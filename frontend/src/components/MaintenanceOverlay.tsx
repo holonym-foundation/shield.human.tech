@@ -19,7 +19,7 @@ export default function MaintenanceOverlay({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
-        className="fixed inset-0 bg-latest-grey-1000 z-[9999] flex items-center justify-center"
+        className="fixed inset-0 bg-latest-grey-1000 backdrop-blur-lg z-[9999] flex items-center justify-center"
         style={{ pointerEvents: 'auto' }}
       >
         <motion.div
