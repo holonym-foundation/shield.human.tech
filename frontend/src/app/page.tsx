@@ -1,6 +1,5 @@
 'use client'
 import TextButton from '@/components/TextButton'
-import { useWalletSync } from '@/hooks/useWalletSync'
 import { ChangeEvent, useCallback, useEffect, useState, useRef } from 'react'
 import { Oval } from 'react-loader-spinner'
 // import { useBridge } from '@/hooks/useBridge'
@@ -54,6 +53,12 @@ import WalletDebugInfo from '@/components/WalletDebugInfo'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useRouter } from 'next/navigation'
+import MaintenanceOverlay from '@/components/MaintenanceOverlay'
+import {
+  MAINTENANCE_MODE,
+  MAINTENANCE_MESSAGE,
+  MAINTENANCE_TITLE,
+} from '@/config'
 
 // Function to check if popups are blocked
 const isPopupBlocked = (): Promise<boolean> => {
@@ -154,27 +159,27 @@ export default function Home() {
     reset: resetBridgeStore,
   } = useBridgeStore()
 
-  // Get wallet state from useWalletSync
+  // Get wallet state from useWalletStore
   const {
     isWaapConnected,
     isAztecConnected,
     connectWaapWallet,
     connectAztecWallet,
     disconnectWaapWallet,
-    disconnectAztec,
+    disconnectAztecWallet,
     executeAztecTransaction,
     azguardClient,
-    loginMethod,
-    walletIcon,
-    walletProvider,
-    getWalletProvider,
-  } = useWalletSync()
+    waapLoginMethod: loginMethod,
+    waapWalletIcon: walletIcon,
+    waapWalletProvider: walletProvider,
+    getWaapWalletProvider: getWalletProvider,
+  } = useWalletStore()
 
-  console.log({
-    loginMethod,
-    walletIcon,
-    walletProvider,
-  })
+  // console.log({
+  //   loginMethod,
+  //   walletIcon,
+  //   walletProvider,
+  // })
 
   // Get UI state from walletStore
   const {
@@ -553,6 +558,13 @@ export default function Home() {
   return (
     <>
       <RootStyle>
+        {/* Maintenance Overlay - blocks all interactions when enabled */}
+        {MAINTENANCE_MODE && (
+          <MaintenanceOverlay
+            title={MAINTENANCE_TITLE}
+            message={MAINTENANCE_MESSAGE}
+          />
+        )}
         {showAzguardPrompt && (
           <AzguardPrompt onClose={() => setShowAzguardPrompt(false)} />
         )}
@@ -612,7 +624,10 @@ export default function Home() {
           onSelect={handleWalletSelect}
         />
 
-        <div className='grid grid-rows-[max-content_1fr_max-content] h-full'>
+        <div
+          className={`grid grid-rows-[max-content_1fr_max-content] h-full ${
+            MAINTENANCE_MODE ? 'pointer-events-none' : ''
+          }`}>
           <div className='p-5'>
             <BridgeHeader
               onClick={async () => {
@@ -626,7 +641,7 @@ export default function Home() {
                 // }, 1000)
 
                 await disconnectWaapWallet()
-                await disconnectAztec()
+                await disconnectAztecWallet()
                 localStorage.clear()
                 window.location.reload()
 

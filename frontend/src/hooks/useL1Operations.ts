@@ -1,6 +1,5 @@
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useContractStore } from '@/stores/contractStore'
-import { useWalletStore } from '@/stores/walletStore'
 import { truncateDecimals, wait } from '@/utils'
 import axios from 'axios'
 import { logError, logInfo } from '@/utils/datadog'
@@ -28,8 +27,7 @@ import { sepolia } from 'viem/chains'
 import PortalSBTJson from '../constants/PortalSBT.json'
 import { useToast, useToastMutation, useToastQuery } from './useToast'
 import { extractEvent } from '@aztec/ethereum'
-import { requestWaapWallet } from '@/stores/waapWalletStore'
-import { useWalletSync } from './useWalletSync'
+import { requestWaapWallet, useWalletStore } from '@/stores/walletStore'
 import { SILK_METHOD } from '@silk-wallet/silk-wallet-sdk'
 import {
   I_UserTokenBalance,
@@ -209,6 +207,11 @@ export function useL1TokenBalances() {
     // Data stays fresh for 1 minute, then triggers a background refetch
     // This means: instant cached data for 1 minute, then auto-refresh
     // staleTime: 60 * 1000, // 1 minute
+    refetchInterval: 30 * 1000, // 1 minute
+    // refetchIntervalInBackground: true,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    // refetchOnReconnect: true,
     meta: {
       persist: true,
     },
@@ -255,8 +258,8 @@ export function useL1Faucet() {
   const { waapAddress: l1Address } = useWalletStore()
   const queryClient = useQueryClient()
 
-  // Get wallet information from useWalletSync
-  const { loginMethod, walletProvider, chainId } = useWalletSync()
+  // Get wallet information from useWalletStore
+  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
 
   // L1 (Ethereum) balances and operations
   const {
@@ -305,7 +308,7 @@ export function useL1Faucet() {
     try {
       console.log('Requesting faucet funds...')
 
-      // Wallet information is already available from useWalletSync hook
+      // Wallet information is already available from useWalletStore hook
 
       // Log faucet request with enhanced data
       logInfo('Internal faucet request initiated', {
@@ -412,7 +415,7 @@ export function useL1Faucet() {
     } catch (error) {
       console.error('Faucet request failed:', error)
 
-      // Wallet information is already available from useWalletSync hook
+      // Wallet information is already available from useWalletStore hook
 
       // Log faucet failure with enhanced data
       logError('Internal faucet request failed', {
@@ -442,7 +445,7 @@ export function useL1Faucet() {
       onSuccess: (data) => {
         console.log('Faucet operations completed:', data)
 
-        // Wallet information is already available from useWalletSync hook
+        // Wallet information is already available from useWalletStore hook
 
         // Log faucet success with enhanced data
         logInfo('Internal faucet request successful', {
@@ -581,8 +584,8 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     aztecLoginMethod,
   } = useWalletStore()
 
-  // Get wallet information from useWalletSync
-  const { loginMethod, walletProvider, chainId } = useWalletSync()
+  // Get wallet information from useWalletStore
+  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
 
   const queryClient = useQueryClient()
   const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled } =
@@ -617,7 +620,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       setProgressStep(1, 'active')
       console.log('Initiating bridge tokens to L2...')
       
-      // Wallet information is already available from useWalletSync hook
+      // Wallet information is already available from useWalletStore hook
       
       logInfo('Bridge from L1 to L2 initiated', {
         // WaaP (L1) wallet information
@@ -840,7 +843,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         const errorMessage = `L1-to-L2 message sync timeout after ${maxAttempts} attempts (${(maxAttempts * pollInterval) / 1000 / 60} minutes)`
         console.error(errorMessage)
         
-        // Wallet information is already available from useWalletSync hook
+        // Wallet information is already available from useWalletStore hook
         
         logError('L1-to-L2 message sync timeout', {
           // WaaP (L1) wallet information
@@ -918,7 +921,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         setProgressStep(3, 'completed')
         setProgressStep(4, 'active')
 
-        // Wallet information is already available from useWalletSync hook
+        // Wallet information is already available from useWalletStore hook
         
         logInfo('Bridge from L1 to L2 completed', {
           // WaaP (L1) wallet information
@@ -973,7 +976,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             
             console.log('Token successfully added to wallet')
             
-            // Wallet information is already available from useWalletSync hook
+            // Wallet information is already available from useWalletStore hook
             
             logInfo('Token added to wallet after bridge', {
               walletType: WalletType.WAAP,
@@ -992,7 +995,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         } catch (error) {
           console.error('Failed to add token to wallet:', error)
           // Don't throw here as the bridge was successful
-          // Wallet information is already available from useWalletSync hook
+          // Wallet information is already available from useWalletStore hook
           
           logError('Failed to add token to wallet after bridge', {
             walletType: WalletType.WAAP,
@@ -1031,7 +1034,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           }
         )
 
-        // Wallet information is already available from useWalletSync hook
+        // Wallet information is already available from useWalletStore hook
         
         logError('Bridge from L1 to L2 failed due to network congestion', {
           // WaaP (L1) wallet information
@@ -1066,7 +1069,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           'Bridge transaction failed (error: 0xfb8f41b2). Please reload the page '
         )
 
-        // Wallet information is already available from useWalletSync hook
+        // Wallet information is already available from useWalletStore hook
         
         logError('Bridge from L1 to L2 failed with contract error', {
           // WaaP (L1) wallet information
@@ -1096,7 +1099,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         // For any other errors, show a generic error message
         notify('error', `Bridge transaction failed: ${errorMessage}`)
 
-        // Wallet information is already available from useWalletSync hook
+        // Wallet information is already available from useWalletStore hook
         
         logError('Bridge from L1 to L2 failed', {
           // WaaP (L1) wallet information

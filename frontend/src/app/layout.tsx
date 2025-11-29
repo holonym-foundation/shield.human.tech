@@ -1,6 +1,7 @@
 'use client'
 
 import ClientLayout from '@/components/ClientLayout'
+import AppLoadingScreen from '@/components/AppLoadingScreen'
 import { Providers } from '@/providers'
 import type { Metadata } from 'next'
 import { useEffect, useState } from 'react'
@@ -29,7 +30,7 @@ export default function RootLayout({
           />
         </head>
         <body className=''>
-          <div>Loading...</div>
+          <AppLoadingScreen />
         </body>
       </html>
     )

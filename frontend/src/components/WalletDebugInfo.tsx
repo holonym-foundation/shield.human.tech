@@ -1,13 +1,13 @@
-import { useWaapWalletStore } from '@/stores/waapWalletStore'
+import { useWalletStore } from '@/stores/walletStore'
 import { useState, useEffect } from 'react'
 
 export default function WalletDebugInfo() {
   const { 
-    address, 
-    loginMethod, 
-    walletProvider, 
+    waapAddress: address, 
+    waapLoginMethod: loginMethod, 
+    waapWalletProvider: walletProvider, 
     getAllAvailableWallets 
-  } = useWaapWalletStore()
+  } = useWalletStore()
 
   const [eip6963Providers, setEip6963Providers] = useState<any[]>([])
 

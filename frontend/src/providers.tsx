@@ -4,20 +4,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { type ReactNode, useEffect, useState } from 'react'
 import { ToastContainer } from 'react-toastify'
-import { useWaapWalletStore } from './stores/waapWalletStore'
+import { useWalletStore } from './stores/walletStore'
 import { init as initDatadog } from '@/utils/datadog'
 
 function InitializeWaapWallet() {
-  const { initializeWaapWallet } = useWaapWalletStore()
-  const [isInitialized, setIsInitialized] = useState(false)
+  const { initializeWaapWallet } = useWalletStore()
 
   useEffect(() => {
-    if (!isInitialized) {
-      console.log('🔧 Initializing WaaP wallet...')
-      initializeWaapWallet()
-      setIsInitialized(true)
-    }
-  }, [initializeWaapWallet, isInitialized])
+    console.log('🔧 Initializing WaaP wallet...')
+    initializeWaapWallet().catch((err: unknown) => {
+      console.error('❌ Failed to initialize WaaP wallet:', err)
+    })
+  }, [initializeWaapWallet])
 
   return null
 }

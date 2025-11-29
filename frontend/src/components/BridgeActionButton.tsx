@@ -224,7 +224,7 @@ function BridgeActionButton({
       try {
         await connectWaapWallet()
       } catch (error) {
-        // Error handling is done in useWalletSync
+        // Error handling is done in useWalletStore
       } finally {
         setIsConnecting(false)
         setIsOperationPending(false)
@@ -239,7 +239,7 @@ function BridgeActionButton({
       try {
         await connectAztec()
       } catch (error) {
-        // Error handling is done in useWalletSync
+        // Error handling is done in useWalletStore
       } finally {
         setIsConnecting(false)
         setIsOperationPending(false)

@@ -1,7 +1,6 @@
 import { ADDRESS } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useContractStore } from '@/stores/contractStore'
-import { useWalletStore } from '@/stores/walletStore'
 import { logError, logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { logger } from '@/utils/logger'
@@ -14,8 +13,7 @@ import { useToast, useToastMutation } from './useToast'
 import { wait } from '@/utils'
 import { useL2ErrorHandler } from '@/utils/l2ErrorHandler'
 import { useMutation } from '@tanstack/react-query'
-import { requestWaapWallet } from '@/stores/waapWalletStore'
-import { useWalletSync } from './useWalletSync'
+import { requestWaapWallet, useWalletStore } from '@/stores/walletStore'
 import { SILK_METHOD } from '@silk-wallet/silk-wallet-sdk'
 import PortalSBTJson from '../constants/PortalSBT.json'
 import { TokenPortalAbi } from '@aztec/l1-artifacts'
@@ -187,8 +185,8 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
   const notify = useToast()
   const { setProgressStep, setTransactionUrls } = useBridgeStore()
 
-  // Get wallet information from useWalletSync
-  const { loginMethod, walletProvider, chainId } = useWalletSync()
+  // Get wallet information from useWalletStore
+  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
 
   const { l1ContractAddresses, l2TokenContract, l2BridgeContract } =
     useContractStore()
@@ -206,7 +204,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         throw new Error('L2 token contract not connected')
       }
 
-      // Wallet information is already available from useWalletSync hook
+      // Wallet information is already available from useWalletStore hook
       
       // Log withdrawal initiation with enhanced data
       logInfo('Withdrawal from L2 to L1 initiated', {
@@ -469,7 +467,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       // Set transaction URLs in the store
       setTransactionUrls(null, aztecscanUrl)
 
-        // Wallet information is already available from useWalletSync hook
+        // Wallet information is already available from useWalletStore hook
       
       // Log successful withdrawal with enhanced data
       logInfo('Withdrawal from L2 to L1 completed', {
@@ -503,7 +501,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
     } catch (error) {
       console.log('🚀MMM - ~ mutationFn ~ error:', error)
       const errorMessage =error instanceof Error ? error.message : 'Unknown error'
-        // Wallet information is already available from useWalletSync hook
+        // Wallet information is already available from useWalletStore hook
       
       // Log withdrawal failure with enhanced data
       logError('Withdrawal from L2 to L1 failed', {
@@ -544,7 +542,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         queryKey: ['l2TokenBalance', aztecAddress],
       })
 
-      // Wallet information is already available from useWalletSync hook
+      // Wallet information is already available from useWalletStore hook
       
       // Log successful withdrawal completion with enhanced data
       logInfo('Withdrawal from L2 to L1 callback', {

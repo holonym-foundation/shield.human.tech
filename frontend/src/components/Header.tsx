@@ -2,9 +2,8 @@
 
 import { Icon } from '@iconify/react'
 import { useToast } from '@/hooks/useToast'
-import { useWalletSync } from '@/hooks/useWalletSync'
-import { useBridgeStore } from '@/stores/bridgeStore'
 import { useWalletStore } from '@/stores/walletStore'
+import { useBridgeStore } from '@/stores/bridgeStore'
 import { useL1TokenBalances } from '@/hooks/useL1Operations'
 import { wait } from '@/utils'
 import { LOGIN_METHODS, WalletType } from '@/types/wallet'
@@ -210,7 +209,7 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
-  // Get wallet state from useWalletSync
+  // Get wallet state from useWalletStore
   const {
     waapAddress,
     isWaapConnected,
@@ -218,14 +217,13 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     disconnectWaapWallet,
     aztecAddress,
     isAztecConnected,
-    disconnectAztec,
-    loginMethod,
-    walletProvider,
-    walletIcon,
-  } = useWalletSync()
+    disconnectAztecWallet,
+    waapLoginMethod: loginMethod,
+    waapWalletProvider: walletProvider,
+    waapWalletIcon: walletIcon,
+    setShowWalletModal,
+  } = useWalletStore()
 
-  // Get wallet store actions
-  const { setShowWalletModal } = useWalletStore()
 
   // Add bridge store state for Private Payments toggle
   const { isPrivacyModeEnabled, setPrivacyModeEnabled } = useBridgeStore()
@@ -392,7 +390,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
           ) : (
             <>
               <WalletDisplay
-                address={waapAddress}
+                address={waapAddress || undefined}
                 isConnected={isWaapConnected}
                 walletIcon={walletIcon || '/assets/wallets/wally-dark.svg'}
                 networkIcon='/assets/svg/network-logo.svg'
@@ -403,11 +401,11 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
               />
 
               <WalletDisplay
-                address={aztecAddress}
+                address={aztecAddress || undefined}
                 isConnected={isAztecConnected}
                 walletIcon='/assets/svg/aztec-wallet-logo.svg'
                 // networkIcon='/assets/svg/network-logo.svg'
-                onDisconnect={disconnectAztec}
+                onDisconnect={disconnectAztecWallet}
                 walletType={WalletType.AZTEC}
               />
             </>
@@ -538,7 +536,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
             ) : (
               <>
                 <WalletDisplay
-                  address={waapAddress}
+                  address={waapAddress || undefined}
                   isConnected={isWaapConnected}
                   walletIcon={walletIcon || '/assets/wallets/wally-dark.svg'}
                   // networkIcon='/assets/svg/network-logo.svg'
@@ -549,11 +547,11 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
                 />
 
                 <WalletDisplay
-                  address={aztecAddress}
+                  address={aztecAddress || undefined}
                   isConnected={isAztecConnected}
                   walletIcon='/assets/svg/aztec-wallet-logo.svg'
                   // networkIcon='/assets/svg/network-logo.svg'
-                  onDisconnect={disconnectAztec}
+                  onDisconnect={disconnectAztecWallet}
                   walletType={WalletType.AZTEC}
                 />
               </>

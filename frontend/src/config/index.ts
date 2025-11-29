@@ -1,6 +1,16 @@
 import { Network, Token } from '@/types/bridge'
 // -------------------------------------
 
+// Maintenance mode flag - set to true to enable maintenance overlay
+export const MAINTENANCE_MODE = true
+
+export const MAINTENANCE_MESSAGE =
+  'We are currently performing scheduled maintenance. The bridge will be available shortly.'
+
+export const MAINTENANCE_TITLE = 'Bridge Under Maintenance'
+
+// -------------------------------------
+
 // since aztec does not have a chain ID yet, i propose to use these values to organise token lists:
 // - testnet: 418719321 // keccak256('aztec-testnet')[0:4]
 // - sandbox:: 147120760, // keccak256('aztec-sandbox')[0:4]

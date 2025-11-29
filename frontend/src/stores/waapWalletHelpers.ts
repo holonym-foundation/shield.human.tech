@@ -180,24 +180,36 @@ export const getEIP6963WalletIcon = (address: string): string | null => {
 }
 
 // Helper function to get fallback wallet icon based on login method and provider
-export const getFallbackWalletIcon = (
+export const getWalletIconByMethod = (
   loginMethod: WaapLoginMethod | null,
-  walletProvider: string | null
+  walletProvider: string | null,
+  address?: string
 ): string => {
   if (loginMethod === LOGIN_METHODS.WALLETCONNECT) {
     return '/assets/wallets/wallet-connect-logo.svg'
   } else if (loginMethod === LOGIN_METHODS.WAAP) {
     return '/assets/wallets/wally-dark.svg' // WaaP/Human wallet logo
-  } else if (walletProvider) {
-    const providerLower = walletProvider.toLowerCase()
-    if (providerLower.includes('metamask')) {
-      return '/assets/wallets/metamask-logo.svg'
-    } else if (providerLower.includes('rabby')) {
-      return '/assets/wallets/rabby-wallet.svg' // Rabby wallet logo
-    } else if (providerLower.includes('coinbase')) {
-      return '/assets/wallets/metamask-logo.svg' // Fallback to MetaMask icon
-    } else if (providerLower.includes('brave')) {
-      return '/assets/wallets/metamask-logo.svg' // Fallback to MetaMask icon
+  } else if (loginMethod === LOGIN_METHODS.INJECTED) {
+    // For injected wallets, try EIP-6963 discovery first
+    if (address) {
+      const eip6963Icon = getEIP6963WalletIcon(address)
+      if (eip6963Icon) {
+        return eip6963Icon
+      }
+    }
+    
+    // Fallback to provider-specific icons
+    if (walletProvider) {
+      const providerLower = walletProvider.toLowerCase()
+      if (providerLower.includes('metamask')) {
+        return '/assets/wallets/metamask-logo.svg'
+      } else if (providerLower.includes('rabby')) {
+        return '/assets/wallets/rabby-wallet.svg' // Rabby wallet logo
+      } else if (providerLower.includes('coinbase')) {
+        return '/assets/wallets/metamask-logo.svg' // Fallback to MetaMask icon
+      } else if (providerLower.includes('brave')) {
+        return '/assets/wallets/metamask-logo.svg' // Fallback to MetaMask icon
+      }
     }
   }
 
