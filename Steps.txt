@@ -21,7 +21,11 @@ VERSION=1.0.0-staging.2 aztec --version
 
 
 source .env
+aztec start --sandbox --port 8081 --pxe --pxe.nodeUrl=$BOOTNODE --pxe.proverEnabled true --l1-chain-id $L1_CHAIN_ID
+
 aztec start --port 8081 --pxe --pxe.nodeUrl=$BOOTNODE --pxe.proverEnabled true --l1-chain-id $L1_CHAIN_ID
+
+
 
 docker pull aztecprotocol/aztec:1.0.0-staging.2
 VERSION=1.0.0-staging.2 aztec start --sandbox

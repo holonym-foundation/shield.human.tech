@@ -1,0 +1,19 @@
+{
+  "name": "devnet",
+  "environment": "devnet",
+  "network": {
+    "nodeUrl": "https://devnet.aztec-labs.com/",
+    "l1RpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+    "l1ChainId": 11155111
+  },
+  "settings": {
+    "skipSandbox": true,
+    "version": "3.0.0-devnet.5"
+  },
+  "timeouts": {
+    "deployTimeout": 1200000,
+    "txTimeout": 180000,
+    "waitTimeout": 60000
+  }
+}
+

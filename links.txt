@@ -1,0 +1,9 @@
+Boilerplate v3.0.0 devnet.2: https://github.com/defi-wonderland/aztec-boilerplate
+
+Standards NPM: https://www.npmjs.com/package/@defi-wonderland/aztec-standards/v/3.0.0-devnet.2
+
+Standards GH tag: https://github.com/defi-wonderland/aztec-standards/releases/tag/v3.0.0-devnet.2
+
+Updated Handbook: https://aztec.handbook.wonderland.xyz/
+
+https://docs.aztec.network/devnet/developers/getting_started_on_devnet
