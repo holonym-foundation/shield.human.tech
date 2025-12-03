@@ -20,4 +20,7 @@ https://nemi.fi/
 
 
 Proof of Clean Hands:
+L1:
 https://github.com/holonym-foundation/aztec/blob/main/packages/l1-contracts/contracts/TokenPortal.sol
+L2: 
+https://github.com/holonym-foundation/aztec/tree/clean-hands
