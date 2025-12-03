@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "start": "node --import tsx index.ts",
-    "start-testnet": "node --import tsx index-testnet.ts",
+    "start-devnet": "node --import tsx index-devnet.ts",
     "test": "jest",
     "fees": "node --loader ts-node/esm scripts/fees.ts",
     "clean": "rm -rf ./src/artifacts ./target",

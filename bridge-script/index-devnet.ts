@@ -33,7 +33,10 @@ import {
   TokenPortalBytecode,
 } from '@aztec/l1-artifacts'
 import { TokenContract } from '@aztec/noir-contracts.js/Token'
+// import { TokenContract } from '@defi-wonderland/aztec-standards/artifacts/Token.js'
+// import { TokenContract } from './constants/aztec/artifacts/Token.ts'
 import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge'
+// import { TokenBridgeContract } from './constants/aztec/artifacts/TokenBridge.ts'
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee/testing'
 import { TestWallet } from '@aztec/test-wallet/server'
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
@@ -42,6 +45,8 @@ import 'dotenv/config'
 import PortalSBTJson from './constants/PortalSBT.json'
 // @ts-ignore
 import TestERC20Json from './constants/TestERC20.json'
+
+
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
