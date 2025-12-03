@@ -17,3 +17,7 @@ https://docs.holonym.id/for-developers/clean-hands
 
 Private vs Public demo:
 https://nemi.fi/
+
+
+Proof of Clean Hands:
+https://github.com/holonym-foundation/aztec/blob/main/packages/l1-contracts/contracts/TokenPortal.sol
