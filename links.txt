@@ -10,16 +10,14 @@ https://docs.aztec.network/devnet/developers/getting_started_on_devnet
 
 https://github.com/AztecProtocol/aztec-starter
 
-
-
-https://docs.holonym.id/for-developers/clean-hands
-
-
+==========================================================================================================
 Private vs Public demo:
 https://nemi.fi/
 
 
 Proof of Clean Hands:
+https://docs.holonym.id/for-developers/clean-hands
+
 L1:
 https://github.com/holonym-foundation/aztec/blob/main/packages/l1-contracts/contracts/TokenPortal.sol
 L2: 
