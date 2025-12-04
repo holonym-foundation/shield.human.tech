@@ -30,7 +30,11 @@ import { sepolia } from 'viem/chains'
 import PortalSBTJson from '../constants/PortalSBT.json'
 import { useToast, useToastMutation, useToastQuery } from './useToast'
 import { extractEvent } from '@aztec/ethereum/utils'
-import { requestWaapWallet, useWalletStore, WAAP_METHOD } from '@/stores/walletStore'
+import {
+  requestWaapWallet,
+  useWalletStore,
+  WAAP_METHOD,
+} from '@/stores/walletStore'
 import {
   I_UserTokenBalance,
   T_AlchemyTokenBalanceResponse,
@@ -219,7 +223,11 @@ export function useL1Faucet() {
   const queryClient = useQueryClient()
 
   // Get wallet information from useWalletStore
-  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
+  const {
+    waapLoginMethod: loginMethod,
+    waapWalletProvider: walletProvider,
+    waapChainId: chainId,
+  } = useWalletStore()
 
   // L1 (Ethereum) balances and operations
   const {
@@ -306,7 +314,9 @@ export function useL1Faucet() {
         try {
           // Check if we should use external faucet for ETH
           // For now, we'll skip internal ETH faucet since it's disabled
-          console.log('ETH needed but internal faucet is disabled. User should get ETH from external source.')
+          console.log(
+            'ETH needed but internal faucet is disabled. User should get ETH from external source.'
+          )
           result.gasProvided = false // Mark as not provided by internal API
         } catch (error) {
           console.log('Error requesting gas:', error)
@@ -325,7 +335,9 @@ export function useL1Faucet() {
 
         // If user only needs tokens (has gas), proceed directly
         // If user needs both gas and tokens, check if they have enough gas
-        const hasEnoughGas = needsTokensOnly || Number(currentNativeBalance || 0) >= mintNativeAmount
+        const hasEnoughGas =
+          needsTokensOnly ||
+          Number(currentNativeBalance || 0) >= mintNativeAmount
 
         if (hasEnoughGas) {
           console.log('User has gas. Requesting tokens from API...')
@@ -546,7 +558,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
   } = useWalletStore()
 
   // Get wallet information from useWalletStore
-  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
+  const {
+    waapLoginMethod: loginMethod,
+    waapWalletProvider: walletProvider,
+    waapChainId: chainId,
+  } = useWalletStore()
 
   const queryClient = useQueryClient()
   const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled } =
@@ -583,9 +599,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
       setProgressStep(1, 'active')
       console.log('Initiating bridge tokens to L2...')
-      
+
       // Wallet information is already available from useWalletStore hook
-      
+
       logInfo('Bridge from L1 to L2 initiated', {
         // WaaP (L1) wallet information
         walletType: WalletType.WAAP,
@@ -655,7 +671,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       }
 
       const [claimSecret, claimSecretHash] = await generateClaimSecret()
-      // TODO: store these at this point in the local storage 
+      // TODO: store these at this point in the local storage
       // TODO: WE NEED TO STORE THE CLAIM SECRET AND CLAIM SECRET HASH BACKEND with ENCRYPTION
 
       // Bridge tokens - use different function based on privacy mode
@@ -768,32 +784,46 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
       while (!messageSynced && attempts < maxAttempts) {
         try {
-          console.log(`Checking L1-to-L2 message sync status (attempt ${attempts + 1}/${maxAttempts})...`, {
-            messageHash: messageHash.toString(),
-            messageLeafIndex: messageLeafIndex.toString(),
-          })
+          console.log(
+            `Checking L1-to-L2 message sync status (attempt ${
+              attempts + 1
+            }/${maxAttempts})...`,
+            {
+              messageHash: messageHash.toString(),
+              messageLeafIndex: messageLeafIndex.toString(),
+            }
+          )
 
           // Create Fr from the message hash
           const messageHashFr = Fr.fromString(messageHash.toString())
-          
+
           // Check if the L1-to-L2 message is synced
-          messageSynced = await aztecAccount?.aztecNode.isL1ToL2MessageSynced(messageHashFr)
-          
+          messageSynced = await aztecAccount?.aztecNode.isL1ToL2MessageSynced(
+            messageHashFr
+          )
+
           if (messageSynced) {
             console.log('L1-to-L2 message is ready for claiming')
             break
           } else {
-            console.log(`L1-to-L2 message not yet synced, waiting ${pollInterval / 1000} seconds before next check...`)
+            console.log(
+              `L1-to-L2 message not yet synced, waiting ${
+                pollInterval / 1000
+              } seconds before next check...`
+            )
             attempts++
-            
+
             if (attempts < maxAttempts) {
               await wait(pollInterval)
             }
           }
         } catch (error) {
-          console.error(`Error checking L1-to-L2 message sync (attempt ${attempts + 1}):`, error)
+          console.error(
+            `Error checking L1-to-L2 message sync (attempt ${attempts + 1}):`,
+            error
+          )
           attempts++
-          
+
           if (attempts < maxAttempts) {
             console.log(`Retrying in ${pollInterval / 1000} seconds...`)
             await wait(pollInterval)
@@ -802,11 +832,13 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       }
 
       if (!messageSynced) {
-        const errorMessage = `L1-to-L2 message sync timeout after ${maxAttempts} attempts (${(maxAttempts * pollInterval) / 1000 / 60} minutes)`
+        const errorMessage = `L1-to-L2 message sync timeout after ${maxAttempts} attempts (${
+          (maxAttempts * pollInterval) / 1000 / 60
+        } minutes)`
         console.error(errorMessage)
-        
+
         // Wallet information is already available from useWalletStore hook
-        
+
         logError('L1-to-L2 message sync timeout', {
           // WaaP (L1) wallet information
           walletType: WalletType.WAAP,
@@ -824,7 +856,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           totalWaitTime: (maxAttempts * pollInterval) / 1000 / 60,
           userAction: 'bridge_l1_to_l2_sync_timeout',
         })
-        
+
         throw new Error(errorMessage)
       }
 
@@ -838,9 +870,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
       try {
         console.log('isPrivacyModeEnabled ', isPrivacyModeEnabled)
-        
+
         if (!walletAdapter) {
-          throw new Error('Aztec wallet not connected or bridge contract not initialized')
+          throw new Error(
+            'Aztec wallet not connected or bridge contract not initialized'
+          )
         }
 
         // Use wallet adapter to execute claim
@@ -885,7 +919,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         setProgressStep(4, 'active')
 
         // Wallet information is already available from useWalletStore hook
-        
+
         logInfo('Bridge from L1 to L2 completed', {
           // WaaP (L1) wallet information
           walletType: WalletType.WAAP,
@@ -917,9 +951,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         if (aztecLoginMethod && walletAdapter) {
           try {
             await walletAdapter.registerToken(walletAdapter.tokenAddress)
-            
-            notify('success', 'Token registered successfully in wallet')
-            
+
+            // notify('success', 'Token registered successfully in wallet')
+
             logInfo('Token added to wallet after bridge', {
               walletType: WalletType.AZTEC,
               loginMethod: aztecLoginMethod,
@@ -933,7 +967,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             console.error('Failed to add token to wallet:', error)
             // Don't throw here as the bridge was successful
             // Wallet information is already available from useWalletStore hook
-            
+
             logError('Failed to add token to wallet after bridge', {
               walletType: WalletType.WAAP,
               loginMethod: loginMethod,
@@ -973,7 +1007,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         )
 
         // Wallet information is already available from useWalletStore hook
-        
+
         logError('Bridge from L1 to L2 failed due to network congestion', {
           // WaaP (L1) wallet information
           walletType: WalletType.WAAP,
@@ -1008,7 +1042,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         )
 
         // Wallet information is already available from useWalletStore hook
-        
+
         logError('Bridge from L1 to L2 failed with contract error', {
           // WaaP (L1) wallet information
           walletType: WalletType.WAAP,
@@ -1034,11 +1068,27 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           userAction: 'bridge_l1_to_l2_contract_error',
         })
       } else {
-        // For any other errors, show a generic error message
-        notify('error', `Bridge transaction failed: ${errorMessage}`)
+        // Check if error is about contract artifact not found
+        const isArtifactError =
+          errorMessage.includes('Contract artifact not found') ||
+          errorMessage.includes('artifact not found') ||
+          errorMessage.includes('Contract artifact') ||
+          (errorMessage.includes('artifact') &&
+            errorMessage.includes('not found'))
+
+        if (isArtifactError) {
+          // Show special error message with link to artifact registry
+          notify('error', {
+            heading: 'Contract Artifact Not Found',
+            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for Azguard wallet.`,
+          })
+        } else {
+          // For any other errors, show a generic error message
+          notify('error', `Bridge transaction failed: ${errorMessage}`)
+        }
 
         // Wallet information is already available from useWalletStore hook
-        
+
         logError('Bridge from L1 to L2 failed', {
           // WaaP (L1) wallet information
           walletType: WalletType.WAAP,

@@ -7,11 +7,21 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { formatUnits, parseUnits, encodeFunctionData, http, createPublicClient } from 'viem'
+import {
+  formatUnits,
+  parseUnits,
+  encodeFunctionData,
+  http,
+  createPublicClient,
+} from 'viem'
 import { useToast, useToastMutation } from './useToast'
 import { wait } from '@/utils'
 import { useL2ErrorHandler } from '@/utils/l2ErrorHandler'
-import { requestWaapWallet, useWalletStore, WAAP_METHOD } from '@/stores/walletStore'
+import {
+  requestWaapWallet,
+  useWalletStore,
+  WAAP_METHOD,
+} from '@/stores/walletStore'
 import { TokenPortalAbi } from '@aztec/l1-artifacts'
 import { sepolia } from 'viem/chains'
 import { useWalletAdapter } from './useWalletAdapter'
@@ -45,7 +55,9 @@ export const useL2TokenBalance = () => {
         throw new Error('Aztec address not found')
       }
       if (!walletAdapter) {
-        throw new Error('Aztec wallet not connected or contracts not initialized')
+        throw new Error(
+          'Aztec wallet not connected or contracts not initialized'
+        )
       }
 
       console.time('l2TokenBalance')
@@ -54,8 +66,16 @@ export const useL2TokenBalance = () => {
 
       // Use wallet adapter to simulate views
       const [privateBalanceResult, publicBalanceResult] = await Promise.all([
-        walletAdapter.simulateView(walletAdapter.tokenAddress, 'balance_of_private', [userAddress]),
-        walletAdapter.simulateView(walletAdapter.tokenAddress, 'balance_of_public', [userAddress]),
+        walletAdapter.simulateView(
+          walletAdapter.tokenAddress,
+          'balance_of_private',
+          [userAddress]
+        ),
+        walletAdapter.simulateView(
+          walletAdapter.tokenAddress,
+          'balance_of_public',
+          [userAddress]
+        ),
       ])
 
       const privateBalance = BigInt(privateBalanceResult.result.toString())
@@ -131,7 +151,11 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
   const { setProgressStep, setTransactionUrls } = useBridgeStore()
 
   // Get wallet information from useWalletStore
-  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
+  const {
+    waapLoginMethod: loginMethod,
+    waapWalletProvider: walletProvider,
+    waapChainId: chainId,
+  } = useWalletStore()
   const walletAdapter = useWalletAdapter()
 
   const mutationFn = async (amount: bigint) => {
@@ -141,11 +165,13 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       }
 
       if (!walletAdapter) {
-        throw new Error('Aztec wallet not connected or contracts not initialized')
+        throw new Error(
+          'Aztec wallet not connected or contracts not initialized'
+        )
       }
 
       // Wallet information is already available from useWalletStore hook
-      
+
       // Log withdrawal initiation with enhanced data
       logInfo('Withdrawal from L2 to L1 initiated', {
         // WaaP (L1) wallet information
@@ -171,14 +197,18 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
 
       // Wallet adapter is already declared at function level
       if (!walletAdapter) {
-        throw new Error('Aztec wallet not connected or contracts not initialized')
+        throw new Error(
+          'Aztec wallet not connected or contracts not initialized'
+        )
       }
 
       // Step 1: Setting up authorization for withdrawal
       setProgressStep(1, 'active')
       const nonce = Fr.random()
 
-      const userAddress = AztecAddress.fromString(aztecAccount.address.toString())
+      const userAddress = AztecAddress.fromString(
+        aztecAccount.address.toString()
+      )
 
       // Use wallet adapter to execute authwit
       await walletAdapter.executeCallWithAuthWit(
@@ -201,12 +231,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       const result = await walletAdapter.executeCall(
         walletAdapter.bridgeAddress,
         'exit_to_l1_public',
-        [
-          EthAddress.fromString(l1Address),
-          amount,
-          EthAddress.ZERO,
-          nonce,
-        ],
+        [EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce],
         {
           contractType: 'bridge',
           autoRegister: true,
@@ -220,11 +245,10 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       //   setPublicAuthWit,
       //   exit_to_l1_public,
       // ])
-      
+
       // const batchedTxHash = await batchedTx.send().wait({
       //   timeout: 200000,
       // })
-
 
       // const l2TxReceipt = await l2BridgeContract.methods
       //   .exit_to_l1_public(
@@ -275,18 +299,22 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       // Step 4: Getting proof for Ethereum withdrawal
       setProgressStep(4, 'active')
       console.log('Getting L2 to L1 message membership witness...')
-      
+
       // For Azguard, we need to get the block number from the transaction
       // If blockNumber is not available, we might need to poll for it
       const blockNumberForProof = l2BlockNumber
       if (!blockNumberForProof && aztecAccount?.aztecNode) {
         // Try to get the latest block number as fallback
         // Note: This is a workaround - ideally we should wait for the transaction to be included
-        console.warn('Block number not available, using latest block as fallback')
+        console.warn(
+          'Block number not available, using latest block as fallback'
+        )
         // We'll need to handle this case differently - for now, throw an error
-        throw new Error('Block number is required for L2 to L1 message proof. Please wait for transaction confirmation.')
+        throw new Error(
+          'Block number is required for L2 to L1 message proof. Please wait for transaction confirmation.'
+        )
       }
-      
+
       const [l2ToL1MessageIndex, siblingPath] =
         await aztecAccount.aztecNode.getL2ToL1MessageMembershipWitness(
           Number(blockNumberForProof!),
@@ -365,7 +393,23 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         const errorMessage =
           error instanceof Error ? error.message : String(error)
 
-        notify('error', `Failed to withdraw tokens. ${errorMessage}`)
+        // Check if error is about contract artifact not found
+        const isArtifactError =
+          errorMessage.includes('Contract artifact not found') ||
+          errorMessage.includes('artifact not found') ||
+          errorMessage.includes('Contract artifact') ||
+          (errorMessage.includes('artifact') &&
+            errorMessage.includes('not found'))
+
+        if (isArtifactError) {
+          // Show special error message with link to artifact registry
+          notify('error', {
+            heading: 'Contract Artifact Not Found',
+            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for Azguard wallet.`,
+          })
+        } else {
+          notify('error', `Failed to withdraw tokens. ${errorMessage}`)
+        }
         throw error
       }
       setProgressStep(6, 'completed')
@@ -378,8 +422,8 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       // Set transaction URLs in the store
       setTransactionUrls(null, aztecscanUrl)
 
-        // Wallet information is already available from useWalletStore hook
-      
+      // Wallet information is already available from useWalletStore hook
+
       // Log successful withdrawal with enhanced data
       logInfo('Withdrawal from L2 to L1 completed', {
         // WaaP (L1) wallet information
@@ -410,9 +454,10 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
 
       return txHash
     } catch (error) {
-      const errorMessage =error instanceof Error ? error.message : 'Unknown error'
-        // Wallet information is already available from useWalletStore hook
-      
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error'
+      // Wallet information is already available from useWalletStore hook
+
       // Log withdrawal failure with enhanced data
       logError('Withdrawal from L2 to L1 failed', {
         // WaaP (L1) wallet information
@@ -453,7 +498,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       })
 
       // Wallet information is already available from useWalletStore hook
-      
+
       // Log successful withdrawal completion with enhanced data
       logInfo('Withdrawal from L2 to L1 callback', {
         // WaaP (L1) wallet information
@@ -617,7 +662,9 @@ export const useL2TokenTransfer = () => {
           throw new Error('Aztec address not found')
         }
         if (!walletAdapter) {
-          throw new Error('Aztec wallet not connected or contracts not initialized')
+          throw new Error(
+            'Aztec wallet not connected or contracts not initialized'
+          )
         }
 
         console.log('Transferring L2 token...')
@@ -628,7 +675,11 @@ export const useL2TokenTransfer = () => {
         // Use wallet adapter to execute transfer
         const method = isPrivate ? 'transfer_to_private' : 'transfer'
         const args = isPrivate
-          ? [AztecAddress.fromString(aztecAddress), recipientAddress, amountInWei]
+          ? [
+              AztecAddress.fromString(aztecAddress),
+              recipientAddress,
+              amountInWei,
+            ]
           : [recipientAddress, amountInWei]
 
         const result = await walletAdapter.executeCall(

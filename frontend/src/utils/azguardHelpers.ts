@@ -254,8 +254,23 @@ export async function executeAzguardCallWithAuthWit(
   const results = await azguardClient.execute([txOp])
   
   if (results.length === 0 || results[0].status !== 'ok') {
-    const error = results[0]?.error || 'Unknown error'
-    throw new Error(`Azguard transaction failed: ${error}`)
+    const errorMsg = results[0]?.error || 'Unknown error'
+    
+    // Check if error is about contract artifact not found
+    const isArtifactError = 
+      errorMsg.includes('Contract artifact not found') ||
+      errorMsg.includes('artifact not found') ||
+      errorMsg.includes('Contract artifact') ||
+      (errorMsg.includes('artifact') && errorMsg.includes('not found'))
+    
+    if (isArtifactError) {
+      throw new Error(
+        `Azguard transaction failed: Contract artifact not found. ` +
+        `Please upload the contract artifact to https://devnet.aztec-registry.xyz/ to make it available for Azguard wallet.`
+      )
+    }
+    
+    throw new Error(`Azguard transaction failed: ${errorMsg}`)
   }
 
   return results[0].result as string
@@ -281,8 +296,23 @@ export async function simulateAzguardView(
   const results = await azguardClient.execute([simulateOp])
   
   if (results.length === 0 || results[0].status !== 'ok') {
-    const error = results[0]?.error || 'Unknown error'
-    throw new Error(`Azguard simulation failed: ${error}`)
+    const errorMsg = results[0]?.error || 'Unknown error'
+    
+    // Check if error is about contract artifact not found
+    const isArtifactError = 
+      errorMsg.includes('Contract artifact not found') ||
+      errorMsg.includes('artifact not found') ||
+      errorMsg.includes('Contract artifact') ||
+      (errorMsg.includes('artifact') && errorMsg.includes('not found'))
+    
+    if (isArtifactError) {
+      throw new Error(
+        `Azguard simulation failed: Contract artifact not found. ` +
+        `Please upload the contract artifact to https://devnet.aztec-registry.xyz/ to make it available for Azguard wallet.`
+      )
+    }
+    
+    throw new Error(`Azguard simulation failed: ${errorMsg}`)
   }
 
   // Return decoded result

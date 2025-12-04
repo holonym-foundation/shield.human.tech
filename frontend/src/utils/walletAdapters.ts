@@ -57,36 +57,53 @@ class AzguardWalletAdapter {
     private account: string
   ) {}
 
-  // Initialize contracts (register with Azguard)
+  // Initialize contracts - no-op since artifacts are in public registry
+  // Azguard will automatically fetch artifacts from the public registry when needed
   async initializeContracts(): Promise<void> {
+    // Contracts are publicly deployed and artifacts are in the public registry
+    // Azguard will fetch them automatically, so no registration needed
+    
+    // NOTE: Contract registration is commented out per recommendation to upload artifacts
+    // to public registry (https://devnet.aztec-registry.xyz/) instead of triggering 
+    // registration on each wallet request.
+    // If artifacts are not in public registry, uncomment the code below:
+    /*
     const chain = 'aztec:1674512022'
     
-    // Register contracts - Azguard will fetch instance/artifact from PXE/node automatically
+    // Register Token contract with artifact
+    // Note: instance is optional - Azguard will fetch it from PXE/node if not provided
     try {
       await this.azguardClient.execute([
         {
           kind: 'register_contract',
           chain,
           address: this.tokenAddress,
-          // instance and artifact are optional - Azguard will fetch them
+          artifact: TokenContract.artifact,
+          // instance is optional - Azguard will fetch it from PXE/node automatically
         },
       ])
-    } catch {
-      // Contract might already be registered
+    } catch (error) {
+      // Contract might already be registered, or registration failed
+      console.warn('Token contract registration warning:', error)
     }
     
+    // Register Bridge contract with artifact
+    // Note: instance is optional - Azguard will fetch it from PXE/node if not provided
     try {
       await this.azguardClient.execute([
         {
           kind: 'register_contract',
           chain,
           address: this.bridgeAddress,
-          // instance and artifact are optional - Azguard will fetch them
+          artifact: TokenBridgeContract.artifact,
+          // instance is optional - Azguard will fetch it from PXE/node automatically
         },
       ])
-    } catch {
-      // Contract might already be registered
+    } catch (error) {
+      // Contract might already be registered, or registration failed
+      console.warn('Bridge contract registration warning:', error)
     }
+    */
   }
 
   async simulateView(
@@ -283,8 +300,8 @@ export async function createWalletAdapter(context: WalletContext) {
       context.azguardClient,
       context.azguardClient.accounts[0]
     )
-    // Initialize contracts (register with Azguard)
-    await adapter.initializeContracts()
+    // No need to initialize contracts - artifacts are in public registry
+    // (https://devnet.aztec-registry.xyz/) - Azguard will fetch them automatically when needed
     return adapter
   } else {
     if (!context.aztecAccount) {

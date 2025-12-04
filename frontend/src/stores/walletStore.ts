@@ -82,7 +82,7 @@ interface WalletState {
   connectAztecWallet: (type: AztecLoginMethod) => Promise<any>
   disconnectAztecWallet: () => Promise<void>
   initializeAztecWallet: () => Promise<void>
-  
+
   // ============================================================================
   // WAAP WALLET STATE
   // ============================================================================
@@ -499,7 +499,7 @@ const walletStore = create<WalletState>((set, get) => ({
         }
       } else if (aztecLoginMethod === 'obsidion') {
         // Disconnect Obsidion wallet using SDK
-        await sdk.disconnect()
+      await sdk.disconnect()
       }
       
       set({
