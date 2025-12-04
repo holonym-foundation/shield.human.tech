@@ -1,19 +1,16 @@
 import { parseUnits } from 'viem'
-import { InitSilkOptions } from '@silk-wallet/silk-wallet-sdk'
+import { InitWaaPOptions } from '@human.tech/waap-sdk'
 import { logo } from './logo'
 
 export const l1ChainId = 11155111
-export const useStagingSilk = false
+export const useStagingWaap = false
 
-export const silkUrl = useStagingSilk
-  ? 'https://staging-silkysignon.com'
-  : 'https://humansignon.com'
+export const waapUrl = useStagingWaap
+  ? 'https://staging-waap.xyz'
+  : 'https://waap.xyz'
 
-export const silkConfig: InitSilkOptions = {
-  // useStaging: true,
-  // useProd: true,
+export const waapConfig: InitWaaPOptions = {
   config: {
-    // darkMode: false,
     allowedSocials: ['google', 'twitter', 'discord', 'github'],
     authenticationMethods: ['email', 'phone', 'wallet', 'social'],
     styles: {
@@ -27,6 +24,10 @@ export const silkConfig: InitSilkOptions = {
   walletConnectProjectId:
     process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '',
 }
+
+// Legacy exports for backward compatibility
+export const silkConfig = waapConfig
+export const silkUrl = waapUrl
 
 // -------------------------------
 

@@ -2,7 +2,6 @@
 import TextButton from '@/components/TextButton'
 import { ChangeEvent, useCallback, useEffect, useState, useRef } from 'react'
 import { Oval } from 'react-loader-spinner'
-// import { useBridge } from '@/hooks/useBridge'
 import RootStyle from '@/components/RootStyle'
 import SBT from '@/components/model/SBT'
 import StyledImage from '@/components/StyledImage'
@@ -49,7 +48,6 @@ import PopupBlockedAlert from '@/components/model/PopupBlockedAlert'
 import WalletSelectionModal from '@/components/model/WalletSelectionModal'
 import { AztecLoginMethod } from '@/types/wallet'
 import AzguardPrompt from '@/components/model/AzguardPrompt'
-import WalletDebugInfo from '@/components/WalletDebugInfo'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useRouter } from 'next/navigation'
@@ -167,7 +165,6 @@ export default function Home() {
     connectAztecWallet,
     disconnectWaapWallet,
     disconnectAztecWallet,
-    executeAztecTransaction,
     azguardClient,
     waapLoginMethod: loginMethod,
     waapWalletIcon: walletIcon,
@@ -175,11 +172,6 @@ export default function Home() {
     getWaapWalletProvider: getWalletProvider,
   } = useWalletStore()
 
-  // console.log({
-  //   loginMethod,
-  //   walletIcon,
-  //   walletProvider,
-  // })
 
   // Get UI state from walletStore
   const {
@@ -435,43 +427,6 @@ export default function Home() {
     }
   }
 
-  // Test function for adding token to wallet
-  // const testAddTokenToWallet = async () => {
-  //   try {
-  //     console.log('Testing add token to wallet...')
-      
-  //     if (!isAztecConnected) {
-  //       throw new Error('Aztec wallet not connected')
-  //     }
-      
-  //     // Import the SDK to access watchAssets
-  //     const { sdk } = await import('../aztec')
-      
-  //     // Test token data (using the L2 token contract address)
-  //     const testToken = {
-  //       type: "ARC20" as const,
-  //       options: {
-  //         chainId: "1337", // Aztec testnet chain ID
-  //         address: "0x011bbe04d65430ca1e05b8b7d092b9ede275b4380f34d4aea1e80ae750e645be",
-  //         name: "Test USDC",
-  //         symbol: "USDC",
-  //         decimals: 6,
-  //         image: "", // You can add a token image URL here if available
-  //       },
-  //     }
-      
-  //     console.log('Adding test token to wallet:', testToken)
-      
-  //     await sdk.watchAssets([testToken])
-      
-  //     console.log('Token successfully added to wallet')
-  //     notify('success', 'Test token added to wallet successfully!')
-      
-  //   } catch (error) {
-  //     console.error('Error testing add token to wallet:', error)
-  //     notify('error', `Test failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
-  //   }
-  // }
 
   // Page visit tracking and component mount effects
   useEffect(() => {
@@ -536,7 +491,6 @@ export default function Home() {
   if (!mounted) return null
 
   const handleBridgeTokensToL2 = (amount: string) => {
-    console.log('Bridge tokens to L2:', amount)
     setDirection(BridgeDirection.L1_TO_L2)
     setBridgeConfig({
       ...bridgeConfig,
@@ -546,7 +500,6 @@ export default function Home() {
   }
 
   const handleWithdrawTokensToL1 = (amount: string) => {
-    console.log('Withdraw tokens to L1:', amount)
     setDirection(BridgeDirection.L2_TO_L1)
     setBridgeConfig({
       ...bridgeConfig,
@@ -631,53 +584,10 @@ export default function Home() {
           <div className='p-5'>
             <BridgeHeader
               onClick={async () => {
-                console.log('testing')
-
-                // Add delay to ensure Datadog is initialized
-                // setTimeout(() => {
-                //   logInfo('log info testing ------------- aztec')
-                //   logError('log error testing ------------- aztec')
-                //   console.log('testing done')
-                // }, 1000)
-
                 await disconnectWaapWallet()
                 await disconnectAztecWallet()
                 localStorage.clear()
                 window.location.reload()
-
-
-                // const fakePromise = new Promise((resolve, reject) => {
-                //   setTimeout(() => {
-                //     // Change to resolve() to test success, or reject() to test error
-                //     resolve('All done!')
-
-                //     // reject(new Error('Something went wrong!'))
-                //   }, 5000)
-                // })
-
-                // notify.promise(
-                //   fakePromise,
-                //   {
-                //     pending: {
-                //       message: 'Processing...',
-                //       heading: 'Please wait',
-                //     },
-                //     success: {
-                //       message: 'Operation successful!',
-                //       heading: 'Success',
-                //     },
-                //     error: { message: 'Operation failed!', heading: 'Error' },
-                //   }
-                //   // { autoClose: false, animatePromise: true }
-                // )
-                // showToast.promise(
-                //   fakePromise,
-                //   {
-                //     pending: 'Processing...',
-                //     success: 'Operation successful!',
-                //     error: 'Operation failed!',
-                //   }
-                // )
               }}
             />
           </div>
@@ -794,9 +704,6 @@ export default function Home() {
             </div>
           </div>
         </div>
-        
-        {/* Debug component - remove in production */}
-        {/* <WalletDebugInfo /> */}
       </RootStyle>
     </>
   )

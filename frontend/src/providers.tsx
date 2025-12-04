@@ -11,11 +11,27 @@ function InitializeWaapWallet() {
   const { initializeWaapWallet } = useWalletStore()
 
   useEffect(() => {
-    console.log('🔧 Initializing WaaP wallet...')
     initializeWaapWallet().catch((err: unknown) => {
-      console.error('❌ Failed to initialize WaaP wallet:', err)
+      console.error('Failed to initialize WaaP wallet:', err)
     })
   }, [initializeWaapWallet])
+
+  return null
+}
+
+function InitializeAztecWallet() {
+  const { initializeAztecWallet } = useWalletStore()
+
+  useEffect(() => {
+    // Add a small delay to ensure other initializations are complete
+    const timer = setTimeout(() => {
+      initializeAztecWallet().catch((err: unknown) => {
+        console.error('Failed to initialize Aztec wallet:', err)
+      })
+    }, 500) // Small delay to ensure Azguard extension is ready
+
+    return () => clearTimeout(timer)
+  }, [initializeAztecWallet])
 
   return null
 }
@@ -67,6 +83,7 @@ export function Providers({ children }: { children: ReactNode }) {
     <>
       <QueryClientProvider client={queryClient}>
         <InitializeWaapWallet />
+        <InitializeAztecWallet />
         <InitializeDatadog />
 
         {children}

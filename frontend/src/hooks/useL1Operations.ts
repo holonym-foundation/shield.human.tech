@@ -1,22 +1,25 @@
 import { useBridgeStore } from '@/stores/bridgeStore'
-import { useContractStore } from '@/stores/contractStore'
 import { truncateDecimals, wait } from '@/utils'
 import axios from 'axios'
 import { logError, logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
-import {
-  AztecAddress,
-  EthAddress,
-  L1TokenPortalManager,
-  Fr,
-  computeSecretHash,
-  generateClaimSecret,
-} from '@aztec/aztec.js'
+import { AztecAddress } from '@aztec/stdlib/aztec-address'
+import { EthAddress } from '@aztec/foundation/eth-address'
+import { Fr } from '@aztec/aztec.js/fields'
+import { computeSecretHash } from '@aztec/aztec.js/crypto'
+import { useWalletAdapter } from './useWalletAdapter'
+import { ADDRESS, getAztecscanUrl, L2_TOKEN_METADATA } from '@/config'
+import { getL1ContractAddresses } from '@/utils/aztecHelpers'
+
+// Generate a claim secret and its hash
+async function generateClaimSecret(): Promise<[Fr, Fr]> {
+  const claimSecret = Fr.random()
+  const claimSecretHash = await computeSecretHash(claimSecret)
+  return [claimSecret, claimSecretHash]
+}
 import { TestERC20Abi, TokenPortalAbi } from '@aztec/l1-artifacts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback } from 'react'
 import {
-  formatEther,
   formatUnits,
   getContract,
   encodeFunctionData,
@@ -26,18 +29,15 @@ import {
 import { sepolia } from 'viem/chains'
 import PortalSBTJson from '../constants/PortalSBT.json'
 import { useToast, useToastMutation, useToastQuery } from './useToast'
-import { extractEvent } from '@aztec/ethereum'
-import { requestWaapWallet, useWalletStore } from '@/stores/walletStore'
-import { SILK_METHOD } from '@silk-wallet/silk-wallet-sdk'
+import { extractEvent } from '@aztec/ethereum/utils'
+import { requestWaapWallet, useWalletStore, WAAP_METHOD } from '@/stores/walletStore'
 import {
   I_UserTokenBalance,
   T_AlchemyTokenBalanceResponse,
   T_UserTokenType,
 } from '@/types/token.balances.types'
-import { NFT } from '@/types/nft.types'
 import { axiosErrorMessage } from './helper'
 import { networkConfig, silkUrl } from '@/config/l1.config'
-import { ADDRESS } from '@/config'
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
@@ -56,7 +56,6 @@ export function useL1NativeBalance() {
     if (!l1Address) return null
 
     const chainIds = [11155111]
-    console.log('calling alchemy')
 
     try {
       const url = `${silkUrl}/api/alchemy/tokens-balances`
@@ -68,17 +67,9 @@ export function useL1NativeBalance() {
 
       const tokens = response?.data
     } catch (error) {
-      console.log('error ', error)
+      // Error handled silently - return 0 balance
     }
 
-    // const balance = await requestWaapWallet(SILK_METHOD.eth_getBalance, [
-    //   l1Address,
-    //   'latest',
-    // ])
-    // console.log('balance ', balance)
-    // // const balance = '0'
-    // const balanceFormatEther = formatEther(BigInt(balance as string))
-    // const formattedBalance = truncateDecimals(balanceFormatEther)
     return 0
   }
 
@@ -107,7 +98,7 @@ export function useL1TokenBalance() {
       args: [l1Address],
     })
 
-    const balance = await requestWaapWallet(SILK_METHOD.eth_call, [
+    const balance = await requestWaapWallet(WAAP_METHOD.eth_call, [
       {
         to: ADDRESS[11155111].L1.TOKEN_CONTRACT,
         data,
@@ -221,37 +212,6 @@ export function useL1TokenBalances() {
 /**
  * Hook to get NFTs for an address across multiple chains
  */
-export function useL1NFTs() {
-  const { waapAddress: l1Address } = useWalletStore()
-
-  const queryKey = ['l1NFTs', l1Address]
-  const queryFn = async () => {
-    try {
-      const response = await axios.post<NFT[]>('/api/alchemy/nfts', {
-        address: l1Address,
-        chains: [11155111], // Sepolia testnet
-      })
-
-      return response.data
-    } catch (error) {
-      console.error('Error fetching NFTs:', error)
-      throw error
-    }
-  }
-
-  return useToastQuery({
-    queryKey,
-    queryFn,
-    enabled: !!l1Address,
-    // Data stays fresh for 1 minute, then triggers a background refetch
-    // This means: instant cached data for 1 minute, then auto-refresh
-    // staleTime: 60 * 1000, // 1 minute
-    meta: {
-      persist: true,
-    },
-  })
-}
-
 // -----------------------------------
 
 export function useL1Faucet() {
@@ -530,7 +490,7 @@ export function useL1MintTokens() {
     })
 
     // Send the transaction
-    const txHash = await requestWaapWallet(SILK_METHOD.eth_sendTransaction, [
+    const txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
       {
         from: l1Address,
         to: ADDRESS[11155111].L1.TOKEN_CONTRACT,
@@ -541,7 +501,7 @@ export function useL1MintTokens() {
 
     // Wait for confirmation
     const receipt = await requestWaapWallet(
-      SILK_METHOD.eth_getTransactionReceipt,
+      WAAP_METHOD.eth_getTransactionReceipt,
       [txHash]
     )
     console.log('Mint transaction confirmed, receipt:', receipt)
@@ -582,6 +542,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     aztecAccount,
     aztecAddress,
     aztecLoginMethod,
+    azguardClient,
   } = useWalletStore()
 
   // Get wallet information from useWalletStore
@@ -592,7 +553,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     useBridgeStore()
   const notify = useToast()
 
-  const { l1ContractAddresses, l2BridgeContract, l2TokenMetadata } = useContractStore()
+  const walletAdapter = useWalletAdapter()
 
   const mutationFn = async (amount: bigint): Promise<string | undefined> => {
     try {
@@ -605,15 +566,18 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         throw new Error('Required accounts not connected')
       }
 
-      if (!l2BridgeContract) {
+      // Get L1 contract addresses (needed for bridging)
+      const l1Addresses = await getL1ContractAddresses(aztecAccount)
+      if (!l1Addresses?.outboxAddress) {
         throw new Error(
-          'L2 bridge contract not initialized. Please wait for contract initialization to complete.'
+          'L1 contract addresses not initialized. Please wait for contract initialization to complete.'
         )
       }
 
-      if (!l1ContractAddresses?.outboxAddress) {
+      // Ensure wallet adapter is initialized (contracts will be initialized by adapter)
+      if (!walletAdapter) {
         throw new Error(
-          'L1 contract addresses not initialized. Please wait for contract initialization to complete.'
+          'Aztec wallet not connected or contracts not initialized. Please wait for wallet initialization to complete.'
         )
       }
 
@@ -651,10 +615,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       const allowanceData = encodeFunctionData({
         abi: TestERC20Abi,
         functionName: 'allowance',
-        args: [l1Address as `0x${string}`, l1PortalAddress],
+        args: [l1Address as `0x${string}`, l1PortalAddress as `0x${string}`],
       })
 
-      const allowance = await requestWaapWallet(SILK_METHOD.eth_call, [
+      const allowance = await requestWaapWallet(WAAP_METHOD.eth_call, [
         {
           to: l1TokenAddress,
           data: allowanceData,
@@ -666,11 +630,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         const approveData = encodeFunctionData({
           abi: TestERC20Abi,
           functionName: 'approve',
-          args: [l1PortalAddress, amount],
+          args: [l1PortalAddress as `0x${string}`, amount],
         })
 
         const approveTxHash = await requestWaapWallet(
-          SILK_METHOD.eth_sendTransaction,
+          WAAP_METHOD.eth_sendTransaction,
           [
             {
               from: l1Address as `0x${string}`,
@@ -680,7 +644,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           ]
         )
 
-        // OLD CODE: const approveReceipt = await requestWaapWallet(SILK_METHOD.eth_getTransactionReceipt, [approveTxHash])
+        // OLD CODE: const approveReceipt = await requestWaapWallet(WAAP_METHOD.eth_getTransactionReceipt, [approveTxHash])
         // ISSUE: eth_getTransactionReceipt returns null if transaction hasn't been mined yet
         // SOLUTION: Use viem's waitForTransactionReceipt which polls until transaction is confirmed
         // Wait for approve transaction to be mined using viem polling
@@ -691,7 +655,8 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       }
 
       const [claimSecret, claimSecretHash] = await generateClaimSecret()
-      // TODO: store these at this point in the local storage
+      // TODO: store these at this point in the local storage 
+      // TODO: WE NEED TO STORE THE CLAIM SECRET AND CLAIM SECRET HASH BACKEND with ENCRYPTION
 
       // Bridge tokens - use different function based on privacy mode
       const functionName = isPrivacyModeEnabled
@@ -711,7 +676,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         args,
       })
 
-      const txHash = await requestWaapWallet(SILK_METHOD.eth_sendTransaction, [
+      const txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
         {
           from: l1Address as `0x${string}`,
           to: l1PortalAddress,
@@ -719,7 +684,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         },
       ])
 
-      // OLD CODE: const txReceipt = await requestWaapWallet(SILK_METHOD.eth_getTransactionReceipt, [txHash])
+      // OLD CODE: const txReceipt = await requestWaapWallet(WAAP_METHOD.eth_getTransactionReceipt, [txHash])
       // ISSUE: eth_getTransactionReceipt returns null if transaction hasn't been mined yet
       // SOLUTION: Use viem's waitForTransactionReceipt which polls until transaction is confirmed
       // Wait for bridge transaction to be mined using viem polling
@@ -755,7 +720,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
       const log = extractEvent(
         txReceipt.logs,
-        l1PortalAddress,
+        l1PortalAddress as `0x${string}`,
         TokenPortalAbi,
         eventName,
         eventFilter
@@ -808,9 +773,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             messageLeafIndex: messageLeafIndex.toString(),
           })
 
-          // Import Fr from @aztec/aztec.js to create the message hash
-          const { Fr } = await import('@aztec/aztec.js')
-          
           // Create Fr from the message hash
           const messageHashFr = Fr.fromString(messageHash.toString())
           
@@ -876,29 +838,30 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
       try {
         console.log('isPrivacyModeEnabled ', isPrivacyModeEnabled)
-        const sendResult = isPrivacyModeEnabled
-          ? l2BridgeContract.methods
-              .claim_private(
-                AztecAddress.fromString(aztecAddress),
-                amount,
-                claimSecret,
-                messageLeafIndex
-              )
-              .send()
-          : l2BridgeContract.methods
-              .claim_public(
-                AztecAddress.fromString(aztecAddress),
-                amount,
-                claimSecret,
-                messageLeafIndex
-              )
-              .send()
+        
+        if (!walletAdapter) {
+          throw new Error('Aztec wallet not connected or bridge contract not initialized')
+        }
 
-        const claimReceipt = await sendResult.wait({ timeout: 200000 })
-        console.log('l2 claimReceipt ', claimReceipt)
+        // Use wallet adapter to execute claim
+        const method = isPrivacyModeEnabled ? 'claim_private' : 'claim_public'
+        const result = await walletAdapter.executeCall(
+          walletAdapter.bridgeAddress,
+          method,
+          [
+            AztecAddress.fromString(aztecAddress),
+            amount,
+            claimSecret,
+            messageLeafIndex,
+          ],
+          {
+            contractType: 'bridge',
+            autoRegister: true,
+          }
+        )
 
-        const l2TxHash = claimReceipt.txHash.toString()
-        const l2TxUrl = `https://aztecscan.xyz/tx-effects/${l2TxHash}`
+        const l2TxHash = result.txHash
+        const l2TxUrl = `${getAztecscanUrl(1674512022)}/tx-effects/${l2TxHash}`
 
         setTransactionUrls(l1TxUrl, l2TxUrl)
 
@@ -951,62 +914,37 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         setProgressStep(4, 'completed')
 
         // Add token to wallet after successful bridge
-        try {
-          console.log('Adding bridged token to wallet...')
-          
-          // Use the L2 token metadata from the hook
-          
-          if (l2TokenMetadata) {
-            // Import the SDK to access watchAssets
-            const { sdk } = await import('../aztec')
+        if (aztecLoginMethod && walletAdapter) {
+          try {
+            await walletAdapter.registerToken(walletAdapter.tokenAddress)
             
-            await sdk.watchAssets([
-              {
-                type: "ARC20",
-                options: {
-                  chainId: "1337", // Aztec testnet chain ID
-                  address: ADDRESS[1337].L2.TOKEN_CONTRACT,
-                  name: l2TokenMetadata.name,
-                  symbol: l2TokenMetadata.symbol,
-                  decimals: l2TokenMetadata.decimals,
-                  image: "", // You can add a token image URL here if available
-                },
-              },
-            ])
-            
-            console.log('Token successfully added to wallet')
-            
-            // Wallet information is already available from useWalletStore hook
+            notify('success', 'Token registered successfully in wallet')
             
             logInfo('Token added to wallet after bridge', {
+              walletType: WalletType.AZTEC,
+              loginMethod: aztecLoginMethod,
+              address: aztecAddress || '',
+              tokenAddress: ADDRESS[1674512022].L2.TOKEN_CONTRACT,
+              tokenName: L2_TOKEN_METADATA.name,
+              tokenSymbol: L2_TOKEN_METADATA.symbol,
+              userAction: 'token_added_to_wallet',
+            })
+          } catch (error) {
+            console.error('Failed to add token to wallet:', error)
+            // Don't throw here as the bridge was successful
+            // Wallet information is already available from useWalletStore hook
+            
+            logError('Failed to add token to wallet after bridge', {
               walletType: WalletType.WAAP,
               loginMethod: loginMethod,
               walletProvider: walletProvider,
               address: l1Address || '',
               chainId: chainId,
-              tokenAddress: ADDRESS[1337].L2.TOKEN_CONTRACT,
-              tokenName: l2TokenMetadata.name,
-              tokenSymbol: l2TokenMetadata.symbol,
-              userAction: 'token_added_to_wallet',
+              error: error instanceof Error ? error.message : 'Unknown error',
+              tokenAddress: ADDRESS[1674512022].L2.TOKEN_CONTRACT,
+              userAction: 'token_add_to_wallet_failed',
             })
-          } else {
-            console.warn('L2 token metadata not available for wallet addition')
           }
-        } catch (error) {
-          console.error('Failed to add token to wallet:', error)
-          // Don't throw here as the bridge was successful
-          // Wallet information is already available from useWalletStore hook
-          
-          logError('Failed to add token to wallet after bridge', {
-            walletType: WalletType.WAAP,
-            loginMethod: loginMethod,
-            walletProvider: walletProvider,
-            address: l1Address || '',
-            chainId: chainId,
-            error: error instanceof Error ? error.message : 'Unknown error',
-            tokenAddress: ADDRESS[1337].L2.TOKEN_CONTRACT,
-            userAction: 'token_add_to_wallet_failed',
-          })
         }
 
         return l2TxHash
@@ -1163,7 +1101,7 @@ export function useL1HasSoulboundToken() {
         args: [l1Address],
       })
 
-      const hasSBT = await requestWaapWallet(SILK_METHOD.eth_call, [
+      const hasSBT = await requestWaapWallet(WAAP_METHOD.eth_call, [
         {
           to: ADDRESS[11155111].L1.PORTAL_SBT_CONTRACT,
           data,
@@ -1220,7 +1158,7 @@ export function useL1MintSoulboundToken(onSuccess: (data: any) => void) {
       })
 
       // Send the transaction
-      const txHash = await requestWaapWallet(SILK_METHOD.eth_sendTransaction, [
+      const txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
         {
           from: l1Address,
           to: ADDRESS[11155111].L1.PORTAL_SBT_CONTRACT,
@@ -1230,7 +1168,7 @@ export function useL1MintSoulboundToken(onSuccess: (data: any) => void) {
 
       // Wait for confirmation
       const receipt = await requestWaapWallet(
-        SILK_METHOD.eth_getTransactionReceipt,
+        WAAP_METHOD.eth_getTransactionReceipt,
         [txHash]
       )
       const txHashStr = receipt?.transactionHash?.toString()
@@ -1262,7 +1200,6 @@ export function useL1MintSoulboundToken(onSuccess: (data: any) => void) {
       onSuccess(data)
     },
     onError: (error) => {
-      console.log('🚀MMM - ~ mutationFn ~ error:', error)
       const errorMessage =
         error instanceof Error ? error.message : String(error)
       notify('error', errorMessage)

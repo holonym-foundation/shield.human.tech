@@ -13,7 +13,6 @@ import { useL2WithdrawTokensToL1 } from '@/hooks/useL2Operations'
 import { BridgeDirection } from '@/types/bridge'
 import { useL1BridgeToL2 } from '@/hooks/useL1Operations'
 import { useWalletStore } from '@/stores/walletStore'
-import { useContractStore } from '@/stores/contractStore'
 import { useToast } from '@/hooks/useToast'
 import { useCountdown } from 'usehooks-ts'
 import TextButton from '@/components/TextButton'
@@ -45,7 +44,6 @@ export default function ProgressPage() {
   // const bridgeAmount = '10'
 
   // const { aztecAddress, metaMaskAddress } = useWalletStore()
-  const { l1ContractAddresses, l2BridgeContract } = useContractStore()
 
   // Bridge operations
   const {

@@ -1,23 +1,21 @@
-import { create } from 'zustand'
-import { useShallow } from 'zustand/react/shallow'
-import { AztecLoginMethod, WalletType, WaapLoginMethod, LOGIN_METHODS } from '@/types/wallet'
-import { sdk, connectWallet } from '../aztec'
-import { AzguardClient } from '@azguardwallet/client'
-import { useAccount as useAztecAccount } from '@nemi-fi/wallet-sdk/react'
+import { l1ChainId, waapConfig } from '@/config/l1.config'
 import { showToast } from '@/hooks/useToast'
-import { sepolia } from 'wagmi/chains'
-import { l1ChainId, silkConfig } from '@/config/l1.config'
-import { initSilk, SILK_METHOD } from '@silk-wallet/silk-wallet-sdk'
-import { logInfo, logError } from '@/utils/datadog'
 import {
-  discoveredProviders,
   detectWalletByProvider,
+  discoveredProviders,
   getEIP6963Provider,
   getEIP6963WalletIcon,
+  getWalletIconByMethod,
   getWalletProviderName,
   handleWaapError,
-  getWalletIconByMethod,
 } from '@/stores/waapWalletHelpers'
+import { AztecLoginMethod, LOGIN_METHODS, WaapLoginMethod, WalletType } from '@/types/wallet'
+import { logError, logInfo } from '@/utils/datadog'
+import { AzguardClient } from '@azguardwallet/client'
+import { initWaaP } from '@human.tech/waap-sdk'
+import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
+import { connectWallet, sdk } from '../aztec'
 
 // ============================================================================
 // TYPE DECLARATIONS
@@ -26,7 +24,8 @@ import {
 declare global {
   interface Window {
     azguard?: any
-    silk: any
+    waap: any
+    ethereum?: any
   }
 }
 
@@ -82,10 +81,8 @@ interface WalletState {
   // Connection management
   connectAztecWallet: (type: AztecLoginMethod) => Promise<any>
   disconnectAztecWallet: () => Promise<void>
+  initializeAztecWallet: () => Promise<void>
   
-  // Transaction execution
-  executeAztecTransaction: (actions: any[]) => Promise<string>
-
   // ============================================================================
   // WAAP WALLET STATE
   // ============================================================================
@@ -147,12 +144,25 @@ const getInitialWalletType = (): AztecLoginMethod | null => {
   return stored ? (stored as AztecLoginMethod) : null
 }
 
+// WAAP_METHOD enum equivalent for WaaP
+export const WAAP_METHOD = {
+  eth_requestAccounts: 'eth_requestAccounts',
+  eth_chainId: 'eth_chainId',
+  wallet_switchEthereumChain: 'wallet_switchEthereumChain',
+  wallet_addEthereumChain: 'wallet_addEthereumChain',
+  personal_sign: 'personal_sign',
+  eth_sendTransaction: 'eth_sendTransaction',
+  eth_call: 'eth_call',
+  eth_getBalance: 'eth_getBalance',
+  eth_getTransactionReceipt: 'eth_getTransactionReceipt',
+} as const
+
 // WaaP wallet request function
 export const requestWaapWallet = async (
-  method: SILK_METHOD,
+  method: string,
   params?: any[]
 ) => {
-  return window.silk.request({ method, params })
+  return window.waap.request({ method, params })
 }
 
 // ============================================================================
@@ -238,17 +248,102 @@ const walletStore = create<WalletState>((set, get) => ({
         userAction: 'aztec_wallet_connection_attempt',
       })
 
-      const connectedAccount = await connectWallet(type)
+      let connectedAccount: any = null
+      let azguardClient: AzguardClient | null = null
+
+      if (type === 'azguard') {
+        // Check if Azguard is installed
+        if (!(await AzguardClient.isAzguardInstalled())) {
+          throw new Error('Azguard wallet is not installed. Please install it from the Chrome Web Store.')
+        }
+
+        // Create Azguard client
+        // The client automatically restores session from localStorage if it exists
+        azguardClient = await AzguardClient.create()
+        
+        // Handle wallet disconnection
+        azguardClient.onDisconnected.addHandler(() => {
+          get().disconnectAztecWallet()
+        })
+
+        // Handle account changes
+        azguardClient.onAccountsChanged.addHandler((accounts) => {
+          if (accounts.length > 0) {
+            const account = accounts[0]
+            const address = account.split(':').at(-1) || ''
+            get().setAztecState({
+              address,
+              account: {
+                address: { toString: () => address },
+                azguardClient,
+                aztecNode: null,
+              },
+              isConnected: true,
+            })
+          }
+        })
+
+        // Connect to Azguard if not connected
+        if (!azguardClient.connected) {
+          const logoUrl = typeof window !== 'undefined' 
+            ? `${window.location.origin}/assets/svg/human.aztec.svg`
+            : '/assets/svg/human.aztec.svg'
+          
+          await azguardClient.connect(
+            {
+              name: 'Aztec Bridge',
+              description: 'Bridge tokens between Ethereum and Aztec Network',
+              logo: logoUrl,
+              url: typeof window !== 'undefined' ? window.location.origin : undefined,
+            },
+            [
+              {
+                chains: ['aztec:1674512022'],
+                methods: ['send_transaction', 'add_private_authwit', 'call', 'simulate_views', 'register_contract', 'register_token'],
+              },
+            ]
+          )
+        }
+
+        // Get the first account
+        if (azguardClient.accounts.length === 0) {
+          throw new Error('No accounts found in Azguard wallet')
+        }
+
+        const account = azguardClient.accounts[0]
+        const address = account.split(':').at(-1) || ''
+
+        // Store the client
+        set({ azguardClient })
+
+        // Import aztecNode for L1 contract addresses
+        const { aztecNode } = await import('../aztec')
+        
+        // Create a mock account object for compatibility
+        connectedAccount = {
+          address: {
+            toString: () => address,
+          },
+          azguardClient, // Store client reference for contract calls
+          aztecNode, // Add aztecNode for getting L1 contract addresses
+        }
+
+      } else {
+        // Use raven-house SDK for Obsidion wallet
+        connectedAccount = await connectWallet(type)
+      }
 
       // Update wallet type
       get().setAztecLoginMethod(type)
 
       // Update Aztec state
       get().setAztecState({
-        address: connectedAccount?.address.toString() || null,
+        address: connectedAccount?.address?.toString() || null,
         account: connectedAccount,
         isConnected: !!connectedAccount,
       })
+
+      // Contracts will be initialized automatically by the wallet adapter
 
       // Close wallet modal
       set({ showWalletModal: false })
@@ -257,7 +352,7 @@ const walletStore = create<WalletState>((set, get) => ({
       logInfo('Aztec wallet connected successfully', {
         walletType: WalletType.AZTEC,
         loginMethod: type,
-        address: connectedAccount?.address.toString() || '',
+        address: connectedAccount?.address?.toString() || '',
         chainId: null,
         userAction: 'aztec_wallet_connection_success',
       })
@@ -284,20 +379,129 @@ const walletStore = create<WalletState>((set, get) => ({
     }
   },
 
+  initializeAztecWallet: async () => {
+    try {
+      // Check if there's a stored wallet type
+      const storedWalletType = getInitialWalletType()
+      
+      if (!storedWalletType) {
+        return
+      }
+
+      const { isAztecConnected, aztecLoginMethod } = get()
+      if (isAztecConnected && aztecLoginMethod === storedWalletType) {
+        return
+      }
+
+      if (storedWalletType === 'azguard') {
+        // Try to reconnect to Azguard
+        try {
+          // Check if Azguard is installed
+          if (!(await AzguardClient.isAzguardInstalled())) {
+            // Clear stored wallet type if wallet is not installed
+            get().setAztecLoginMethod(null)
+            return
+          }
+
+          // Create Azguard client
+          const azguardClient = await AzguardClient.create()
+          
+          // Check if already connected (session was restored from localStorage)
+          if (azguardClient.connected && azguardClient.accounts.length > 0) {
+            
+            const account = azguardClient.accounts[0]
+            const address = account.split(':').at(-1) || ''
+
+            // Handle wallet disconnection
+            azguardClient.onDisconnected.addHandler(() => {
+              get().disconnectAztecWallet()
+            })
+
+            // Import aztecNode for L1 contract addresses
+            const { aztecNode } = await import('../aztec')
+            
+            // Create a mock account object for compatibility
+            const connectedAccount = {
+              address: {
+                toString: () => address,
+              },
+              azguardClient,
+              aztecNode,
+            }
+
+            // Store the client and update state
+            set({ azguardClient })
+            get().setAztecLoginMethod('azguard')
+            get().setAztecState({
+              address,
+              account: connectedAccount,
+              isConnected: true,
+            })
+
+            try {
+              // Contracts will be initialized automatically by the wallet adapter
+            } catch (error) {
+              console.error('Failed to initialize L2 contracts:', error)
+            }
+          }
+        } catch (error) {
+          // Don't clear the stored type on error - might be temporary
+        }
+      } else if (storedWalletType === 'obsidion') {
+        // Try to reconnect to Obsidion using SDK
+        try {
+          const connectedAccount = await connectWallet('obsidion')
+          
+          if (connectedAccount) {
+            get().setAztecLoginMethod('obsidion')
+            get().setAztecState({
+              address: connectedAccount?.address?.toString() || null,
+              account: connectedAccount,
+              isConnected: !!connectedAccount,
+            })
+
+            try {
+              // Contracts will be initialized automatically by the wallet adapter
+            } catch (error) {
+              console.error('Failed to initialize L2 contracts:', error)
+            }
+          }
+        } catch (error) {
+          console.error('Failed to reconnect to Obsidion wallet:', error)
+          // Don't clear the stored type on error - might be temporary
+        }
+      }
+    } catch (error) {
+      console.error('❌ Failed to initialize Aztec wallet:', error)
+    }
+  },
+
   disconnectAztecWallet: async () => {
     try {
       // Log disconnection attempt
-      const { aztecAddress } = get()
+      const { aztecAddress, azguardClient, aztecLoginMethod } = get()
+      
       logInfo('Aztec wallet disconnection initiated', {
         walletType: WalletType.AZTEC,
-        loginMethod: null,
+        loginMethod: aztecLoginMethod || null,
         walletProvider: null,
         address: aztecAddress || '',
         chainId: null,
         userAction: 'aztec_wallet_disconnection_attempt',
       })
 
-      await sdk.disconnect()
+      // Disconnect Azguard client if connected
+      if (aztecLoginMethod === 'azguard' && azguardClient) {
+        try {
+          await azguardClient.disconnect()
+        } catch (error) {
+          console.error('Error disconnecting Azguard:', error)
+        }
+      } else if (aztecLoginMethod === 'obsidion') {
+        // Disconnect Obsidion wallet using SDK
+        await sdk.disconnect()
+      }
+      
       set({
         azguardClient: null,
         aztecAddress: null,
@@ -333,30 +537,6 @@ const walletStore = create<WalletState>((set, get) => ({
     }
   },
 
-  // Transaction execution
-  executeAztecTransaction: async (actions: any[]) => {
-    const { aztecLoginMethod, azguardClient } = get()
-
-    if (aztecLoginMethod === 'azguard' && azguardClient) {
-      const results = await azguardClient.execute(actions)
-      if (results.length > 0 && results[0].status === 'success') {
-        return results[0].txHash
-      } else {
-        const error = new Error(
-          `Transaction failed: ${results[0]?.error || 'Unknown error'}`
-        )
-        showToast('error', error.message)
-        throw error
-      }
-    } else {
-      const error = new Error(
-        'Transaction execution not supported for this wallet type'
-      )
-      showToast('error', error.message)
-      throw error
-    }
-  },
-
   // ============================================================================
   // WAAP WALLET ACTIONS
   // ============================================================================
@@ -370,7 +550,7 @@ const walletStore = create<WalletState>((set, get) => ({
     }
 
     try {
-      initSilk(silkConfig)
+      initWaaP(waapConfig)
 
       const { getWaapAccount, switchWaapChain, refreshWaapWalletInfo } = get()
 
@@ -385,12 +565,11 @@ const walletStore = create<WalletState>((set, get) => ({
 
       // If wallet is already connected, refresh all wallet info
       if (initialAccount) {
-        console.log('🔄 Wallet already connected, refreshing wallet info...')
         await refreshWaapWalletInfo()
       }
 
       // Set up event listeners
-      window.silk.on('accountsChanged', async (accounts: string[]) => {
+      window.waap.on('accountsChanged', async (accounts: string[]) => {
         const isConnected = accounts.length > 0
         set({ waapAddress: accounts[0] as `0x${string}` || null, isWaapConnected: isConnected })
 
@@ -403,7 +582,7 @@ const walletStore = create<WalletState>((set, get) => ({
         }
       })
 
-      window.silk.on('chainChanged', (chainId: string) => {
+      window.waap.on('chainChanged', (chainId: string) => {
         const chainIdNumber = parseInt(chainId, 16)
         set({ waapChainId: chainIdNumber })
       })
@@ -429,8 +608,7 @@ const walletStore = create<WalletState>((set, get) => ({
         userAction: 'waap_wallet_connection_attempt',
       })
 
-      const result = (await window.silk.login()) as WaapLoginMethod
-      console.log('🚀MMM - ~ walletStore.ts ~ result:', result)
+      const result = (await window.waap.login()) as WaapLoginMethod
 
       // Check if login method is 'injected' but no wallet extension is available
       if (result === LOGIN_METHODS.INJECTED && !window.ethereum) {
@@ -558,7 +736,7 @@ const walletStore = create<WalletState>((set, get) => ({
         userAction: 'waap_wallet_disconnection_attempt',
       })
       
-      await window.silk.logout()
+      await window.waap.logout()
     set({
         waapAddress: null,
         waapChainId: null,
@@ -598,7 +776,7 @@ const walletStore = create<WalletState>((set, get) => ({
     const chainIdHex = `0x${chainId.toString(16)}`
     
     try {
-      await requestWaapWallet(SILK_METHOD.wallet_switchEthereumChain, [
+      await requestWaapWallet(WAAP_METHOD.wallet_switchEthereumChain, [
         { chainId: chainIdHex },
       ])
       set({ waapChainId: chainId })
@@ -608,7 +786,7 @@ const walletStore = create<WalletState>((set, get) => ({
           (err?.message && err.message.includes('Unrecognized chain ID'))) {
         // Chain not added to wallet, try to add it
         try {
-          await requestWaapWallet(SILK_METHOD.wallet_addEthereumChain, [
+          await requestWaapWallet(WAAP_METHOD.wallet_addEthereumChain, [
             {
               chainId: chainIdHex,
               chainName: chainId === 11155111 ? 'Sepolia' : `Chain ${chainId}`,
@@ -637,7 +815,7 @@ const walletStore = create<WalletState>((set, get) => ({
 
   getWaapChainId: async () => {
     try {
-      const chainId = await requestWaapWallet(SILK_METHOD.eth_chainId)
+      const chainId = await requestWaapWallet(WAAP_METHOD.eth_chainId)
       const chainIdNumber = parseInt(chainId as string, 16)
       set({ waapChainId: chainIdNumber })
       return chainIdNumber
@@ -649,7 +827,7 @@ const walletStore = create<WalletState>((set, get) => ({
   // Account management
   getWaapAccount: async () => {
     try {
-      const accounts = await requestWaapWallet(SILK_METHOD.eth_requestAccounts)
+      const accounts = await requestWaapWallet(WAAP_METHOD.eth_requestAccounts)
       const address = (accounts as string[])[0]
 
       if (!address) {
@@ -672,13 +850,11 @@ const walletStore = create<WalletState>((set, get) => ({
       }
 
       if (err?.code === 4001) {
-        console.log('⚠️ getWaapAccount: User rejected the connection request')
         set({ waapAddress: null, isWaapConnected: false, waapError: null })
         return null
       }
 
       // For other errors, still set disconnected state but don't throw
-      console.log('⚠️ getWaapAccount: Setting disconnected state due to error')
       set({ waapAddress: null, isWaapConnected: false, waapError: null })
       return null
     }
@@ -691,7 +867,7 @@ const walletStore = create<WalletState>((set, get) => ({
         throw new Error('No wallet connected')
       }
 
-      const signature = await requestWaapWallet(SILK_METHOD.personal_sign, [
+      const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [
         message,
         waapAddress,
       ])
@@ -708,9 +884,9 @@ const walletStore = create<WalletState>((set, get) => ({
   // Wallet identification
   getWaapLoginMethod: async () => {
     try {
-      if (typeof window !== 'undefined' && window.silk) {
+      if (typeof window !== 'undefined' && window.waap) {
         const loginMethod =
-          (await window.silk.getLoginMethod()) as WaapLoginMethod
+          (await window.waap.getLoginMethod()) as WaapLoginMethod
 
         // Update state with login method
         set((state) => ({
@@ -819,7 +995,6 @@ const walletStore = create<WalletState>((set, get) => ({
       // Get wallet icon (this will update state)
       getWaapWalletIcon()
       
-      console.log('✅ Wallet info refreshed successfully')
     } catch (err) {
       console.error('❌ Error refreshing wallet info:', err)
     }
@@ -892,9 +1067,7 @@ export const useWalletStore = () =>
       // Connection management
       connectAztecWallet: state.connectAztecWallet,
       disconnectAztecWallet: state.disconnectAztecWallet,
-      
-      // Transaction execution
-      executeAztecTransaction: state.executeAztecTransaction,
+      initializeAztecWallet: state.initializeAztecWallet,
 
       // ============================================================================
       // WAAP WALLET ACTIONS

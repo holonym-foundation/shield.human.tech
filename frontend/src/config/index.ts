@@ -2,7 +2,7 @@ import { Network, Token } from '@/types/bridge'
 // -------------------------------------
 
 // Maintenance mode flag - set to true to enable maintenance overlay
-export const MAINTENANCE_MODE = true
+export const MAINTENANCE_MODE = false
 
 export const MAINTENANCE_MESSAGE =
   'We are currently performing scheduled maintenance. The bridge will be available shortly.'
@@ -15,6 +15,21 @@ export const MAINTENANCE_TITLE = 'Bridge Under Maintenance'
 // - testnet: 418719321 // keccak256('aztec-testnet')[0:4]
 // - sandbox:: 147120760, // keccak256('aztec-sandbox')[0:4]
 
+// Import deployed tokens from bridge-script
+import deployedTokensData from '@/constants/deployed-tokens.json'
+
+// Aztecscan URLs for different networks
+export const AZTECSCAN_URLS = {
+  1674512022: 'https://devnet.aztecscan.xyz', // Aztec Devnet
+  // Add other chain IDs as needed
+  // testnet: 'https://testnet.aztecscan.xyz',
+} as const
+
+// Helper function to get Aztecscan URL for a given chain ID
+export const getAztecscanUrl = (chainId: number): string => {
+  return AZTECSCAN_URLS[chainId as keyof typeof AZTECSCAN_URLS] || 'https://aztecscan.xyz'
+}
+
 export const ADDRESS = {
   11155111: {
     // Sepolia
@@ -22,19 +37,19 @@ export const ADDRESS = {
     CHAIN_NAME: 'Sepolia',
     L1: {
       PORTAL_SBT_CONTRACT: '0x983ad7bdc7701a77a6c22e2245d7eafe893b21fe',
-      TOKEN_CONTRACT: '0x93527f0552bef5fafc340bceac6a5a37b6c34496',
-      FEE_ASSET_HANDLER_CONTRACT: '0x57860b112fc6890c4ddfeccb83714aa988dc382c',
-      PORTAL_CONTRACT: '0x069840ae19473e452792c8e17fee77d78a3fcecb',
+      TOKEN_CONTRACT: deployedTokensData.tokens[0]?.l1TokenContract || '0xd1ca59d01c8e55d93dccfed3853301b3408d9ab1',
+      FEE_ASSET_HANDLER_CONTRACT: deployedTokensData.tokens[0]?.feeAssetHandler || '0x10a5c8d68f17ecfe37220e15beb3e2475d62b507',
+      PORTAL_CONTRACT: deployedTokensData.tokens[0]?.l1PortalContract || '0xfc47a123edd8a85fe7294b71540559f9e6a2ce89',
     },
   },
-  1337: {
-    // Aztec Testnet
-    CHAIN_ID: 1337,
-    CHAIN_NAME: 'Aztec Testnet',
+  1674512022: {
+    // Aztec Devnet (l2ChainId = l1ChainId ^ rollupVersion)
+    CHAIN_ID: 1674512022,
+    CHAIN_NAME: 'Aztec Devnet',
     L2: {
-      TOKEN_CONTRACT: '0x011bbe04d65430ca1e05b8b7d092b9ede275b4380f34d4aea1e80ae750e645be',
-      TOKEN_BRIDGE_CONTRACT: '0x0a8ba03e74bea383e790265f23d6b042435bf1f78038806f8e4319006815a1e2',
-      SPONSORED_FEE_PAYMENT_CONTRACT: '0x299f255076aa461e4e94a843f0275303470a6b8ebe7cb44a471c66711151e529',
+      TOKEN_CONTRACT: deployedTokensData.tokens[0]?.l2TokenContract || '0x10702f787877e0ff499fff6f502df13893137f0d6b94ea74715c7cba4d29a9c7',
+      TOKEN_BRIDGE_CONTRACT: deployedTokensData.tokens[0]?.l2BridgeContract || '0x254efc5596bd763be0040664874c1cd4224f533472138b3d29418171953cee1e',
+      SPONSORED_FEE_PAYMENT_CONTRACT: deployedTokensData.sponsoredFeeAddress || '0x280e5686a148059543f4d0968f9a18cd4992520fcd887444b8689bf2726a1f97',
     },
   },
 } as const
@@ -90,7 +105,7 @@ export const L2_NETWORKS: Network[] = [
     id: 2,
     img: '/assets/svg/aztec.svg',
     title: 'Aztec Tesnet',
-    chainId: 1337,
+    chainId: 1674512022,
     network: 'aztec',
     symbol: 'ETH',
   },
@@ -110,8 +125,8 @@ export const L1_TOKENS: Token[] = [
     img: '/assets/svg/USDC.svg',
     title: 'USDC',
     symbol: 'USDC',
-    decimals: 6,
-    address: '0x93527f0552bef5fafc340bceac6a5a37b6c34496',
+    decimals: deployedTokensData.tokens[0]?.decimals || 6,
+    address: deployedTokensData.tokens[0]?.l1TokenContract || '0xd1ca59d01c8e55d93dccfed3853301b3408d9ab1',
   },
   // {
   //   id: 2,
@@ -139,8 +154,8 @@ export const L2_TOKENS: Token[] = [
     img: '/assets/svg/USDC.svg',
     title: 'Clean USDC',
     symbol: 'cUSDC',
-    decimals: 6,
-    address: '0x011bbe04d65430ca1e05b8b7d092b9ede275b4380f34d4aea1e80ae750e645be',
+    decimals: deployedTokensData.tokens[0]?.decimals || 6,
+    address: deployedTokensData.tokens[0]?.l2TokenContract || '0x10702f787877e0ff499fff6f502df13893137f0d6b94ea74715c7cba4d29a9c7',
   },
   // {
   //   id: 2,
@@ -149,3 +164,10 @@ export const L2_TOKENS: Token[] = [
   //   symbol: 'USDT',
   // },
 ]
+
+// L2 Token Metadata (static configuration)
+export const L2_TOKEN_METADATA = {
+  name: 'Test USDC',
+  symbol: 'USDC',
+  decimals: deployedTokensData.tokens[0]?.decimals || 6,
+} as const

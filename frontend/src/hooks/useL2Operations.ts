@@ -1,24 +1,20 @@
-import { ADDRESS } from '@/config'
+import { ADDRESS, getAztecscanUrl, L2_TOKEN_METADATA } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
-import { useContractStore } from '@/stores/contractStore'
+import { getL1ContractAddresses } from '@/utils/aztecHelpers'
 import { logError, logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
-import { logger } from '@/utils/logger'
-import { AztecAddress, EthAddress, Fr, IntentAction } from '@aztec/aztec.js'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback } from 'react'
+import { AztecAddress } from '@aztec/stdlib/aztec-address'
+import { EthAddress } from '@aztec/foundation/eth-address'
+import { Fr } from '@aztec/aztec.js/fields'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, parseUnits, encodeFunctionData, http, createPublicClient } from 'viem'
-import { usePublicClient, useWalletClient } from 'wagmi'
 import { useToast, useToastMutation } from './useToast'
 import { wait } from '@/utils'
 import { useL2ErrorHandler } from '@/utils/l2ErrorHandler'
-import { useMutation } from '@tanstack/react-query'
-import { requestWaapWallet, useWalletStore } from '@/stores/walletStore'
-import { SILK_METHOD } from '@silk-wallet/silk-wallet-sdk'
-import PortalSBTJson from '../constants/PortalSBT.json'
+import { requestWaapWallet, useWalletStore, WAAP_METHOD } from '@/stores/walletStore'
 import { TokenPortalAbi } from '@aztec/l1-artifacts'
 import { sepolia } from 'viem/chains'
-import { BatchCall } from '@nemi-fi/wallet-sdk/eip1193'
+import { useWalletAdapter } from './useWalletAdapter'
 
 // Create a public client for transaction receipt polling
 const publicClient = createPublicClient({
@@ -32,27 +28,12 @@ export interface L2TokenBalanceData {
   privateBalance: string
 }
 
-export const useL2NativeBalance = () => {
-  const { aztecAddress, isAztecConnected } = useWalletStore()
-
-  const queryKey = ['l2NativeBalance', aztecAddress]
-  const queryFn = async () => {
-    return 0
-  }
-
-  return useQuery({
-    queryKey,
-    queryFn,
-    enabled: !!isAztecConnected,
-  })
-}
-
 // -----------------------------------
 
 export const useL2TokenBalance = () => {
   const { aztecAddress, isAztecConnected } = useWalletStore()
-  const { l2TokenContract, l2TokenMetadata } = useContractStore()
   const handleL2Error = useL2ErrorHandler()
+  const walletAdapter = useWalletAdapter()
 
   // Create a stable query key that doesn't change with renders
   const queryKey = ['l2TokenBalance', aztecAddress]
@@ -60,40 +41,35 @@ export const useL2TokenBalance = () => {
   // Query function without tracking state
   const queryFn = async (): Promise<L2TokenBalanceData> => {
     try {
-      if (!l2TokenContract) {
-        throw new Error('L2 token contract not found')
-      }
       if (!aztecAddress) {
         throw new Error('Aztec address not found')
       }
-      if (!l2TokenMetadata) {
-        throw new Error('L2 token metadata not found')
+      if (!walletAdapter) {
+        throw new Error('Aztec wallet not connected or contracts not initialized')
       }
-
-      // console.log('Fetching L2 balances...')
 
       console.time('l2TokenBalance')
 
-      const [privateBalance, publicBalance] = await Promise.all([
-        l2TokenContract.methods
-          .balance_of_private(AztecAddress.fromString(aztecAddress))
-          .simulate(),
-        l2TokenContract.methods
-          .balance_of_public(AztecAddress.fromString(aztecAddress))
-          .simulate(),
+      const userAddress = AztecAddress.fromString(aztecAddress)
+
+      // Use wallet adapter to simulate views
+      const [privateBalanceResult, publicBalanceResult] = await Promise.all([
+        walletAdapter.simulateView(walletAdapter.tokenAddress, 'balance_of_private', [userAddress]),
+        walletAdapter.simulateView(walletAdapter.tokenAddress, 'balance_of_public', [userAddress]),
       ])
 
+      const privateBalance = BigInt(privateBalanceResult.result.toString())
+      const publicBalance = BigInt(publicBalanceResult.result.toString())
+
       const publicBalanceFormat = formatUnits(
-        publicBalance as bigint,
-        l2TokenMetadata.decimals
+        publicBalance,
+        L2_TOKEN_METADATA.decimals
       )
       const privateBalanceFormat = formatUnits(
-        privateBalance as bigint,
-        l2TokenMetadata.decimals
+        privateBalance,
+        L2_TOKEN_METADATA.decimals
       )
 
-      console.log('publicBalanceFormat: ', publicBalanceFormat)
-      console.log('privateBalanceFormat: ', privateBalanceFormat)
       console.timeEnd('l2TokenBalance')
 
       return {
@@ -102,7 +78,6 @@ export const useL2TokenBalance = () => {
       }
     } catch (error) {
       handleL2Error<L2TokenBalanceData>(error, 'BALANCE')
-      console.log('error ', error)
       throw error
     }
   }
@@ -111,7 +86,7 @@ export const useL2TokenBalance = () => {
   return useQuery<L2TokenBalanceData, Error>({
     queryKey,
     queryFn,
-    enabled: !!aztecAddress && !!l2TokenContract && !!l2TokenMetadata,
+    enabled: !!aztecAddress && !!walletAdapter,
     meta: {
       persist: true, // Mark this query for persistence
     },
@@ -123,22 +98,7 @@ export function useL1ContractAddresses() {
 
   const queryKey = ['l1ContractAddresses']
   const queryFn = async () => {
-    if (!aztecAccount?.aztecNode) return null
-    return await aztecAccount.aztecNode.getL1ContractAddresses()
-  }
-  return useQuery({
-    queryKey,
-    queryFn,
-    enabled: isAztecConnected,
-  })
-}
-
-export function useL2NodeInfo() {
-  const { aztecAccount, isAztecConnected } = useWalletStore()
-  const queryKey = ['nodeInfo']
-  const queryFn = async () => {
-    if (!aztecAccount?.aztecNode) return null
-    return await aztecAccount.aztecNode.getNodeInfo()
+    return await getL1ContractAddresses(aztecAccount)
   }
   return useQuery({
     queryKey,
@@ -163,21 +123,6 @@ export function useL2NodeIsReady() {
 
 // -----------------------------------
 
-export function useL2TokenInfo() {
-  const { aztecAccount, isAztecConnected } = useWalletStore()
-
-  const queryKey = ['l2TokenInfo']
-  const queryFn = async () => {}
-
-  return useQuery({
-    queryKey,
-    queryFn,
-    enabled: isAztecConnected,
-  })
-}
-
-// -----------------------------------
-
 export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
   const { waapAddress: l1Address } = useWalletStore()
   const { aztecAddress, aztecAccount, aztecLoginMethod } = useWalletStore()
@@ -187,9 +132,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
 
   // Get wallet information from useWalletStore
   const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
-
-  const { l1ContractAddresses, l2TokenContract, l2BridgeContract } =
-    useContractStore()
+  const walletAdapter = useWalletAdapter()
 
   const mutationFn = async (amount: bigint) => {
     try {
@@ -197,11 +140,8 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         throw new Error('Required accounts not connected')
       }
 
-      if (!l2BridgeContract) {
-        throw new Error('L2 bridge contract not connected')
-      }
-      if (!l2TokenContract) {
-        throw new Error('L2 token contract not connected')
+      if (!walletAdapter) {
+        throw new Error('Aztec wallet not connected or contracts not initialized')
       }
 
       // Wallet information is already available from useWalletStore hook
@@ -229,81 +169,52 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         userAction: 'withdrawal_l2_to_l1_initiated',
       })
 
+      // Wallet adapter is already declared at function level
+      if (!walletAdapter) {
+        throw new Error('Aztec wallet not connected or contracts not initialized')
+      }
+
       // Step 1: Setting up authorization for withdrawal
       setProgressStep(1, 'active')
-      console.log('Setting up authorization for withdrawal...')
       const nonce = Fr.random()
 
-      // Give approval to bridge to burn owner's funds:
-      const authwitRequests = await aztecAccount.setPublicAuthWit(
-        {
-          caller: l2BridgeContract.address,
-          action: await l2TokenContract.methods
-            .burn_public(
-              AztecAddress.fromString(aztecAccount.address.toString()),
-              amount,
-              nonce
-            )
-            .request(),
-        },
-        true
-      )
+      const userAddress = AztecAddress.fromString(aztecAccount.address.toString())
 
-      await authwitRequests.send().wait({ timeout: 120000 })
+      // Use wallet adapter to execute authwit
+      await walletAdapter.executeCallWithAuthWit(
+        userAddress,
+        walletAdapter.bridgeAddress,
+        walletAdapter.tokenAddress,
+        'burn_public',
+        [userAddress, amount, nonce]
+      )
       setProgressStep(1, 'completed')
 
       // Step 2: Preparing withdrawal message
       setProgressStep(2, 'active')
-      console.log('Getting L2 bridge address...')
-
-      // Get the L2 bridge address using the portal contract
-      // const messageData = encodeFunctionData({
-      //   abi: TokenPortalAbi,
-      //   functionName: 'l2Bridge',
-      //   args: []
-      // })
-      // const l2BridgeAddress = await requestWaapWallet(SILK_METHOD.eth_call, [{
-      //   to: ADDRESS[11155111].L1.PORTAL_CONTRACT,
-      //   data: messageData
-      // }, 'latest'])
-      const l2BridgeAddress = ADDRESS[1337].L2.TOKEN_BRIDGE_CONTRACT
-
-      console.log('Retrieved L2 bridge address: ', l2BridgeAddress.toString())
       setProgressStep(2, 'completed')
 
       // Step 3: Initiating exit to Ethereum
       setProgressStep(3, 'active')
-      console.log('Initiating exit to L1...')
 
-      // let authwitRequests: IntentAction[] | undefined = undefined
-      //   authwitRequests = [
-      //     {
-      //       caller: l2BridgeContract.address,
-      //       action: await l2TokenContract.methods
-      //         .burn_public(
-      //           AztecAddress.fromString(aztecAccount.address.toString()),
-      //           amount,
-      //           nonce
-      //         )
-      //         .request(),
-      //     },
-      //   ]
-      
-      // console.log('authwitRequests: ', authwitRequests)
-
-
-      const l2TxReceipt = await l2BridgeContract.methods
-        .exit_to_l1_public(
+      // Use wallet adapter to execute exit to L1
+      const result = await walletAdapter.executeCall(
+        walletAdapter.bridgeAddress,
+        'exit_to_l1_public',
+        [
           EthAddress.fromString(l1Address),
           amount,
           EthAddress.ZERO,
           nonce,
-          // { authWitnesses: authwitRequests }
-        )
-        .send()
-        .wait({
-          timeout: 200000,
-        })
+        ],
+        {
+          contractType: 'bridge',
+          autoRegister: true,
+        }
+      )
+
+      const l2TxHash = result.txHash
+      const l2BlockNumber = result.blockNumber
 
       // const batchedTx = new BatchCall(aztecAccount, [
       //   setPublicAuthWit,
@@ -330,10 +241,10 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       // Store L2 to L1 message and transaction receipt in localStorage
       const withdrawalData = {
         id: Date.now().toString(), // Unique identifier for this attempt
-        l2BridgeAddress: l2BridgeAddress.toString(),
+        l2BridgeAddress: walletAdapter.bridgeAddress,
         l2TxReceipt: {
-          txHash: l2TxReceipt.txHash.toString(),
-          blockNumber: l2TxReceipt.blockNumber?.toString(),
+          txHash: l2TxHash,
+          blockNumber: l2BlockNumber?.toString(),
         },
         timestamp: Date.now(),
         amount: amount.toString(),
@@ -341,8 +252,8 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         l2Address: aztecAddress,
         nonce: nonce.toString(),
         success: false, // Initial state
-        l2TxHash: l2TxReceipt.txHash.toString(),
-        l2TxUrl: `https://aztecscan.xyz/tx-effects/${l2TxReceipt.txHash.toString()}`,
+        l2TxHash: l2TxHash,
+        l2TxUrl: `${getAztecscanUrl(1674512022)}/tx-effects/${l2TxHash}`,
       }
 
       // Get existing withdrawals or initialize empty array
@@ -356,33 +267,40 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       localStorage.setItem('l2ToL1Withdrawals', JSON.stringify(withdrawals))
 
       console.log('Exit to L1 transaction completed', {
-        txReceipt: l2TxReceipt,
+        txHash: l2TxHash,
+        blockNumber: l2BlockNumber,
       })
       setProgressStep(3, 'completed')
 
       // Step 4: Getting proof for Ethereum withdrawal
       setProgressStep(4, 'active')
       console.log('Getting L2 to L1 message membership witness...')
+      
+      // For Azguard, we need to get the block number from the transaction
+      // If blockNumber is not available, we might need to poll for it
+      const blockNumberForProof = l2BlockNumber
+      if (!blockNumberForProof && aztecAccount?.aztecNode) {
+        // Try to get the latest block number as fallback
+        // Note: This is a workaround - ideally we should wait for the transaction to be included
+        console.warn('Block number not available, using latest block as fallback')
+        // We'll need to handle this case differently - for now, throw an error
+        throw new Error('Block number is required for L2 to L1 message proof. Please wait for transaction confirmation.')
+      }
+      
       const [l2ToL1MessageIndex, siblingPath] =
         await aztecAccount.aztecNode.getL2ToL1MessageMembershipWitness(
-          Number(l2TxReceipt.blockNumber!),
-          l2BridgeAddress
+          Number(blockNumberForProof!),
+          walletAdapter.bridgeAddress
         )
-      console.log('Retrieved membership witness', {
-        messageIndex: l2ToL1MessageIndex,
-        siblingPath: siblingPath.toString(),
-      })
       setProgressStep(4, 'completed')
 
       // Step 5: Waiting for Ethereum confirmation
       setProgressStep(5, 'active')
-      console.log('Waiting for L1 confirmation (40 minutes)...')
       await new Promise((resolve) => setTimeout(resolve, 40 * 60 * 1000))
       setProgressStep(5, 'completed')
 
       // Step 6: Claiming tokens on Ethereum
       setProgressStep(6, 'active')
-      console.log('Initiating withdrawal on L1...')
       try {
         // Prepare the withdrawal transaction
         const withdrawData = encodeFunctionData({
@@ -392,7 +310,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             l1Address,
             amount,
             false, // _withCaller
-            BigInt(l2TxReceipt.blockNumber!),
+            BigInt(l2BlockNumber!),
             l2ToL1MessageIndex,
             siblingPath,
           ],
@@ -400,7 +318,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
 
         // Send the withdrawal transaction
         const txHash = await requestWaapWallet(
-          SILK_METHOD.eth_sendTransaction,
+          WAAP_METHOD.eth_sendTransaction,
           [
             {
               from: l1Address,
@@ -412,13 +330,12 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
 
         // // Wait for transaction receipt
         // const receipt = await requestWaapWallet(
-        //   SILK_METHOD.eth_getTransactionReceipt,
+        //   WAAP_METHOD.eth_getTransactionReceipt,
         //   [txHash]
         // )
         // ISSUE: eth_getTransactionReceipt returns null if transaction hasn't been mined yet
         // SOLUTION: Use viem's waitForTransactionReceipt which polls until transaction is confirmed
         // Wait for approve transaction to be mined using viem polling
-        console.log('Waiting for approve transaction to be mined...')
         const receipt = await publicClient.waitForTransactionReceipt({
           hash: txHash,
         })
@@ -455,14 +372,8 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
 
       // Step 7: Withdrawal Complete
       setProgressStep(7, 'active')
-      console.log('Withdrawal completed successfully')
-
-      const txHash = l2TxReceipt.txHash.toString()
-      console.log('txHash ', txHash)
-
-      // Create an Aztecscan URL for the transaction
-      const aztecscanUrl = `https://aztecscan.xyz/tx-effects/${txHash}`
-      console.log('View transaction on Aztecscan:', aztecscanUrl)
+      const txHash = l2TxHash
+      const aztecscanUrl = `${getAztecscanUrl(1674512022)}/tx-effects/${txHash}`
 
       // Set transaction URLs in the store
       setTransactionUrls(null, aztecscanUrl)
@@ -499,7 +410,6 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
 
       return txHash
     } catch (error) {
-      console.log('🚀MMM - ~ mutationFn ~ error:', error)
       const errorMessage =error instanceof Error ? error.message : 'Unknown error'
         // Wallet information is already available from useWalletStore hook
       
@@ -689,8 +599,8 @@ export const useL2PendingTxCount = () => {
 
 export const useL2TokenTransfer = () => {
   const { aztecAddress, isAztecConnected } = useWalletStore()
-  const { l2TokenContract, l2TokenMetadata } = useContractStore()
   const handleL2Error = useL2ErrorHandler()
+  const walletAdapter = useWalletAdapter()
 
   const mutation = useMutation({
     mutationFn: async ({
@@ -703,37 +613,36 @@ export const useL2TokenTransfer = () => {
       isPrivate: boolean
     }) => {
       try {
-        if (!l2TokenContract) {
-          throw new Error('L2 token contract not found')
-        }
         if (!aztecAddress) {
           throw new Error('Aztec address not found')
         }
-        if (!l2TokenMetadata) {
-          throw new Error('L2 token metadata not found')
+        if (!walletAdapter) {
+          throw new Error('Aztec wallet not connected or contracts not initialized')
         }
 
         console.log('Transferring L2 token...')
 
-        const amountInWei = parseUnits(amount, l2TokenMetadata.decimals)
+        const amountInWei = parseUnits(amount, L2_TOKEN_METADATA.decimals)
         const recipientAddress = AztecAddress.fromString(recipient)
 
-        let tx
-        if (isPrivate) {
-          tx = await l2TokenContract.methods
-            .transfer_to_private(recipientAddress, amountInWei)
-            .send()
-            .wait()
-        } else {
-          tx = await l2TokenContract.methods
-            .transfer(recipientAddress, amountInWei)
-            .send()
-            .wait()
-        }
+        // Use wallet adapter to execute transfer
+        const method = isPrivate ? 'transfer_to_private' : 'transfer'
+        const args = isPrivate
+          ? [AztecAddress.fromString(aztecAddress), recipientAddress, amountInWei]
+          : [recipientAddress, amountInWei]
 
-        console.log('Transfer tx:', tx)
+        const result = await walletAdapter.executeCall(
+          walletAdapter.tokenAddress,
+          method,
+          args,
+          {
+            contractType: 'token',
+            autoRegister: true,
+          }
+        )
 
-        return tx
+        // Return a receipt-like object for compatibility
+        return { txHash: result.txHash, status: 'mined' }
       } catch (error) {
         handleL2Error<null>(error, 'TRANSACTION')
         throw error
