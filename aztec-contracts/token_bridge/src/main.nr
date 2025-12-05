@@ -24,18 +24,23 @@ pub contract TokenBridge {
     use dep::token::Token;
 
     use dep::aztec::macros::{functions::{external, initializer, view}, storage::storage};
+    use dep::clean_hands_sbt::{CleanHandsSBTContract, sbt::SBT};
 
     // Storage structure, containing all storage, and specifying what slots they use.
     #[storage]
     struct Storage<Context> {
         config: PublicImmutable<Config, Context>,
+        passport_signer_x: PublicImmutable<Field, Context>,
+        passport_signer_y: PublicImmutable<Field, Context>,
     }
 
     // Constructs the contract.
     #[external("public")]
     #[initializer]
-    fn constructor(token: AztecAddress, portal: EthAddress) {
+    fn constructor(token: AztecAddress, portal: EthAddress, passport_signer_x: Field, passport_signer_y: Field) {
         storage.config.initialize(Config { token, portal });
+        storage.passport_signer_x.initialize(passport_signer_x);
+        storage.passport_signer_y.initialize(passport_signer_y);
     }
 
     #[external("private")]
@@ -124,12 +129,57 @@ pub contract TokenBridge {
         amount: u128,
         caller_on_l1: EthAddress, // ethereum address that can call this function on the L1 portal (0x0 if anyone can call)
         authwit_nonce: Field, // nonce used in the approval message by `msg.sender` to let bridge burn their tokens on L2
+        passport_max: u128,
+        passport_nonce: Field,
+        passport_deadline: u64, // using u64 for timestamp comparison
+        signature: [u8; 64],    // Schnorr signatures are 64 bytes
     ) {
         let config = storage.config.read();
 
         // Assert that user provided token address is same as seen in storage.
         assert_eq(config.token, token, "Token address is not the same as seen in storage");
 
+        let ch_contract = CleanHandsSBTContract::at(config.clean_hands_sbt);
+        let sbt = ch_contract.get_sbt_by_address(sender).view(&mut context);
+        
+        let mut is_clean = false;
+        // (Assuming you have logic to check if sbt is valid...)
+        if (sbt.minter != AztecAddress::zero()) { is_clean = true; }
+
+        // 2. LOGIC GATE: If not clean, check Schnorr Signature
+        if (!is_clean) {
+             assert(passport_deadline as Field > context.timestamp(), "Expired");
+             assert(amount <= passport_max, "Over Limit");
+
+             // A. Reconstruct the Message
+             // We hash the specific fields we want to verify
+             // Note: In Noir, we usually hash Fields. 
+             let mut message_hash = std::hash::pedersen_hash([
+                 sender.to_field(),
+                 passport_max as Field,
+                 passport_nonce,
+                 passport_deadline as Field
+             ]);
+
+             // B. Get the Trusted Signer Key from Storage
+             let pub_key_x = storage.passport_signer_x.read();
+             let pub_key_y = storage.passport_signer_y.read();
+
+             // C. Verify Schnorr
+             // verify_signature(pub_key_x, pub_key_y, signature, message_bytes)
+             let is_valid = schnorr::verify_signature(
+                 pub_key_x,
+                 pub_key_y,
+                 signature,
+                 message_hash.to_be_bytes(32) // Convert Field hash to 32 bytes
+             );
+
+             assert(is_valid, "Invalid Passport Signature");
+             
+             // D. Replay Protection (Nullifier)
+             // You MUST emit a nullifier to prevent using the same signature twice
+             context.push_new_nullifier(passport_nonce, ...); 
+        }
         // Send an L2 to L1 message
         let content = get_withdraw_content_hash(recipient, amount, caller_on_l1);
         context.message_portal(config.portal, content);

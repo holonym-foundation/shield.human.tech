@@ -135,59 +135,16 @@ contract TokenPortal {
      * @param _amount - The amount to deposit
      * @param _secretHash - The hash of the secret consumable message. The hash should be 254 bits (so it can fit in a
      * Field element)
-     * @param _cleanHands - The clean hands attestation data
-     * @param _passport - The passport attestation data
      * @return The key of the entry in the Inbox and its leaf index
      */
     function depositToAztecPublic(
         bytes32 _to,
         uint256 _amount,
-        bytes32 _secretHash,
-        CleanHandsData calldata _cleanHands,
-        PassportData calldata _passport
+        bytes32 _secretHash
     )
         external
         returns (bytes32, uint256) // docs:end:deposit_public
     {
-        bool isCleanHands = false;
-        if (_cleanHands.signature.length > 0) {
-            if (
-                verifyCleanHandsSignature(
-                    cleanHandsCircuitId,
-                    _cleanHands.actionId,
-                    msg.sender,
-                    _cleanHands.signature
-                )
-            ) {
-                isCleanHands = true;
-            }
-        }
-        if (!isCleanHands) {
-            require(
-                _passport.signature.length > 0,
-                "No valid verification provided"
-            );
-            require(
-                !passportNonces[msg.sender][_passport.nonce],
-                "Passport nonce used"
-            );
-            bool isPassportValid = verifyPassportSignature(
-                _passport.maxAmount,
-                _passport.nonce,
-                _passport.deadline,
-                _passport.signature
-            );
-
-            require(isPassportValid, "Passport signature invalid");
-            require(
-                _amount <= _passport.maxAmount,
-                "Amount exceeds Passport limit"
-            );
-
-            // Consume Nonce only if we relied on Passport logic
-            passportNonces[msg.sender][_passport.nonce] = true;
-        }
-
         // Preamble
         DataStructures.L2Actor memory actor = DataStructures.L2Actor(
             l2Bridge,
