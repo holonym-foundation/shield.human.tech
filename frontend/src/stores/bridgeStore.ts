@@ -133,11 +133,23 @@ const initialTransactionState: TransactionState = {
   l2TxUrl: null,
 }
 
+// Helper to safely get privacy mode from localStorage (SSR-safe)
+const getInitialPrivacyMode = (): boolean => {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return false
+  }
+  try {
+    return localStorage.getItem('privacyModeEnabled') === 'true'
+  } catch {
+    return false
+  }
+}
+
 const initialState = {
   ...initialStepState,
   ...initialBridgeConfigState,
   ...initialTransactionState,
-  isPrivacyModeEnabled: typeof window !== 'undefined' ? localStorage.getItem('privacyModeEnabled') === 'true' : false,
+  isPrivacyModeEnabled: getInitialPrivacyMode(),
 } as const
 
 const bridgeStore = create<BridgeStoreState>((set, get) => ({
@@ -145,10 +157,14 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   direction: BridgeDirection.L1_TO_L2,
 
   // Privacy Mode toggle
-  isPrivacyModeEnabled: typeof window !== 'undefined' ? localStorage.getItem('privacyModeEnabled') === 'true' : false,
+  isPrivacyModeEnabled: getInitialPrivacyMode(),
   setPrivacyModeEnabled: (enabled: boolean) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('privacyModeEnabled', enabled.toString())
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('privacyModeEnabled', enabled.toString())
+      } catch {
+        // Ignore localStorage errors
+      }
     }
     set({ isPrivacyModeEnabled: enabled })
   },

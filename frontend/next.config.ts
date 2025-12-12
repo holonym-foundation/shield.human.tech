@@ -3,6 +3,9 @@ import webpack from 'webpack';
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // Explicitly use webpack for polyfills compatibility
+  // Turbopack config is empty to allow webpack to be used
+  turbopack: {},
   webpack: (config, { isServer }) => {
     // Add polyfills for Node.js built-ins in the browser
     if (!isServer) {
