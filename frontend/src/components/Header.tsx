@@ -218,6 +218,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     aztecAddress,
     isAztecConnected,
     disconnectAztecWallet,
+    connectAztecWallet,
     waapLoginMethod: loginMethod,
     waapWalletProvider: walletProvider,
     waapWalletIcon: walletIcon,
@@ -255,8 +256,10 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     if (isWaapConnected && !isAztecConnected && walletButtonPressed) {
       // Add a slight delay to avoid UI issues
       const timer = setTimeout(() => {
-        setShowWalletModal(true)
-        // Reset the button press tracker after showing modal
+        // setShowWalletModal(true)
+        // Directly connect to Azguard instead of showing modal
+        connectAztecWallet('azguard')
+        // Reset the button press tracker after connecting
         setWalletButtonPressed(false)
       }, 2000)
 
@@ -266,7 +269,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     isWaapConnected,
     isAztecConnected,
     walletButtonPressed,
-    setShowWalletModal,
+    connectAztecWallet,
   ])
 
   // Handle connect wallet click

@@ -571,11 +571,12 @@ export default function Home() {
             }
           />
         )}
-        <WalletSelectionModal
+        {/* Wallet selection modal commented out - directly connecting to Azguard */}
+        {/* <WalletSelectionModal
           isOpen={showWalletModal}
           onClose={() => setShowWalletModal(false)}
           onSelect={handleWalletSelect}
-        />
+        /> */}
 
         <div
           className={`grid grid-rows-[max-content_1fr_max-content] h-full ${
@@ -651,7 +652,9 @@ export default function Home() {
                 loginMethod={loginMethod}
                 walletProvider={walletProvider}
                 isAztecConnected={isAztecConnected}
-                connectAztec={() => setShowWalletModal(true)}
+                // connectAztec={() => setShowWalletModal(true)}
+
+                connectAztec={() => connectAztecWallet('azguard')}
                 inputRef={inputRef}
                 // Balance and amount states
                 inputAmount={bridgeConfig.amount}
