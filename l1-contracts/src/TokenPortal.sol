@@ -18,6 +18,7 @@ contract TokenPortal {
     event DepositToAztecPublic(
         bytes32 to,
         uint256 amount,
+        uint256 fee,
         bytes32 secretHash,
         bytes32 key,
         uint256 index
@@ -25,10 +26,15 @@ contract TokenPortal {
 
     event DepositToAztecPrivate(
         uint256 amount,
+        uint256 fee,
         bytes32 secretHashForL2MessageConsumption,
         bytes32 key,
         uint256 index
     );
+
+    event FeeUpdated(uint256 newFeeBasisPoints);
+    event FeeRecipientUpdated(address newFeeRecipient);
+    event FeesWithdrawn(address recipient, uint256 amount);
 
     IRegistry public registry;
     IERC20 public underlying;
@@ -42,8 +48,16 @@ contract TokenPortal {
     address public humanIdAttester = 0xa74772264f896843c6346ceA9B13e0128A1d3b5D;
     uint256 public cleanHandsCircuitId =
         0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19;
-    address public passportSigner = 0xEa7D467E12B199E7D94EE7bda32335a0f9248315; // ADDRESS MUST BE SET PRIOR TO DEPLOYMENT
+    // ADDRESS MUST BE SET PRIOR TO DEPLOYMENT
+    address public passportSigner = 0xEa7D467E12B199E7D94EE7bda32335a0f9248315;
     mapping(address => mapping(uint256 => bool)) public passportNonces;
+
+    // Fee management
+    uint256 public feeBasisPoints; // Fee in basis points (1 bp = 0.01%, 100 bp = 1%)
+    uint256 public constant MAX_FEE_BASIS_POINTS = 1000; // Max 10% fee
+    address public feeRecipient;
+    uint256 public collectedFees;
+    address public owner;
 
     struct PassportData {
         uint256 maxAmount;
@@ -57,6 +71,11 @@ contract TokenPortal {
         bytes signature;
     }
 
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner");
+        _;
+    }
+
     /**
      * @notice Initialize the portal
      * @param _registry - The registry address
@@ -68,6 +87,8 @@ contract TokenPortal {
         address _underlying,
         bytes32 _l2Bridge
     ) external {
+        require(owner == address(0), "Already initialized");
+
         registry = IRegistry(_registry);
         underlying = IERC20(_underlying);
         l2Bridge = _l2Bridge;
@@ -76,6 +97,76 @@ contract TokenPortal {
         outbox = rollup.getOutbox();
         inbox = rollup.getInbox();
         rollupVersion = rollup.getVersion();
+
+        owner = msg.sender;
+        feeRecipient = msg.sender;
+        feeBasisPoints = 10; // Default 0.1% fee
+    }
+
+    /**
+     * @notice Update the fee percentage
+     * @param _newFeeBasisPoints - New fee in basis points (100 = 1%)
+     */
+    function updateFee(uint256 _newFeeBasisPoints) external onlyOwner {
+        require(_newFeeBasisPoints <= MAX_FEE_BASIS_POINTS, "Fee too high");
+        feeBasisPoints = _newFeeBasisPoints;
+        emit FeeUpdated(_newFeeBasisPoints);
+    }
+
+    /**
+     * @notice Update the fee recipient address
+     * @param _newFeeRecipient - New fee recipient address
+     */
+    function updateFeeRecipient(address _newFeeRecipient) external onlyOwner {
+        require(_newFeeRecipient != address(0), "Invalid address");
+        feeRecipient = _newFeeRecipient;
+        emit FeeRecipientUpdated(_newFeeRecipient);
+    }
+
+    /**
+     * @notice Withdraw collected fees
+     */
+    function withdrawFees() external onlyOwner {
+        uint256 amount = collectedFees;
+        require(amount > 0, "No fees to withdraw");
+
+        collectedFees = 0;
+        underlying.safeTransfer(feeRecipient, amount);
+
+        emit FeesWithdrawn(feeRecipient, amount);
+    }
+
+    /**
+     * @notice Calculate fee for a given amount
+     * @param _amount - The amount to calculate fee for
+     * @return fee - The calculated fee
+     */
+    function calculateFee(uint256 _amount) public view returns (uint256) {
+        return (_amount * feeBasisPoints) / 10000;
+    }
+
+    /**
+     * @notice Get the fee percentage as a decimal (e.g., 1.5 for 1.5%)
+     * @return The fee percentage with 2 decimal precision
+     */
+    function getFeePercentage() external view returns (uint256) {
+        return feeBasisPoints / 100;
+    }
+
+    /**
+     * @notice Get total collected fees available for withdrawal
+     * @return The total collected fees
+     */
+    function getCollectedFees() external view returns (uint256) {
+        return collectedFees;
+    }
+
+    /**
+     * @notice Get the current fee recipient address
+     * @return The fee recipient address
+     */
+    function getFeeRecipient() external view returns (address) {
+        return feeRecipient;
     }
 
     function verifyCleanHandsSignature(
@@ -99,6 +190,7 @@ contract TokenPortal {
 
         return recovered == humanIdAttester;
     }
+
     function verifyPassportSignature(
         uint256 maxAmount,
         uint256 nonce,
@@ -107,7 +199,6 @@ contract TokenPortal {
     ) internal view returns (bool) {
         if (block.timestamp > deadline) return false;
 
-        // Reconstruct hash: User + MaxAmount + Nonce + Deadline + Chain/Contract scope
         bytes32 messageHash = keccak256(
             abi.encodePacked(
                 msg.sender,
@@ -128,42 +219,43 @@ contract TokenPortal {
         );
         return recovered == passportSigner;
     }
-    // docs:start:deposit_public
+
     /**
      * @notice Deposit funds into the portal and adds an L2 message which can only be consumed publicly on Aztec
      * @param _to - The aztec address of the recipient
-     * @param _amount - The amount to deposit
-     * @param _secretHash - The hash of the secret consumable message. The hash should be 254 bits (so it can fit in a
-     * Field element)
+     * @param _amount - The amount to deposit (BEFORE fees)
+     * @param _secretHash - The hash of the secret consumable message
      * @return The key of the entry in the Inbox and its leaf index
      */
     function depositToAztecPublic(
         bytes32 _to,
         uint256 _amount,
         bytes32 _secretHash
-    )
-        external
-        returns (bytes32, uint256) // docs:end:deposit_public
-    {
+    ) external returns (bytes32, uint256) {
+        // Calculate fee
+        uint256 fee = calculateFee(_amount);
+        uint256 amountAfterFee = _amount - fee;
+
         // Preamble
         DataStructures.L2Actor memory actor = DataStructures.L2Actor(
             l2Bridge,
             rollupVersion
         );
 
-        // Hash the message content to be reconstructed in the receiving contract
-        // The purpose of including the function selector is to make the message unique to that specific call. Note that
-        // it has nothing to do with calling the function.
+        // Hash with amount AFTER fee (this is what gets minted on L2)
         bytes32 contentHash = Hash.sha256ToField(
             abi.encodeWithSignature(
                 "mint_to_public(bytes32,uint256)",
                 _to,
-                _amount
+                amountAfterFee
             )
         );
 
-        // Hold the tokens in the portal
+        // Transfer full amount from user (including fee)
         underlying.safeTransferFrom(msg.sender, address(this), _amount);
+
+        // Track collected fees
+        collectedFees += fee;
 
         // Send message to rollup
         (bytes32 key, uint256 index) = inbox.sendL2Message(
@@ -173,17 +265,22 @@ contract TokenPortal {
         );
 
         // Emit event
-        emit DepositToAztecPublic(_to, _amount, _secretHash, key, index);
+        emit DepositToAztecPublic(
+            _to,
+            amountAfterFee,
+            fee,
+            _secretHash,
+            key,
+            index
+        );
 
         return (key, index);
     }
 
-    // docs:start:deposit_private
     /**
      * @notice Deposit funds into the portal and adds an L2 message which can only be consumed privately on Aztec
-     * @param _amount - The amount to deposit
-     * @param _secretHashForL2MessageConsumption - The hash of the secret consumable L1 to L2 message. The hash should be
-     * 254 bits (so it can fit in a Field element)
+     * @param _amount - The amount to deposit (BEFORE fees)
+     * @param _secretHashForL2MessageConsumption - The hash of the secret consumable L1 to L2 message
      * @param _cleanHands - The clean hands attestation data
      * @param _passport - The passport attestation data
      * @return The key of the entry in the Inbox and its leaf index
@@ -193,10 +290,7 @@ contract TokenPortal {
         bytes32 _secretHashForL2MessageConsumption,
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
-    )
-        external
-        returns (bytes32, uint256) // docs:end:deposit_private
-    {
+    ) external returns (bytes32, uint256) {
         bool isCleanHands = false;
         if (_cleanHands.signature.length > 0) {
             if (
@@ -232,23 +326,29 @@ contract TokenPortal {
                 "Amount exceeds Passport limit"
             );
 
-            // Consume Nonce only if we relied on Passport logic
             passportNonces[msg.sender][_passport.nonce] = true;
         }
+
+        // Calculate fee
+        uint256 fee = calculateFee(_amount);
+        uint256 amountAfterFee = _amount - fee;
+
         // Preamble
         DataStructures.L2Actor memory actor = DataStructures.L2Actor(
             l2Bridge,
             rollupVersion
         );
 
-        // Hash the message content to be reconstructed in the receiving contract - the signature below does not correspond
-        // to a real function. It's just an identifier of an action.
+        // Hash with amount AFTER fee (this is what gets minted on L2)
         bytes32 contentHash = Hash.sha256ToField(
-            abi.encodeWithSignature("mint_to_private(uint256)", _amount)
+            abi.encodeWithSignature("mint_to_private(uint256)", amountAfterFee)
         );
 
-        // Hold the tokens in the portal
+        // Transfer full amount from user (including fee)
         underlying.safeTransferFrom(msg.sender, address(this), _amount);
+
+        // Track collected fees
+        collectedFees += fee;
 
         // Send message to rollup
         (bytes32 key, uint256 index) = inbox.sendL2Message(
@@ -259,7 +359,8 @@ contract TokenPortal {
 
         // Emit event
         emit DepositToAztecPrivate(
-            _amount,
+            amountAfterFee,
+            fee,
             _secretHashForL2MessageConsumption,
             key,
             index
@@ -268,17 +369,15 @@ contract TokenPortal {
         return (key, index);
     }
 
-    // docs:start:token_portal_withdraw
     /**
      * @notice Withdraw funds from the portal
      * @dev Second part of withdraw, must be initiated from L2 first as it will consume a message from outbox
      * @param _recipient - The address to send the funds to
-     * @param _amount - The amount to withdraw
+     * @param _amount - The amount to withdraw from L2 (the amount burned on L2)
      * @param _withCaller - Flag to use `msg.sender` as caller, otherwise address(0)
-     * @param _l2BlockNumber - The address to send the funds to
-     * @param _leafIndex - The amount to withdraw
-     * @param _path - Flag to use `msg.sender` as caller, otherwise address(0)
-     * Must match the caller of the message (specified from L2) to consume it.
+     * @param _l2BlockNumber - The L2 block number
+     * @param _leafIndex - The leaf index
+     * @param _path - The merkle path
      */
     function withdraw(
         address _recipient,
@@ -288,8 +387,8 @@ contract TokenPortal {
         uint256 _leafIndex,
         bytes32[] calldata _path
     ) external {
-        // The purpose of including the function selector is to make the message unique to that specific call. Note that
-        // it has nothing to do with calling the function.
+        // Message validation - must match what was sent from L2
+        // L2 sends the amount it burned (gross amount)
         DataStructures.L2ToL1Msg memory message = DataStructures.L2ToL1Msg({
             sender: DataStructures.L2Actor(l2Bridge, rollupVersion),
             recipient: DataStructures.L1Actor(address(this), block.chainid),
@@ -305,7 +404,14 @@ contract TokenPortal {
 
         outbox.consume(message, _l2BlockNumber, _leafIndex, _path);
 
-        underlying.safeTransfer(_recipient, _amount);
+        // Calculate fee on L1 from the bridged amount
+        uint256 fee = calculateFee(_amount);
+        uint256 amountAfterFee = _amount - fee;
+
+        // Track collected fees
+        collectedFees += fee;
+
+        // Transfer amount after fee to recipient
+        underlying.safeTransfer(_recipient, amountAfterFee);
     }
-    // docs:end:token_portal_withdraw
 }
