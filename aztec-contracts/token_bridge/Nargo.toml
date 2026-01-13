@@ -1,11 +1,10 @@
 [package]
 name = "token_bridge_contract"
-authors = ["Anmol"]
-compiler_version = ">=0.25.0"
+authors = ["Anmol Bansal <anmolbansal1807@gmail.com>"]
 type = "contract"
 
 [dependencies]
+token_minter_proxy = { path = "../token_minter_proxy" }
 aztec = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v3.0.0-devnet.20251212", directory = "noir-projects/aztec-nr/aztec" }
 token_portal_content_hash_lib = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v3.0.0-devnet.20251212", directory = "noir-projects/noir-contracts/contracts/libs/token_portal_content_hash_lib" }
-token = { git = "https://github.com/defi-wonderland/aztec-standards", tag = "chore/v3.0.0-nightly.20251212", directory = "src/token_contract" }
 keccak256 = { tag = "v0.1.2", git = "https://github.com/noir-lang/keccak256" }

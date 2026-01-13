@@ -25,10 +25,9 @@ pub contract TokenBridge {
         get_withdraw_content_hash,
     };
 
-    // use dep::token::Token;
     use keccak256::keccak256;
     use std::ecdsa_secp256k1::verify_signature;
-    use token::Token;
+    use token_minter_proxy::TokenMinterProxy;
 
     #[derive(Deserialize, Serialize)]
     pub struct CleanHandsData {
@@ -65,8 +64,8 @@ pub contract TokenBridge {
     // Constructs the contract.
     #[external("public")]
     #[initializer]
-    fn constructor(token: AztecAddress, portal: EthAddress) {
-        self.storage.config.initialize(Config { token, portal });
+    fn constructor(token_minter_proxy: AztecAddress, portal: EthAddress) {
+        self.storage.config.initialize(Config { token_minter_proxy, portal });
         self.storage.human_id_attester_pubkey.initialize(
             PubKey {
                 x: [
@@ -130,7 +129,7 @@ pub contract TokenBridge {
         );
 
         // Mint tokens
-        self.call(Token::at(config.token).mint_to_public(to, amount));
+        self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_public(to, amount));
     }
     // docs:end:claim_public
 
@@ -151,7 +150,7 @@ pub contract TokenBridge {
         self.context.message_portal(config.portal, content);
 
         // Burn tokens
-        self.call(Token::at(config.token).burn_public(
+        self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_public(
             self.context.msg_sender().unwrap(),
             amount,
             authwit_nonce,
@@ -180,7 +179,7 @@ pub contract TokenBridge {
             message_leaf_index,
         );
         // At last we mint the tokens
-        self.call(Token::at(config.token).mint_to_private(recipient, amount));
+        self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_private(recipient, amount));
     }
 
     // Verify clean hands signature using ECDSA recovery
@@ -324,7 +323,6 @@ pub contract TokenBridge {
     // Requires `msg.sender` (caller of the method) to give approval to the bridge to burn tokens on their behalf using witness signatures
     #[external("private")]
     fn exit_to_l1_private(
-        token: AztecAddress,
         recipient: EthAddress, // ethereum address to withdraw to
         amount: u128,
         caller_on_l1: EthAddress, // ethereum address that can call this function on the L1 portal (0x0 if anyone can call)
@@ -334,9 +332,6 @@ pub contract TokenBridge {
     ) {
         let config = self.storage.config.read();
         let sender = self.context.msg_sender().unwrap();
-
-        // Assert that user provided token address is same as seen in storage.
-        assert_eq(config.token, token, "Token address is not the same as seen in storage");
 
         let mut is_clean_hands = false;
 
@@ -379,7 +374,7 @@ pub contract TokenBridge {
         self.context.message_portal(config.portal, content);
 
         // Burn tokens
-        self.call(Token::at(token).burn_private(
+        self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_private(
             self.context.msg_sender().unwrap(),
             amount,
             authwit_nonce,

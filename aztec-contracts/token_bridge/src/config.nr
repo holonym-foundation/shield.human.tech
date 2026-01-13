@@ -8,6 +8,6 @@ use std::meta::derive;
 // values in a single struct
 #[derive(Deserialize, Eq, Packable, Serialize)]
 pub struct Config {
-    pub token: AztecAddress,
+    pub token_minter_proxy: AztecAddress,
     pub portal: EthAddress,
 }
