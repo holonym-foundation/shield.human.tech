@@ -2,7 +2,7 @@ import { Network, Token } from '@/types/bridge'
 // -------------------------------------
 
 // Maintenance mode flag - set to true to enable maintenance overlay
-export const MAINTENANCE_MODE = false
+export const MAINTENANCE_MODE = true
 
 export const MAINTENANCE_MESSAGE =
   'We are currently performing scheduled maintenance. The bridge will be available shortly.'
