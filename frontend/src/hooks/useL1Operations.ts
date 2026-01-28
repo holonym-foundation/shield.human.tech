@@ -46,10 +46,12 @@ import { networkConfig, silkUrl } from '@/config/l1.config'
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
 
+const L1_RPC_URL = process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL
+
 // Create a public client for transaction receipt polling
 const publicClient = createPublicClient({
   chain: sepolia,
-  transport: http(),
+  transport: http(L1_RPC_URL),
 })
 
 export function useL1NativeBalance() {
@@ -671,7 +673,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       }
 
       const [claimSecret, claimSecretHash] = await generateClaimSecret()
-
       // Bridge tokens - use different function based on privacy mode
       const functionName = isPrivacyModeEnabled
         ? 'depositToAztecPrivate'

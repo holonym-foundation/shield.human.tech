@@ -21,6 +21,7 @@ import deployedTokensData from '@/constants/deployed-tokens.json'
 export const L1_CHAIN_ID = 11155111
 export const L2_CHAIN_ID = 1654394782
 export const L2_CHAIN_KEY = `aztec:${L2_CHAIN_ID}`
+export const L2_NODE_URL = 'https://next.devnet.aztec-labs.com/'
 
 // Aztecscan URLs for different networks
 export const AZTECSCAN_URLS = {

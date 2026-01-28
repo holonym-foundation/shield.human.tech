@@ -26,10 +26,12 @@ import { TokenPortalAbi } from '@aztec/l1-artifacts'
 import { sepolia } from 'viem/chains'
 import { useWalletAdapter } from './useWalletAdapter'
 
+const L1_RPC_URL = process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL
+
 // Create a public client for transaction receipt polling
 const publicClient = createPublicClient({
   chain: sepolia,
-  transport: http(),
+  transport: http(L1_RPC_URL),
 })
 
 // Define types for balance queries

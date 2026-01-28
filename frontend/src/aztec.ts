@@ -2,11 +2,10 @@
 
 // import { AztecWalletSdk, obsidion } from 'raven-house-wallet-sdk'
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
-
-const NODE_URL = 'https://devnet-6.aztec-labs.com/'
+import { L2_NODE_URL } from '@/config'
 
 // Create Aztec node client (for direct node access if needed)
-export const aztecNode = createAztecNodeClient(NODE_URL)
+export const aztecNode = createAztecNodeClient(L2_NODE_URL)
 
 // let sdkInstance: AztecWalletSdk | null = null
 
@@ -18,7 +17,7 @@ export const aztecNode = createAztecNodeClient(NODE_URL)
 //     throw new Error('AztecWalletSdk must be initialized in the browser')
 //   }
 //   sdkInstance = new AztecWalletSdk({
-//     aztecNode: NODE_URL,
+//     aztecNode: L2_NODE_URL,
 //     connectors: [obsidion({})],
 //   })
 //   return sdkInstance

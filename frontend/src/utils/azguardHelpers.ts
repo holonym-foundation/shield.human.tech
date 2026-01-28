@@ -3,6 +3,7 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { L2_CHAIN_KEY } from '@/config'
+import { showToast } from '@/hooks/useToast'
 import type {
   Operation,
   OperationResult,
@@ -343,7 +344,27 @@ export async function registerAzguardToken(
 
   if (results.length === 0 || results[0].status !== 'ok') {
     const error = results[0]?.error || 'Unknown error'
-    throw new Error(`Azguard token registration failed: ${error}`)
+    const errorMsg = String(error)
+    const isSimulationInvalid =
+      errorMsg.includes('simulated transaction') &&
+      errorMsg.includes('unable to be added to state') &&
+      errorMsg.includes('invalid')
+    if (isSimulationInvalid) {
+      console.log(
+        'Azguard token registration simulation failed. tokenAddress:',
+        addressToString(tokenAddress)
+      )
+      console.warn(
+        'Azguard token registration simulation failed; continuing without token registration.',
+        errorMsg
+      )
+      showToast(
+        'warn',
+        'Azguard token registration failed in simulation. Check token address and node; continuing without registration.'
+      )
+      return
+    }
+    throw new Error(`Azguard token registration failed: ${errorMsg}`)
   }
 }
 
