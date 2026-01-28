@@ -15,7 +15,7 @@ import { AzguardClient } from '@azguardwallet/client'
 import { initWaaP } from '@human.tech/waap-sdk'
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { connectWallet, sdk } from '../aztec'
+import { connectWallet } from '../aztec'
 
 // ============================================================================
 // TYPE DECLARATIONS
@@ -329,7 +329,7 @@ const walletStore = create<WalletState>((set, get) => ({
         }
 
       } else {
-        // Use raven-house SDK for Obsidion wallet
+        // Use raven-house SDK for Obsidion wallet (disabled on Devnet 6)
         connectedAccount = await connectWallet(type)
       }
 
@@ -448,28 +448,29 @@ const walletStore = create<WalletState>((set, get) => ({
           // Don't clear the stored type on error - might be temporary
         }
       } else if (storedWalletType === 'obsidion') {
+        // Obsidion SDK is disabled (not yet on Devnet 6)
         // Try to reconnect to Obsidion using SDK
-        try {
-          const connectedAccount = await connectWallet('obsidion')
-          
-          if (connectedAccount) {
-            get().setAztecLoginMethod('obsidion')
-            get().setAztecState({
-              address: connectedAccount?.address?.toString() || null,
-              account: connectedAccount,
-              isConnected: !!connectedAccount,
-            })
-
-            try {
-              // Contracts will be initialized automatically by the wallet adapter
-            } catch (error) {
-              console.error('Failed to initialize L2 contracts:', error)
-            }
-          }
-        } catch (error) {
-          console.error('Failed to reconnect to Obsidion wallet:', error)
-          // Don't clear the stored type on error - might be temporary
-        }
+        // try {
+        //   const connectedAccount = await connectWallet('obsidion')
+        //
+        //   if (connectedAccount) {
+        //     get().setAztecLoginMethod('obsidion')
+        //     get().setAztecState({
+        //       address: connectedAccount?.address?.toString() || null,
+        //       account: connectedAccount,
+        //       isConnected: !!connectedAccount,
+        //     })
+        //
+        //     try {
+        //       // Contracts will be initialized automatically by the wallet adapter
+        //     } catch (error) {
+        //       console.error('Failed to initialize L2 contracts:', error)
+        //     }
+        //   }
+        // } catch (error) {
+        //   console.error('Failed to reconnect to Obsidion wallet:', error)
+        //   // Don't clear the stored type on error - might be temporary
+        // }
       }
     } catch (error) {
       console.error('❌ Failed to initialize Aztec wallet:', error)
@@ -498,8 +499,8 @@ const walletStore = create<WalletState>((set, get) => ({
           console.error('Error disconnecting Azguard:', error)
         }
       } else if (aztecLoginMethod === 'obsidion') {
-        // Disconnect Obsidion wallet using SDK
-      await sdk.disconnect()
+        // Disconnect Obsidion wallet using SDK (disabled on Devnet 6)
+        // Obsidion SDK disabled
       }
       
       set({

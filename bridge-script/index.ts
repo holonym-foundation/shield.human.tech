@@ -10,7 +10,10 @@ import {
   createPXEClient,
   waitForPXE,
 } from '@aztec/aztec.js';
-import { createL1Clients, deployL1Contract } from '@aztec/ethereum';
+import { createEthereumChain } from '@aztec/ethereum/chain';
+import { createExtendedL1Client, getPublicClient } from '@aztec/ethereum/client';
+import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contracts';
+import type { ExtendedViemWalletClient, ViemPublicClient } from '@aztec/ethereum/types';
 import {
   FeeAssetHandlerAbi,
   FeeAssetHandlerBytecode,
@@ -29,8 +32,16 @@ import { getContract } from 'viem';
 const MNEMONIC = 'test test test test test test test test test test test junk';
 const { ETHEREUM_HOSTS = 'http://localhost:8545' } = process.env;
 
-const { walletClient, publicClient } = createL1Clients(ETHEREUM_HOSTS.split(','), MNEMONIC);
-const ownerEthAddress = walletClient.account.address;
+let walletClient: ExtendedViemWalletClient;
+let publicClient: ViemPublicClient;
+let ownerEthAddress: `0x${string}`;
+
+const initL1Clients = (l1ChainId: number) => {
+  const chain = createEthereumChain(ETHEREUM_HOSTS.split(','), l1ChainId);
+  walletClient = createExtendedL1Client(chain.rpcUrls, MNEMONIC, chain.chainInfo);
+  publicClient = getPublicClient({ l1RpcUrls: chain.rpcUrls, l1ChainId });
+  ownerEthAddress = walletClient.account.address;
+};
 
 const MINT_AMOUNT = BigInt(1e15);
 
@@ -81,10 +92,12 @@ async function main() {
   // docs:start:setup
     const logger = createLogger('aztec:token-bridge-tutorial');
     const pxe = await setupSandbox();
+    const nodeInfo = await pxe.getNodeInfo();
+    initL1Clients(nodeInfo.l1ChainId);
     const wallets = await getInitialTestAccountsWallets(pxe);
     const ownerWallet = wallets[0];
     const ownerAztecAddress = wallets[0].getAddress();
-    const l1ContractAddresses = (await pxe.getNodeInfo()).l1ContractAddresses;
+    const l1ContractAddresses = nodeInfo.l1ContractAddresses;
     logger.info('L1 Contract Addresses:');
     logger.info(`Registry Address: ${l1ContractAddresses.registryAddress}`);
     logger.info(`Inbox Address: ${l1ContractAddresses.inboxAddress}`);

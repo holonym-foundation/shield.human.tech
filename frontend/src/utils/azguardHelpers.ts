@@ -1,7 +1,7 @@
 import { AzguardClient } from '@azguardwallet/client'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
-import { Fr } from '@aztec/foundation/fields'
+import { Fr } from '@aztec/aztec.js/fields'
 import type {
   Operation,
   OperationResult,

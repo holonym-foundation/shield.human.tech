@@ -2,7 +2,7 @@ import { Network, Token } from '@/types/bridge'
 // -------------------------------------
 
 // Maintenance mode flag - set to true to enable maintenance overlay
-export const MAINTENANCE_MODE = true
+export const MAINTENANCE_MODE = false
 
 export const MAINTENANCE_MESSAGE =
   'We are currently performing scheduled maintenance. The bridge will be available shortly.'
@@ -37,9 +37,9 @@ export const ADDRESS = {
     CHAIN_NAME: 'Sepolia',
     L1: {
       PORTAL_SBT_CONTRACT: '0x983ad7bdc7701a77a6c22e2245d7eafe893b21fe',
-      TOKEN_CONTRACT: deployedTokensData.tokens[0]?.l1TokenContract || '0xd1ca59d01c8e55d93dccfed3853301b3408d9ab1',
-      FEE_ASSET_HANDLER_CONTRACT: deployedTokensData.tokens[0]?.feeAssetHandler || '0x10a5c8d68f17ecfe37220e15beb3e2475d62b507',
-      PORTAL_CONTRACT: deployedTokensData.tokens[0]?.l1PortalContract || '0xfc47a123edd8a85fe7294b71540559f9e6a2ce89',
+      TOKEN_CONTRACT: deployedTokensData.tokens[0]?.l1TokenContract,
+      FEE_ASSET_HANDLER_CONTRACT: deployedTokensData.tokens[0]?.feeAssetHandler,
+      PORTAL_CONTRACT: deployedTokensData.tokens[0]?.l1PortalContract,
     },
   },
   1674512022: {
@@ -47,9 +47,9 @@ export const ADDRESS = {
     CHAIN_ID: 1674512022,
     CHAIN_NAME: 'Aztec Devnet',
     L2: {
-      TOKEN_CONTRACT: deployedTokensData.tokens[0]?.l2TokenContract || '0x10702f787877e0ff499fff6f502df13893137f0d6b94ea74715c7cba4d29a9c7',
-      TOKEN_BRIDGE_CONTRACT: deployedTokensData.tokens[0]?.l2BridgeContract || '0x254efc5596bd763be0040664874c1cd4224f533472138b3d29418171953cee1e',
-      SPONSORED_FEE_PAYMENT_CONTRACT: deployedTokensData.sponsoredFeeAddress || '0x280e5686a148059543f4d0968f9a18cd4992520fcd887444b8689bf2726a1f97',
+      TOKEN_CONTRACT: deployedTokensData.tokens[0]?.l2TokenContract,
+      TOKEN_BRIDGE_CONTRACT: deployedTokensData.tokens[0]?.l2BridgeContract,
+      SPONSORED_FEE_PAYMENT_CONTRACT: deployedTokensData.sponsoredFeeAddress,
     },
   },
 } as const
@@ -126,7 +126,7 @@ export const L1_TOKENS: Token[] = [
     title: 'USDC',
     symbol: 'USDC',
     decimals: deployedTokensData.tokens[0]?.decimals || 6,
-    address: deployedTokensData.tokens[0]?.l1TokenContract || '0xd1ca59d01c8e55d93dccfed3853301b3408d9ab1',
+    address: deployedTokensData.tokens[0]?.l1TokenContract,
   },
   // {
   //   id: 2,
@@ -155,7 +155,7 @@ export const L2_TOKENS: Token[] = [
     title: 'Clean USDC',
     symbol: 'cUSDC',
     decimals: deployedTokensData.tokens[0]?.decimals || 6,
-    address: deployedTokensData.tokens[0]?.l2TokenContract || '0x10702f787877e0ff499fff6f502df13893137f0d6b94ea74715c7cba4d29a9c7',
+    address: deployedTokensData.tokens[0]?.l2TokenContract,
   },
   // {
   //   id: 2,

@@ -20,12 +20,10 @@ import {
   getContractInstanceFromInstantiationParams,
   type ContractInstanceWithAddress,
 } from '@aztec/aztec.js/contracts'
-import {
-  createExtendedL1Client,
-  deployL1Contract,
-  ExtendedViemWalletClient,
-  createEthereumChain,
-} from '@aztec/ethereum'
+import { createExtendedL1Client } from '@aztec/ethereum/client'
+import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contracts'
+import { createEthereumChain } from '@aztec/ethereum/chain'
+import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
 import {
   FeeAssetHandlerAbi,
   FeeAssetHandlerBytecode,
@@ -286,19 +284,18 @@ async function deployCompleteTokenSetup(
 
   // Deploy L2 token contract
   logger.info(`🏗️  Deploying L2 ${tokenConfig.symbol} token contract`)
-  const l2TokenContract = await TokenContract.deploy(
+  const l2TokenDeploy = TokenContract.deploy(
     ownerWallet,
     ownerAztecAddress,
     tokenConfig.l2Name,
     tokenConfig.l2Symbol,
     tokenConfig.decimals
-  )
-    .send({
-      from: ownerAztecAddress,
-      contractAddressSalt: tokenSalt,
-      fee: { paymentMethod: sponsoredPaymentMethod },
-    })
-    .deployed({ timeout: getTimeouts().deployTimeout })
+  ).send({
+    from: ownerAztecAddress,
+    contractAddressSalt: tokenSalt,
+    fee: { paymentMethod: sponsoredPaymentMethod },
+  })
+  const l2TokenContract = await l2TokenDeploy.deployed({ timeout: getTimeouts().deployTimeout })
 
   logger.info(
     `✅ L2 ${tokenConfig.symbol} token contract deployed at ${l2TokenContract.address}`
@@ -306,17 +303,16 @@ async function deployCompleteTokenSetup(
 
   // Deploy L2 bridge contract
   logger.info(`🌉 Deploying L2 bridge contract for ${tokenConfig.symbol}`)
-  const l2BridgeContract = await TokenBridgeContract.deploy(
+  const l2BridgeDeploy = TokenBridgeContract.deploy(
     ownerWallet,
     l2TokenContract.address,
     l1PortalContractAddress
-  )
-    .send({
-      from: ownerAztecAddress,
-      contractAddressSalt: bridgeSalt,
-      fee: { paymentMethod: sponsoredPaymentMethod },
-    })
-    .deployed({ timeout: getTimeouts().deployTimeout })
+  ).send({
+    from: ownerAztecAddress,
+    contractAddressSalt: bridgeSalt,
+    fee: { paymentMethod: sponsoredPaymentMethod },
+  })
+  const l2BridgeContract = await l2BridgeDeploy.deployed({ timeout: getTimeouts().deployTimeout })
 
   logger.info(
     `✅ L2 ${tokenConfig.symbol} bridge contract deployed at ${l2BridgeContract.address}`
@@ -324,14 +320,14 @@ async function deployCompleteTokenSetup(
 
   // Register L2 contracts with wallet
   logger.info(`📝 Registering L2 contracts with wallet for ${tokenConfig.symbol}`)
-  await wallet.registerContract({
-    instance: l2TokenContract.instance,
-    artifact: TokenContract.artifact,
-  })
-  await wallet.registerContract({
-    instance: l2BridgeContract.instance,
-    artifact: TokenBridgeContract.artifact,
-  })
+  const l2TokenInstance = await l2TokenDeploy.getInstance()
+  if (l2TokenInstance) {
+    await wallet.registerContract(l2TokenInstance, TokenContract.artifact)
+  }
+  const l2BridgeInstance = await l2BridgeDeploy.getInstance()
+  if (l2BridgeInstance) {
+    await wallet.registerContract(l2BridgeInstance, TokenBridgeContract.artifact)
+  }
 
   // Set Bridge as a minter
   logger.info(`🔑 Setting bridge as minter for ${tokenConfig.symbol}`)
@@ -440,10 +436,7 @@ async function main() {
   logger.info(' ')
   logger.info('🔧 Setting up sponsored fee payment contract...')
   const sponsoredFPC = await getSponsoredFPCInstance()
-  await wallet.registerContract({
-    instance: sponsoredFPC,
-    artifact: SponsoredFPCContract.artifact,
-  })
+  await wallet.registerContract(sponsoredFPC, SponsoredFPCContract.artifact)
   const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(
     sponsoredFPC.address
   )
@@ -559,23 +552,8 @@ async function main() {
       wallet
     )
 
-    // Register the contracts with wallet for testing
-    logger.info('📝 Registering L2 contracts with wallet for testing...')
-    try {
-      await wallet.registerContract({
-        instance: l2TokenContract.instance,
-        artifact: TokenContract.artifact,
-      })
-      await wallet.registerContract({
-        instance: l2BridgeContract.instance,
-        artifact: TokenBridgeContract.artifact,
-      })
-      logger.info('✅ L2 contracts registered with wallet')
-    } catch (error) {
-      logger.warn(
-        `⚠️  Contract registration warning (may already be registered): ${error}`
-      )
-    }
+    // Registering here is optional; contract instances already carry artifacts.
+    logger.info('📝 Skipping extra L2 contract registration for testing')
 
     logger.info('🌉 Bridge tokens publicly')
     logger.info(`📤 Step 1: Send tokens publicly on L1`)

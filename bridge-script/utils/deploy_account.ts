@@ -36,7 +36,7 @@ export async function deploySchnorrAccount(wallet?: TestWallet): Promise<Account
     logger.info(`💰 Sponsored FPC instance obtained at: ${sponsoredFPC.address}`);
 
     logger.info('📝 Registering sponsored FPC contract with wallet...');
-    await activeWallet.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContract.artifact });
+    await activeWallet.registerContract(sponsoredFPC, SponsoredFPCContract.artifact);
     const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
     logger.info('✅ Sponsored fee payment method configured for account deployment');
 

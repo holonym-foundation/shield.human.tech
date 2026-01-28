@@ -8,11 +8,14 @@
 import { AzguardClient } from '@azguardwallet/client'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
-import { Fr } from '@aztec/foundation/fields'
+import { Fr } from '@aztec/aztec.js/fields'
 import { ADDRESS } from '@/config'
-import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge'
-import { TokenContract } from '@aztec/noir-contracts.js/Token'
-import { Contract } from 'raven-house-wallet-sdk/eip1193'
+// Obsidion SDK imports are disabled (not yet on Devnet 6)
+// import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge'
+// import { TokenContract } from '@aztec/noir-contracts.js/Token'
+// import { Contract } from 'raven-house-wallet-sdk/eip1193'
+// Package removed from package.json:
+// "raven-house-wallet-sdk": "3.0.1-devnet.3",
 import {
   executeAzguardCall,
   executeAzguardCallWithAuthWit,
@@ -20,9 +23,9 @@ import {
   registerAzguardToken,
 } from './azguardHelpers'
 
-// Contract classes for Obsidion SDK
-class L2Token extends Contract.fromAztec(TokenContract as any) {}
-class L2TokenBridge extends Contract.fromAztec(TokenBridgeContract as any) {}
+// Contract classes for Obsidion SDK (disabled on Devnet 6)
+// class L2Token extends Contract.fromAztec(TokenContract as any) {}
+// class L2TokenBridge extends Contract.fromAztec(TokenBridgeContract as any) {}
 
 // ============================================================================
 // TYPES
@@ -165,6 +168,8 @@ class AzguardWalletAdapter {
 // OBSIDION SDK WALLET ADAPTER
 // ============================================================================
 
+// Obsidion SDK wallet adapter is disabled (SDK not yet on Devnet 6)
+/*
 class ObsidionWalletAdapter {
   // Expose contract addresses as properties for direct access
   readonly tokenAddress: string = ADDRESS[1674512022].L2.TOKEN_CONTRACT
@@ -265,8 +270,8 @@ class ObsidionWalletAdapter {
 
   async registerToken(tokenAddress: AztecAddress | string): Promise<void> {
     // For Obsidion, use SDK's watchAssets
-    const { sdk } = await import('../aztec')
-    await sdk.watchAssets([
+    const { getSdk } = await import('../aztec')
+    await getSdk().watchAssets([
       {
         type: 'ARC20' as const,
         options: {
@@ -278,7 +283,7 @@ class ObsidionWalletAdapter {
           image: '',
         },
       },
-    ])
+    // ])
   }
 
   private getContractInstance(contract: AztecAddress | string): any {
@@ -286,6 +291,7 @@ class ObsidionWalletAdapter {
     return this.contractMap.get(contractStr) || null
   }
 }
+*/
 
 // ============================================================================
 // WALLET ADAPTER FACTORY
@@ -303,15 +309,19 @@ export async function createWalletAdapter(context: WalletContext) {
     // No need to initialize contracts - artifacts are in public registry
     // (https://devnet.aztec-registry.xyz/) - Azguard will fetch them automatically when needed
     return adapter
-  } else {
-    if (!context.aztecAccount) {
-      throw new Error('Obsidion SDK account not available')
-    }
-    const adapter = new ObsidionWalletAdapter(context.aztecAccount)
-    // Initialize contracts (create SDK instances)
-    await adapter.initializeContracts()
-    return adapter
   }
+
+  // else {
+  //   if (!context.aztecAccount) {
+  //     throw new Error('Obsidion SDK account not available')
+  //   }
+  //   const adapter = new ObsidionWalletAdapter(context.aztecAccount)
+  //   // Initialize contracts (create SDK instances)
+  //   await adapter.initializeContracts()
+  //   return adapter
+  // }
+
+  throw new Error('Obsidion wallet support is disabled (SDK not yet on Devnet 6)')
 }
 
 
