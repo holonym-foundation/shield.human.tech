@@ -2,7 +2,6 @@ import { parseUnits } from 'viem'
 import { InitWaaPOptions } from '@human.tech/waap-sdk'
 import { logo } from './logo'
 
-export const l1ChainId = 11155111
 export const useStagingWaap = false
 
 export const waapUrl = useStagingWaap

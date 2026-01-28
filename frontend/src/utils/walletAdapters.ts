@@ -9,7 +9,7 @@ import { AzguardClient } from '@azguardwallet/client'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
-import { ADDRESS } from '@/config'
+import { ADDRESS, L2_CHAIN_ID, L2_CHAIN_KEY } from '@/config'
 // Obsidion SDK imports are disabled (not yet on Devnet 6)
 // import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge'
 // import { TokenContract } from '@aztec/noir-contracts.js/Token'
@@ -52,8 +52,8 @@ export interface ExecuteCallResult {
 
 class AzguardWalletAdapter {
   // Expose contract addresses as properties for direct access
-  readonly tokenAddress: string = ADDRESS[1674512022].L2.TOKEN_CONTRACT
-  readonly bridgeAddress: string = ADDRESS[1674512022].L2.TOKEN_BRIDGE_CONTRACT
+  readonly tokenAddress: string = ADDRESS[L2_CHAIN_ID].L2.TOKEN_CONTRACT
+  readonly bridgeAddress: string = ADDRESS[L2_CHAIN_ID].L2.TOKEN_BRIDGE_CONTRACT
 
   constructor(
     private azguardClient: AzguardClient,
@@ -71,7 +71,7 @@ class AzguardWalletAdapter {
     // registration on each wallet request.
     // If artifacts are not in public registry, uncomment the code below:
     /*
-    const chain = 'aztec:1674512022'
+    const chain = L2_CHAIN_KEY
     
     // Register Token contract with artifact
     // Note: instance is optional - Azguard will fetch it from PXE/node if not provided
@@ -172,8 +172,8 @@ class AzguardWalletAdapter {
 /*
 class ObsidionWalletAdapter {
   // Expose contract addresses as properties for direct access
-  readonly tokenAddress: string = ADDRESS[1674512022].L2.TOKEN_CONTRACT
-  readonly bridgeAddress: string = ADDRESS[1674512022].L2.TOKEN_BRIDGE_CONTRACT
+  readonly tokenAddress: string = ADDRESS[L2_CHAIN_ID].L2.TOKEN_CONTRACT
+  readonly bridgeAddress: string = ADDRESS[L2_CHAIN_ID].L2.TOKEN_BRIDGE_CONTRACT
 
   // Cache contract lookup map for O(1) access
   private readonly contractMap: Map<string, any>
@@ -275,7 +275,7 @@ class ObsidionWalletAdapter {
       {
         type: 'ARC20' as const,
         options: {
-          chainId: '1674512022',
+          chainId: String(L2_CHAIN_ID),
           address: typeof tokenAddress === 'string' ? tokenAddress : tokenAddress.toString(),
           name: 'Test USDC',
           symbol: 'USDC',

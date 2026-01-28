@@ -2,6 +2,7 @@ import { AzguardClient } from '@azguardwallet/client'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
+import { L2_CHAIN_KEY } from '@/config'
 import type {
   Operation,
   OperationResult,
@@ -177,7 +178,7 @@ export async function executeAzguardCall(
     autoRegister?: boolean
   }
 ): Promise<string> {
-  const chain = options?.chain || 'aztec:1674512022'
+  const chain = options?.chain || L2_CHAIN_KEY
   
   // Try to execute the call first
   const callOp = createAzguardCall(contract, method, args)

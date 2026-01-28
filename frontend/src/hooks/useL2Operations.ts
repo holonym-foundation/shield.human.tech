@@ -1,4 +1,4 @@
-import { ADDRESS, getAztecscanUrl, L2_TOKEN_METADATA } from '@/config'
+import { ADDRESS, getAztecscanUrl, L2_CHAIN_ID, L2_TOKEN_METADATA } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { getL1ContractAddresses } from '@/utils/aztecHelpers'
 import { logError, logInfo } from '@/utils/datadog'
@@ -277,7 +277,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         nonce: nonce.toString(),
         success: false, // Initial state
         l2TxHash: l2TxHash,
-        l2TxUrl: `${getAztecscanUrl(1674512022)}/tx-effects/${l2TxHash}`,
+        l2TxUrl: `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${l2TxHash}`,
       }
 
       // Get existing withdrawals or initialize empty array
@@ -417,7 +417,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       // Step 7: Withdrawal Complete
       setProgressStep(7, 'active')
       const txHash = l2TxHash
-      const aztecscanUrl = `${getAztecscanUrl(1674512022)}/tx-effects/${txHash}`
+      const aztecscanUrl = `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${txHash}`
 
       // Set transaction URLs in the store
       setTransactionUrls(null, aztecscanUrl)

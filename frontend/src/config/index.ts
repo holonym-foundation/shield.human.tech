@@ -18,9 +18,13 @@ export const MAINTENANCE_TITLE = 'Bridge Under Maintenance'
 // Import deployed tokens from bridge-script
 import deployedTokensData from '@/constants/deployed-tokens.json'
 
+export const L1_CHAIN_ID = 11155111
+export const L2_CHAIN_ID = 1654394782
+export const L2_CHAIN_KEY = `aztec:${L2_CHAIN_ID}`
+
 // Aztecscan URLs for different networks
 export const AZTECSCAN_URLS = {
-  1674512022: 'https://devnet.aztecscan.xyz', // Aztec Devnet
+  [L2_CHAIN_ID]: 'https://devnet.aztecscan.xyz', // Aztec Devnet
   // Add other chain IDs as needed
   // testnet: 'https://testnet.aztecscan.xyz',
 } as const
@@ -31,7 +35,7 @@ export const getAztecscanUrl = (chainId: number): string => {
 }
 
 export const ADDRESS = {
-  11155111: {
+  [L1_CHAIN_ID]: {
     // Sepolia
     CHAIN_ID: 11155111,
     CHAIN_NAME: 'Sepolia',
@@ -42,9 +46,9 @@ export const ADDRESS = {
       PORTAL_CONTRACT: deployedTokensData.tokens[0]?.l1PortalContract,
     },
   },
-  1674512022: {
+  [L2_CHAIN_ID]: {
     // Aztec Devnet (l2ChainId = l1ChainId ^ rollupVersion)
-    CHAIN_ID: 1674512022,
+    CHAIN_ID: L2_CHAIN_ID,
     CHAIN_NAME: 'Aztec Devnet',
     L2: {
       TOKEN_CONTRACT: deployedTokensData.tokens[0]?.l2TokenContract,
@@ -74,7 +78,7 @@ export const L1_NETWORKS: Network[] = [
     id: 1,
     img: '/assets/svg/ethereum.svg',
     title: 'Eth Sepolia',
-    chainId: 11155111,
+    chainId: L1_CHAIN_ID,
     network: 'sepolia',
     symbol: 'ETH',
   },
@@ -105,7 +109,7 @@ export const L2_NETWORKS: Network[] = [
     id: 2,
     img: '/assets/svg/aztec.svg',
     title: 'Aztec Tesnet',
-    chainId: 1674512022,
+    chainId: L2_CHAIN_ID,
     network: 'aztec',
     symbol: 'ETH',
   },

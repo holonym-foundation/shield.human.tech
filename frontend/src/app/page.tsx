@@ -44,7 +44,7 @@ import MetaMaskPrompt from '@/components/model/MetaMaskPrompt'
 import BalanceCard from '@/components/BalanceCard'
 import { logInfo, logError } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
-import PopupBlockedAlert from '@/components/model/PopupBlockedAlert'
+// import PopupBlockedAlert from '@/components/model/PopupBlockedAlert'
 import WalletSelectionModal from '@/components/model/WalletSelectionModal'
 import { AztecLoginMethod } from '@/types/wallet'
 import AzguardPrompt from '@/components/model/AzguardPrompt'
@@ -58,60 +58,60 @@ import {
   MAINTENANCE_TITLE,
 } from '@/config'
 
-// Function to check if popups are blocked
-const isPopupBlocked = (): Promise<boolean> => {
-  return new Promise((resolve) => {
-    // Log popup test initiation
-    logInfo('Popup blocking test initiated', {
-      walletType: null,
-      loginMethod: null,
-      walletProvider: null,
-      address: '',
-      chainId: null,
-      testType: 'popup_detection',
-      userAgent: navigator.userAgent,
-      timestamp: Date.now(),
-      userAction: 'popup_detection_test',
-    })
-    
-    const popup = window.open('about:blank', '_blank', 'width=1,height=1')
-    setTimeout(() => {
-      if (!popup || popup.closed || popup.closed === undefined) {
-        // Log popup blocked
-        logInfo('Popups are blocked - user will see popup blocked alert', {
-          walletType: null,
-          loginMethod: null,
-          walletProvider: null,
-          address: '',
-          chainId: null,
-          popupBlocked: true,
-          popupClosed: popup?.closed,
-          popupUndefined: popup === undefined,
-          userAgent: navigator.userAgent,
-          timestamp: Date.now(),
-          userAction: 'popup_blocked_detected',
-        })
-        resolve(true) // Popups are blocked
-      } else {
-        // Log popup allowed
-        logInfo('Popups are allowed - user can proceed normally', {
-          walletType: null,
-          loginMethod: null,
-          walletProvider: null,
-          address: '',
-          chainId: null,
-          popupBlocked: false,
-          popupClosed: popup.closed,
-          userAgent: navigator.userAgent,
-          timestamp: Date.now(),
-          userAction: 'popup_allowed_detected',
-        })
-        popup.close()
-        resolve(false) // Popups are allowed
-      }
-    }, 50)
-  })
-}
+// Function to check if popups are blocked (disabled for now, was used for Obsidion)
+// const isPopupBlocked = (): Promise<boolean> => {
+//   return new Promise((resolve) => {
+//     // Log popup test initiation
+//     logInfo('Popup blocking test initiated', {
+//       walletType: null,
+//       loginMethod: null,
+//       walletProvider: null,
+//       address: '',
+//       chainId: null,
+//       testType: 'popup_detection',
+//       userAgent: navigator.userAgent,
+//       timestamp: Date.now(),
+//       userAction: 'popup_detection_test',
+//     })
+//
+//     const popup = window.open('about:blank', '_blank', 'width=1,height=1')
+//     setTimeout(() => {
+//       if (!popup || popup.closed || popup.closed === undefined) {
+//         // Log popup blocked
+//         logInfo('Popups are blocked - user will see popup blocked alert', {
+//           walletType: null,
+//           loginMethod: null,
+//           walletProvider: null,
+//           address: '',
+//           chainId: null,
+//           popupBlocked: true,
+//           popupClosed: popup?.closed,
+//           popupUndefined: popup === undefined,
+//           userAgent: navigator.userAgent,
+//           timestamp: Date.now(),
+//           userAction: 'popup_blocked_detected',
+//         })
+//         resolve(true) // Popups are blocked
+//       } else {
+//         // Log popup allowed
+//         logInfo('Popups are allowed - user can proceed normally', {
+//           walletType: null,
+//           loginMethod: null,
+//           walletProvider: null,
+//           address: '',
+//           chainId: null,
+//           popupBlocked: false,
+//           popupClosed: popup.closed,
+//           userAgent: navigator.userAgent,
+//           timestamp: Date.now(),
+//           userAction: 'popup_allowed_detected',
+//         })
+//         popup.close()
+//         resolve(false) // Popups are allowed
+//       }
+//     }, 50)
+//   })
+// }
 
 const variants = {
   hidden: { opacity: 0, y: 100 },
@@ -138,8 +138,8 @@ export default function Home() {
     'Ethereum'
   )
   const [bridgeCompleted, setBridgeCompleted] = useState(false)
-  const [arePopupsBlocked, setArePopupsBlocked] = useState<boolean | null>(null)
-  const [showPopupBlockedAlert, setShowPopupBlockedAlert] = useState(false)
+  // const [arePopupsBlocked, setArePopupsBlocked] = useState<boolean | null>(null)
+  // const [showPopupBlockedAlert, setShowPopupBlockedAlert] = useState(false)
 
   // Notification system
   const notify = useToast()
@@ -362,7 +362,7 @@ export default function Home() {
         address: '',
         chainId: null,
         userAction: 'wallet_selection',
-        popupsBlocked: arePopupsBlocked,
+        // popupsBlocked: arePopupsBlocked,
       })
       
       if (type === 'azguard' && !window.azguard) {
@@ -389,7 +389,7 @@ export default function Home() {
         address: '',
         chainId: null,
         userAction: 'wallet_connection_attempt',
-        popupsBlocked: arePopupsBlocked,
+        // popupsBlocked: arePopupsBlocked,
       })
       
       await connectAztecWallet(type)
@@ -403,7 +403,7 @@ export default function Home() {
         address: '',
         chainId: null,
         userAction: 'wallet_connection_success',
-        popupsBlocked: arePopupsBlocked,
+        // popupsBlocked: arePopupsBlocked,
       })
     } catch (error) {
       // Log wallet connection failure
@@ -414,7 +414,7 @@ export default function Home() {
         address: '',
         chainId: null,
         userAction: 'wallet_connection_failure',
-        popupsBlocked: arePopupsBlocked,
+        // popupsBlocked: arePopupsBlocked,
         error: error instanceof Error ? error.message : 'Unknown error',
       })
       
@@ -448,40 +448,40 @@ export default function Home() {
     })
   }, [])
 
-  // Check if popups are blocked immediately after page load
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      // Immediately check if popups are blocked
-      isPopupBlocked().then((blocked) => {
-        setArePopupsBlocked(blocked)
-        if (blocked) {
-          console.log('Popups are blocked for this site')
-          logInfo('Popups are blocked - showing popup blocked alert to user', { 
-            walletType: null,
-            loginMethod: null,
-            walletProvider: null,
-            address: '',
-            chainId: null,
-            blocked,
-            alertShown: true,
-            userAction: 'popup_blocked_alert_displayed',
-          })
-          setShowPopupBlockedAlert(true)
-        } else {
-          // console.log('Popups are allowed for this site')
-          logInfo('Popups are allowed - user can proceed with wallet connections', {
-            walletType: null,
-            loginMethod: null,
-            walletProvider: null,
-            address: '',
-            chainId: null,
-            blocked: false,
-            userAction: 'popup_allowed_proceed',
-          })
-        }
-      })
-    }
-  }, [])
+  // Check if popups are blocked immediately after page load (disabled for now)
+  // useEffect(() => {
+  //   if (typeof window !== 'undefined') {
+  //     // Immediately check if popups are blocked
+  //     isPopupBlocked().then((blocked) => {
+  //       setArePopupsBlocked(blocked)
+  //       if (blocked) {
+  //         console.log('Popups are blocked for this site')
+  //         logInfo('Popups are blocked - showing popup blocked alert to user', {
+  //           walletType: null,
+  //           loginMethod: null,
+  //           walletProvider: null,
+  //           address: '',
+  //           chainId: null,
+  //           blocked,
+  //           alertShown: true,
+  //           userAction: 'popup_blocked_alert_displayed',
+  //         })
+  //         setShowPopupBlockedAlert(true)
+  //       } else {
+  //         // console.log('Popups are allowed for this site')
+  //         logInfo('Popups are allowed - user can proceed with wallet connections', {
+  //           walletType: null,
+  //           loginMethod: null,
+  //           walletProvider: null,
+  //           address: '',
+  //           chainId: null,
+  //           blocked: false,
+  //           userAction: 'popup_allowed_proceed',
+  //         })
+  //       }
+  //     })
+  //   }
+  // }, [])
 
   useEffect(() => {
     resetStepState()
@@ -521,8 +521,9 @@ export default function Home() {
         {showAzguardPrompt && (
           <AzguardPrompt onClose={() => setShowAzguardPrompt(false)} />
         )}
+        {/* Popup blocked alert disabled (used for Obsidion)
         {showPopupBlockedAlert && (
-          <PopupBlockedAlert 
+          <PopupBlockedAlert
             onClose={() => {
               // Log when user closes popup blocked alert
               logInfo('User closed popup blocked alert', {
@@ -536,9 +537,10 @@ export default function Home() {
                 userGaveUp: true, // This might indicate user is giving up
               })
               setShowPopupBlockedAlert(false)
-            }} 
+            }}
           />
         )}
+        */}
         {selectNetwork && (
           <NetworkModal
             setNetworkData={handleSelectNetwork}

@@ -11,7 +11,7 @@ export const aztecNode = createAztecNodeClient(NODE_URL)
 // let sdkInstance: AztecWalletSdk | null = null
 
 // Lazily create SDK on the client to avoid SSR localStorage errors
-// L2 chain ID for devnet: l1ChainId ^ rollupVersion = 11155111 ^ rollupVersion = 1674512022
+
 // export const getSdk = () => {
 //   if (sdkInstance) return sdkInstance
 //   if (typeof window === 'undefined') {

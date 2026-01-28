@@ -1,4 +1,5 @@
-import { l1ChainId, waapConfig } from '@/config/l1.config'
+import { L1_CHAIN_ID, L2_CHAIN_KEY } from '@/config'
+import { waapConfig } from '@/config/l1.config'
 import { showToast } from '@/hooks/useToast'
 import {
   detectWalletByProvider,
@@ -298,7 +299,7 @@ const walletStore = create<WalletState>((set, get) => ({
             },
             [
               {
-                chains: ['aztec:1674512022'],
+                chains: [L2_CHAIN_KEY],
                 methods: ['send_transaction', 'add_private_authwit', 'call', 'simulate_views', 'register_contract', 'register_token'],
               },
             ]
@@ -359,6 +360,14 @@ const walletStore = create<WalletState>((set, get) => ({
 
       return connectedAccount
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+
+      if (type === 'azguard' && errorMessage.includes('Azguard wallet is not installed')) {
+        // Show Azguard install prompt instead of toast
+        set({ showAzguardPrompt: true, showWalletModal: false })
+        return null
+      }
+
       // Log wallet connection failure
       logError('Failed to connect Aztec wallet', {
         walletType: WalletType.AZTEC,
@@ -366,13 +375,13 @@ const walletStore = create<WalletState>((set, get) => ({
         address: '',
         chainId: null,
         userAction: 'aztec_wallet_connection_failure',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessage,
       })
       
       showToast(
         'error',
         `Failed to connect to ${type} wallet: ${
-          error instanceof Error ? error.message : 'Unknown error'
+          errorMessage
         }`
       )
       throw error
@@ -644,7 +653,7 @@ const walletStore = create<WalletState>((set, get) => ({
 
       const { getWaapAccount, switchWaapChain, getWaapChainId } = get()
       const address = await getWaapAccount()
-      await switchWaapChain(l1ChainId)
+      await switchWaapChain(L1_CHAIN_ID)
       const chainId = await getWaapChainId()
 
       // Determine wallet provider based on login method

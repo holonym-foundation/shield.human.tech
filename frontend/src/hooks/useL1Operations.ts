@@ -8,7 +8,7 @@ import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { computeSecretHash } from '@aztec/aztec.js/crypto'
 import { useWalletAdapter } from './useWalletAdapter'
-import { ADDRESS, getAztecscanUrl, L2_TOKEN_METADATA } from '@/config'
+import { ADDRESS, getAztecscanUrl, L2_CHAIN_ID, L2_TOKEN_METADATA } from '@/config'
 import { getL1ContractAddresses } from '@/utils/aztecHelpers'
 
 // Generate a claim secret and its hash
@@ -671,8 +671,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       }
 
       const [claimSecret, claimSecretHash] = await generateClaimSecret()
-      // TODO: store these at this point in the local storage
-      // TODO: WE NEED TO STORE THE CLAIM SECRET AND CLAIM SECRET HASH BACKEND with ENCRYPTION
 
       // Bridge tokens - use different function based on privacy mode
       const functionName = isPrivacyModeEnabled
@@ -895,7 +893,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         )
 
         const l2TxHash = result.txHash
-        const l2TxUrl = `${getAztecscanUrl(1674512022)}/tx-effects/${l2TxHash}`
+        const l2TxUrl = `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${l2TxHash}`
 
         setTransactionUrls(l1TxUrl, l2TxUrl)
 
@@ -958,7 +956,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               walletType: WalletType.AZTEC,
               loginMethod: aztecLoginMethod,
               address: aztecAddress || '',
-              tokenAddress: ADDRESS[1674512022].L2.TOKEN_CONTRACT,
+              tokenAddress: ADDRESS[L2_CHAIN_ID].L2.TOKEN_CONTRACT,
               tokenName: L2_TOKEN_METADATA.name,
               tokenSymbol: L2_TOKEN_METADATA.symbol,
               userAction: 'token_added_to_wallet',
@@ -975,7 +973,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               address: l1Address || '',
               chainId: chainId,
               error: error instanceof Error ? error.message : 'Unknown error',
-              tokenAddress: ADDRESS[1674512022].L2.TOKEN_CONTRACT,
+              tokenAddress: ADDRESS[L2_CHAIN_ID].L2.TOKEN_CONTRACT,
               userAction: 'token_add_to_wallet_failed',
             })
           }
