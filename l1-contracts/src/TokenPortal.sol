@@ -28,7 +28,7 @@ error InvalidVerification();
 error PassportNonceUsed();
 error InvalidPassportSignature();
 error AmountExceedsLimit();
-error TransferFailed();
+error Unauthorized();
 
 /**
  * @title TokenPortal
@@ -57,6 +57,8 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     // STATE VARIABLES
     // =============================================================
 
+    address private immutable DEPLOYER;
+
     // Aztec Infrastructure
     IRegistry public registry;
     IERC20 public underlying;
@@ -83,6 +85,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     // EVENTS
     // =============================================================
 
+    event Initialized(address registry, address underlying, bytes32 l2Bridge);
     event DepositToAztecPublic(
         bytes32 indexed to,
         uint256 amount,
@@ -111,13 +114,16 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     // CONSTRUCTOR / INITIALIZER
     // =============================================================
 
-    constructor() Ownable(msg.sender) {}
+    constructor() Ownable(msg.sender) {
+        DEPLOYER = msg.sender;
+    }
 
     function initialize(
         address _registry,
         address _underlying,
         bytes32 _l2Bridge
     ) external {
+        if (msg.sender != DEPLOYER) revert Unauthorized();
         if (address(registry) != address(0)) revert AlreadyInitialized();
         if (_registry == address(0) || _underlying == address(0))
             revert InvalidAddress();
@@ -134,10 +140,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         feeRecipient = owner();
         feeBasisPoints = 10; // 0.1%
 
-        // Transfer initial ownership to the caller if not already set
-        if (owner() != msg.sender) {
-            _transferOwnership(msg.sender);
-        }
+        emit Initialized(_registry, _underlying, _l2Bridge);
     }
 
     // =============================================================
@@ -382,10 +385,6 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
     function calculateFee(uint256 _amount) public view returns (uint256) {
         return (_amount * feeBasisPoints) / 10000;
-    }
-
-    function getFeePercentage() external view returns (uint256) {
-        return feeBasisPoints / 100;
     }
 
     function getCollectedFees() external view returns (uint256) {
