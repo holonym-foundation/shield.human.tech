@@ -65,7 +65,6 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     IInbox public inbox;
     bytes32 public l2Bridge;
     uint256 public rollupVersion;
-
     // Attestation Config
     address public humanIdAttester = 0xa74772264f896843c6346ceA9B13e0128A1d3b5D;
     uint256 public cleanHandsCircuitId =
@@ -102,6 +101,11 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     event FeeUpdated(uint256 newFeeBasisPoints);
     event FeeRecipientUpdated(address indexed newFeeRecipient);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
+    event TokensRescued(
+        address indexed token,
+        address indexed to,
+        uint256 amount
+    );
 
     // =============================================================
     // CONSTRUCTOR / INITIALIZER
@@ -281,7 +285,9 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     }
 
     function rescueToken(address _token, uint256 _amount) external onlyOwner {
+        if (_token == address(0)) revert InvalidAddress();
         IERC20(_token).safeTransfer(owner(), _amount);
+        emit TokensRescued(_token, owner(), _amount);
     }
 
     // =============================================================
@@ -376,5 +382,17 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
     function calculateFee(uint256 _amount) public view returns (uint256) {
         return (_amount * feeBasisPoints) / 10000;
+    }
+
+    function getFeePercentage() external view returns (uint256) {
+        return feeBasisPoints / 100;
+    }
+
+    function getCollectedFees() external view returns (uint256) {
+        return collectedFees;
+    }
+
+    function getFeeRecipient() external view returns (address) {
+        return feeRecipient;
     }
 }
