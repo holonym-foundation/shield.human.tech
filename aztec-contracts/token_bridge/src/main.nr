@@ -12,12 +12,15 @@ pub contract TokenBridge {
     use crate::config::Config;
 
     use dep::aztec::{
-        macros::{functions::{internal, external, initializer, only_self, view}, storage::storage},
+        macros::{functions::{external, initializer, internal, only_self, view}, storage::storage},
         protocol_types::{
             address::{AztecAddress, EthAddress},
             traits::{Deserialize, Packable, Serialize, ToField},
         },
-        state_vars::{delayed_public_mutable::DelayedPublicMutable, map::Map, PublicImmutable},
+        state_vars::{
+            delayed_public_mutable::DelayedPublicMutable, map::Map, public_mutable::PublicMutable,
+            PublicImmutable,
+        },
     };
 
     use dep::token_portal_content_hash_lib::{
@@ -52,7 +55,8 @@ pub contract TokenBridge {
     // Storage structure, containing all storage, and specifying what slots they use.
     #[storage]
     struct Storage<Context> {
-        owner: PublicImmutable<AztecAddress, Context>,
+        owner: PublicMutable<AztecAddress, Context>,
+        pending_owner: PublicMutable<AztecAddress, Context>,
         config: PublicImmutable<Config, Context>,
         // clean hands and passport verification vars
         human_id_attester_pubkey: PublicImmutable<PubKey, Context>,
@@ -68,7 +72,7 @@ pub contract TokenBridge {
     #[initializer]
     fn constructor(token_minter_proxy: AztecAddress, portal: EthAddress) {
         let sender = self.context.msg_sender().unwrap();
-        self.storage.owner.initialize(sender);
+        self.storage.owner.write(sender);
         self.storage.config.initialize(Config { token_minter_proxy, portal });
         self.storage.human_id_attester_pubkey.initialize(
             PubKey {
@@ -103,6 +107,26 @@ pub contract TokenBridge {
             },
         );
         self.storage.is_paused.schedule_value_change(false);
+    }
+
+    #[external("public")]
+    fn transfer_ownership(new_owner: AztecAddress) {
+        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+        assert(!new_owner.is_zero(), "New owner cannot be zero address");
+
+        self.storage.pending_owner.write(new_owner);
+    }
+
+    #[external("public")]
+    fn claim_ownership() {
+        let sender = self.context.msg_sender().unwrap();
+        assert(self.storage.pending_owner.read() == sender, "Only pending owner can claim");
+
+        // Perform the transfer
+        self.storage.owner.write(sender);
+
+        // Clear the pending slot
+        self.storage.pending_owner.write(AztecAddress::zero());
     }
 
     #[external("public")]
@@ -355,8 +379,11 @@ pub contract TokenBridge {
             (clean_hands.signature[0] != 0u8) | (clean_hands.signature[1] != 0u8);
 
         if has_clean_hands_sig {
-            is_clean_hands =
-                self.internal.verify_clean_hands_signature(clean_hands.action_id, sender, clean_hands.signature)
+            is_clean_hands = self.internal.verify_clean_hands_signature(
+                clean_hands.action_id,
+                sender,
+                clean_hands.signature,
+            )
         }
 
         if !is_clean_hands {
