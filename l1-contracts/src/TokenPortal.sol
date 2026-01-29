@@ -3,6 +3,7 @@ pragma solidity >=0.8.27;
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@oz/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@oz/utils/cryptography/ECDSA.sol";
+import {Pausable} from "@oz/utils/Pausable.sol";
 
 // Messaging
 import {IRegistry} from "@aztec/governance/interfaces/IRegistry.sol";
@@ -12,7 +13,7 @@ import {IRollup} from "@aztec/core/interfaces/IRollup.sol";
 import {DataStructures} from "@aztec/core/libraries/DataStructures.sol";
 import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
 
-contract TokenPortal {
+contract TokenPortal is Pausable {
     using SafeERC20 for IERC20;
 
     event DepositToAztecPublic(
@@ -104,6 +105,30 @@ contract TokenPortal {
     }
 
     /**
+     * @notice Emergency stop: prevents new deposits and withdrawals
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /**
+     * @notice Resume normal operations
+     */
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+    
+    /**
+     * @notice rescue tokens accidentally sent to this contract
+     * @param _token - The token address to rescue
+     * @param _amount - The amount of tokens to rescue
+     */
+    function rescueToken(address _token, uint256 _amount) external onlyOwner {
+        require(_token != address(underlying), "Cannot rescue underlying");
+        IERC20(_token).safeTransfer(msg.sender, _amount);
+    }
+
+    /**
      * @notice Update the fee percentage
      * @param _newFeeBasisPoints - New fee in basis points (100 = 1%)
      */
@@ -174,7 +199,7 @@ contract TokenPortal {
         uint256 actionId,
         address userAddress,
         bytes memory signature
-    ) public view returns (bool) {
+    ) internal view returns (bool) {
         bytes32 digest = keccak256(
             abi.encodePacked(circuitId, actionId, userAddress)
         );
@@ -231,7 +256,7 @@ contract TokenPortal {
         bytes32 _to,
         uint256 _amount,
         bytes32 _secretHash
-    ) external returns (bytes32, uint256) {
+    ) external whenNotPaused returns (bytes32, uint256) {
         // Calculate fee
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
@@ -290,7 +315,7 @@ contract TokenPortal {
         bytes32 _secretHashForL2MessageConsumption,
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
-    ) external returns (bytes32, uint256) {
+    ) external whenNotPaused returns (bytes32, uint256) {
         bool isCleanHands = false;
         if (_cleanHands.signature.length > 0) {
             if (
@@ -386,7 +411,7 @@ contract TokenPortal {
         uint256 _l2BlockNumber,
         uint256 _leafIndex,
         bytes32[] calldata _path
-    ) external {
+    ) external whenNotPaused {
         // Message validation - must match what was sent from L2
         // L2 sends the amount it burned (gross amount)
         DataStructures.L2ToL1Msg memory message = DataStructures.L2ToL1Msg({

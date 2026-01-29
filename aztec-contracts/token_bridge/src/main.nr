@@ -12,7 +12,7 @@ pub contract TokenBridge {
     use crate::config::Config;
 
     use dep::aztec::{
-        macros::{functions::{external, initializer, only_self, view}, storage::storage},
+        macros::{functions::{internal, external, initializer, only_self, view}, storage::storage},
         protocol_types::{
             address::{AztecAddress, EthAddress},
             traits::{Deserialize, Packable, Serialize, ToField},
@@ -52,6 +52,7 @@ pub contract TokenBridge {
     // Storage structure, containing all storage, and specifying what slots they use.
     #[storage]
     struct Storage<Context> {
+        owner: PublicImmutable<AztecAddress, Context>,
         config: PublicImmutable<Config, Context>,
         // clean hands and passport verification vars
         human_id_attester_pubkey: PublicImmutable<PubKey, Context>,
@@ -59,12 +60,15 @@ pub contract TokenBridge {
         passport_signer_pubkey: PublicImmutable<PubKey, Context>,
         // Mapping: user address => nonce => consumed status
         passport_nonces: Map<AztecAddress, Map<Field, DelayedPublicMutable<bool, 2, Context>, Context>, Context>,
+        is_paused: DelayedPublicMutable<bool, 2, Context>,
     }
 
     // Constructs the contract.
     #[external("public")]
     #[initializer]
     fn constructor(token_minter_proxy: AztecAddress, portal: EthAddress) {
+        let sender = self.context.msg_sender().unwrap();
+        self.storage.owner.initialize(sender);
         self.storage.config.initialize(Config { token_minter_proxy, portal });
         self.storage.human_id_attester_pubkey.initialize(
             PubKey {
@@ -98,6 +102,13 @@ pub contract TokenBridge {
                 ],
             },
         );
+        self.storage.is_paused.schedule_value_change(false);
+    }
+
+    #[external("public")]
+    fn set_paused(paused: bool) {
+        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+        self.storage.is_paused.schedule_value_change(paused);
     }
 
     #[external("private")]
@@ -116,6 +127,7 @@ pub contract TokenBridge {
     // Consumes a L1->L2 message and calls the token contract to mint the appropriate amount publicly
     #[external("public")]
     fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field) {
+        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
         let content_hash = get_mint_to_public_content_hash(to, amount);
 
         let config = self.storage.config.read();
@@ -143,6 +155,7 @@ pub contract TokenBridge {
         caller_on_l1: EthAddress, // ethereum address that can call this function on the L1 portal (0x0 if anyone can call)
         authwit_nonce: Field, // nonce used in the approval message by `msg.sender` to let bridge burn their tokens on L2
     ) {
+        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
         let config = self.storage.config.read();
 
         // Send an L2 to L1 message
@@ -168,6 +181,7 @@ pub contract TokenBridge {
         secret_for_L1_to_L2_message_consumption: Field, // secret used to consume the L1 to L2 message
         message_leaf_index: Field,
     ) {
+        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
         let config = self.storage.config.read();
 
         // Consume L1 to L2 message and emit nullifier
@@ -183,7 +197,7 @@ pub contract TokenBridge {
     }
 
     // Verify clean hands signature using ECDSA recovery
-    #[external("private")]
+    #[internal("private")]
     fn verify_clean_hands_signature(
         action_id: Field,
         user_address: AztecAddress,
@@ -238,7 +252,7 @@ pub contract TokenBridge {
     }
 
     // Verify passport signature
-    #[external("private")]
+    #[internal("private")]
     fn verify_passport_signature(
         user_address: AztecAddress,
         max_amount: u128,
@@ -247,40 +261,40 @@ pub contract TokenBridge {
         signature: [u8; 64],
     ) -> bool {
         // TODO: Check deadline (this would need block timestamp from context which is not possible in private fn)
-        
+
         let mut message_bytes: [u8; 160] = [0; 160];
-        
+
         // Convert user_address to bytes (32 bytes)
         let user_bytes = user_address.to_field().to_be_bytes::<32>();
         for i in 0..32 {
             message_bytes[i] = user_bytes[i];
         }
-        
+
         // Convert max_amount to bytes (32 bytes)
         let amount_bytes = (max_amount as Field).to_be_bytes::<32>();
         for i in 0..32 {
             message_bytes[32 + i] = amount_bytes[i];
         }
-        
+
         // Convert nonce to bytes (32 bytes)
         let nonce_bytes = nonce.to_be_bytes::<32>();
         for i in 0..32 {
             message_bytes[64 + i] = nonce_bytes[i];
         }
-        
+
         // Convert deadline to bytes (32 bytes)
         let deadline_bytes = deadline.to_be_bytes::<32>();
         for i in 0..32 {
             message_bytes[96 + i] = deadline_bytes[i];
         }
-        
+
         // Convert bridge_address to bytes (32 bytes)
         let contract_address = self.address;
         let contract_bytes = contract_address.to_field().to_be_bytes::<32>();
         for i in 0..32 {
             message_bytes[128 + i] = contract_bytes[i];
         }
-        
+
         let digest = keccak256(message_bytes, 160);
 
         // Create Ethereum signed message hash
@@ -330,6 +344,7 @@ pub contract TokenBridge {
         clean_hands: CleanHandsData,
         passport: PassportData,
     ) {
+        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
         let config = self.storage.config.read();
         let sender = self.context.msg_sender().unwrap();
 
@@ -340,11 +355,8 @@ pub contract TokenBridge {
             (clean_hands.signature[0] != 0u8) | (clean_hands.signature[1] != 0u8);
 
         if has_clean_hands_sig {
-            is_clean_hands = verify_clean_hands_signature(
-                clean_hands.action_id,
-                sender,
-                clean_hands.signature,
-            )
+            is_clean_hands =
+                self.internal.verify_clean_hands_signature(clean_hands.action_id, sender, clean_hands.signature)
         }
 
         if !is_clean_hands {
@@ -356,7 +368,7 @@ pub contract TokenBridge {
 
             assert(!nonce_used, "Passport nonce used");
 
-            let is_passport_valid = verify_passport_signature(
+            let is_passport_valid = self.internal.verify_passport_signature(
                 sender,
                 passport.max_amount,
                 passport.nonce,
