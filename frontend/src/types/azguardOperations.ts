@@ -24,7 +24,11 @@ export type Result<T> = {
 };
 
 /** Action types for transactions */
-export type Action = CallAction | EncodedCallAction;
+export type Action =
+  | CallAction
+  | EncodedCallAction
+  | AddPrivateAuthwitAction
+  | AddPublicAuthwitAction;
 
 /** Call action */
 export type CallAction = {
@@ -32,6 +36,28 @@ export type CallAction = {
   contract: string;
   method: string;
   args: any[];
+};
+
+/** Authwit content for a contract call (must include caller for authwit) */
+export type CallAuthwitContent = {
+  kind: 'call';
+  /** Address of the caller (AztecAddress) - the contract authorized to make the call (e.g. bridge) */
+  caller: string;
+  contract: string;
+  method: string;
+  args: any[];
+};
+
+/** Add private authwit action (for private function calls) */
+export type AddPrivateAuthwitAction = {
+  kind: 'add_private_authwit';
+  content: CallAuthwitContent;
+};
+
+/** Add public authwit action (for public function calls like burn_public) */
+export type AddPublicAuthwitAction = {
+  kind: 'add_public_authwit';
+  content: CallAuthwitContent;
 };
 
 /** Encoded call action */

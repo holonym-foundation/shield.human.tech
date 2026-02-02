@@ -24,8 +24,11 @@ import {
 } from '@aztec/l1-artifacts';
 import { TokenContract } from '@aztec/noir-contracts.js/Token';
 import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge';
+import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging';
+import { sha256ToField } from '@aztec/foundation/crypto/sha256';
+import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash';
 
-import { getContract } from 'viem';
+import { getContract, toFunctionSelector } from 'viem';
 
 // docs:end:imports
 // docs:start:utils
@@ -209,12 +212,27 @@ describe('e2e_cross_chain_messaging token_bridge_tutorial_test', () => {
     // docs:end:setup-withdrawal
 
     // docs:start:l2-withdraw
-    const l2ToL1Message = await l1PortalManager.getL2ToL1MessageLeaf(
-      withdrawAmount,
-      EthAddress.fromString(ownerEthAddress),
-      l2BridgeContract.address,
-      EthAddress.ZERO,
+    // Compute L2→L1 message leaf directly (same pattern as Aztec NFT example)
+    const version = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0;
+    const selectorBuf = Buffer.from(
+      toFunctionSelector('withdraw(address,uint256,address)').slice(2),
+      'hex',
     );
+    const recipient = EthAddress.fromString(ownerEthAddress);
+    const callerOnL1 = EthAddress.ZERO;
+    const content = sha256ToField([
+      selectorBuf,
+      recipient.toBuffer32(),
+      new Fr(withdrawAmount).toBuffer(),
+      callerOnL1.toBuffer32(),
+    ]);
+    const msgLeaf = computeL2ToL1MessageHash({
+      l2Sender: l2BridgeContract.address,
+      l1Recipient: l1PortalContractAddress,
+      content,
+      rollupVersion: new Fr(version),
+      chainId: new Fr(nodeInfo.l1ChainId),
+    });
     const l2TxReceipt = await l2BridgeContract.methods
       .exit_to_l1_public(EthAddress.fromString(ownerEthAddress), withdrawAmount, EthAddress.ZERO, nonce)
       .send()
@@ -225,17 +243,28 @@ describe('e2e_cross_chain_messaging token_bridge_tutorial_test', () => {
     // docs:end:l2-withdraw
 
     // docs:start:l1-withdraw
-    const [l2ToL1MessageIndex, siblingPath] = await pxe.getL2ToL1MembershipWitness(
-      await pxe.getBlockNumber(),
-      l2ToL1Message,
-    );
-    await l1PortalManager.withdrawFunds(
-      withdrawAmount,
-      EthAddress.fromString(ownerEthAddress),
-      BigInt(l2TxReceipt.blockNumber!),
-      l2ToL1MessageIndex,
-      siblingPath,
-    );
+    const blockNumber = l2TxReceipt.blockNumber!; // L2 block where the L2→L1 message was emitted
+    const witness = await computeL2ToL1MembershipWitness(pxe, blockNumber, msgLeaf);
+    if (!witness) {
+      throw new Error('L2→L1 message not found in block');
+    }
+    const siblingPathHex = witness!.siblingPath
+      .toBufferArray()
+      .map((buf: Buffer) => `0x${buf.toString('hex')}` as `0x${string}`);
+    const withdrawHash = await walletClient.writeContract({
+      address: l1PortalContractAddress.toString() as `0x${string}`,
+      abi: TokenPortalAbi,
+      functionName: 'withdraw',
+      args: [
+        ownerEthAddress,
+        withdrawAmount,
+        false,
+        BigInt(blockNumber),
+        BigInt(witness!.leafIndex),
+        siblingPathHex,
+      ],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: withdrawHash });
     const newL1Balance = await l1TokenManager.getL1TokenBalance(ownerEthAddress);
     logger.info(`New L1 balance of ${ownerEthAddress} is ${newL1Balance}`);
     // docs:end:l1-withdraw

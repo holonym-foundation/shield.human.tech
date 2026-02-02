@@ -300,7 +300,7 @@ const walletStore = create<WalletState>((set, get) => ({
             [
               {
                 chains: [L2_CHAIN_KEY],
-                methods: ['send_transaction', 'add_private_authwit', 'call', 'simulate_views', 'register_contract', 'register_token'],
+                methods: ['send_transaction', 'add_private_authwit', 'add_public_authwit', 'call', 'simulate_views', 'register_contract', 'register_token'],
               },
             ]
           )

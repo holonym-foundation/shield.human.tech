@@ -1,10 +1,10 @@
 'use client'
 
 // import { AztecWalletSdk, obsidion } from 'raven-house-wallet-sdk'
+
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
 import { L2_NODE_URL } from '@/config'
 
-// Create Aztec node client (for direct node access if needed)
 export const aztecNode = createAztecNodeClient(L2_NODE_URL)
 
 // let sdkInstance: AztecWalletSdk | null = null
@@ -22,8 +22,6 @@ export const aztecNode = createAztecNodeClient(L2_NODE_URL)
 //   })
 //   return sdkInstance
 // }
-
-// Function to connect to the specified wallet type
 export const connectWallet = async (type: 'obsidion' | 'azguard') => {
   try {
     // const sdk = getSdk()

@@ -246,12 +246,19 @@ export default function Home() {
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
     useL2MintSoulboundToken(mintL2SBTOnSuccess)
 
-  // Bridge success callback
+  // Bridge success callback (runs after L1→L2 bridge or L2→L1 withdrawal)
   const handleBridgeSuccess = useCallback(
     (data: any) => {
-      // Refetch balances after a successful bridge operation
-      refetchL1Balance()
-      refetchL2Balance()
+      console.log('[Bridge] handleBridgeSuccess called', { data })
+      console.log('[Bridge] Showing refresh toast, starting L1 + L2 balance refetch...')
+      notify.promise(
+        Promise.all([refetchL1Balance(), refetchL2Balance()]),
+        {
+          pending: 'Refreshing L1 and L2 balances...',
+          success: 'Balances updated',
+          error: 'Failed to refresh balances',
+        }
+      )
       setBridgeConfig({
         ...bridgeConfig,
         amount: '',
@@ -262,7 +269,7 @@ export default function Home() {
         setBridgeCompleted(false)
       }, 3000)
     },
-    [refetchL1Balance, refetchL2Balance, setBridgeConfig, bridgeConfig]
+    [refetchL1Balance, refetchL2Balance, setBridgeConfig, bridgeConfig, notify]
   )
 
   const { mutate: bridgeTokensToL2, isPending: bridgeTokensToL2Pending } =

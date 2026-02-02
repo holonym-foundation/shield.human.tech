@@ -27,6 +27,7 @@ import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
 import {
   FeeAssetHandlerAbi,
   FeeAssetHandlerBytecode,
+  RollupAbi,
   TokenPortalAbi,
   TokenPortalBytecode,
 } from '@aztec/l1-artifacts'
@@ -38,6 +39,10 @@ import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge'
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee/testing'
 import { TestWallet } from '@aztec/test-wallet/server'
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
+import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
+import { sha256ToField } from '@aztec/foundation/crypto/sha256'
+import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
+import { toFunctionSelector } from 'viem'
 import 'dotenv/config'
 // @ts-ignore
 import PortalSBTJson from './constants/PortalSBT.json'
@@ -54,6 +59,8 @@ const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
 
 import { getContract } from 'viem'
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 import { SponsoredFPCContract } from '@aztec/noir-contracts.js/SponsoredFPC'
 import { setupWallet } from './utils/setup_wallet.js'
@@ -563,6 +570,54 @@ async function main() {
       true
     )
 
+    // Poll for L1→L2 message sync (same pattern as frontend), then final wait before claim
+    const messageHash =
+      (claim as { messageHash?: string }).messageHash ??
+      (claim as { key?: string }).key
+    if (messageHash) {
+      const pollIntervalMs = 120_000 // 2 minutes
+      const maxWaitMs = 20 * 60 * 1000 // 20 min max
+      const startWait = Date.now()
+      let messageSynced = false
+      const messageHashFr = Fr.fromString(messageHash)
+      logger.info(
+        `⏳ Polling for L1→L2 message sync (messageHash=${messageHash.slice(0, 18)}...)...`
+      )
+      while (Date.now() - startWait < maxWaitMs) {
+        try {
+          const messageBlock = await node.getL1ToL2MessageBlock(messageHashFr)
+          messageSynced = messageBlock !== undefined
+          if (messageSynced) {
+            logger.info(
+              `✅ L1→L2 message ready (block=${messageBlock}), proceeding to claim.`
+            )
+            break
+          }
+          logger.info(
+            `   L1→L2 message not yet synced. Waiting ${pollIntervalMs / 1000}s...`
+          )
+        } catch (e) {
+          logger.warn(`   Poll check failed, retrying: ${e}`)
+        }
+        await wait(pollIntervalMs)
+      }
+      if (!messageSynced) {
+        const elapsedMin = (Date.now() - startWait) / 1000 / 60
+        logger.warn(
+          `⚠️ L1→L2 message sync timeout after ${elapsedMin.toFixed(1)} min; attempting claim anyway.`
+        )
+      }
+      const finalWaitMs = 120_000 // 2 minutes 
+      logger.info(
+        `⏳ Final wait before claiming (${finalWaitMs / 1000}s)...`
+      )
+      await wait(finalWaitMs)
+    } else {
+      logger.info(
+        `⚠️ No messageHash on claim; claiming immediately (polling skipped).`
+      )
+    }
+
     // Claim tokens publicly on L2
     logger.info(`📥 Step 2: Claim tokens publicly on L2`)
     logger.info(`📋 Claim parameters:`)
@@ -611,12 +666,26 @@ async function main() {
       })
       .wait({ timeout: getTimeouts().txTimeout })
 
-    const l2ToL1Message = await l1PortalManager.getL2ToL1MessageLeaf(
-      withdrawAmount,
-      EthAddress.fromString(ownerEthAddress),
-      l2BridgeContract.address,
-      EthAddress.ZERO
+    const version = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
+    const selectorBuf = Buffer.from(
+      toFunctionSelector('withdraw(address,uint256,address)').slice(2),
+      'hex'
     )
+    const recipient = EthAddress.fromString(ownerEthAddress)
+    const callerOnL1 = EthAddress.ZERO
+    const content = sha256ToField([
+      selectorBuf,
+      recipient.toBuffer32(),
+      new Fr(withdrawAmount).toBuffer(),
+      callerOnL1.toBuffer32(),
+    ])
+    const msgLeaf = computeL2ToL1MessageHash({
+      l2Sender: l2BridgeContract.address,
+      l1Recipient: EthAddress.fromString(firstToken.l1PortalContract),
+      content,
+      rollupVersion: new Fr(version),
+      chainId: new Fr(nodeInfo.l1ChainId),
+    })
     const l2TxReceipt = await l2BridgeContract.methods
       .exit_to_l1_public(
         EthAddress.fromString(ownerEthAddress),
@@ -635,28 +704,88 @@ async function main() {
       .simulate({ from: ownerAztecAddress })
     logger.info(`💰 New L2 balance of ${ownerAztecAddress} is ${newL2Balance}`)
 
-    // Wait 45 minutes for L2 to L1 message to be processed
-    logger.info(
-      '⏳ Waiting 45 minutes for L2 to L1 message to be processed before withdrawal...'
-    )
-    const delayMs = 45 * 60 * 1000 // 45 minutes in milliseconds
-    await new Promise((resolve) => setTimeout(resolve, delayMs))
-    logger.info('✅ 45-minute delay completed, proceeding with withdrawal...')
+    const finalWaitMs = 120_000 // 2 minutes 
+    logger.info(`⏳ Final wait before proof (${finalWaitMs / 1000}s)...`)
+    await wait(finalWaitMs)
 
-    const blockNumber = await node.getBlockNumber()
-    // Use node client for L2ToL1MembershipWitness as wallet doesn't have this method
-    const [l2ToL1MessageIndex, siblingPath] =
-      await (node as any).getL2ToL1MembershipWitness(
-        blockNumber,
-        l2ToL1Message
+    const blockNumber = l2TxReceipt.blockNumber! // L2 block where the L2→L1 message was emitted
+
+    // Poll L1 Rollup for proven block (same pattern as frontend), then fallback to fixed wait if needed
+    const rollupAddress =
+      l1ContractAddresses?.rollupAddress != null
+        ? l1ContractAddresses.rollupAddress.toString()
+        : undefined
+    const pollIntervalMs = 120_000 // 2 minutes
+    const maxWaitMs = 50 * 60 * 1000 // 50 min max
+    const startWait = Date.now()
+    let blockProven = false
+    let usedPoll = false
+    if (rollupAddress) {
+      try {
+        logger.info(
+          `⏳ Polling L1 Rollup for proven block (blockNumber=${blockNumber})...`
+        )
+        usedPoll = true
+        while (Date.now() - startWait < maxWaitMs) {
+          const proven = await l1Client.readContract({
+            address: rollupAddress as `0x${string}`,
+            abi: RollupAbi,
+            functionName: 'getProvenCheckpointNumber',
+          })
+          const provenBlock = typeof proven === 'bigint' ? Number(proven) : proven
+          if (provenBlock >= blockNumber) {
+            logger.info(
+              `✅ L2 block ${blockNumber} is proven on L1 (proven=${provenBlock}), proceeding.`
+            )
+            blockProven = true
+            break
+          }
+          logger.info(
+            `   L2 block not yet proven (proven=${provenBlock}, need ${blockNumber}). Waiting ${pollIntervalMs / 1000}s...`
+          )
+          await wait(pollIntervalMs)
+        }
+        if (!blockProven) {
+          logger.warn(
+            `⚠️ Max wait reached; proceeding with L1 withdraw (may revert if block not proven).`
+          )
+        }
+      } catch (e) {
+        logger.warn(`⚠️ L1 Rollup poll failed, using fixed 40 min wait: ${e}`)
+        usedPoll = false
+      }
+    }
+    if (!blockProven && !usedPoll) {
+      logger.info(
+        '⏳ Waiting 40 minutes for L2→L1 message to be processable on L1...'
       )
-    await l1PortalManager.withdrawFunds(
+      await wait(40 * 60 * 1000)
+    }
+    const witness = await computeL2ToL1MembershipWitness(node, blockNumber, msgLeaf)
+    if (!witness) {
+      throw new Error('L2→L1 message not found in block')
+    }
+    const siblingPathHex = witness!.siblingPath
+      .toBufferArray()
+      .map((buf: Buffer) => `0x${buf.toString('hex')}` as `0x${string}`)
+    // Withdraw on L1 (same pattern as Aztec NFT example: direct contract call with siblingPathHex)
+    const l1Portal = getContract({
+      address: firstToken.l1PortalContract as `0x${string}`,
+      abi: TokenPortalAbi,
+      client: l1Client as any,
+    }) as any
+    const withdrawTx = await l1Portal.write.withdraw([
+      ownerEthAddress,
       withdrawAmount,
-      EthAddress.fromString(ownerEthAddress),
-      BigInt(l2TxReceipt.blockNumber!),
-      l2ToL1MessageIndex,
-      siblingPath
-    )
+      false,
+      BigInt(blockNumber),
+      BigInt(witness!.leafIndex),
+      siblingPathHex,
+    ])
+    await l1Client.waitForTransactionReceipt({
+      hash: withdrawTx,
+      timeout: getTimeouts().txTimeout,
+    })
     const newL1Balance = await l1TokenManager.getL1TokenBalance(ownerEthAddress)
     logger.info(`💰 New L1 balance of ${ownerEthAddress} is ${newL1Balance}`)
   } else {

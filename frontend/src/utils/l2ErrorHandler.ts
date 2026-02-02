@@ -27,14 +27,14 @@ export const useL2ErrorHandler = () => {
 
     let fullMessage = ''
 
-    // Check for Aztec network server error
-    if (
-      errorMessage.includes(
-        '500 from server https://aztec-alpha-testnet-fullnode.zkv.xyz/'
-      )
-    ) {
+    // Check for Aztec network / node errors (any node URL or Failed to fetch)
+    const isNodeUnavailable =
+      errorMessage.includes('500 from server') ||
+      errorMessage.includes('Failed to fetch') ||
+      /aztec.*\.(zkv\.xyz|aztec-labs\.com)/i.test(errorMessage)
+    if (isNodeUnavailable) {
       fullMessage =
-        'Unable to connect to Aztec network. The bridge service is temporarily unavailable. Please check back later'
+        'Unable to connect to Aztec network. The bridge service is temporarily unavailable. Please check back later.'
       fullMessage = `${operationMessages[type]} - ${fullMessage}`
     } else {
       fullMessage = `${operationMessages[type]} - ${errorMessage}`

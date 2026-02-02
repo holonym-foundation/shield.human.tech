@@ -340,7 +340,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
         )}
 
         <div className='flex items-center gap-4'>
-          {/* Privacy Mode Toggle UI */}
+          {false && (
           <div className='flex px-[3px] py-[3px] pl-[8px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200'>
             <Image
               src='/assets/svg/human.aztec.svg'
@@ -386,6 +386,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
               </span>
             </button>
           </div>
+          )}
 
           {/* Wallet Controls */}
           {!isAnyWalletConnected ? (
@@ -486,7 +487,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
             </div>
           )}
 
-          {/* Privacy Mode Toggle UI (Mobile) */}
+          {false && (
           <div className='flex px-[3px] py-[3px] pl-[8px] w-[240px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200 max-w-[190px]'>
             <Image
               src='/assets/svg/human.aztec.svg'
@@ -532,6 +533,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
               </span>
             </button>
           </div>
+          )}
 
           <div className='flex flex-col items-start gap-3'>
             {!isAnyWalletConnected ? (

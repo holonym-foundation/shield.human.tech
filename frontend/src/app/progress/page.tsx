@@ -9,9 +9,12 @@ import BridgeHeader from '@/components/BridgeHeader'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { wait } from '@/utils'
 import { formatUnits, parseUnits } from 'viem'
-import { useL2WithdrawTokensToL1 } from '@/hooks/useL2Operations'
+import {
+  useL2WithdrawTokensToL1,
+  useL2TokenBalance,
+} from '@/hooks/useL2Operations'
+import { useL1TokenBalances, useL1BridgeToL2 } from '@/hooks/useL1Operations'
 import { BridgeDirection } from '@/types/bridge'
-import { useL1BridgeToL2 } from '@/hooks/useL1Operations'
 import { useWalletStore } from '@/stores/walletStore'
 import { useToast } from '@/hooks/useToast'
 import { useCountdown } from 'usehooks-ts'
@@ -41,9 +44,20 @@ export default function ProgressPage() {
   const steps = getProgressSteps()
 
   const bridgeAmount = bridgeConfig.amount
-  // const bridgeAmount = '10'
 
-  // const { aztecAddress, metaMaskAddress } = useWalletStore()
+  // Refetch balances when bridge/withdrawal completes (show toast on progress page too)
+  const { refetch: refetchL1Balance } = useL1TokenBalances()
+  const { refetch: refetchL2Balance } = useL2TokenBalance()
+  const handleBridgeSuccess = useCallback(() => {
+    notify.promise(
+      Promise.all([refetchL1Balance(), refetchL2Balance()]),
+      {
+        pending: 'Refreshing L1 and L2 balances...',
+        success: 'Balances updated',
+        error: 'Failed to refresh balances',
+      }
+    )
+  }, [notify, refetchL1Balance, refetchL2Balance])
 
   // Bridge operations
   const {
@@ -52,14 +66,14 @@ export default function ProgressPage() {
     isSuccess: bridgeTokensToL2Success,
     isError: isBridgeTokensToL2Error,
     error: bridgeTokensToL2Error,
-  } = useL1BridgeToL2()
+  } = useL1BridgeToL2(handleBridgeSuccess)
 
   const {
     mutate: withdrawTokensToL1,
     isPending: withdrawTokensToL1Pending,
     isSuccess: withdrawTokensToL1Success,
     isError: withdrawTokensToL1Error,
-  } = useL2WithdrawTokensToL1()
+  } = useL2WithdrawTokensToL1(handleBridgeSuccess)
 
   // console.log({
   //   isBridgeTokensToL2Error,
@@ -82,6 +96,13 @@ export default function ProgressPage() {
       .toString()
       .padStart(2, '0')}`
   }
+
+  // Initial estimated time (full duration) as MM:SS – shown once complete
+  const totalEstimateSeconds =
+    direction === 'L1_TO_L2' ? L1_TO_L2_TIME : L2_TO_L1_TIME
+  const initialEstimateFormatted = `${Math.floor(totalEstimateSeconds / 60)
+    .toString()
+    .padStart(2, '0')}:${(totalEstimateSeconds % 60).toString().padStart(2, '0')}`
 
   // Calculate total time taken
   const totalTimeTaken = () => {
@@ -258,7 +279,9 @@ export default function ProgressPage() {
             <p className='text-14 font-medium text-latest-grey-100'>
               Estimated time{' '}
             </p>
-            <p className='font-semibold text-14'>~{formattedTime()}</p>
+            <p className='font-semibold text-14'>
+              ~{steps.every((step) => step.status === 'completed') ? initialEstimateFormatted : formattedTime()}
+            </p>
           </div>
           {steps.every((step) => step.status === 'completed') && (
             <div className='flex justify-between mt-[2px]'>

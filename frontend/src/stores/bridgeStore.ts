@@ -100,27 +100,25 @@ const initialStepState: StepState = {
   l2ToL1Steps: [
     {
       id: 1,
-      label: 'Setting up authorization for withdrawal',
+      label: 'Exiting from Aztec (auth to burn + exit)',
       status: 'pending' as const,
     },
     {
       id: 2,
-      label: 'Preparing withdrawal message',
+      label: 'Getting proof for withdrawal',
       status: 'pending' as const,
     },
-    { id: 3, label: 'Initiating exit to Ethereum', status: 'pending' as const },
+    {
+      id: 3,
+      label: 'Waiting for Ethereum confirmation',
+      status: 'pending' as const,
+    },
     {
       id: 4,
-      label: 'Getting proof for Ethereum withdrawal',
+      label: 'Withdrawing on Ethereum',
       status: 'pending' as const,
     },
-    {
-      id: 5,
-      label: 'Waiting for Ethereum confirmation (40 minutes)',
-      status: 'pending' as const,
-    },
-    { id: 6, label: 'Claiming tokens on Ethereum', status: 'pending' as const },
-    { id: 7, label: 'Withdrawal Complete', status: 'pending' as const },
+    { id: 5, label: 'Withdrawal complete', status: 'pending' as const },
   ],
 }
 

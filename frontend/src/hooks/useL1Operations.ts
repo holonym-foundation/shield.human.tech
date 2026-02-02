@@ -9,7 +9,7 @@ import { Fr } from '@aztec/aztec.js/fields'
 import { computeSecretHash } from '@aztec/aztec.js/crypto'
 import { useWalletAdapter } from './useWalletAdapter'
 import { ADDRESS, getAztecscanUrl, L2_CHAIN_ID, L2_TOKEN_METADATA } from '@/config'
-import { getL1ContractAddresses } from '@/utils/aztecHelpers'
+import { aztecNode } from '@/aztec'
 
 // Generate a claim secret and its hash
 async function generateClaimSecret(): Promise<[Fr, Fr]> {
@@ -575,17 +575,13 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
   const mutationFn = async (amount: bigint): Promise<string | undefined> => {
     try {
-      if (!l1Address || !aztecAddress || !aztecAccount?.aztecNode) {
-        console.log({
-          l1Address,
-          aztecAddress,
-          hasAztecNode: !!aztecAccount?.aztecNode,
-        })
+      if (!l1Address || !aztecAddress) {
+        console.log({ l1Address, aztecAddress })
         throw new Error('Required accounts not connected')
       }
 
-      // Get L1 contract addresses (needed for bridging)
-      const l1Addresses = await getL1ContractAddresses(aztecAccount)
+      const nodeInfo = await aztecNode.getNodeInfo()
+      const l1Addresses = nodeInfo?.l1ContractAddresses ?? null
       if (!l1Addresses?.outboxAddress) {
         throw new Error(
           'L1 contract addresses not initialized. Please wait for contract initialization to complete.'
@@ -773,67 +769,35 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       // Step 2: Waiting for L1-to-L2 message to be available
       setProgressStep(1, 'completed')
       setProgressStep(2, 'active')
-      console.log('Waiting for L1-to-L2 message to be available...')
-
-      // Poll for L1-to-L2 message sync status every 2 minutes
+      const messageHashFr = Fr.fromString(messageHash.toString())
+      const pollIntervalMs = 120_000 // 2 minutes
+      const maxWaitMs = 20 * 60 * 1000 // 20 min max
+      const startWait = Date.now()
       let messageSynced = false
-      let attempts = 0
-      const maxAttempts = 10 // Maximum 20 minutes of waiting
-      const pollInterval = 120000 // 2 minutes in milliseconds
 
-      while (!messageSynced && attempts < maxAttempts) {
+      console.log('[L1→L2] Polling for L1-to-L2 message sync (messageHash=', messageHash.toString(), ')...')
+      while (Date.now() - startWait < maxWaitMs) {
         try {
-          console.log(
-            `Checking L1-to-L2 message sync status (attempt ${
-              attempts + 1
-            }/${maxAttempts})...`,
-            {
-              messageHash: messageHash.toString(),
-              messageLeafIndex: messageLeafIndex.toString(),
-            }
-          )
-
-          // Create Fr from the message hash
-          const messageHashFr = Fr.fromString(messageHash.toString())
-
-          // Check if the L1-to-L2 message is synced
-          messageSynced = await aztecAccount?.aztecNode.isL1ToL2MessageSynced(
-            messageHashFr
-          )
-
+          const messageBlock = await aztecNode.getL1ToL2MessageBlock(messageHashFr)
+          messageSynced = messageBlock !== undefined
           if (messageSynced) {
-            console.log('L1-to-L2 message is ready for claiming')
+            console.log('[L1→L2] L1-to-L2 message ready (block=', messageBlock, '), proceeding.')
             break
-          } else {
-            console.log(
-              `L1-to-L2 message not yet synced, waiting ${
-                pollInterval / 1000
-              } seconds before next check...`
-            )
-            attempts++
-
-            if (attempts < maxAttempts) {
-              await wait(pollInterval)
-            }
           }
-        } catch (error) {
-          console.error(
-            `Error checking L1-to-L2 message sync (attempt ${attempts + 1}):`,
-            error
+          console.log(
+            '[L1→L2] L1-to-L2 message not yet synced. Waiting',
+            pollIntervalMs / 1000,
+            's...'
           )
-          attempts++
-
-          if (attempts < maxAttempts) {
-            console.log(`Retrying in ${pollInterval / 1000} seconds...`)
-            await wait(pollInterval)
-          }
+        } catch (error) {
+          console.warn('[L1→L2] Poll check failed, retrying:', error)
         }
+        await wait(pollIntervalMs)
       }
 
       if (!messageSynced) {
-        const errorMessage = `L1-to-L2 message sync timeout after ${maxAttempts} attempts (${
-          (maxAttempts * pollInterval) / 1000 / 60
-        } minutes)`
+        const elapsedMin = (Date.now() - startWait) / 1000 / 60
+        const errorMessage = `L1-to-L2 message sync timeout after ${elapsedMin.toFixed(1)} minutes`
         console.error(errorMessage)
 
         // Wallet information is already available from useWalletStore hook
@@ -851,17 +815,20 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           // Error details
           messageHash: messageHash.toString(),
           messageLeafIndex: messageLeafIndex.toString(),
-          attempts: maxAttempts,
-          totalWaitTime: (maxAttempts * pollInterval) / 1000 / 60,
+          elapsedMinutes: elapsedMin,
+          maxWaitMinutes: maxWaitMs / 1000 / 60,
           userAction: 'bridge_l1_to_l2_sync_timeout',
         })
 
         throw new Error(errorMessage)
       }
 
-      // Wait for the final poll interval before claiming
-      console.log('Waiting for the final poll interval before claiming...')
-      await wait(pollInterval)
+ 
+      // Longer final wait so the L1→L2 message is visible on the node Azguard uses for simulation
+      const finalWaitMs = 120_000 // 2 minutes (was 30s; reduces "nonexistent L1-to-L2 message" from node lag)
+      console.log('[L1→L2] Final wait before claiming (', finalWaitMs / 1000, 's)...')
+      await wait(pollIntervalMs)
+
 
       // Step 3: Claiming tokens on Aztec Network
       setProgressStep(2, 'completed')
@@ -1119,11 +1086,16 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
   return useMutation({
     mutationFn,
     onSuccess: (txHash) => {
-      console.log('Refetching balances after successful mint')
-      queryClient.invalidateQueries({ queryKey: [l1Address] })
-      queryClient.invalidateQueries({ queryKey: [aztecAddress] })
+      console.log('[L1→L2] Bridge mutation onSuccess', { txHash, hasOnBridgeSuccess: !!onBridgeSuccess })
+      // Refresh balances (L1→L2 bridge completed)
+      queryClient.invalidateQueries({ queryKey: ['l1TokenBalances', l1Address] })
+      queryClient.invalidateQueries({ queryKey: ['l1TokenBalance', l1Address] })
+      queryClient.invalidateQueries({
+        queryKey: ['l2TokenBalance', aztecAddress],
+      })
 
       if (onBridgeSuccess) {
+        console.log('[L1→L2] Calling onBridgeSuccess (handleBridgeSuccess)')
         onBridgeSuccess(txHash)
       }
     },

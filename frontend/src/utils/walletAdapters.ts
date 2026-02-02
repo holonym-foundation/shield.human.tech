@@ -19,7 +19,10 @@ import { ADDRESS, L2_CHAIN_ID, L2_CHAIN_KEY } from '@/config'
 import {
   executeAzguardCall,
   executeAzguardCallWithAuthWit,
+  executeAzguardWithdrawToL1Batch,
+  executeAzguardWithdrawToL1BatchPrivate,
   simulateAzguardView,
+  simulateAzguardViews,
   registerAzguardToken,
 } from './azguardHelpers'
 
@@ -124,6 +127,21 @@ class AzguardWalletAdapter {
     return { result }
   }
 
+  /**
+   * Simulate multiple view calls in one Azguard simulate_views request.
+   * Returns array of { result } in the same order as the calls.
+   */
+  async simulateViews(
+    calls: { contract: AztecAddress | string; method: string; args: any[] }[]
+  ): Promise<SimulateViewResult[]> {
+    const decoded = await simulateAzguardViews(
+      this.azguardClient,
+      this.account,
+      calls
+    )
+    return decoded.map((result) => ({ result }))
+  }
+
   async executeCall(
     contract: AztecAddress | string,
     method: string,
@@ -148,15 +166,65 @@ class AzguardWalletAdapter {
     method: string,
     args: any[]
   ): Promise<void> {
-    // For Azguard authwit: caller is bridge, contract is token
     await executeAzguardCallWithAuthWit(
       this.azguardClient,
       this.account,
-      bridgeContract, // caller
-      tokenContract, // contract
+      bridgeContract,
+      tokenContract,
       method,
       args
     )
+  }
+
+  /**
+   * Public withdrawal to L1 via Azguard: one send_transaction with
+   * [add_public_authwit (auth to burn + exit), call exit_to_l1_public].
+   */
+  async executeWithdrawToL1Public(
+    l1Address: string,
+    amount: bigint,
+    nonce: Fr,
+    userAddress?: AztecAddress | string
+  ): Promise<ExecuteCallResult> {
+    const user = userAddress ?? AztecAddress.fromString(this.account)
+    const txHash = await executeAzguardWithdrawToL1Batch(
+      this.azguardClient,
+      this.account,
+      user,
+      l1Address,
+      amount,
+      nonce,
+      this.bridgeAddress,
+      this.tokenAddress,
+      { autoRegister: true }
+    )
+    return { txHash }
+  }
+
+  /**
+   * Private withdrawal to L1 via Azguard: one send_transaction with
+   * [add_private_authwit (auth to burn_private + exit), call exit_to_l1_private].
+   * L1 message leaf and withdraw() call are the same as public (get_withdraw_content_hash).
+   */
+  async executeWithdrawToL1Private(
+    l1Address: string,
+    amount: bigint,
+    nonce: Fr,
+    userAddress?: AztecAddress | string
+  ): Promise<ExecuteCallResult> {
+    const user = userAddress ?? AztecAddress.fromString(this.account)
+    const txHash = await executeAzguardWithdrawToL1BatchPrivate(
+      this.azguardClient,
+      this.account,
+      user,
+      l1Address,
+      amount,
+      nonce,
+      this.bridgeAddress,
+      this.tokenAddress,
+      { autoRegister: true }
+    )
+    return { txHash }
   }
 
   async registerToken(tokenAddress: AztecAddress | string): Promise<void> {
