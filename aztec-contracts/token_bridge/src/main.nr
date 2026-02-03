@@ -59,56 +59,54 @@ pub contract TokenBridge {
         pending_owner: PublicMutable<AztecAddress, Context>,
         config: PublicImmutable<Config, Context>,
         // clean hands and passport verification vars
-        human_id_attester_pubkey: PublicImmutable<PubKey, Context>,
-        clean_hands_circuit_id: PublicImmutable<Field, Context>,
-        passport_signer_pubkey: PublicImmutable<PubKey, Context>,
+        human_id_attester_pubkey: DelayedPublicMutable<PubKey, 1, Context>,
+        clean_hands_circuit_id: DelayedPublicMutable<Field, 1, Context>,
+        passport_signer_pubkey: DelayedPublicMutable<PubKey, 1, Context>,
         // Mapping: user address => nonce => consumed status
-        passport_nonces: Map<AztecAddress, Map<Field, DelayedPublicMutable<bool, 2, Context>, Context>, Context>,
-        is_paused: DelayedPublicMutable<bool, 2, Context>,
+        passport_nonces: Map<AztecAddress, Map<Field, DelayedPublicMutable<bool, 1, Context>, Context>, Context>,
+        is_paused: DelayedPublicMutable<bool, 1, Context>,
     }
 
     // Constructs the contract.
     #[external("public")]
     #[initializer]
-    fn constructor(token_minter_proxy: AztecAddress, portal: EthAddress) {
+    fn constructor(
+        token_minter_proxy: AztecAddress,
+        portal: EthAddress,
+        human_id_attester_x: [u8; 32],
+        human_id_attester_y: [u8; 32],
+        circuit_id: Field,
+        passport_signer_x: [u8; 32],
+        passport_signer_y: [u8; 32],
+    ) {
         let sender = self.context.msg_sender().unwrap();
         self.storage.owner.write(sender);
         self.storage.config.initialize(Config { token_minter_proxy, portal });
-        self.storage.human_id_attester_pubkey.initialize(
-            PubKey {
-                x: [
-                    0xf5, 0x28, 0x5c, 0x98, 0xd2, 0x41, 0xf5, 0x97, 0x0a, 0xb6, 0x0f, 0x33, 0xe1,
-                    0x69, 0xff, 0x07, 0x8a, 0x37, 0x77, 0x62, 0x82, 0x51, 0x3f, 0x9c, 0x3c, 0x0c,
-                    0x07, 0xd1, 0x29, 0x32, 0x10, 0x4a,
-                ],
-                y: [
-                    0x4f, 0x14, 0xb8, 0x29, 0x78, 0x32, 0x38, 0x55, 0x84, 0xe8, 0xb3, 0xbb, 0xca,
-                    0x67, 0x55, 0xc3, 0xcb, 0x49, 0xf7, 0x97, 0xaa, 0x07, 0x7e, 0x76, 0x74, 0x83,
-                    0xdc, 0x79, 0xac, 0xf7, 0xbd, 0x1d,
-                ],
-            },
+        self.storage.human_id_attester_pubkey.schedule_value_change(
+            PubKey { x: human_id_attester_x, y: human_id_attester_y },
         );
-        self.storage.clean_hands_circuit_id.initialize(
-            0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19,
-        );
+        self.storage.clean_hands_circuit_id.schedule_value_change(circuit_id);
         // ADDRESS MUST BE SET PRIOR TO DEPLOYMENT
-        self.storage.passport_signer_pubkey.initialize(
-            PubKey {
-                x: [
-                    0xc5, 0x5a, 0x7d, 0x84, 0x6b, 0x74, 0x63, 0xf1, 0x22, 0x6c, 0x3b, 0x77, 0xe7,
-                    0x44, 0x60, 0xbb, 0x05, 0x93, 0x79, 0xca, 0xf5, 0x1f, 0xa1, 0xa0, 0xe2, 0x75,
-                    0x34, 0x3b, 0xd3, 0xa1, 0x25, 0x6e,
-                ],
-                y: [
-                    0x01, 0x47, 0x2a, 0x2b, 0xa7, 0xc0, 0xad, 0x2a, 0x30, 0xfb, 0x84, 0x16, 0x92,
-                    0x9a, 0xcc, 0xd4, 0xbe, 0x04, 0xf6, 0x07, 0x55, 0x3f, 0x26, 0xfd, 0x7c, 0x03,
-                    0x67, 0x9a, 0x32, 0xc8, 0x1a, 0xa3,
-                ],
-            },
+        self.storage.passport_signer_pubkey.schedule_value_change(
+            PubKey { x: passport_signer_x, y: passport_signer_y },
         );
         self.storage.is_paused.schedule_value_change(false);
     }
 
+    #[external("public")]
+    fn update_attestation_config(
+        attester_x: [u8; 32],
+        attester_y: [u8; 32],
+        circuit_id: Field,
+        passport_x: [u8; 32],
+        passport_y: [u8; 32],
+    ) {
+        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+
+        self.storage.human_id_attester_pubkey.schedule_value_change(PubKey { x: attester_x, y: attester_y });
+        self.storage.clean_hands_circuit_id.schedule_value_change(circuit_id);
+        self.storage.passport_signer_pubkey.schedule_value_change(PubKey { x: passport_x, y: passport_y });
+    }
     #[external("public")]
     fn transfer_ownership(new_owner: AztecAddress) {
         assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
@@ -116,7 +114,12 @@ pub contract TokenBridge {
 
         self.storage.pending_owner.write(new_owner);
     }
-
+    #[external("public")]
+    fn cancel_ownership_transfer() {
+        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+        assert(!self.storage.pending_owner.read().is_zero(), "No pending owner");
+        self.storage.pending_owner.write(AztecAddress::zero());
+    }
     #[external("public")]
     fn claim_ownership() {
         let sender = self.context.msg_sender().unwrap();
@@ -147,11 +150,11 @@ pub contract TokenBridge {
         self.storage.config.read()
     }
 
-    // docs:start:claim_public
     // Consumes a L1->L2 message and calls the token contract to mint the appropriate amount publicly
     #[external("public")]
     fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field) {
         assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        assert(amount > 0, "Amount must be greater than zero");
         let content_hash = get_mint_to_public_content_hash(to, amount);
 
         let config = self.storage.config.read();
@@ -167,9 +170,7 @@ pub contract TokenBridge {
         // Mint tokens
         self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_public(to, amount));
     }
-    // docs:end:claim_public
 
-    // docs:start:exit_to_l1_public
     // Burns the appropriate amount of tokens and creates a L2 to L1 withdraw message publicly
     // Requires `msg.sender` to give approval to the bridge to burn tokens on their behalf using witness signatures
     #[external("public")]
@@ -180,6 +181,7 @@ pub contract TokenBridge {
         authwit_nonce: Field, // nonce used in the approval message by `msg.sender` to let bridge burn their tokens on L2
     ) {
         assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
 
         // Send an L2 to L1 message
@@ -193,7 +195,6 @@ pub contract TokenBridge {
             authwit_nonce,
         ));
     }
-    // docs:end:exit_to_l1_public
 
     /// Claims the bridged tokens and makes them accessible in private. Note that recipient's address is not revealed
     /// but the amount is. Hence it's most likely possible to determine to which L1 deposit this claim corresponds to
@@ -206,6 +207,7 @@ pub contract TokenBridge {
         message_leaf_index: Field,
     ) {
         assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
 
         // Consume L1 to L2 message and emit nullifier
@@ -230,7 +232,7 @@ pub contract TokenBridge {
         let mut message_bytes: [u8; 84] = [0; 84];
 
         // Add circuit_id (32 bytes)
-        let circuit_id_bytes = self.storage.clean_hands_circuit_id.read().to_be_bytes::<32>();
+        let circuit_id_bytes = self.storage.clean_hands_circuit_id.get_current_value().to_be_bytes::<32>();
         for i in 0..32 {
             message_bytes[i] = circuit_id_bytes[i];
         }
@@ -265,7 +267,7 @@ pub contract TokenBridge {
 
         let personal_sign_hash = keccak256(eth_message, 60);
 
-        let attestor_pubkey = self.storage.human_id_attester_pubkey.read();
+        let attestor_pubkey = self.storage.human_id_attester_pubkey.get_current_value();
 
         verify_signature(
             attestor_pubkey.x,
@@ -338,7 +340,7 @@ pub contract TokenBridge {
 
         let personal_sign_hash = keccak256(eth_message, 60);
 
-        let signer_pubkey = self.storage.passport_signer_pubkey.read();
+        let signer_pubkey = self.storage.passport_signer_pubkey.get_current_value();
 
         verify_signature(
             signer_pubkey.x,
@@ -352,11 +354,9 @@ pub contract TokenBridge {
     #[external("public")]
     #[only_self]
     fn _consume_passport_nonce_public(user: AztecAddress, nonce: Field) {
-        // This should ideally verify the caller, but for simplicity we'll just mark it used
         self.storage.passport_nonces.at(user).at(nonce).schedule_value_change(true);
     }
 
-    // docs:start:exit_to_l1_private
     // Burns the appropriate amount of tokens and creates a L2 to L1 withdraw message privately
     // Requires `msg.sender` (caller of the method) to give approval to the bridge to burn tokens on their behalf using witness signatures
     #[external("private")]
@@ -369,6 +369,7 @@ pub contract TokenBridge {
         passport: PassportData,
     ) {
         assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
         let sender = self.context.msg_sender().unwrap();
 
@@ -419,5 +420,4 @@ pub contract TokenBridge {
             authwit_nonce,
         ));
     }
-    // docs:end:exit_to_l1_private
 }

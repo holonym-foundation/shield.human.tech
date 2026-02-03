@@ -29,6 +29,7 @@ error PassportNonceUsed();
 error InvalidPassportSignature();
 error AmountExceedsLimit();
 error Unauthorized();
+error NoPendingOwner();
 
 /**
  * @title TokenPortal
@@ -68,10 +69,9 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     bytes32 public l2Bridge;
     uint256 public rollupVersion;
     // Attestation Config
-    address public humanIdAttester = 0xa74772264f896843c6346ceA9B13e0128A1d3b5D;
-    uint256 public cleanHandsCircuitId =
-        0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19;
-    address public passportSigner = 0xEa7D467E12B199E7D94EE7bda32335a0f9248315;
+    address public humanIdAttester;
+    uint256 public cleanHandsCircuitId;
+    address public passportSigner;
 
     mapping(address => mapping(uint256 => bool)) public passportNonces;
 
@@ -109,13 +109,38 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         address indexed to,
         uint256 amount
     );
-
+    event AttestationConfigUpdated(
+        address attester,
+        uint256 circuitId,
+        address signer
+    );
+    event OwnershipTransferProposed(
+        address indexed previousOwner,
+        address indexed newOwner
+    );
+    event OwnershipTransferCancelled(address indexed currentOwner);
     // =============================================================
     // CONSTRUCTOR / INITIALIZER
     // =============================================================
 
-    constructor() Ownable(msg.sender) {
-        DEPLOYER = msg.sender;
+    constructor(
+        address _initialOwner,
+        address _feeRecipient,
+        uint256 _feeBasisPoints,
+        address _humanIdAttester,
+        uint256 _cleanHandsCircuitId,
+        address _passportSigner
+    ) Ownable(_initialOwner) {
+        DEPLOYER = _msgSender();
+
+        if (_feeRecipient == address(0)) revert InvalidAddress();
+        if (_feeBasisPoints > MAX_FEE_BASIS_POINTS) revert FeeTooHigh();
+
+        feeRecipient = _feeRecipient;
+        feeBasisPoints = _feeBasisPoints;
+        humanIdAttester = _humanIdAttester;
+        cleanHandsCircuitId = _cleanHandsCircuitId;
+        passportSigner = _passportSigner;
     }
 
     function initialize(
@@ -123,7 +148,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         address _underlying,
         bytes32 _l2Bridge
     ) external {
-        if (msg.sender != DEPLOYER) revert Unauthorized();
+        if (_msgSender() != DEPLOYER) revert Unauthorized();
         if (address(registry) != address(0)) revert AlreadyInitialized();
         if (_registry == address(0) || _underlying == address(0))
             revert InvalidAddress();
@@ -137,9 +162,6 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         inbox = rollup.getInbox();
         rollupVersion = rollup.getVersion();
 
-        feeRecipient = owner();
-        feeBasisPoints = 10; // 0.1%
-
         emit Initialized(_registry, _underlying, _l2Bridge);
     }
 
@@ -152,6 +174,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         uint256 _amount,
         bytes32 _secretHash
     ) external whenNotPaused nonReentrant returns (bytes32, uint256) {
+        require(_amount > 0, "Amount must be greater than zero");
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
 
@@ -167,7 +190,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
             )
         );
 
-        underlying.safeTransferFrom(msg.sender, address(this), _amount);
+        underlying.safeTransferFrom(_msgSender(), address(this), _amount);
         collectedFees += fee;
 
         (bytes32 key, uint256 index) = inbox.sendL2Message(
@@ -193,6 +216,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
     ) external whenNotPaused nonReentrant returns (bytes32, uint256) {
+        require(_amount > 0, "Amount must be greater than zero");
         _validatePrivateAttestations(_amount, _cleanHands, _passport);
 
         uint256 fee = calculateFee(_amount);
@@ -206,7 +230,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
             abi.encodeWithSignature("mint_to_private(uint256)", amountAfterFee)
         );
 
-        underlying.safeTransferFrom(msg.sender, address(this), _amount);
+        underlying.safeTransferFrom(_msgSender(), address(this), _amount);
         collectedFees += fee;
 
         (bytes32 key, uint256 index) = inbox.sendL2Message(
@@ -233,6 +257,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         uint256 _leafIndex,
         bytes32[] calldata _path
     ) external whenNotPaused nonReentrant {
+        require(_amount > 0, "Amount must be greater than zero");
         DataStructures.L2ToL1Msg memory message = DataStructures.L2ToL1Msg({
             sender: DataStructures.L2Actor(l2Bridge, rollupVersion),
             recipient: DataStructures.L1Actor(address(this), block.chainid),
@@ -241,7 +266,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
                     "withdraw(address,uint256,address)",
                     _recipient,
                     _amount,
-                    _withCaller ? msg.sender : address(0)
+                    _withCaller ? _msgSender() : address(0)
                 )
             )
         });
@@ -264,6 +289,17 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     }
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    function updateAttestationConfig(
+        address _attester,
+        uint256 _circuitId,
+        address _signer
+    ) external onlyOwner {
+        humanIdAttester = _attester;
+        cleanHandsCircuitId = _circuitId;
+        passportSigner = _signer;
+        emit AttestationConfigUpdated(_attester, _circuitId, _signer);
     }
 
     function updateFee(uint256 _newFeeBasisPoints) external onlyOwner {
@@ -309,7 +345,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
             verified = verifyCleanHandsSignature(
                 cleanHandsCircuitId,
                 _cleanHands.actionId,
-                msg.sender,
+                _msgSender(),
                 _cleanHands.signature
             );
         }
@@ -317,7 +353,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         // 2. Fallback to Passport Verification
         if (!verified) {
             if (_passport.signature.length == 0) revert InvalidVerification();
-            if (passportNonces[msg.sender][_passport.nonce])
+            if (passportNonces[_msgSender()][_passport.nonce])
                 revert PassportNonceUsed();
             if (
                 !verifyPassportSignature(
@@ -331,7 +367,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
             }
             if (_amount > _passport.maxAmount) revert AmountExceedsLimit();
 
-            passportNonces[msg.sender][_passport.nonce] = true;
+            passportNonces[_msgSender()][_passport.nonce] = true;
         }
     }
 
@@ -364,7 +400,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         if (block.timestamp > deadline) return false;
         bytes32 messageHash = keccak256(
             abi.encodePacked(
-                msg.sender,
+                _msgSender(),
                 maxAmount,
                 nonce,
                 deadline,
@@ -393,5 +429,30 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
     function getFeeRecipient() external view returns (address) {
         return feeRecipient;
+    }
+
+    // =============================================================
+    // OWNERSHIP 2-STEP (CUSTOM OVERRIDES)
+    // =============================================================
+
+    function proposeOwnershipTransfer(address newOwner) public onlyOwner {
+        if (newOwner == address(0)) revert InvalidAddress();
+
+        address previousOwner = owner();
+        _transferOwnership(newOwner); // This sets pendingOwner, requires acceptOwnership() to complete
+        emit OwnershipTransferProposed(previousOwner, newOwner);
+    }
+
+    function cancelOwnershipTransfer() public onlyOwner {
+        address pendingOwnerAddress = pendingOwner();
+        if (pendingOwnerAddress == address(0)) revert NoPendingOwner();
+
+        // Cancel by transferring ownership back to current owner (self)
+        _transferOwnership(owner());
+        emit OwnershipTransferCancelled(owner());
+    }
+
+    function acceptOwnership() public override {
+        super.acceptOwnership();
     }
 }

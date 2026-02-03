@@ -16,7 +16,7 @@ pub contract TokenMinterProxy {
     struct Storage<Context> {
         owner: PublicImmutable<AztecAddress, Context>,
         token: PublicImmutable<AztecAddress, Context>,
-        can_mint: Map<AztecAddress, DelayedPublicMutable<bool, 2, Context>, Context>,
+        can_mint: Map<AztecAddress, DelayedPublicMutable<bool, 1, Context>, Context>,
     }
 
     #[external("public")]
