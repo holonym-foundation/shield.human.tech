@@ -26,6 +26,7 @@ error FeeTooHigh();
 error NoFeesToWithdraw();
 error InvalidVerification();
 error PassportNonceUsed();
+error CleanHandsNonceUsed();
 error InvalidPassportSignature();
 error AmountExceedsLimit();
 error Unauthorized();
@@ -50,6 +51,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     }
 
     struct CleanHandsData {
+        uint256 nonce;
         uint256 actionId;
         bytes signature;
     }
@@ -74,6 +76,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     address public passportSigner;
 
     mapping(address => mapping(uint256 => bool)) public passportNonces;
+    mapping(address => mapping(uint256 => bool)) public cleanHandsNonces;
 
     // Fee Management
     uint256 public feeBasisPoints;
@@ -342,12 +345,16 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
         // 1. Try Clean Hands Verification
         if (_cleanHands.signature.length > 0) {
+            if (cleanHandsNonces[_msgSender()][_cleanHands.nonce])
+                revert CleanHandsNonceUsed();
             verified = verifyCleanHandsSignature(
+                _cleanHands.nonce,
                 cleanHandsCircuitId,
                 _cleanHands.actionId,
                 _msgSender(),
                 _cleanHands.signature
             );
+            cleanHandsNonces[_msgSender()][_cleanHands.nonce] = true;
         }
 
         // 2. Fallback to Passport Verification
@@ -372,13 +379,14 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     }
 
     function verifyCleanHandsSignature(
+        uint256 nonce,
         uint256 circuitId,
         uint256 actionId,
         address userAddress,
         bytes memory signature
     ) public view returns (bool) {
         bytes32 digest = keccak256(
-            abi.encodePacked(circuitId, actionId, userAddress)
+            abi.encodePacked(nonce, circuitId, actionId, userAddress)
         );
         bytes32 personalSignPreimage = keccak256(
             abi.encodePacked("\x19Ethereum Signed Message:\n32", digest)
@@ -439,7 +447,8 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         if (newOwner == address(0)) revert InvalidAddress();
 
         address previousOwner = owner();
-        _transferOwnership(newOwner); // This sets pendingOwner, requires acceptOwnership() to complete
+        // this is the main function that goes through the 2-step process
+        transferOwnership(newOwner); // This sets pendingOwner, requires acceptOwnership() to complete
         emit OwnershipTransferProposed(previousOwner, newOwner);
     }
 
@@ -448,6 +457,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         if (pendingOwnerAddress == address(0)) revert NoPendingOwner();
 
         // Cancel by transferring ownership back to current owner (self)
+        // this is the internal function that directly transfers the ownership BYPASSING the 2-step process
         _transferOwnership(owner());
         emit OwnershipTransferCancelled(owner());
     }
