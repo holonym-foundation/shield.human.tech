@@ -1,179 +1,59 @@
-use crate::Token;
-use dep::uint_note::uint_note::UintNote;
+use crate::TokenBridge;
+
 use aztec::{
-    oracle::{execution::{get_block_number, get_contract_address}, storage::storage_read},
-    prelude::AztecAddress,
-    protocol_types::storage::map::derive_storage_slot_in_map,
-    test::helpers::{cheatcodes, test_environment::TestEnvironment},
+    protocol_types::{
+        address::{AztecAddress, EthAddress},
+        traits::FromField,
+    },
+    test::helpers::test_environment::TestEnvironment,
 };
 
-pub unconstrained fn setup(
-    with_account_contracts: bool,
-) -> (&mut TestEnvironment, AztecAddress, AztecAddress, AztecAddress) {
-    // Setup env, generate keys
+pub global DUMMY_PORTAL: EthAddress = EthAddress::from_field(0xdead);
+
+pub global DUMMY_ATTESTER_X: [u8; 32] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    26, 27, 28, 29, 30, 31, 32,
+];
+pub global DUMMY_ATTESTER_Y: [u8; 32] = [
+    33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+    56, 57, 58, 59, 60, 61, 62, 63, 64,
+];
+pub global DUMMY_PASSPORT_X: [u8; 32] = [
+    65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87,
+    88, 89, 90, 91, 92, 93, 94, 95, 96,
+];
+pub global DUMMY_PASSPORT_Y: [u8; 32] = [
+    97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115,
+    116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
+];
+pub global DUMMY_CIRCUIT_ID: Field = 42;
+
+pub unconstrained fn setup() -> (TestEnvironment, AztecAddress, AztecAddress, AztecAddress, AztecAddress) {
     let mut env = TestEnvironment::new();
-    let (owner, recipient) = if with_account_contracts {
-        let owner = env.create_account_contract(1);
-        let recipient = env.create_account_contract(2);
-        (owner, recipient)
-    } else {
-        let owner = env.create_account(1);
-        let recipient = env.create_account(2);
-        (owner, recipient)
-    };
 
-    // Start the test in the account contract address
-    env.impersonate(owner);
+    let owner = env.create_light_account();
+    let other = env.create_light_account();
 
-    // Deploy token contract
-    let initializer_call_interface = Token::interface().constructor(
-        owner,
-        "TestToken0000000000000000000000",
-        "TT00000000000000000000000000000",
-        18,
-    );
-    let token_contract =
-        env.deploy_self("Token").with_public_void_initializer(owner, initializer_call_interface);
-    let token_contract_address = token_contract.to_address();
-    env.advance_block_by(1);
-    (&mut env, token_contract_address, owner, recipient)
-}
+    // Use a dummy address for the token minter proxy
+    let dummy_proxy = AztecAddress::from_field(0xbeef);
 
-pub unconstrained fn setup_and_mint_to_public(
-    with_account_contracts: bool,
-) -> (&mut TestEnvironment, AztecAddress, AztecAddress, AztecAddress, u128) {
-    // Setup
-    let (env, token_contract_address, owner, recipient) = setup(with_account_contracts);
-    let mint_amount = 10000 as u128;
-    // Mint some tokens
-    Token::at(token_contract_address).mint_to_public(owner, mint_amount).call(&mut env.public());
-
-    (env, token_contract_address, owner, recipient, mint_amount)
-}
-
-pub unconstrained fn setup_and_mint_amount_to_private(
-    with_account_contracts: bool,
-    mint_amount: u128,
-) -> (&mut TestEnvironment, AztecAddress, AztecAddress, AztecAddress, u128) {
-    // Setup the tokens and mint public balance
-    let (env, token_contract_address, owner, recipient) = setup(with_account_contracts);
-
-    // Mint some tokens
-    mint_to_private(env, token_contract_address, owner, mint_amount);
-
-    (env, token_contract_address, owner, recipient, mint_amount)
-}
-
-pub unconstrained fn setup_and_mint_to_private(
-    with_account_contracts: bool,
-) -> (&mut TestEnvironment, AztecAddress, AztecAddress, AztecAddress, u128) {
-    let mint_amount = 10000 as u128;
-    setup_and_mint_amount_to_private(with_account_contracts, mint_amount)
-}
-
-pub unconstrained fn mint_to_private(
-    env: &mut TestEnvironment,
-    token_contract_address: AztecAddress,
-    recipient: AztecAddress,
-    amount: u128,
-) {
-    let from = recipient; // we are setting from to recipient because we need to compute the tag
-    Token::at(token_contract_address).mint_to_private(from, recipient, amount).call(
-        &mut env.private(),
+    let initializer = TokenBridge::interface().constructor(
+        dummy_proxy,
+        DUMMY_PORTAL,
+        DUMMY_ATTESTER_X,
+        DUMMY_ATTESTER_Y,
+        DUMMY_CIRCUIT_ID,
+        DUMMY_PASSPORT_X,
+        DUMMY_PASSPORT_Y,
     );
 
-    env.advance_block_by(1);
-}
+    let bridge_address =
+        env.deploy("TokenBridge").with_public_initializer(owner, initializer);
 
-// docs:start:txe_test_read_public
-pub unconstrained fn check_public_balance(
-    token_contract_address: AztecAddress,
-    address: AztecAddress,
-    address_amount: u128,
-) {
-    let current_contract_address = get_contract_address();
-    cheatcodes::set_contract_address(token_contract_address);
-    let block_number = get_block_number();
+    // Advance time past the DelayedPublicMutable delay (delay=1 second) so initial values become active.
+    // The constructor schedules values; we need to mine a block at a timestamp past the change point.
+    let advance_timestamp = env.last_block_timestamp() + 2;
+    env.mine_block_at(advance_timestamp);
 
-    let balances_slot = Token::storage_layout().public_balances.slot;
-    let address_slot = derive_storage_slot_in_map(balances_slot, address);
-    let amount: u128 = storage_read(token_contract_address, address_slot, block_number);
-    assert(amount == address_amount, "Public balance is not correct");
-    cheatcodes::set_contract_address(current_contract_address);
-}
-// docs:end:txe_test_read_public
-
-pub unconstrained fn get_public_balance(
-    token_contract_address: AztecAddress,
-    address: AztecAddress,
-) -> u128 {
-    let current_contract_address = get_contract_address();
-    cheatcodes::set_contract_address(token_contract_address);
-    let block_number = get_block_number();
-
-    let balances_slot = Token::storage_layout().public_balances.slot;
-    let address_slot = derive_storage_slot_in_map(balances_slot, address);
-    let amount: u128 = storage_read(token_contract_address, address_slot, block_number);
-    cheatcodes::set_contract_address(current_contract_address);
-    amount
-}
-
-pub unconstrained fn check_total_supply(
-    token_contract_address: AztecAddress,
-    expected_total_supply: u128,
-) {
-    let current_contract_address = get_contract_address();
-    cheatcodes::set_contract_address(token_contract_address);
-    let block_number = get_block_number();
-
-    let total_supply_slot = Token::storage_layout().total_supply.slot;
-    let total_supply: u128 = storage_read(token_contract_address, total_supply_slot, block_number);
-    assert(total_supply == expected_total_supply, "Total supply is not correct");
-    cheatcodes::set_contract_address(current_contract_address);
-}
-
-// docs:start:txe_test_call_utility
-pub unconstrained fn check_private_balance(
-    token_contract_address: AztecAddress,
-    address: AztecAddress,
-    address_amount: u128,
-) {
-    let current_contract_address = get_contract_address();
-    cheatcodes::set_contract_address(token_contract_address);
-    // Direct call to a utility function
-    let balance_of_private = Token::balance_of_private(address);
-    assert(balance_of_private == address_amount, "Private balance is not correct");
-    cheatcodes::set_contract_address(current_contract_address);
-}
-// docs:end:txe_test_call_utility
-
-pub unconstrained fn get_private_balance(
-    token_contract_address: AztecAddress,
-    address: AztecAddress,
-) -> u128 {
-    let current_contract_address = get_contract_address();
-    cheatcodes::set_contract_address(token_contract_address);
-    let amt = Token::balance_of_private(address);
-    cheatcodes::set_contract_address(current_contract_address);
-    amt
-}
-
-// This is used if we need to add a token note manually, in the case where the note is not emitted in logs.
-pub unconstrained fn add_token_note(
-    env: &mut TestEnvironment,
-    token_contract_address: AztecAddress,
-    owner: AztecAddress,
-    amount: u128,
-    note_randomness: Field,
-) {
-    // docs:start:txe_test_add_note
-    let balances_owner_slot =
-        derive_storage_slot_in_map(Token::storage_layout().balances.slot, owner);
-
-    env.add_note(
-        UintNote { value: amount, owner: owner, randomness: note_randomness },
-        balances_owner_slot,
-        token_contract_address,
-    );
-    // docs:end:txe_test_add_note
+    (env, bridge_address, owner, other, dummy_proxy)
 }
