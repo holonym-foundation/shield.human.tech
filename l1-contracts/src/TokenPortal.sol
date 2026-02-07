@@ -1,162 +1,375 @@
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.27;
 
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@oz/token/ERC20/utils/SafeERC20.sol";
+import {ECDSA} from "@oz/utils/cryptography/ECDSA.sol";
+import {Pausable} from "@oz/utils/Pausable.sol";
+import {ReentrancyGuard} from "@oz/utils/ReentrancyGuard.sol";
+import {Ownable2Step, Ownable} from "@oz/access/Ownable2Step.sol";
 
-// Messaging
+// Aztec Messaging Interfaces
 import {IRegistry} from "@aztec/governance/interfaces/IRegistry.sol";
 import {IInbox} from "@aztec/core/interfaces/messagebridge/IInbox.sol";
 import {IOutbox} from "@aztec/core/interfaces/messagebridge/IOutbox.sol";
 import {IRollup} from "@aztec/core/interfaces/IRollup.sol";
 import {DataStructures} from "@aztec/core/libraries/DataStructures.sol";
-// docs:start:content_hash_sol_import
 import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
-// docs:end:content_hash_sol_import
 
-contract TokenPortal {
-  using SafeERC20 for IERC20;
+// =============================================================
+// CUSTOM ERRORS
+// =============================================================
 
-  event DepositToAztecPublic(
-    bytes32 to, uint256 amount, bytes32 secretHash, bytes32 key, uint256 index
-  );
+error AlreadyInitialized();
+error InvalidAddress();
+error FeeTooHigh();
+error NoFeesToWithdraw();
+error InvalidVerification();
+error PassportNonceUsed();
+error CleanHandsNonceUsed();
+error InvalidPassportSignature();
+error AmountExceedsLimit();
+error Unauthorized();
+error NoPendingOwner();
 
-  event DepositToAztecPrivate(
-    uint256 amount, bytes32 secretHashForL2MessageConsumption, bytes32 key, uint256 index
-  );
+/**
+ * @title TokenPortal
+ * @dev Manages L1/L2 token transfers between Ethereum and Aztec with fee logic and attestation checks.
+ */
+contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
+    using SafeERC20 for IERC20;
 
-  IRegistry public registry;
-  IERC20 public underlying;
-  bytes32 public l2Bridge;
+    // =============================================================
+    // DATA STRUCTURES
+    // =============================================================
 
-  IRollup public rollup;
-  IOutbox public outbox;
-  IInbox public inbox;
-  uint256 public rollupVersion;
+    struct PassportData {
+        uint256 maxAmount;
+        uint256 nonce;
+        uint256 deadline;
+        bytes signature;
+    }
 
-  /**
-   * @notice Initialize the portal
-   * @param _registry - The registry address
-   * @param _underlying - The underlying token address
-   * @param _l2Bridge - The L2 bridge address
-   */
-  // docs:start:init
-  function initialize(address _registry, address _underlying, bytes32 _l2Bridge) external {
-    registry = IRegistry(_registry);
-    underlying = IERC20(_underlying);
-    l2Bridge = _l2Bridge;
+    struct CleanHandsData {
+        uint256 nonce;
+        uint256 actionId;
+        bytes signature;
+    }
 
-    rollup = IRollup(registry.getCanonicalRollup());
-    outbox = rollup.getOutbox();
-    inbox = rollup.getInbox();
-    rollupVersion = rollup.getVersion();
-  }
-  // docs:end:init
+    // =============================================================
+    // STATE VARIABLES
+    // =============================================================
 
-  // docs:start:deposit_public
-  /**
-   * @notice Deposit funds into the portal and adds an L2 message which can only be consumed publicly on Aztec
-   * @param _to - The aztec address of the recipient
-   * @param _amount - The amount to deposit
-   * @param _secretHash - The hash of the secret consumable message. The hash should be 254 bits (so it can fit in a Field element)
-   * @return The key of the entry in the Inbox and its leaf index
-   */
-  function depositToAztecPublic(bytes32 _to, uint256 _amount, bytes32 _secretHash)
-    external
-    returns (bytes32, uint256)
-  // docs:end:deposit_public
-  {
-    // Preamble
-    DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+    address private immutable DEPLOYER;
 
-    // Hash the message content to be reconstructed in the receiving contract
-    // The purpose of including the function selector is to make the message unique to that specific call. Note that
-    // it has nothing to do with calling the function.
-    bytes32 contentHash =
-      Hash.sha256ToField(abi.encodeWithSignature("mint_to_public(bytes32,uint256)", _to, _amount));
+    // Aztec Infrastructure
+    IRegistry public registry;
+    IERC20 public underlying;
+    IRollup public rollup;
+    IOutbox public outbox;
+    IInbox public inbox;
+    bytes32 public l2Bridge;
+    uint256 public rollupVersion;
+    // Attestation Config
+    address public humanIdAttester;
+    uint256 public cleanHandsCircuitId;
+    address public passportSigner;
 
-    // Hold the tokens in the portal
-    underlying.safeTransferFrom(msg.sender, address(this), _amount);
+    mapping(address => mapping(uint256 => bool)) public passportNonces;
+    mapping(address => mapping(uint256 => bool)) public cleanHandsNonces;
 
-    // Send message to rollup
-    (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHash);
+    // Fee Management
+    uint256 public feeBasisPoints;
+    uint256 public constant MAX_FEE_BASIS_POINTS = 1000; // 10%
+    address public feeRecipient;
+    uint256 public collectedFees;
 
-    // Emit event
-    emit DepositToAztecPublic(_to, _amount, _secretHash, key, index);
+    // =============================================================
+    // EVENTS
+    // =============================================================
 
-    return (key, index);
-  }
+    event Initialized(address registry, address underlying, bytes32 l2Bridge);
+    event DepositToAztecPublic(
+        bytes32 indexed to, uint256 amount, uint256 fee, bytes32 secretHash, bytes32 key, uint256 index
+    );
+    event DepositToAztecPrivate(uint256 amount, uint256 fee, bytes32 secretHash, bytes32 key, uint256 index);
+    event FeeUpdated(uint256 newFeeBasisPoints);
+    event FeeRecipientUpdated(address indexed newFeeRecipient);
+    event FeesWithdrawn(address indexed recipient, uint256 amount);
+    event TokensRescued(address indexed token, address indexed to, uint256 amount);
+    event AttestationConfigUpdated(address attester, uint256 circuitId, address signer);
+    event OwnershipTransferProposed(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferCancelled(address indexed currentOwner);
+    // =============================================================
+    // CONSTRUCTOR / INITIALIZER
+    // =============================================================
 
-  // docs:start:deposit_private
-  /**
-   * @notice Deposit funds into the portal and adds an L2 message which can only be consumed privately on Aztec
-   * @param _amount - The amount to deposit
-   * @param _secretHashForL2MessageConsumption - The hash of the secret consumable L1 to L2 message. The hash should be 254 bits (so it can fit in a Field element)
-   * @return The key of the entry in the Inbox and its leaf index
-   */
-  function depositToAztecPrivate(uint256 _amount, bytes32 _secretHashForL2MessageConsumption)
-    external
-    returns (bytes32, uint256)
-  // docs:end:deposit_private
-  {
-    // Preamble
-    DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+    constructor(
+        address _initialOwner,
+        address _feeRecipient,
+        uint256 _feeBasisPoints,
+        address _humanIdAttester,
+        uint256 _cleanHandsCircuitId,
+        address _passportSigner
+    ) Ownable(_initialOwner) {
+        DEPLOYER = _msgSender();
 
-    // Hash the message content to be reconstructed in the receiving contract - the signature below does not correspond
-    // to a real function. It's just an identifier of an action.
-    bytes32 contentHash =
-      Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256)", _amount));
+        if (_feeRecipient == address(0)) revert InvalidAddress();
+        if (_feeBasisPoints > MAX_FEE_BASIS_POINTS) revert FeeTooHigh();
 
-    // Hold the tokens in the portal
-    underlying.safeTransferFrom(msg.sender, address(this), _amount);
+        feeRecipient = _feeRecipient;
+        feeBasisPoints = _feeBasisPoints;
+        humanIdAttester = _humanIdAttester;
+        cleanHandsCircuitId = _cleanHandsCircuitId;
+        passportSigner = _passportSigner;
+    }
 
-    // Send message to rollup
-    (bytes32 key, uint256 index) =
-      inbox.sendL2Message(actor, contentHash, _secretHashForL2MessageConsumption);
+    function initialize(address _registry, address _underlying, bytes32 _l2Bridge) external {
+        if (_msgSender() != DEPLOYER) revert Unauthorized();
+        if (address(registry) != address(0)) revert AlreadyInitialized();
+        if (_registry == address(0) || _underlying == address(0)) {
+            revert InvalidAddress();
+        }
 
-    // Emit event
-    emit DepositToAztecPrivate(_amount, _secretHashForL2MessageConsumption, key, index);
+        registry = IRegistry(_registry);
+        underlying = IERC20(_underlying);
+        l2Bridge = _l2Bridge;
 
-    return (key, index);
-  }
+        rollup = IRollup(address(registry.getCanonicalRollup()));
+        outbox = rollup.getOutbox();
+        inbox = rollup.getInbox();
+        rollupVersion = rollup.getVersion();
 
-  // docs:start:token_portal_withdraw
-  /**
-   * @notice Withdraw funds from the portal
-   * @dev Second part of withdraw, must be initiated from L2 first as it will consume a message from outbox
-   * @param _recipient - The address to send the funds to
-   * @param _amount - The amount to withdraw
-   * @param _withCaller - Flag to use `msg.sender` as caller, otherwise address(0)
-   * @param _l2BlockNumber - The address to send the funds to
-   * @param _leafIndex - The amount to withdraw
-   * @param _path - Flag to use `msg.sender` as caller, otherwise address(0)
-   * Must match the caller of the message (specified from L2) to consume it.
-   */
-  function withdraw(
-    address _recipient,
-    uint256 _amount,
-    bool _withCaller,
-    uint256 _l2BlockNumber,
-    uint256 _leafIndex,
-    bytes32[] calldata _path
-  ) external {
-    // The purpose of including the function selector is to make the message unique to that specific call. Note that
-    // it has nothing to do with calling the function.
-    DataStructures.L2ToL1Msg memory message = DataStructures.L2ToL1Msg({
-      sender: DataStructures.L2Actor(l2Bridge, rollupVersion),
-      recipient: DataStructures.L1Actor(address(this), block.chainid),
-      content: Hash.sha256ToField(
-        abi.encodeWithSignature(
-          "withdraw(address,uint256,address)",
-          _recipient,
-          _amount,
-          _withCaller ? msg.sender : address(0)
-        )
-      )
-    });
+        emit Initialized(_registry, _underlying, _l2Bridge);
+    }
 
-    outbox.consume(message, _l2BlockNumber, _leafIndex, _path);
+    // =============================================================
+    // EXTERNAL FUNCTIONS: USER ACTIONS
+    // =============================================================
 
-    underlying.transfer(_recipient, _amount);
-  }
-  // docs:end:token_portal_withdraw
+    function depositToAztecPublic(bytes32 _to, uint256 _amount, bytes32 _secretHash)
+        external
+        whenNotPaused
+        nonReentrant
+        returns (bytes32, uint256)
+    {
+        require(_amount > 0, "Amount must be greater than zero");
+        uint256 fee = calculateFee(_amount);
+        uint256 amountAfterFee = _amount - fee;
+
+        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+        bytes32 contentHash =
+            Hash.sha256ToField(abi.encodeWithSignature("mint_to_public(bytes32,uint256)", _to, amountAfterFee));
+
+        underlying.safeTransferFrom(_msgSender(), address(this), _amount);
+        collectedFees += fee;
+
+        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHash);
+
+        emit DepositToAztecPublic(_to, amountAfterFee, fee, _secretHash, key, index);
+        return (key, index);
+    }
+
+    function depositToAztecPrivate(
+        uint256 _amount,
+        bytes32 _secretHashForL2MessageConsumption,
+        CleanHandsData calldata _cleanHands,
+        PassportData calldata _passport
+    ) external whenNotPaused nonReentrant returns (bytes32, uint256) {
+        require(_amount > 0, "Amount must be greater than zero");
+        _validatePrivateAttestations(_amount, _cleanHands, _passport);
+
+        uint256 fee = calculateFee(_amount);
+        uint256 amountAfterFee = _amount - fee;
+
+        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+        bytes32 contentHash = Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256)", amountAfterFee));
+
+        underlying.safeTransferFrom(_msgSender(), address(this), _amount);
+        collectedFees += fee;
+
+        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHashForL2MessageConsumption);
+
+        emit DepositToAztecPrivate(amountAfterFee, fee, _secretHashForL2MessageConsumption, key, index);
+        return (key, index);
+    }
+
+    function withdraw(
+        address _recipient,
+        uint256 _amount,
+        bool _withCaller,
+        uint256 _l2BlockNumber,
+        uint256 _leafIndex,
+        bytes32[] calldata _path
+    ) external whenNotPaused nonReentrant {
+        require(_amount > 0, "Amount must be greater than zero");
+        DataStructures.L2ToL1Msg memory message = DataStructures.L2ToL1Msg({
+            sender: DataStructures.L2Actor(l2Bridge, rollupVersion),
+            recipient: DataStructures.L1Actor(address(this), block.chainid),
+            content: Hash.sha256ToField(
+                abi.encodeWithSignature(
+                    "withdraw(address,uint256,address)", _recipient, _amount, _withCaller ? _msgSender() : address(0)
+                )
+            )
+        });
+
+        outbox.consume(message, _l2BlockNumber, _leafIndex, _path);
+
+        uint256 fee = calculateFee(_amount);
+        uint256 amountAfterFee = _amount - fee;
+        collectedFees += fee;
+
+        underlying.safeTransfer(_recipient, amountAfterFee);
+    }
+
+    // =============================================================
+    // EXTERNAL FUNCTIONS: ADMIN
+    // =============================================================
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function updateAttestationConfig(address _attester, uint256 _circuitId, address _signer) external onlyOwner {
+        humanIdAttester = _attester;
+        cleanHandsCircuitId = _circuitId;
+        passportSigner = _signer;
+        emit AttestationConfigUpdated(_attester, _circuitId, _signer);
+    }
+
+    function updateFee(uint256 _newFeeBasisPoints) external onlyOwner {
+        if (_newFeeBasisPoints > MAX_FEE_BASIS_POINTS) revert FeeTooHigh();
+        feeBasisPoints = _newFeeBasisPoints;
+        emit FeeUpdated(_newFeeBasisPoints);
+    }
+
+    function updateFeeRecipient(address _newFeeRecipient) external onlyOwner {
+        if (_newFeeRecipient == address(0)) revert InvalidAddress();
+        feeRecipient = _newFeeRecipient;
+        emit FeeRecipientUpdated(_newFeeRecipient);
+    }
+
+    function withdrawFees() external onlyOwner nonReentrant {
+        uint256 amount = collectedFees;
+        if (amount == 0) revert NoFeesToWithdraw();
+
+        collectedFees = 0;
+        underlying.safeTransfer(feeRecipient, amount);
+        emit FeesWithdrawn(feeRecipient, amount);
+    }
+
+    function rescueToken(address _token, uint256 _amount) external onlyOwner {
+        if (_token == address(0)) revert InvalidAddress();
+        IERC20(_token).safeTransfer(owner(), _amount);
+        emit TokensRescued(_token, owner(), _amount);
+    }
+
+    // =============================================================
+    // INTERNAL HELPERS
+    // =============================================================
+
+    function _validatePrivateAttestations(
+        uint256 _amount,
+        CleanHandsData calldata _cleanHands,
+        PassportData calldata _passport
+    ) internal {
+        bool verified = false;
+
+        // 1. Try Clean Hands Verification
+        if (_cleanHands.signature.length > 0) {
+            if (cleanHandsNonces[_msgSender()][_cleanHands.nonce]) {
+                revert CleanHandsNonceUsed();
+            }
+            verified = verifyCleanHandsSignature(
+                _cleanHands.nonce, cleanHandsCircuitId, _cleanHands.actionId, _msgSender(), _cleanHands.signature
+            );
+            cleanHandsNonces[_msgSender()][_cleanHands.nonce] = true;
+        }
+
+        // 2. Fallback to Passport Verification
+        if (!verified) {
+            if (_passport.signature.length == 0) revert InvalidVerification();
+            if (passportNonces[_msgSender()][_passport.nonce]) {
+                revert PassportNonceUsed();
+            }
+            if (!verifyPassportSignature(_passport.maxAmount, _passport.nonce, _passport.deadline, _passport.signature))
+            {
+                revert InvalidPassportSignature();
+            }
+            if (_amount > _passport.maxAmount) revert AmountExceedsLimit();
+
+            passportNonces[_msgSender()][_passport.nonce] = true;
+        }
+    }
+
+    function verifyCleanHandsSignature(
+        uint256 nonce,
+        uint256 circuitId,
+        uint256 actionId,
+        address userAddress,
+        bytes memory signature
+    ) public view returns (bool) {
+        bytes32 digest = keccak256(abi.encodePacked(nonce, circuitId, actionId, userAddress));
+        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        (address recovered,,) = ECDSA.tryRecover(personalSignPreimage, signature);
+
+        return recovered == humanIdAttester;
+    }
+
+    function verifyPassportSignature(uint256 maxAmount, uint256 nonce, uint256 deadline, bytes memory signature)
+        public
+        view
+        returns (bool)
+    {
+        if (block.timestamp > deadline) return false;
+        bytes32 messageHash = keccak256(abi.encodePacked(_msgSender(), maxAmount, nonce, deadline, address(this)));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+
+        (address recovered,,) = ECDSA.tryRecover(ethSignedMessageHash, signature);
+
+        return recovered == passportSigner;
+    }
+
+    function calculateFee(uint256 _amount) public view returns (uint256) {
+        return (_amount * feeBasisPoints) / 10000;
+    }
+
+    function getCollectedFees() external view returns (uint256) {
+        return collectedFees;
+    }
+
+    function getFeeRecipient() external view returns (address) {
+        return feeRecipient;
+    }
+
+    // =============================================================
+    // OWNERSHIP 2-STEP (CUSTOM OVERRIDES)
+    // =============================================================
+
+    function proposeOwnershipTransfer(address newOwner) public onlyOwner {
+        if (newOwner == address(0)) revert InvalidAddress();
+
+        address previousOwner = owner();
+        // this is the main function that goes through the 2-step process
+        transferOwnership(newOwner); // This sets pendingOwner, requires acceptOwnership() to complete
+        emit OwnershipTransferProposed(previousOwner, newOwner);
+    }
+
+    function cancelOwnershipTransfer() public onlyOwner {
+        address pendingOwnerAddress = pendingOwner();
+        if (pendingOwnerAddress == address(0)) revert NoPendingOwner();
+
+        // Cancel by transferring ownership back to current owner (self)
+        // this is the internal function that directly transfers the ownership BYPASSING the 2-step process
+        _transferOwnership(owner());
+        emit OwnershipTransferCancelled(owner());
+    }
+
+    function acceptOwnership() public override {
+        super.acceptOwnership();
+    }
 }
