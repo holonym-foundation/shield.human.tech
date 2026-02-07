@@ -90,37 +90,15 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
     event Initialized(address registry, address underlying, bytes32 l2Bridge);
     event DepositToAztecPublic(
-        bytes32 indexed to,
-        uint256 amount,
-        uint256 fee,
-        bytes32 secretHash,
-        bytes32 key,
-        uint256 index
+        bytes32 indexed to, uint256 amount, uint256 fee, bytes32 secretHash, bytes32 key, uint256 index
     );
-    event DepositToAztecPrivate(
-        uint256 amount,
-        uint256 fee,
-        bytes32 secretHash,
-        bytes32 key,
-        uint256 index
-    );
+    event DepositToAztecPrivate(uint256 amount, uint256 fee, bytes32 secretHash, bytes32 key, uint256 index);
     event FeeUpdated(uint256 newFeeBasisPoints);
     event FeeRecipientUpdated(address indexed newFeeRecipient);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
-    event TokensRescued(
-        address indexed token,
-        address indexed to,
-        uint256 amount
-    );
-    event AttestationConfigUpdated(
-        address attester,
-        uint256 circuitId,
-        address signer
-    );
-    event OwnershipTransferProposed(
-        address indexed previousOwner,
-        address indexed newOwner
-    );
+    event TokensRescued(address indexed token, address indexed to, uint256 amount);
+    event AttestationConfigUpdated(address attester, uint256 circuitId, address signer);
+    event OwnershipTransferProposed(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferCancelled(address indexed currentOwner);
     // =============================================================
     // CONSTRUCTOR / INITIALIZER
@@ -146,15 +124,12 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         passportSigner = _passportSigner;
     }
 
-    function initialize(
-        address _registry,
-        address _underlying,
-        bytes32 _l2Bridge
-    ) external {
+    function initialize(address _registry, address _underlying, bytes32 _l2Bridge) external {
         if (_msgSender() != DEPLOYER) revert Unauthorized();
         if (address(registry) != address(0)) revert AlreadyInitialized();
-        if (_registry == address(0) || _underlying == address(0))
+        if (_registry == address(0) || _underlying == address(0)) {
             revert InvalidAddress();
+        }
 
         registry = IRegistry(_registry);
         underlying = IERC20(_underlying);
@@ -172,44 +147,26 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     // EXTERNAL FUNCTIONS: USER ACTIONS
     // =============================================================
 
-    function depositToAztecPublic(
-        bytes32 _to,
-        uint256 _amount,
-        bytes32 _secretHash
-    ) external whenNotPaused nonReentrant returns (bytes32, uint256) {
+    function depositToAztecPublic(bytes32 _to, uint256 _amount, bytes32 _secretHash)
+        external
+        whenNotPaused
+        nonReentrant
+        returns (bytes32, uint256)
+    {
         require(_amount > 0, "Amount must be greater than zero");
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
 
-        DataStructures.L2Actor memory actor = DataStructures.L2Actor(
-            l2Bridge,
-            rollupVersion
-        );
-        bytes32 contentHash = Hash.sha256ToField(
-            abi.encodeWithSignature(
-                "mint_to_public(bytes32,uint256)",
-                _to,
-                amountAfterFee
-            )
-        );
+        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+        bytes32 contentHash =
+            Hash.sha256ToField(abi.encodeWithSignature("mint_to_public(bytes32,uint256)", _to, amountAfterFee));
 
         underlying.safeTransferFrom(_msgSender(), address(this), _amount);
         collectedFees += fee;
 
-        (bytes32 key, uint256 index) = inbox.sendL2Message(
-            actor,
-            contentHash,
-            _secretHash
-        );
+        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHash);
 
-        emit DepositToAztecPublic(
-            _to,
-            amountAfterFee,
-            fee,
-            _secretHash,
-            key,
-            index
-        );
+        emit DepositToAztecPublic(_to, amountAfterFee, fee, _secretHash, key, index);
         return (key, index);
     }
 
@@ -225,30 +182,15 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
 
-        DataStructures.L2Actor memory actor = DataStructures.L2Actor(
-            l2Bridge,
-            rollupVersion
-        );
-        bytes32 contentHash = Hash.sha256ToField(
-            abi.encodeWithSignature("mint_to_private(uint256)", amountAfterFee)
-        );
+        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+        bytes32 contentHash = Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256)", amountAfterFee));
 
         underlying.safeTransferFrom(_msgSender(), address(this), _amount);
         collectedFees += fee;
 
-        (bytes32 key, uint256 index) = inbox.sendL2Message(
-            actor,
-            contentHash,
-            _secretHashForL2MessageConsumption
-        );
+        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHashForL2MessageConsumption);
 
-        emit DepositToAztecPrivate(
-            amountAfterFee,
-            fee,
-            _secretHashForL2MessageConsumption,
-            key,
-            index
-        );
+        emit DepositToAztecPrivate(amountAfterFee, fee, _secretHashForL2MessageConsumption, key, index);
         return (key, index);
     }
 
@@ -266,10 +208,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
             recipient: DataStructures.L1Actor(address(this), block.chainid),
             content: Hash.sha256ToField(
                 abi.encodeWithSignature(
-                    "withdraw(address,uint256,address)",
-                    _recipient,
-                    _amount,
-                    _withCaller ? _msgSender() : address(0)
+                    "withdraw(address,uint256,address)", _recipient, _amount, _withCaller ? _msgSender() : address(0)
                 )
             )
         });
@@ -290,15 +229,12 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     function pause() external onlyOwner {
         _pause();
     }
+
     function unpause() external onlyOwner {
         _unpause();
     }
 
-    function updateAttestationConfig(
-        address _attester,
-        uint256 _circuitId,
-        address _signer
-    ) external onlyOwner {
+    function updateAttestationConfig(address _attester, uint256 _circuitId, address _signer) external onlyOwner {
         humanIdAttester = _attester;
         cleanHandsCircuitId = _circuitId;
         passportSigner = _signer;
@@ -345,14 +281,11 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
         // 1. Try Clean Hands Verification
         if (_cleanHands.signature.length > 0) {
-            if (cleanHandsNonces[_msgSender()][_cleanHands.nonce])
+            if (cleanHandsNonces[_msgSender()][_cleanHands.nonce]) {
                 revert CleanHandsNonceUsed();
+            }
             verified = verifyCleanHandsSignature(
-                _cleanHands.nonce,
-                cleanHandsCircuitId,
-                _cleanHands.actionId,
-                _msgSender(),
-                _cleanHands.signature
+                _cleanHands.nonce, cleanHandsCircuitId, _cleanHands.actionId, _msgSender(), _cleanHands.signature
             );
             cleanHandsNonces[_msgSender()][_cleanHands.nonce] = true;
         }
@@ -360,16 +293,11 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         // 2. Fallback to Passport Verification
         if (!verified) {
             if (_passport.signature.length == 0) revert InvalidVerification();
-            if (passportNonces[_msgSender()][_passport.nonce])
+            if (passportNonces[_msgSender()][_passport.nonce]) {
                 revert PassportNonceUsed();
-            if (
-                !verifyPassportSignature(
-                    _passport.maxAmount,
-                    _passport.nonce,
-                    _passport.deadline,
-                    _passport.signature
-                )
-            ) {
+            }
+            if (!verifyPassportSignature(_passport.maxAmount, _passport.nonce, _passport.deadline, _passport.signature))
+            {
                 revert InvalidPassportSignature();
             }
             if (_amount > _passport.maxAmount) revert AmountExceedsLimit();
@@ -385,44 +313,23 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         address userAddress,
         bytes memory signature
     ) public view returns (bool) {
-        bytes32 digest = keccak256(
-            abi.encodePacked(nonce, circuitId, actionId, userAddress)
-        );
-        bytes32 personalSignPreimage = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", digest)
-        );
-        (address recovered, , ) = ECDSA.tryRecover(
-            personalSignPreimage,
-            signature
-        );
+        bytes32 digest = keccak256(abi.encodePacked(nonce, circuitId, actionId, userAddress));
+        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        (address recovered,,) = ECDSA.tryRecover(personalSignPreimage, signature);
 
         return recovered == humanIdAttester;
     }
 
-    function verifyPassportSignature(
-        uint256 maxAmount,
-        uint256 nonce,
-        uint256 deadline,
-        bytes memory signature
-    ) public view returns (bool) {
+    function verifyPassportSignature(uint256 maxAmount, uint256 nonce, uint256 deadline, bytes memory signature)
+        public
+        view
+        returns (bool)
+    {
         if (block.timestamp > deadline) return false;
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(
-                _msgSender(),
-                maxAmount,
-                nonce,
-                deadline,
-                address(this)
-            )
-        );
-        bytes32 ethSignedMessageHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
-        );
+        bytes32 messageHash = keccak256(abi.encodePacked(_msgSender(), maxAmount, nonce, deadline, address(this)));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
 
-        (address recovered, , ) = ECDSA.tryRecover(
-            ethSignedMessageHash,
-            signature
-        );
+        (address recovered,,) = ECDSA.tryRecover(ethSignedMessageHash, signature);
 
         return recovered == passportSigner;
     }

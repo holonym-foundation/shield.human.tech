@@ -65,11 +65,7 @@ contract MockRollup {
 contract MockInbox {
     uint256 private messageCount;
 
-    function sendL2Message(
-        DataStructures.L2Actor memory,
-        bytes32,
-        bytes32
-    ) external returns (bytes32, uint256) {
+    function sendL2Message(DataStructures.L2Actor memory, bytes32, bytes32) external returns (bytes32, uint256) {
         messageCount++;
         return (keccak256(abi.encodePacked(messageCount)), messageCount);
     }
@@ -78,12 +74,7 @@ contract MockInbox {
 contract MockOutbox {
     mapping(bytes32 => bool) public consumed;
 
-    function consume(
-        DataStructures.L2ToL1Msg memory message,
-        uint256,
-        uint256,
-        bytes32[] calldata
-    ) external {
+    function consume(DataStructures.L2ToL1Msg memory message, uint256, uint256, bytes32[] calldata) external {
         bytes32 messageHash = keccak256(abi.encode(message));
         require(!consumed[messageHash], "Already consumed");
         consumed[messageHash] = true;
@@ -115,37 +106,15 @@ contract TokenPortalTest is Test {
 
     event Initialized(address registry, address underlying, bytes32 l2Bridge);
     event DepositToAztecPublic(
-        bytes32 indexed to,
-        uint256 amount,
-        uint256 fee,
-        bytes32 secretHash,
-        bytes32 key,
-        uint256 index
+        bytes32 indexed to, uint256 amount, uint256 fee, bytes32 secretHash, bytes32 key, uint256 index
     );
-    event DepositToAztecPrivate(
-        uint256 amount,
-        uint256 fee,
-        bytes32 secretHash,
-        bytes32 key,
-        uint256 index
-    );
+    event DepositToAztecPrivate(uint256 amount, uint256 fee, bytes32 secretHash, bytes32 key, uint256 index);
     event FeeUpdated(uint256 newFeeBasisPoints);
     event FeeRecipientUpdated(address indexed newFeeRecipient);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
-    event TokensRescued(
-        address indexed token,
-        address indexed to,
-        uint256 amount
-    );
-    event AttestationConfigUpdated(
-        address attester,
-        uint256 circuitId,
-        address signer
-    );
-    event OwnershipTransferProposed(
-        address indexed previousOwner,
-        address indexed newOwner
-    );
+    event TokensRescued(address indexed token, address indexed to, uint256 amount);
+    event AttestationConfigUpdated(address attester, uint256 circuitId, address signer);
+    event OwnershipTransferProposed(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferCancelled(address indexed currentOwner);
 
     function setUp() public {
@@ -170,12 +139,7 @@ contract TokenPortalTest is Test {
 
         // Deploy portal
         portal = new TokenPortal(
-            owner,
-            feeRecipient,
-            FEE_BASIS_POINTS,
-            humanIdAttester,
-            CLEAN_HANDS_CIRCUIT_ID,
-            passportSigner
+            owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
         );
 
         // Initialize portal
@@ -202,14 +166,7 @@ contract TokenPortalTest is Test {
 
     function test_Constructor_RevertWhen_InvalidFeeRecipient() public {
         vm.expectRevert(InvalidAddress.selector);
-        new TokenPortal(
-            owner,
-            address(0),
-            FEE_BASIS_POINTS,
-            humanIdAttester,
-            CLEAN_HANDS_CIRCUIT_ID,
-            passportSigner
-        );
+        new TokenPortal(owner, address(0), FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner);
     }
 
     function test_Constructor_RevertWhen_FeeTooHigh() public {
@@ -230,12 +187,7 @@ contract TokenPortalTest is Test {
 
     function test_Initialize() public {
         TokenPortal newPortal = new TokenPortal(
-            owner,
-            feeRecipient,
-            FEE_BASIS_POINTS,
-            humanIdAttester,
-            CLEAN_HANDS_CIRCUIT_ID,
-            passportSigner
+            owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
         );
 
         vm.expectEmit(true, true, true, true);
@@ -254,12 +206,7 @@ contract TokenPortalTest is Test {
 
     function test_Initialize_RevertWhen_NotDeployer() public {
         TokenPortal newPortal = new TokenPortal(
-            owner,
-            feeRecipient,
-            FEE_BASIS_POINTS,
-            humanIdAttester,
-            CLEAN_HANDS_CIRCUIT_ID,
-            passportSigner
+            owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
         );
 
         vm.prank(user);
@@ -274,12 +221,7 @@ contract TokenPortalTest is Test {
 
     function test_Initialize_RevertWhen_InvalidRegistryAddress() public {
         TokenPortal newPortal = new TokenPortal(
-            owner,
-            feeRecipient,
-            FEE_BASIS_POINTS,
-            humanIdAttester,
-            CLEAN_HANDS_CIRCUIT_ID,
-            passportSigner
+            owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
         );
 
         vm.expectRevert(InvalidAddress.selector);
@@ -288,12 +230,7 @@ contract TokenPortalTest is Test {
 
     function test_Initialize_RevertWhen_InvalidUnderlyingAddress() public {
         TokenPortal newPortal = new TokenPortal(
-            owner,
-            feeRecipient,
-            FEE_BASIS_POINTS,
-            humanIdAttester,
-            CLEAN_HANDS_CIRCUIT_ID,
-            passportSigner
+            owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
         );
 
         vm.expectRevert(InvalidAddress.selector);
@@ -315,19 +252,10 @@ contract TokenPortalTest is Test {
         vm.prank(user);
         vm.expectEmit(true, true, true, true);
         emit DepositToAztecPublic(
-            to,
-            expectedAmountAfterFee,
-            expectedFee,
-            secretHash,
-            keccak256(abi.encodePacked(uint256(1))),
-            1
+            to, expectedAmountAfterFee, expectedFee, secretHash, keccak256(abi.encodePacked(uint256(1))), 1
         );
 
-        (bytes32 key, uint256 index) = portal.depositToAztecPublic(
-            to,
-            amount,
-            secretHash
-        );
+        (bytes32 key, uint256 index) = portal.depositToAztecPublic(to, amount, secretHash);
 
         assertEq(portal.collectedFees(), expectedFee);
         assertEq(token.balanceOf(address(portal)), amount);
@@ -357,19 +285,14 @@ contract TokenPortalTest is Test {
     function test_DepositToAztecPrivate_WithCleanHands() public {
         uint256 amount = 1000 ether;
         bytes32 secretHash = bytes32(uint256(0x789));
-        
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) = 
+
+        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
             _createCleanHandsData(1, 100);
 
         uint256 expectedFee = portal.calculateFee(amount);
 
         vm.prank(user);
-        (bytes32 key, uint256 index) = portal.depositToAztecPrivate(
-            amount,
-            secretHash,
-            cleanHands,
-            passport
-        );
+        (bytes32 key, uint256 index) = portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
 
         assertEq(portal.collectedFees(), expectedFee);
         assertTrue(portal.cleanHandsNonces(user, 1));
@@ -377,40 +300,26 @@ contract TokenPortalTest is Test {
         assertEq(index, 1);
     }
 
-    function _createCleanHandsData(uint256 nonce, uint256 actionId) internal view returns (
-        TokenPortal.CleanHandsData memory cleanHands,
-        TokenPortal.PassportData memory passport
-    ) {
-        bytes32 digest = keccak256(
-            abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user)
-        );
-        bytes32 personalSignPreimage = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", digest)
-        );
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            attesterPrivateKey,
-            personalSignPreimage
-        );
-        
-        cleanHands = TokenPortal.CleanHandsData({
-            nonce: nonce,
-            actionId: actionId,
-            signature: abi.encodePacked(r, s, v)
-        });
+    function _createCleanHandsData(uint256 nonce, uint256 actionId)
+        internal
+        view
+        returns (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport)
+    {
+        bytes32 digest = keccak256(abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user));
+        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(attesterPrivateKey, personalSignPreimage);
 
-        passport = TokenPortal.PassportData({
-            maxAmount: 0,
-            nonce: 0,
-            deadline: 0,
-            signature: ""
-        });
+        cleanHands =
+            TokenPortal.CleanHandsData({nonce: nonce, actionId: actionId, signature: abi.encodePacked(r, s, v)});
+
+        passport = TokenPortal.PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""});
     }
 
     function test_DepositToAztecPrivate_WithPassport() public {
         uint256 amount = 500 ether;
         bytes32 secretHash = bytes32(uint256(0x789));
-        
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) = 
+
+        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
             _createPassportData(1, 1000 ether);
 
         vm.prank(user);
@@ -419,28 +328,18 @@ contract TokenPortalTest is Test {
         assertTrue(portal.passportNonces(user, 1));
     }
 
-    function _createPassportData(uint256 nonce, uint256 maxAmount) internal view returns (
-        TokenPortal.CleanHandsData memory cleanHands,
-        TokenPortal.PassportData memory passport
-    ) {
+    function _createPassportData(uint256 nonce, uint256 maxAmount)
+        internal
+        view
+        returns (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport)
+    {
         uint256 deadline = block.timestamp + 1 hours;
-        
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(user, maxAmount, nonce, deadline, address(portal))
-        );
-        bytes32 ethSignedMessageHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
-        );
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            passportSignerPrivateKey,
-            ethSignedMessageHash
-        );
 
-        cleanHands = TokenPortal.CleanHandsData({
-            nonce: 0,
-            actionId: 0,
-            signature: ""
-        });
+        bytes32 messageHash = keccak256(abi.encodePacked(user, maxAmount, nonce, deadline, address(portal)));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(passportSignerPrivateKey, ethSignedMessageHash);
+
+        cleanHands = TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""});
 
         passport = TokenPortal.PassportData({
             maxAmount: maxAmount,
@@ -474,8 +373,8 @@ contract TokenPortalTest is Test {
     function test_DepositToAztecPrivate_RevertWhen_CleanHandsNonceUsed() public {
         uint256 amount = 1000 ether;
         bytes32 secretHash = bytes32(uint256(0x789));
-        
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) = 
+
+        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
             _createCleanHandsData(1, 100);
 
         vm.prank(user);
@@ -490,8 +389,8 @@ contract TokenPortalTest is Test {
     function test_DepositToAztecPrivate_RevertWhen_PassportNonceUsed() public {
         uint256 amount = 500 ether;
         bytes32 secretHash = bytes32(uint256(0x789));
-        
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) = 
+
+        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
             _createPassportData(1, 1000 ether);
 
         vm.prank(user);
@@ -507,15 +406,11 @@ contract TokenPortalTest is Test {
         uint256 amount = 500 ether;
         bytes32 secretHash = bytes32(uint256(0x789));
 
-        TokenPortal.CleanHandsData memory cleanHands = TokenPortal
-            .CleanHandsData({nonce: 0, actionId: 0, signature: ""});
+        TokenPortal.CleanHandsData memory cleanHands =
+            TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""});
 
-        TokenPortal.PassportData memory passport = TokenPortal.PassportData({
-            maxAmount: 0,
-            nonce: 0,
-            deadline: 0,
-            signature: ""
-        });
+        TokenPortal.PassportData memory passport =
+            TokenPortal.PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""});
 
         vm.prank(user);
         vm.expectRevert(InvalidVerification.selector);
@@ -527,24 +422,17 @@ contract TokenPortalTest is Test {
         bytes32 secretHash = bytes32(uint256(0x789));
         uint256 cleanHandsNonce = 1;
         uint256 passportNonce = 2;
-        
+
         // Create CleanHands with invalid signature (wrong signer)
-        bytes32 digest = keccak256(
-            abi.encodePacked(cleanHandsNonce, CLEAN_HANDS_CIRCUIT_ID, uint256(100), user)
-        );
-        bytes32 personalSignPreimage = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", digest)
-        );
+        bytes32 digest = keccak256(abi.encodePacked(cleanHandsNonce, CLEAN_HANDS_CIRCUIT_ID, uint256(100), user));
+        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xBAD, personalSignPreimage); // Wrong key
-        
-        TokenPortal.CleanHandsData memory cleanHands = TokenPortal.CleanHandsData({
-            nonce: cleanHandsNonce,
-            actionId: 100,
-            signature: abi.encodePacked(r, s, v)
-        });
+
+        TokenPortal.CleanHandsData memory cleanHands =
+            TokenPortal.CleanHandsData({nonce: cleanHandsNonce, actionId: 100, signature: abi.encodePacked(r, s, v)});
 
         // Create valid passport to fallback to
-        (,TokenPortal.PassportData memory passport) = _createPassportData(passportNonce, 1000 ether);
+        (, TokenPortal.PassportData memory passport) = _createPassportData(passportNonce, 1000 ether);
 
         vm.prank(user);
         portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
@@ -555,13 +443,11 @@ contract TokenPortalTest is Test {
         assertTrue(portal.passportNonces(user, passportNonce));
     }
 
-    function test_DepositToAztecPrivate_RevertWhen_InvalidPassportSignature()
-        public
-    {
+    function test_DepositToAztecPrivate_RevertWhen_InvalidPassportSignature() public {
         uint256 amount = 500 ether;
         bytes32 secretHash = bytes32(uint256(0x789));
-        
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) = 
+
+        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
             _createInvalidPassportData(1, 1000 ether);
 
         vm.prank(user);
@@ -569,28 +455,21 @@ contract TokenPortalTest is Test {
         portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
     }
 
-    function _createInvalidPassportData(uint256 nonce, uint256 maxAmount) internal view returns (
-        TokenPortal.CleanHandsData memory cleanHands,
-        TokenPortal.PassportData memory passport
-    ) {
+    function _createInvalidPassportData(uint256 nonce, uint256 maxAmount)
+        internal
+        view
+        returns (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport)
+    {
         uint256 deadline = block.timestamp + 1 hours;
-        
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(user, maxAmount, nonce, deadline, address(portal))
-        );
-        bytes32 ethSignedMessageHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
-        );
+
+        bytes32 messageHash = keccak256(abi.encodePacked(user, maxAmount, nonce, deadline, address(portal)));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(
             0xBAD, // Wrong private key
             ethSignedMessageHash
         );
 
-        cleanHands = TokenPortal.CleanHandsData({
-            nonce: 0,
-            actionId: 0,
-            signature: ""
-        });
+        cleanHands = TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""});
 
         passport = TokenPortal.PassportData({
             maxAmount: maxAmount,
@@ -603,8 +482,8 @@ contract TokenPortalTest is Test {
     function test_DepositToAztecPrivate_RevertWhen_AmountExceedsLimit() public {
         uint256 amount = 2000 ether; // Exceeds maxAmount
         bytes32 secretHash = bytes32(uint256(0x789));
-        
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) = 
+
+        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
             _createPassportData(1, 1000 ether);
 
         vm.prank(user);
@@ -632,12 +511,7 @@ contract TokenPortalTest is Test {
                 abi.encodePacked(
                     "\x19Ethereum Signed Message:\n32",
                     keccak256(
-                        abi.encodeWithSignature(
-                            "withdraw(address,uint256,address)",
-                            recipient,
-                            withdrawAmount,
-                            address(0)
-                        )
+                        abi.encodeWithSignature("withdraw(address,uint256,address)", recipient, withdrawAmount, address(0))
                     )
                 )
             )
@@ -723,9 +597,7 @@ contract TokenPortalTest is Test {
 
     function test_Pause_RevertWhen_NotOwner() public {
         vm.prank(user);
-        vm.expectRevert(
-            abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
         portal.pause();
     }
 
@@ -744,9 +616,7 @@ contract TokenPortalTest is Test {
         portal.pause();
 
         vm.prank(user);
-        vm.expectRevert(
-            abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
         portal.unpause();
     }
 
@@ -768,9 +638,7 @@ contract TokenPortalTest is Test {
 
     function test_UpdateAttestationConfig_RevertWhen_NotOwner() public {
         vm.prank(user);
-        vm.expectRevert(
-            abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
         portal.updateAttestationConfig(address(0), 0, address(0));
     }
 
@@ -788,9 +656,7 @@ contract TokenPortalTest is Test {
 
     function test_UpdateFee_RevertWhen_NotOwner() public {
         vm.prank(user);
-        vm.expectRevert(
-            abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
         portal.updateFee(200);
     }
 
@@ -814,9 +680,7 @@ contract TokenPortalTest is Test {
 
     function test_UpdateFeeRecipient_RevertWhen_NotOwner() public {
         vm.prank(user);
-        vm.expectRevert(
-            abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
         portal.updateFeeRecipient(makeAddr("someone"));
     }
 
@@ -847,9 +711,7 @@ contract TokenPortalTest is Test {
 
     function test_WithdrawFees_RevertWhen_NotOwner() public {
         vm.prank(user);
-        vm.expectRevert(
-            abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
         portal.withdrawFees();
     }
 
@@ -875,9 +737,7 @@ contract TokenPortalTest is Test {
 
     function test_RescueToken_RevertWhen_NotOwner() public {
         vm.prank(user);
-        vm.expectRevert(
-            abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
         portal.rescueToken(address(token), 100 ether);
     }
 
@@ -904,9 +764,7 @@ contract TokenPortalTest is Test {
 
     function test_ProposeOwnershipTransfer_RevertWhen_NotOwner() public {
         vm.prank(user);
-        vm.expectRevert(
-            abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
         portal.proposeOwnershipTransfer(newOwner);
     }
 
@@ -946,9 +804,7 @@ contract TokenPortalTest is Test {
         portal.proposeOwnershipTransfer(newOwner);
 
         vm.prank(user);
-        vm.expectRevert(
-            abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
-        );
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
         portal.cancelOwnershipTransfer();
     }
 
@@ -966,25 +822,12 @@ contract TokenPortalTest is Test {
         uint256 nonce = 123;
         uint256 actionId = 456;
 
-        bytes32 digest = keccak256(
-            abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user)
-        );
-        bytes32 personalSignPreimage = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", digest)
-        );
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            attesterPrivateKey,
-            personalSignPreimage
-        );
+        bytes32 digest = keccak256(abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user));
+        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(attesterPrivateKey, personalSignPreimage);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        bool result = portal.verifyCleanHandsSignature(
-            nonce,
-            CLEAN_HANDS_CIRCUIT_ID,
-            actionId,
-            user,
-            signature
-        );
+        bool result = portal.verifyCleanHandsSignature(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user, signature);
 
         assertTrue(result);
     }
@@ -993,25 +836,15 @@ contract TokenPortalTest is Test {
         uint256 nonce = 123;
         uint256 actionId = 456;
 
-        bytes32 digest = keccak256(
-            abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user)
-        );
-        bytes32 personalSignPreimage = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", digest)
-        );
+        bytes32 digest = keccak256(abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user));
+        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(
             0xBAD, // Wrong key
             personalSignPreimage
         );
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        bool result = portal.verifyCleanHandsSignature(
-            nonce,
-            CLEAN_HANDS_CIRCUIT_ID,
-            actionId,
-            user,
-            signature
-        );
+        bool result = portal.verifyCleanHandsSignature(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user, signature);
 
         assertFalse(result);
     }
@@ -1024,27 +857,15 @@ contract TokenPortalTest is Test {
         bytes memory signature = _signPassport(maxAmount, nonce, deadline);
 
         vm.prank(user);
-        bool result = portal.verifyPassportSignature(
-            maxAmount,
-            nonce,
-            deadline,
-            signature
-        );
+        bool result = portal.verifyPassportSignature(maxAmount, nonce, deadline, signature);
 
         assertTrue(result);
     }
 
     function _signPassport(uint256 maxAmount, uint256 nonce, uint256 deadline) internal view returns (bytes memory) {
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(user, maxAmount, nonce, deadline, address(portal))
-        );
-        bytes32 ethSignedMessageHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
-        );
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            passportSignerPrivateKey,
-            ethSignedMessageHash
-        );
+        bytes32 messageHash = keccak256(abi.encodePacked(user, maxAmount, nonce, deadline, address(portal)));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(passportSignerPrivateKey, ethSignedMessageHash);
         return abi.encodePacked(r, s, v);
     }
 
@@ -1056,12 +877,7 @@ contract TokenPortalTest is Test {
         bytes memory signature = _signPassport(maxAmount, nonce, deadline);
 
         vm.prank(user);
-        bool result = portal.verifyPassportSignature(
-            maxAmount,
-            nonce,
-            deadline,
-            signature
-        );
+        bool result = portal.verifyPassportSignature(maxAmount, nonce, deadline, signature);
 
         assertFalse(result);
     }
@@ -1074,23 +890,18 @@ contract TokenPortalTest is Test {
         bytes memory signature = _signPassportInvalid(maxAmount, nonce, deadline);
 
         vm.prank(user);
-        bool result = portal.verifyPassportSignature(
-            maxAmount,
-            nonce,
-            deadline,
-            signature
-        );
+        bool result = portal.verifyPassportSignature(maxAmount, nonce, deadline, signature);
 
         assertFalse(result);
     }
 
-    function _signPassportInvalid(uint256 maxAmount, uint256 nonce, uint256 deadline) internal view returns (bytes memory) {
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(user, maxAmount, nonce, deadline, address(portal))
-        );
-        bytes32 ethSignedMessageHash = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
-        );
+    function _signPassportInvalid(uint256 maxAmount, uint256 nonce, uint256 deadline)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 messageHash = keccak256(abi.encodePacked(user, maxAmount, nonce, deadline, address(portal)));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(
             0xBAD, // Wrong key
             ethSignedMessageHash
@@ -1134,9 +945,8 @@ contract TokenPortalTest is Test {
 
         vm.stopPrank();
 
-        uint256 expectedFees = portal.calculateFee(100 ether) +
-            portal.calculateFee(200 ether) +
-            portal.calculateFee(300 ether);
+        uint256 expectedFees =
+            portal.calculateFee(100 ether) + portal.calculateFee(200 ether) + portal.calculateFee(300 ether);
 
         assertEq(portal.collectedFees(), expectedFees);
     }
