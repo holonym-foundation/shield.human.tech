@@ -284,7 +284,7 @@ pub contract TokenBridge {
         assert(current_timestamp <= deadline, "Passport deadline passed");
     }
 
-    // Verify passport signature
+    // Verify passport signaturetoken
     #[internal("private")]
     fn verify_passport_signature(
         user_address: AztecAddress,

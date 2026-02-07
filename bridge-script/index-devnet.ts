@@ -53,10 +53,6 @@ import TestERC20Json from "./constants/TestERC20.json";
 // @ts-ignore
 import TokenPortalArtifact from "../l1-contracts/out/TokenPortal.sol/TokenPortal.json";
 
-// Fix the bytecode format
-const PortalSBTAbi = PortalSBTJson.abi;
-const PortalSBTBytecode = PortalSBTJson.bytecode.object;
-
 const TestERC20Abi = TestERC20Json.abi;
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`;
 
@@ -95,17 +91,6 @@ const passportApiKey = process.env.PASSPORT_API_KEY;
 const passportScorerId = process.env.PASSPORT_SCORER_ID;
 
 const MINT_AMOUNT = BigInt(1e15);
-
-export const deployPortalSBT = async (
-  l1Client: ExtendedViemWalletClient
-): Promise<EthAddress> => {
-  return await deployL1Contract(
-    l1Client,
-    PortalSBTAbi,
-    PortalSBTBytecode as `0x${string}`,
-    []
-  ).then(({ address }) => address);
-};
 
 async function deployTestERC20(
   l1Client: ExtendedViemWalletClient,
@@ -657,15 +642,15 @@ async function main() {
     logger.info(`📋 Claim parameters:`);
     logger.info(`  - 👤 ownerAztecAddress: ${ownerAztecAddress}`);
     logger.info(`  - 💰 MINT_AMOUNT: ${MINT_AMOUNT}`);
-    logger.info(`  - 🔐 claimSecret: ${claimSecret}`);
-    logger.info(`  - 📍 messageLeafIndex: ${messageLeafIndex}`);
+    logger.info(`  - 🔐 claimSecret: ${claim.claimSecret}`);
+    logger.info(`  - 📍 messageLeafIndex: ${claim.messageLeafIndex}`);
 
     await l2BridgeContract.methods
       .claim_public(
         ownerAztecAddress,
         MINT_AMOUNT,
-        claimSecret,
-        messageLeafIndex
+        claim.claimSecret,
+        claim.messageLeafIndex
       )
       .send({
         from: ownerAztecAddress,
