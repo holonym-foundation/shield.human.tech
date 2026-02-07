@@ -45,16 +45,9 @@ import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
 import { toFunctionSelector } from 'viem'
 import 'dotenv/config'
 // @ts-ignore
-import PortalSBTJson from './constants/PortalSBT.json'
-// @ts-ignore
 import TestERC20Json from './constants/TestERC20.json'
 
-
-
 // Fix the bytecode format
-const PortalSBTAbi = PortalSBTJson.abi
-const PortalSBTBytecode = PortalSBTJson.bytecode.object
-
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
 
@@ -86,15 +79,6 @@ const MNEMONIC = process.env.MNEMONIC || 'test test test test test test test tes
 const L1_URL = process.env.L1_URL || getL1RpcUrl()
 
 const MINT_AMOUNT = BigInt(1e15)
-
-export const deployPortalSBT = async (l1Client: ExtendedViemWalletClient): Promise<EthAddress> => {
-  return await deployL1Contract(
-    l1Client,
-    PortalSBTAbi,
-    PortalSBTBytecode as `0x${string}`,
-    []
-  ).then(({ address }) => address)
-}
 
 async function deployTestERC20(
   l1Client: ExtendedViemWalletClient,
