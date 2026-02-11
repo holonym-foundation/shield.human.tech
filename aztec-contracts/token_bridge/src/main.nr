@@ -1,4 +1,5 @@
 mod config;
+mod test;
 
 // Minimal implementation of the token bridge that can move funds between L1 <> L2.
 // The bridge has a corresponding Portal contract on L1 that it is attached to
@@ -47,10 +48,61 @@ pub contract TokenBridge {
         pub signature: [u8; 64],
     }
 
-    #[derive(Deserialize, Eq, Packable, Serialize)]
+    #[derive(Deserialize, Eq, Serialize)]
     struct PubKey {
         x: [u8; 32],
         y: [u8; 32],
+    }
+
+    // We need to implement custom packing and unpacking since the pubkey doesn't fit into a single field.
+    // We split it into 4 fields, where the first 3 fields contain 31 bytes of data and the last field contains the remaining byte.
+    // as present here: https://github.com/AztecProtocol/aztec-packages/blob/24f9e0e85aa7574125ff009d075b71a2e28f9450/noir-projects/noir-contracts/contracts/libs/ecdsa_public_key_note/src/lib.nr#L25-L41
+    impl Packable for PubKey {
+        let N: u32 = 4;
+
+        // Cannot use the automatic packing since x and y don't fit. Pack the note as 5 fields where:
+        // [0] = x[0..31] (upper bound excluded)
+        // [1] = x[31]
+        // [2] = y[0..31]
+        // [3] = y[31]
+        fn pack(self) -> [Field; Self::N] {
+            let mut x: Field = 0;
+            let mut y: Field = 0;
+            let mut mul: Field = 1;
+
+            for i in 1..32 {
+                let byte_x: Field = self.x[31 - i] as Field;
+                x = x + (byte_x * mul);
+                let byte_y: Field = self.y[31 - i] as Field;
+                y = y + (byte_y * mul);
+                mul *= 256;
+            }
+
+            let last_x = self.x[31] as Field;
+            let last_y = self.y[31] as Field;
+
+            [x, last_x, y, last_y]
+        }
+
+        // Cannot use the automatic unpacking for the aforementioned reasons
+        fn unpack(packed_note: [Field; Self::N]) -> Self {
+            let mut x: [u8; 32] = [0; 32];
+            let mut y: [u8; 32] = [0; 32];
+
+            let part_x: [u8; 32] = packed_note[0].to_be_bytes();
+            for i in 0..31 {
+                x[i] = part_x[i + 1];
+            }
+            x[31] = packed_note[1].to_be_bytes::<32>()[31];
+
+            let part_y: [u8; 32] = packed_note[2].to_be_bytes();
+            for i in 0..31 {
+                y[i] = part_y[i + 1];
+            }
+            y[31] = packed_note[3].to_be_bytes::<32>()[31];
+
+            PubKey { x, y }
+        }
     }
 
     // Storage structure, containing all storage, and specifying what slots they use.
@@ -356,7 +408,10 @@ pub contract TokenBridge {
     fn _consume_clean_hands_nonce_public(user: AztecAddress, nonce: Field) {
         // nonce verification is done in the public function here, cause the public fn is executed after the private fn
         // so in case the nonce is used, the entire call is reverted
-        assert(!self.storage.clean_hands_nonces.at(user).at(nonce).read(), "Clean hands nonce used");
+        assert(
+            !self.storage.clean_hands_nonces.at(user).at(nonce).read(),
+            "Clean hands nonce used",
+        );
         self.storage.clean_hands_nonces.at(user).at(nonce).write(true);
     }
 
@@ -401,7 +456,7 @@ pub contract TokenBridge {
                 sender,
                 clean_hands.signature,
             );
-            
+
             self.enqueue_self._consume_clean_hands_nonce_public(sender, clean_hands.nonce);
         }
 

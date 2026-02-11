@@ -6,11 +6,6 @@ use aztec::protocol_types::{
     traits::FromField,
 };
 
-// NOT ABLE TO VERIFY IF THE TESTS ARE RUNNING CORRECTLY RIGHT NOW, AS I'M BLOCKED DUE TO THE FOLLOWING ISSUE:
-// NOT ABLE TO UPDATE THE AZTEC TO VERSION: v3.0.0-devnet.6-patch.1
-// GITHUB ISSUE: https://github.com/AztecProtocol/aztec-packages/issues/20141
-
-
 // ========================================================================
 // 1. Constructor & Config Tests
 // ========================================================================
