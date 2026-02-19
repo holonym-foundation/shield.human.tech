@@ -12,6 +12,8 @@ import Link from 'next/link'
 import React, { useEffect, useRef, useState } from 'react'
 import { Tooltip as ReactTooltip } from 'react-tooltip'
 import { silkUrl } from '@/config/l1.config'
+import { L1_CHAIN_ID } from '@/config'
+import DeploymentSelector from '@/components/DeploymentSelector'
 
 type WalletDisplayProps = {
   address?: string
@@ -234,7 +236,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
 
   // Extract native token balance for Sepolia
   const sepoliaNativeTokens = l1TokenBalances.find(
-    (token) => token.type === 'native' && token.network?.chainId === 11155111
+    (token) => token.type === 'native' && token.network?.chainId === L1_CHAIN_ID
   )
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted?.toString()
 
@@ -340,8 +342,9 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
         )}
 
         <div className='flex items-center gap-4'>
-          {false && (
-          <div className='flex px-[3px] py-[3px] pl-[8px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200'>
+          <DeploymentSelector />
+          {/* Privacy Mode Toggle UI */}
+          {/* <div className='flex px-[3px] py-[3px] pl-[8px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200'>
             <Image
               src='/assets/svg/human.aztec.svg'
               alt='Aztec'
@@ -364,7 +367,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
                   setTimeout(() => {
                     notify('privacy-mode', {
                       message:
-                        'Private balances and transactions are used instead of public',
+                        'Transactions are masked and untraceable, unlike public mode',
                       heading: 'Private mode activated',
                     })
                   }, 1500)
@@ -385,8 +388,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
                 />
               </span>
             </button>
-          </div>
-          )}
+          </div> */}
 
           {/* Wallet Controls */}
           {!isAnyWalletConnected ? (
@@ -487,6 +489,8 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
             </div>
           )}
 
+          <DeploymentSelector />
+
           {false && (
           <div className='flex px-[3px] py-[3px] pl-[8px] w-[240px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200 max-w-[190px]'>
             <Image
@@ -511,7 +515,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
                   setTimeout(() => {
                     notify('privacy-mode', {
                       message:
-                        'Private balances and transactions are used instead of public',
+                        'Transactions are masked and untraceable, unlike public mode',
                       heading: 'Private mode activated',
                     })
                   }, 1500)

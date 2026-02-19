@@ -799,14 +799,14 @@ const walletStore = create<WalletState>((set, get) => ({
           await requestWaapWallet(WAAP_METHOD.wallet_addEthereumChain, [
             {
               chainId: chainIdHex,
-              chainName: chainId === 11155111 ? 'Sepolia' : `Chain ${chainId}`,
+              chainName: chainId === L1_CHAIN_ID ? 'Sepolia' : `Chain ${chainId}`,
               nativeCurrency: {
                 name: 'ETH',
                 symbol: 'ETH',
                 decimals: 18,
               },
-              rpcUrls: chainId === 11155111 ? [process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL || 'https://sepolia.infura.io/'] : [],
-              blockExplorerUrls: chainId === 11155111 ? ['https://sepolia.etherscan.io'] : [],
+              rpcUrls: chainId === L1_CHAIN_ID ? [process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL || 'https://sepolia.infura.io/'] : [],
+              blockExplorerUrls: chainId === L1_CHAIN_ID ? ['https://sepolia.etherscan.io'] : [],
             },
           ])
           set({ waapChainId: chainId })

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Aztec Token Bridge Deployment Script
  *
@@ -21,7 +22,9 @@ import {
   type ContractInstanceWithAddress,
 } from '@aztec/aztec.js/contracts'
 import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contracts'
+import { RollupContract } from '@aztec/ethereum/contracts'
+import { CheckpointNumber } from '@aztec/foundation/branded-types'
+import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
 import { createEthereumChain } from '@aztec/ethereum/chain'
 import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
 import {
@@ -37,12 +40,12 @@ import { TokenContract } from '@aztec/noir-contracts.js/Token'
 import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge'
 // import { TokenBridgeContract } from './constants/aztec/artifacts/TokenBridge.ts'
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee/testing'
-import { TestWallet } from '@aztec/test-wallet/server'
+import { SetPublicAuthwitContractInteraction } from '@aztec/aztec.js/authorization'
+import { EmbeddedWallet } from '@aztec/wallets/embedded'
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
 import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
 import { sha256ToField } from '@aztec/foundation/crypto/sha256'
 import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
-import { toFunctionSelector } from 'viem'
 import 'dotenv/config'
 // @ts-ignore
 import TestERC20Json from './constants/TestERC20.json'
@@ -51,21 +54,22 @@ import TestERC20Json from './constants/TestERC20.json'
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
 
-import { getContract } from 'viem'
+import { createPublicClient, getContract, http, toFunctionSelector } from 'viem'
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-import { SponsoredFPCContract } from '@aztec/noir-contracts.js/SponsoredFPC'
+import { SponsoredFPCContract, SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC'
 import { setupWallet } from './utils/setup_wallet.js'
 import { deploySchnorrAccount } from './utils/deploy_account.js'
 import { getSponsoredFPCInstance } from './utils/sponsored_fpc.js'
 import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
-  saveTokenToFile,
-  generateSimpleTypescriptFile,
-  loadExistingDeployments,
-  ensureDeploymentEnvironment,
-  DeployedContracts,
+  createDeployment,
+  saveTokenToDeployment,
+  loadExistingTokens,
+  copyToFrontend,
+  type DeployedToken,
+  type L1ContractAddresses,
 } from './utils/save_contracts.js'
 import {
   getAztecNodeUrl,
@@ -73,6 +77,7 @@ import {
   getTimeouts,
   isDevnet,
 } from './config/config.js'
+import configManager from './config/config.js'
 
 // Get environment configuration
 const MNEMONIC = process.env.MNEMONIC || 'test test test test test test test test test test test junk'
@@ -217,7 +222,7 @@ async function mintL1Tokens(
 
 async function deployCompleteTokenSetup(
   tokenConfig: TokenConfig,
-  wallet: TestWallet,
+  wallet: EmbeddedWallet,
   ownerWallet: any,
   ownerAztecAddress: AztecAddress,
   l1Client: ExtendedViemWalletClient,
@@ -225,7 +230,7 @@ async function deployCompleteTokenSetup(
   l1ContractAddresses: any,
   sponsoredPaymentMethod: any,
   logger: Logger
-): Promise<DeployedContracts> {
+): Promise<DeployedToken> {
   logger.info(`\n=== Deploying ${tokenConfig.symbol} Token Setup ===`)
 
   // Generate unique salts for this token
@@ -275,7 +280,7 @@ async function deployCompleteTokenSetup(
 
   // Deploy L2 token contract
   logger.info(`🏗️  Deploying L2 ${tokenConfig.symbol} token contract`)
-  const l2TokenDeploy = TokenContract.deploy(
+  const l2TokenContract = await TokenContract.deploy(
     ownerWallet,
     ownerAztecAddress,
     tokenConfig.l2Name,
@@ -285,8 +290,8 @@ async function deployCompleteTokenSetup(
     from: ownerAztecAddress,
     contractAddressSalt: tokenSalt,
     fee: { paymentMethod: sponsoredPaymentMethod },
+    wait: { timeout: getTimeouts().deployTimeout },
   })
-  const l2TokenContract = await l2TokenDeploy.deployed({ timeout: getTimeouts().deployTimeout })
 
   logger.info(
     `✅ L2 ${tokenConfig.symbol} token contract deployed at ${l2TokenContract.address}`
@@ -294,7 +299,7 @@ async function deployCompleteTokenSetup(
 
   // Deploy L2 bridge contract
   logger.info(`🌉 Deploying L2 bridge contract for ${tokenConfig.symbol}`)
-  const l2BridgeDeploy = TokenBridgeContract.deploy(
+  const l2BridgeContract = await TokenBridgeContract.deploy(
     ownerWallet,
     l2TokenContract.address,
     l1PortalContractAddress
@@ -302,23 +307,12 @@ async function deployCompleteTokenSetup(
     from: ownerAztecAddress,
     contractAddressSalt: bridgeSalt,
     fee: { paymentMethod: sponsoredPaymentMethod },
+    wait: { timeout: getTimeouts().deployTimeout },
   })
-  const l2BridgeContract = await l2BridgeDeploy.deployed({ timeout: getTimeouts().deployTimeout })
 
   logger.info(
     `✅ L2 ${tokenConfig.symbol} bridge contract deployed at ${l2BridgeContract.address}`
   )
-
-  // Register L2 contracts with wallet
-  logger.info(`📝 Registering L2 contracts with wallet for ${tokenConfig.symbol}`)
-  const l2TokenInstance = await l2TokenDeploy.getInstance()
-  if (l2TokenInstance) {
-    await wallet.registerContract(l2TokenInstance, TokenContract.artifact)
-  }
-  const l2BridgeInstance = await l2BridgeDeploy.getInstance()
-  if (l2BridgeInstance) {
-    await wallet.registerContract(l2BridgeInstance, TokenBridgeContract.artifact)
-  }
 
   // Set Bridge as a minter
   logger.info(`🔑 Setting bridge as minter for ${tokenConfig.symbol}`)
@@ -327,8 +321,8 @@ async function deployCompleteTokenSetup(
     .send({
       from: ownerAztecAddress,
       fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: getTimeouts().txTimeout },
     })
-    .wait({ timeout: getTimeouts().txTimeout })
 
   // Initialize L1 portal contract
   logger.info(`🔧 Initializing L1 portal contract for ${tokenConfig.symbol}`)
@@ -352,14 +346,17 @@ async function deployCompleteTokenSetup(
 
   logger.info(`✅ L1 portal contract for ${tokenConfig.symbol} initialized`)
 
-  const deployedContract: DeployedContracts = {
+  const deployedContract: DeployedToken = {
     symbol: tokenConfig.symbol,
     decimals: tokenConfig.decimals,
     logo: tokenConfig.logo,
+    // L1 contracts
     l1TokenContract: l1TokenContract.toString(),
+    l1PortalContract: l1PortalContractAddress.toString(),
+    // L2 contracts
     l2TokenContract: l2TokenContract.address.toString(),
     l2BridgeContract: l2BridgeContract.address.toString(),
-    l1PortalContract: l1PortalContractAddress.toString(),
+    // Fee infrastructure
     feeAssetHandler: feeAssetHandler.toString(),
     sponsoredFee: '', // Will be set later
   }
@@ -370,10 +367,10 @@ async function deployCompleteTokenSetup(
 // *************************************
 
 async function main() {
-  let wallet: TestWallet
+  let wallet: EmbeddedWallet
   let logger: Logger
 
-  logger = createLogger('aztec:')
+  logger = createLogger('aztec:bridge')
   
   // Setup wallet
   wallet = await setupWallet()
@@ -427,7 +424,7 @@ async function main() {
   logger.info(' ')
   logger.info('🔧 Setting up sponsored fee payment contract...')
   const sponsoredFPC = await getSponsoredFPCInstance()
-  await wallet.registerContract(sponsoredFPC, SponsoredFPCContract.artifact)
+  await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact)
   const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(
     sponsoredFPC.address
   )
@@ -439,19 +436,56 @@ async function main() {
   await wallet.registerSender(ownerAztecAddress)
   logger.info(`📍 Owner Aztec Address: ${ownerAztecAddress}`)
 
-  // Ensure deployment environment is ready
-  logger.info('\n🔧 Setting up deployment environment...')
-  ensureDeploymentEnvironment()
+  // Create versioned deployment file with network + L1 infra info
+  const rollupVersion = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
+  const l2ChainId = nodeInfo.l1ChainId ^ rollupVersion
+  logger.info('\n🔧 Creating versioned deployment...')
+  // Serialize nodeInfo for storage (convert EthAddress/AztecAddress objects to strings)
+  const serializedNodeInfo: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(nodeInfo)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      // Nested object (e.g. l1ContractAddresses, protocolContractAddresses)
+      const nested: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        nested[k] = v != null && typeof (v as any).toString === 'function' && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean'
+          ? (v as any).toString()
+          : v
+      }
+      serializedNodeInfo[key] = nested
+    } else {
+      serializedNodeInfo[key] = value != null && typeof (value as any).toString === 'function' && typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean'
+        ? (value as any).toString()
+        : value
+    }
+  }
 
-  // Check for existing deployments
-  logger.info('\n📋 Checking for existing deployments...')
-  const existingDeployments = loadExistingDeployments()
-  if (existingDeployments) {
+  createDeployment({
+    nodeUrl,
+    l1RpcUrl: L1_URL,
+    l1ChainId: nodeInfo.l1ChainId,
+    l2ChainId,
+    aztecVersion: configManager.getConfig().settings.version,
+    rollupVersion,
+    networkName: configManager.getConfig().name,
+    l1ContractAddresses: {
+      rollupAddress: l1ContractAddresses.rollupAddress.toString(),
+      registryAddress: l1ContractAddresses.registryAddress.toString(),
+      inboxAddress: l1ContractAddresses.inboxAddress.toString(),
+      outboxAddress: l1ContractAddresses.outboxAddress.toString(),
+    },
+    nodeInfo: serializedNodeInfo,
+    sponsoredFeeAddress: sponsoredFPC.address.toString(),
+  })
+
+  // Check for existing token deployments (for skip-if-deployed checks)
+  logger.info('\n📋 Checking for existing token deployments...')
+  const existingTokens = loadExistingTokens()
+  if (existingTokens.length > 0) {
     logger.info(
-      `✅ Found existing deployments with ${existingDeployments.tokens.length} tokens`
+      `✅ Found ${existingTokens.length} existing tokens`
     )
     logger.info(
-      `🪙 Deployed tokens: ${existingDeployments.tokens
+      `🪙 Deployed tokens: ${existingTokens
         .map((t) => t.symbol)
         .join(', ')}`
     )
@@ -459,17 +493,20 @@ async function main() {
 
   // Deploy all tokens and their related contracts
   logger.info('\n🚀 Starting deployment of all tokens...')
-  const deployedContracts: DeployedContracts[] = []
+  const deployedContracts: DeployedToken[] = []
 
   for (const tokenConfig of TOKEN_CONFIGS) {
     // Check if token is already deployed
-    const existingToken = existingDeployments?.tokens.find(
+    const existingToken = existingTokens.find(
       (t) => t.symbol === tokenConfig.symbol
     )
-    if (existingToken) {
+    if (existingToken && !tokenConfig.forceDeploy) {
       logger.info(`⏭️  ${tokenConfig.symbol} already deployed, skipping...`)
       deployedContracts.push(existingToken)
       continue
+    }
+    if (existingToken && tokenConfig.forceDeploy) {
+      logger.info(`🔄 ${tokenConfig.symbol} already deployed but forceDeploy is set, redeploying...`)
     }
 
     try {
@@ -487,8 +524,8 @@ async function main() {
       )
       deployedContract.sponsoredFee = sponsoredFPC.address.toString()
 
-      // Save immediately after successful deployment
-      saveTokenToFile(deployedContract, sponsoredFPC.address.toString())
+      // Save incrementally to active deployment (survives partial failures)
+      saveTokenToDeployment(deployedContract)
       deployedContracts.push(deployedContract)
       logger.info(
         `✅ Successfully deployed and saved ${tokenConfig.symbol} token setup`
@@ -499,10 +536,9 @@ async function main() {
     }
   }
 
-  // Generate final TypeScript file
-  logger.info('\n📝 Generating final TypeScript file...')
-  generateSimpleTypescriptFile()
-  logger.info('✅ All contract addresses saved and TypeScript file generated!')
+  // Sync active deployment to frontend
+  copyToFrontend()
+  logger.info('✅ Deployment finalized and synced to frontend')
 
   // Example: Test with the first deployed token (USDC)
   if (deployedContracts.length > 0) {
@@ -548,6 +584,17 @@ async function main() {
 
     logger.info('🌉 Bridge tokens publicly')
     logger.info(`📤 Step 1: Send tokens publicly on L1`)
+
+    // Log current L1 block BEFORE network call so we have a starting point if tx fails or script exits before receipt
+    let l1BlockNumberBeforeTx: bigint | undefined
+    try {
+      const l1Public = createPublicClient({ transport: http(L1_URL) })
+      l1BlockNumberBeforeTx = await l1Public.getBlockNumber()
+      logger.info(`[L1→L2] Current L1 block before tx: ${l1BlockNumberBeforeTx}`)
+    } catch (e) {
+      logger.warn(`[L1→L2] Could not get current L1 block number before tx: ${e}`)
+    }
+
     const claim = await l1PortalManager.bridgeTokensPublic(
       ownerAztecAddress,
       MINT_AMOUNT,
@@ -620,8 +667,8 @@ async function main() {
       .send({
         from: ownerAztecAddress,
         fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: getTimeouts().txTimeout },
       })
-      .wait({ timeout: getTimeouts().txTimeout })
     const balance = await l2TokenContract.methods
       .balance_of_public(ownerAztecAddress)
       .simulate({ from: ownerAztecAddress })
@@ -632,7 +679,8 @@ async function main() {
     const nonce = Fr.random()
 
     // Give approval to bridge to burn owner's funds:
-    const authwit = await wallet.setPublicAuthWit(
+    const authwit = await SetPublicAuthwitContractInteraction.create(
+      wallet,
       ownerAztecAddress,
       {
         caller: l2BridgeContract.address,
@@ -646,11 +694,10 @@ async function main() {
     )
     await authwit
       .send({
-        fee: { paymentMethod: sponsoredPaymentMethod },
+        fee: { paymentMethod: sponsoredPaymentMethod as any },
+        wait: { timeout: getTimeouts().txTimeout },
       })
-      .wait({ timeout: getTimeouts().txTimeout })
 
-    const version = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
     const selectorBuf = Buffer.from(
       toFunctionSelector('withdraw(address,uint256,address)').slice(2),
       'hex'
@@ -667,9 +714,19 @@ async function main() {
       l2Sender: l2BridgeContract.address,
       l1Recipient: EthAddress.fromString(firstToken.l1PortalContract),
       content,
-      rollupVersion: new Fr(version),
+      rollupVersion: new Fr(rollupVersion),
       chainId: new Fr(nodeInfo.l1ChainId),
     })
+
+    // Log current L2 block BEFORE network call so we have a starting point if tx fails or script exits before receipt
+    let l2BlockNumberBeforeTx: number | undefined
+    try {
+      l2BlockNumberBeforeTx = await node.getBlockNumber()
+      logger.info(`[L2→L1] Current L2 block before tx: ${l2BlockNumberBeforeTx}`)
+    } catch (e) {
+      logger.warn(`[L2→L1] Could not get current L2 block number before tx: ${e}`)
+    }
+
     const l2TxReceipt = await l2BridgeContract.methods
       .exit_to_l1_public(
         EthAddress.fromString(ownerEthAddress),
@@ -680,8 +737,8 @@ async function main() {
       .send({
         from: ownerAztecAddress,
         fee: { paymentMethod: sponsoredPaymentMethod },
+        wait: { timeout: getTimeouts().txTimeout, returnReceipt: true },
       })
-      .wait({ timeout: getTimeouts().txTimeout })
 
     const newL2Balance = await l2TokenContract.methods
       .balance_of_public(ownerAztecAddress)
@@ -745,9 +802,16 @@ async function main() {
       )
       await wait(40 * 60 * 1000)
     }
-    const witness = await computeL2ToL1MembershipWitness(node, blockNumber, msgLeaf)
+    // Convert block number → checkpoint → epoch 
+    const rollup = new RollupContract(l1Client, rollupAddress as any)
+    const epoch = await rollup.getEpochNumberForCheckpoint(
+      CheckpointNumber.fromBlockNumber(blockNumber)
+    )
+    logger.info(`📦 Block ${blockNumber} → Epoch ${epoch}`)
+
+    const witness = await computeL2ToL1MembershipWitness(node, epoch, msgLeaf)
     if (!witness) {
-      throw new Error('L2→L1 message not found in block')
+      throw new Error(`L2→L1 message not found in epoch ${epoch} (block ${blockNumber})`)
     }
     const siblingPathHex = witness!.siblingPath
       .toBufferArray()
@@ -762,7 +826,7 @@ async function main() {
       ownerEthAddress,
       withdrawAmount,
       false,
-      BigInt(blockNumber),
+      BigInt(epoch),
       BigInt(witness!.leafIndex),
       siblingPathHex,
     ])

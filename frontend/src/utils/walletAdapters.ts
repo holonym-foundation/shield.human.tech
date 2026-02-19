@@ -9,7 +9,7 @@ import { AzguardClient } from '@azguardwallet/client'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
-import { ADDRESS, L2_CHAIN_ID, L2_CHAIN_KEY } from '@/config'
+import { L1_TOKENS, L2_CHAIN_ID, L2_CHAIN_KEY } from '@/config'
 // Obsidion SDK imports are disabled (not yet on Devnet 6)
 // import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge'
 // import { TokenContract } from '@aztec/noir-contracts.js/Token'
@@ -55,13 +55,19 @@ export interface ExecuteCallResult {
 
 class AzguardWalletAdapter {
   // Expose contract addresses as properties for direct access
-  readonly tokenAddress: string = ADDRESS[L2_CHAIN_ID].L2.TOKEN_CONTRACT
-  readonly bridgeAddress: string = ADDRESS[L2_CHAIN_ID].L2.TOKEN_BRIDGE_CONTRACT
+  readonly tokenAddress: string
+  readonly bridgeAddress: string
 
   constructor(
     private azguardClient: AzguardClient,
-    private account: string
-  ) {}
+    private account: string,
+    tokenAddress?: string,
+    bridgeAddress?: string,
+  ) {
+    // Default to first deployed token if not specified
+    this.tokenAddress = tokenAddress ?? L1_TOKENS[0]?.l2TokenContract ?? ''
+    this.bridgeAddress = bridgeAddress ?? L1_TOKENS[0]?.l2BridgeContract ?? ''
+  }
 
   // Initialize contracts - no-op since artifacts are in public registry
   // Azguard will automatically fetch artifacts from the public registry when needed

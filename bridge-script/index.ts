@@ -175,6 +175,13 @@ async function main() {
     // docs:end:setup-portal
 
     // docs:start:l1-bridge-public
+    // Log current L1 block BEFORE network call so we have a starting point if tx fails or script exits before receipt
+    try {
+      const l1BlockNumberBeforeTx = await publicClient.getBlockNumber();
+      logger.info(`[L1→L2] Current L1 block before tx: ${l1BlockNumberBeforeTx}`);
+    } catch (e) {
+      logger.warn(`[L1→L2] Could not get current L1 block number before tx: ${e}`);
+    }
     const claim = await l1PortalManager.bridgeTokensPublic(ownerAztecAddress, MINT_AMOUNT, true);
 
     // Do 2 unrleated actions because
@@ -232,6 +239,13 @@ async function main() {
       rollupVersion: new Fr(version),
       chainId: new Fr(nodeInfo.l1ChainId),
     });
+    // Log current L2 block BEFORE network call so we have a starting point if tx fails or script exits before receipt
+    try {
+      const l2BlockNumberBeforeTx = await (pxe as { getBlockNumber?: () => Promise<number> }).getBlockNumber?.();
+      if (l2BlockNumberBeforeTx != null) logger.info(`[L2→L1] Current L2 block before tx: ${l2BlockNumberBeforeTx}`);
+    } catch (e) {
+      logger.warn(`[L2→L1] Could not get current L2 block number before tx: ${e}`);
+    }
     const l2TxReceipt = await l2BridgeContract.methods
       .exit_to_l1_public(EthAddress.fromString(ownerEthAddress), withdrawAmount, EthAddress.ZERO, nonce)
       .send()

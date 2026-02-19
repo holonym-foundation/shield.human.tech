@@ -6,7 +6,7 @@ import { BridgeDirection } from '@/types/bridge'
 import { useToast } from '@/hooks/useToast'
 import { parseUnits } from 'viem'
 import CongestionWarningModal from './model/CongestionWarningModal'
-import { useL2PendingTxCount } from '@/hooks/useL2Operations'
+import { useL2PendingTxCount, useNetworkHealth } from '@/hooks/useL2Operations'
 
 function LoadingContent({ label }: { label: string }) {
   return (
@@ -133,6 +133,8 @@ function BridgeActionButton({
   const [showCongestionWarning, setShowCongestionWarning] = useState(false)
   const { data: pendingTxCount } = useL2PendingTxCount()
   const isCongested = pendingTxCount && pendingTxCount > 40
+  const { data: networkHealth } = useNetworkHealth()
+  const isNetworkDown = networkHealth?.isNetworkDown ?? false
 
   // Helper functions for bridge operations
   const getOperationType = (direction: BridgeDirection) =>
@@ -306,6 +308,10 @@ function BridgeActionButton({
     if (l2NodeError) {
       return 'Aztec Network Unavailable';
     }
+    // Show message if chain is stalled
+    if (isNetworkDown) {
+      return 'Aztec Network is Down';
+    }
     // Show success message when bridge operation completes
     if (bridgeCompleted) {
       return 'Bridge Complete!'
@@ -348,6 +354,7 @@ function BridgeActionButton({
   const isButtonDisabled =
     l2NodeIsReadyLoading ||
     l2NodeError ||
+    isNetworkDown ||
     // Disable during loading states
     (isWaapConnected &&
       isAztecConnected &&
@@ -421,7 +428,7 @@ function BridgeActionButton({
           )}
         </TextButton>
       </div>
-      
+
       <CongestionWarningModal
         isOpen={showCongestionWarning}
         onClose={() => setShowCongestionWarning(false)}

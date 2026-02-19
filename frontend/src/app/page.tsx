@@ -39,7 +39,7 @@ import BridgeFooter from '@/components/BridgeFooter'
 import BridgeHeader from '@/components/BridgeHeader'
 import { motion, AnimatePresence } from 'framer-motion'
 import BridgeActionButton from '@/components/BridgeActionButton'
-import { L1_NETWORKS, L2_NETWORKS, L1_TOKENS, L2_TOKENS, ADDRESS } from '@/config'
+import { L1_CHAIN_ID, L1_NETWORKS, L2_NETWORKS, L1_TOKENS, L2_TOKENS, getL2PairedToken, getL1PairedToken } from '@/config'
 import MetaMaskPrompt from '@/components/model/MetaMaskPrompt'
 import BalanceCard from '@/components/BalanceCard'
 import { logInfo, logError } from '@/utils/datadog'
@@ -210,12 +210,13 @@ export default function Home() {
 
   // native token
   const sepoliaNativeTokens = l1TokenBalances.find(
-    (token) => token.type === 'native' && token.network?.chainId === 11155111
+    (token) => token.type === 'native' && token.network?.chainId === L1_CHAIN_ID
   )
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted
 
+  const selectedFromToken = bridgeConfig.from.token
   const l1Balance = l1TokenBalances.find(
-    (token) => token.type === 'erc20' && token.network?.chainId === 11155111 && token.address === ADDRESS[11155111].L1.TOKEN_CONTRACT
+    (token) => token.type === 'erc20' && token.network?.chainId === L1_CHAIN_ID && token.address === (selectedFromToken?.l1TokenContract ?? L1_TOKENS[0]?.l1TokenContract)
   )?.balance_formatted
 
   // const { data: l1NativeBalance } = useL1NativeBalance()
@@ -323,11 +324,19 @@ export default function Home() {
     console.log('Selected network:', network)
   }
 
-  // Handle token selection
+  // Handle token selection with auto-pairing
   const handleSelectToken = (token: TokenType) => {
     const section = getCurrentSection()
     updateToken(section, token)
-    console.log('Selected token:', token)
+    // Auto-pair: set the counterpart on the other side
+    const oppositeSection = getOppositeSection()
+    const paired = section === 'from'
+      ? (bridgeConfig.direction === BridgeDirection.L1_TO_L2 ? getL2PairedToken(token) : getL1PairedToken(token))
+      : (bridgeConfig.direction === BridgeDirection.L1_TO_L2 ? getL1PairedToken(token) : getL2PairedToken(token))
+    if (paired) {
+      updateToken(oppositeSection, paired)
+    }
+    console.log('Selected token:', token.symbol, '→ paired:', paired?.symbol)
   }
 
   // Input amount change handler
@@ -435,10 +444,15 @@ export default function Home() {
   }
 
 
+  // Prefetch routes this page navigates to
+  useEffect(() => {
+    router.prefetch('/progress')
+  }, [router])
+
   // Page visit tracking and component mount effects
   useEffect(() => {
     setMounted(true)
-    
+
     // Log page visit/session start
     logInfo('User session started - page loaded', {
       walletType: null,

@@ -1,6 +1,7 @@
 import { parseUnits } from 'viem'
 import { InitWaaPOptions } from '@human.tech/waap-sdk'
 import { logo } from './logo'
+import { L1_CHAIN_ID } from '@/config'
 
 export const useStagingWaap = false
 
@@ -72,7 +73,7 @@ export const networkConfig: NetworkConfigInfo = {
   //   chainId: 5,
   //   isTestnet: true
   // },
-  11155111: {
+  [L1_CHAIN_ID]: {
     name: 'Ethereum Sepolia',
     cmc_id: 23669,
     currencyName: 'Sepolia Ether',
@@ -80,7 +81,7 @@ export const networkConfig: NetworkConfigInfo = {
     logo: 'https://assets.coingecko.com/coins/images/279/small/ethereum.png?1595348880',
     blockExplorer: 'https://sepolia.etherscan.io/',
     rpcUrl: '',
-    chainId: 11155111,
+    chainId: L1_CHAIN_ID,
     isTestnet: true,
   },
   100: {
