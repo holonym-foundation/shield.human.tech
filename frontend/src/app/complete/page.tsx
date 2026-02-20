@@ -7,11 +7,17 @@ import styles from "@/styles/Home.module.css";
 import TextButton from "@/components/TextButton";
 import RootStyle from "@/components/RootStyle";
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import StyledImage from "@/components/StyledImage";
 
 
 export default function CompletePage() {
   const router = useRouter();
+
+  // Prefetch routes this page navigates to
+  useEffect(() => {
+    router.prefetch('/')
+  }, [router])
   return (
     <>
       <RootStyle>

@@ -1,0 +1,174 @@
+// Bridge encrypted backup storage + user/wallet logging + transaction tracking.
+// User/auth: prisma/USER_AND_AUTH_DESIGN.md
+// Encryption: bridge-script/ENCRYPTION_STRATEGY.md
+// Log context (logInfo/logError) aligns with BridgeActivity fields.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums: canonical values used by app and DB (keep in sync with design doc)
+// ---------------------------------------------------------------------------
+
+enum BridgeDirection {
+  L1_TO_L2
+  L2_TO_L1
+}
+
+enum BridgeOperationStatus {
+  pending
+  deposited
+  claimed
+  submitted
+  ready
+  pending_finalize
+  completed
+  failed
+}
+
+// ---------------------------------------------------------------------------
+// User: one identity = (L1 wallet + L2 Aztec address). Changing L1 or L2 = new user.
+// See prisma/USER_AND_AUTH_DESIGN.md. Auth when both L1 and L2 are connected;
+// JWT has userId + l1Address + l2Address.
+// ---------------------------------------------------------------------------
+
+model User {
+  id             String   @id @unique @default(cuid(2))
+  // L1 (Ethereum / WaaP)
+  l1Address      String   // L1 Ethereum address (normalized lowercase)
+  l1LoginMethod  String?  // waap | injected | walletconnect (WaapLoginMethod)
+  l1WalletProvider String? // e.g. "MetaMask", "Wallet as a Protocol"
+  // L2 (Aztec)
+  l2Address      String   // L2 Aztec address (normalized lowercase)
+  l2LoginMethod  String?  // azguard | obsidion (AztecLoginMethod)
+  l2WalletProvider String? // e.g. "Azguard", "Obsidion"
+  defaultPrivacyMode Boolean? // Sync from frontend localStorage "privacyModeEnabled"
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  bridgeActivities BridgeActivity[]
+
+  @@unique([l1Address, l2Address])
+  @@index([l1Address])
+  @@index([l2Address])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// BridgeActivity: one bridge activity (L1→L2 or L2→L1) with encrypted backup
+// ---------------------------------------------------------------------------
+
+model BridgeActivity {
+  id            String                @id @unique @default(cuid(2))
+  fkUserId      String                // FK to User.id (one user = L1 + L2 pair)
+  user          User?                 @relation(fields: [fkUserId], references: [id], onDelete: Cascade)
+  direction BridgeDirection
+  status    BridgeOperationStatus
+
+  // --- Encrypted payload (AES-256-GCM); server cannot read ---
+  encryptedCiphertext String
+  encryptedIv        String
+  encryptedTag       String
+
+  // --- Key derivation: same deterministic message/signature needed to decrypt ---
+  keyDerivationMessage   String  // Deterministic message user signed (same for all ops per wallet+domain)
+  keyDerivationDomain    String  // e.g. "https://bridge.human.tech/"
+
+  // --- Plaintext metadata (for querying only) ---
+  // l1Address/l2Address: use activity.user.l1Address, activity.user.l2Address (User relation)
+  recipientL1Address String? // L2→L1: withdraw-to address (if different from signer)
+  l1TxHash   String?
+  l2TxHash   String?
+
+  // --- L1→L2 claim recovery (plaintext so we can list "pending claim" without decrypting) ---
+  messageHash     String? // L1→L2 message key (from portal event); used for sync check and claim
+  messageLeafIndex String? // L1→L2 leaf index; required for claim_public/claim_private on L2
+
+  // --- L2→L1 withdrawal recovery (for L1 withdraw proof) ---
+  l2BlockNumber      String? // L2 block where exit tx was included; required for witness and L1 withdraw
+  l2BlockNumberBeforeTx String? // L2 block number captured before sending exit tx; starting point if receipt lost
+  l2ToL1MessageIndex String? // Leaf index in L2→L1 message tree (same as frontend l2ToL1MessageIndex)
+  siblingPath       Json?   // Merkle sibling path (array of hex strings) for L1 portal withdraw
+
+  // --- L1→L2 recovery hint ---
+  l1BlockNumberBeforeTx String? // L1 block number captured before sending deposit tx; starting point if receipt lost
+
+  // --- Progress tracking (for resume from activity page) ---
+  // L1→L2: 1=deposit sent, 2=waiting for sync, 3=claiming on L2, 4=complete
+  // L2→L1: 1=burn+exit sent, 2=computing witness, 3=waiting for proven, 4=L1 withdraw, 5=complete
+  currentStep    Int?    @default(0)
+
+  // --- Completion ---
+  completedAt DateTime? // When operation reached completed or failed (for analytics and listing)
+
+  // --- Network names & explorer URLs (same as Datadog logInfo context) ---
+  fromNetworkName String? // e.g. "Ethereum", "Aztec"
+  toNetworkName   String? // e.g. "Aztec", "Ethereum"
+  l1TxUrl         String? // e.g. etherscan tx URL
+  l2TxUrl         String? // e.g. aztecscan tx-effects URL
+
+  // --- Token information: both L1 and L2 token (multi-token snapshot at tx time; see PRISMA_SCHEMA_DESIGN §11) ---
+  // L1 token (e.g. Ethereum USDC)
+  tokenSymbolL1   String?
+  tokenNameL1     String?
+  tokenDecimalsL1 Int?
+  tokenLogoUrlL1  String?
+  tokenAddressL1  String?
+  amountL1        String?  // Raw amount in smallest unit (e.g. "1000000" for 1 USDC)
+  amountDisplayL1 String? // Human-readable amount as entered by the user (e.g. "1" for 1 USDC)
+  // L2 token (e.g. Aztec cUSDC / Clean USDC)
+  tokenSymbolL2   String?
+  tokenNameL2     String?
+  tokenDecimalsL2 Int?
+  tokenLogoUrlL2  String?
+  tokenAddressL2  String?
+  amountL2        String?  // Raw amount in smallest unit (e.g. "1000000" for 1 USDC)
+  amountDisplayL2 String? // Human-readable amount as entered by the user (e.g. "1" for 1 USDC)
+  // Convenience: "from" token symbol for list view (e.g. L1→L2 use tokenSymbolL1, L2→L1 use tokenSymbolL2)
+  tokenSymbol     String?
+  chainIdL1       Int?    // e.g. 11155111 (Sepolia)
+  chainIdL2       Int?    // Aztec chain id from config
+
+  // --- Contract & privacy (support & recovery; see PRISMA_SCHEMA_DESIGN §8) ---
+  isPrivacyModeEnabled Boolean? // L1→L2: private vs public deposit
+  portalAddressL1      String?  // L1 portal contract used
+  bridgeAddressL2      String?  // L2 bridge contract (for L2→L1 recovery)
+  lastErrorMessage    String?  // When status = failed: operation-level error
+
+  // --- Full Aztec node info at tx time (support & recovery) ---
+  nodeInfo          Json?   // Full NodeInfo from aztecNode.getNodeInfo(): nodeVersion, l1ChainId, rollupVersion, enr, l1ContractAddresses, protocolContractAddresses
+
+  // --- L1/L2 and rollup contract snapshot (which contracts/version were used for this tx) ---
+  // From app config at tx time:
+  // tokenAddressL1, tokenAddressL2, portalAddressL1, bridgeAddressL2 already above
+  // From node.getNodeInfo() at tx time (inbox/outbox/rollup/registry are Aztec protocol L1 contracts):
+  rollupVersion     Int?    // node.getNodeInfo().rollupVersion (used in L2→L1 message hash)
+  l1InboxAddress    String? // node.l1ContractAddresses.inboxAddress
+  l1OutboxAddress   String? // node.l1ContractAddresses.outboxAddress
+  l1RollupAddress   String? // node.l1ContractAddresses.rollupAddress
+  l1RegistryAddress String? // node.l1ContractAddresses.registryAddress
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([fkUserId])
+  @@index([fkUserId, createdAt])
+  @@index([status])
+  @@index([direction])
+  @@index([l1TxHash])
+  @@index([l2TxHash])
+  @@index([createdAt])
+  @@index([tokenSymbol])
+  @@index([chainIdL1])
+  @@index([rollupVersion])
+  @@index([messageHash])
+  @@index([l2BlockNumber])
+  @@index([completedAt])
+  @@map("bridge_activities")
+}

@@ -29,10 +29,67 @@ interface TransactionState {
   l2TxUrl: string | null
 }
 
+/** Data needed to resume an incomplete L1→L2 bridge operation */
+export interface RecoveryClaimData {
+  operationId: string
+  claimSecret: string
+  claimSecretHash: string
+  messageHash: string | null
+  messageLeafIndex: string | null
+  amount: string
+  l1Address: string
+  l2Address: string
+  l1TxHash: string | null
+  l1TxUrl: string | null
+  l1BlockNumberBeforeTx: string | null
+  isPrivacyModeEnabled: boolean
+  nodeInfo: Record<string, unknown> | null
+  status: string
+  currentStep: number | null
+  // Recovery-critical contract snapshot (multi-token support)
+  portalAddressL1: string | null
+  bridgeAddressL2: string | null
+  tokenAddressL1: string | null
+  tokenAddressL2: string | null
+}
+
+/** Data needed to resume an incomplete L2→L1 withdrawal */
+export interface RecoveryWithdrawalData {
+  operationId: string
+  amount: string
+  l1Address: string
+  l2Address: string
+  l2TxHash: string | null
+  l2TxUrl: string | null
+  l2BlockNumber: string | null
+  l2BlockNumberBeforeTx: string | null
+  l2ToL1MessageIndex: string | null
+  siblingPath: string[] | null
+  recipientL1Address: string | null
+  // Recovery-critical contract & version snapshot
+  rollupVersion: number | null
+  chainIdL1: number | null
+  portalAddressL1: string | null
+  bridgeAddressL2: string | null
+  l1RollupAddress: string | null
+  l1OutboxAddress: string | null
+  isPrivacyModeEnabled: boolean
+  nodeInfo: Record<string, unknown> | null
+  status: string
+  currentStep: number | null
+}
+
+interface RecoveryState {
+  recoveryOperationId: string | null
+  recoveryClaimData: RecoveryClaimData | null
+  recoveryWithdrawalData: RecoveryWithdrawalData | null
+}
+
 interface BridgeStoreState
   extends StepState,
     BridgeConfigState,
-    TransactionState {
+    TransactionState,
+    RecoveryState {
   direction: BridgeDirection
 
   // Privacy Mode toggle
@@ -59,17 +116,22 @@ interface BridgeStoreState
   swapDirection: () => void
   setTransactionUrls: (l1TxUrl: string | null, l2TxUrl: string | null) => void
 
+  // Recovery actions
+  setRecovery: (operationId: string, claimData: RecoveryClaimData) => void
+  setWithdrawalRecovery: (operationId: string, withdrawalData: RecoveryWithdrawalData) => void
+  clearRecovery: () => void
+
   // Reset
   resetStepState: () => void
   reset: () => void
 }
 
-// Initial states
+// Initial states (default amount '1' so /progress can be used directly for development)
 const DEFAULT_BRIDGE_STATE: BridgeState = {
   from: { network: L1_NETWORKS[0], token: L1_TOKENS[0] },
   to: { network: L2_NETWORKS[0], token: L2_TOKENS[0] },
   direction: BridgeDirection.L1_TO_L2,
-  amount: '',
+  amount: '1',
 }
 
 const initialStepState: StepState = {
@@ -143,10 +205,17 @@ const getInitialPrivacyMode = (): boolean => {
   }
 }
 
+const initialRecoveryState: RecoveryState = {
+  recoveryOperationId: null,
+  recoveryClaimData: null,
+  recoveryWithdrawalData: null,
+}
+
 const initialState = {
   ...initialStepState,
   ...initialBridgeConfigState,
   ...initialTransactionState,
+  ...initialRecoveryState,
   isPrivacyModeEnabled: getInitialPrivacyMode(),
 } as const
 
@@ -284,12 +353,23 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
 
   setTransactionUrls: (l1TxUrl, l2TxUrl) => set({ l1TxUrl, l2TxUrl }),
 
+  // Recovery actions
+  setRecovery: (operationId: string, claimData: RecoveryClaimData) =>
+    set({ recoveryOperationId: operationId, recoveryClaimData: claimData, recoveryWithdrawalData: null }),
+  setWithdrawalRecovery: (operationId: string, withdrawalData: RecoveryWithdrawalData) =>
+    set({ recoveryOperationId: operationId, recoveryWithdrawalData: withdrawalData, recoveryClaimData: null }),
+  clearRecovery: () =>
+    set({ recoveryOperationId: null, recoveryClaimData: null, recoveryWithdrawalData: null }),
+
   // Reset
   resetStepState: () => set({ ...initialStepState }),
-  reset: () => set((state) => ({ 
-    ...initialState, 
+  reset: () => set((state) => ({
+    ...initialState,
     direction: BridgeDirection.L1_TO_L2,
-    isPrivacyModeEnabled: state.isPrivacyModeEnabled 
+    isPrivacyModeEnabled: state.isPrivacyModeEnabled,
+    recoveryOperationId: null,
+    recoveryClaimData: null,
+    recoveryWithdrawalData: null,
   })),
 }))
 
@@ -335,5 +415,13 @@ export const useBridgeStore = () =>
       // Privacy Mode toggle
       isPrivacyModeEnabled: state.isPrivacyModeEnabled,
       setPrivacyModeEnabled: state.setPrivacyModeEnabled,
+
+      // Recovery
+      recoveryOperationId: state.recoveryOperationId,
+      recoveryClaimData: state.recoveryClaimData,
+      recoveryWithdrawalData: state.recoveryWithdrawalData,
+      setRecovery: state.setRecovery,
+      setWithdrawalRecovery: state.setWithdrawalRecovery,
+      clearRecovery: state.clearRecovery,
     }))
   )

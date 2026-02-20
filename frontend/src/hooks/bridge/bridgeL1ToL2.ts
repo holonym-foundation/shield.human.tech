@@ -1,0 +1,759 @@
+/**
+ * L1→L2 bridge operations: shared polling/claim + deposit step functions.
+ *
+ * Shared (used by both main hook and resume hook):
+ *   - pollL1ToL2MessageSync
+ *   - executeL2Claim
+ *
+ * Deposit steps (used only by useL1BridgeToL2):
+ *   - validateAndCaptureBlocks  (step 1)
+ *   - generateAndBackupClaimSecret  (step 2)
+ *   - checkAndApproveAllowance  (step 3)
+ *   - sendL1DepositTransaction  (step 4)
+ *   - waitForReceiptAndExtractEvent  (step 5)
+ *   - persistReceiptToBackend  (step 6)
+ *   - finalizeLocalStorageAfterDeposit  (step 7)
+ */
+
+import { Fr } from '@aztec/aztec.js/fields'
+import { computeSecretHash } from '@aztec/aztec.js/crypto'
+import { AztecAddress } from '@aztec/stdlib/aztec-address'
+import { TestERC20Abi, TokenPortalAbi } from '@aztec/l1-artifacts'
+import { extractEvent } from '@aztec/ethereum/utils'
+import { encodeFunctionData } from 'viem'
+import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
+import { aztecNode } from '@/aztec'
+import { api } from '@/lib/api'
+import axios from 'axios'
+import {
+  L1_CHAIN_ID,
+  L2_CHAIN_ID,
+} from '@/config'
+import type { Token } from '@/types/bridge'
+import { serializeNodeInfo, wait } from '@/utils'
+import { logInfo } from '@/utils/datadog'
+import { WalletType } from '@/types/wallet'
+import {
+  getKeyDerivationDomain,
+  createSigningMessage,
+  deriveEncryptionKey,
+  encryptData,
+} from '@/utils/encryption'
+import {
+  requestWaapWallet,
+  WAAP_METHOD,
+} from '@/stores/walletStore'
+import {
+  type BridgeLogContext,
+  LS_KEY_BRIDGE_DEPOSITS,
+  patchOperationWithRetry,
+  publicClient,
+  updateLocalStorageItem,
+  pushToLocalStorageArray,
+} from './bridgeUtils'
+
+// ─── Shared Types ────────────────────────────────────────────────────
+
+/** Dependencies injected from the calling hook (React-dependent values). */
+export interface L2ClaimDeps {
+  walletAdapter: any
+  aztecAddress: string
+  isPrivacyModeEnabled: boolean
+}
+
+export interface MessageSyncResult {
+  synced: boolean
+  elapsedMinutes: number
+}
+
+export interface L2ClaimResult {
+  l2TxHash: string
+  usedBruteForce: boolean
+  bruteForceLeafIndex?: number
+}
+
+// ─── Deposit Step Result Types ───────────────────────────────────────
+
+export interface CaptureBlocksResult {
+  nodeInfo: any
+  l1Addresses: any
+  l1BlockNumberBeforeTx: string
+  l2BlockNumberBeforeTx: string
+}
+
+export interface BackupResult {
+  operationId: string
+  claimSecret: Fr
+  claimSecretHash: Fr
+  nodeInfoSnapshot: any
+}
+
+export interface DepositTxResult {
+  txHash: any
+  l1TxHash: string
+  l1TxUrl: string
+}
+
+export interface ReceiptResult {
+  l1TxHash: string
+  l1TxUrl: string
+  messageHashStr: string
+  messageLeafIndexStr: string
+  messageHash: any
+  messageLeafIndex: any
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// SHARED: Message Sync Polling
+// ═════════════════════════════════════════════════════════════════════
+
+/**
+ * Poll aztecNode.getL1ToL2MessageBlock() until the message is synced on L2.
+ *
+ * Does NOT include the final 2-minute buffer wait — the caller should add
+ * that if needed (so the caller can update UI progress between poll and wait).
+ */
+export async function pollL1ToL2MessageSync(
+  messageHash: string,
+  options?: { pollIntervalMs?: number; maxWaitMs?: number },
+): Promise<MessageSyncResult> {
+  const pollIntervalMs = options?.pollIntervalMs ?? 120_000
+  const maxWaitMs = options?.maxWaitMs ?? 20 * 60 * 1000
+  const messageHashFr = Fr.fromString(messageHash)
+  const startWait = Date.now()
+
+  console.log('[L1→L2] Polling for L1-to-L2 message sync (messageHash=', messageHash, ')...')
+
+  while (Date.now() - startWait < maxWaitMs) {
+    try {
+      const messageBlock = await aztecNode.getL1ToL2MessageBlock(messageHashFr)
+      if (messageBlock !== undefined) {
+        console.log('[L1→L2] L1-to-L2 message ready (block=', messageBlock, ')')
+        return {
+          synced: true,
+          elapsedMinutes: (Date.now() - startWait) / 60_000,
+        }
+      }
+      console.log('[L1→L2] Not yet synced, waiting', pollIntervalMs / 1000, 's...')
+    } catch (error) {
+      console.warn('[L1→L2] Poll check failed, retrying:', error)
+    }
+    await wait(pollIntervalMs)
+  }
+
+  return {
+    synced: false,
+    elapsedMinutes: (Date.now() - startWait) / 60_000,
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// SHARED: L2 Claim Execution
+// ═════════════════════════════════════════════════════════════════════
+
+/**
+ * Execute claim_public or claim_private on L2.
+ *
+ * - If messageLeafIndex is provided: retry up to maxAttempts times on
+ *   "nonexistent L1-to-L2 message" (Azguard node lag).
+ * - If messageLeafIndex is null: brute-force indices 0..bruteForceMaxIndex.
+ */
+export async function executeL2Claim(
+  deps: L2ClaimDeps,
+  params: {
+    amount: bigint
+    claimSecret: Fr
+    messageLeafIndex: bigint | null
+  },
+  options?: {
+    maxAttempts?: number
+    retryDelayMs?: number
+    bruteForceMaxIndex?: number
+    /** Called before each claim attempt. */
+    onAttempt?: (attempt: number, maxAttempts: number) => void
+    /** Called when a retryable "nonexistent message" error occurs before waiting. */
+    onRetry?: (attempt: number, maxAttempts: number, retryDelayMs: number) => void
+  },
+): Promise<L2ClaimResult> {
+  const { walletAdapter, aztecAddress, isPrivacyModeEnabled } = deps
+  const { amount, claimSecret, messageLeafIndex } = params
+  const maxAttempts = options?.maxAttempts ?? 5
+  const retryDelayMs = options?.retryDelayMs ?? 120_000
+  const bruteForceMaxIndex = options?.bruteForceMaxIndex ?? 64
+
+  const method = isPrivacyModeEnabled ? 'claim_private' : 'claim_public'
+
+  if (messageLeafIndex != null) {
+    // ── Normal path: known leaf index, retry on "nonexistent message" ──
+    let result: { txHash: string } | undefined
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        options?.onAttempt?.(attempt, maxAttempts)
+        console.log(`[L1→L2] Claim attempt ${attempt}/${maxAttempts}...`)
+        result = await walletAdapter.executeCall(
+          walletAdapter.bridgeAddress,
+          method,
+          [
+            AztecAddress.fromString(aztecAddress),
+            amount,
+            claimSecret,
+            messageLeafIndex,
+          ],
+          { contractType: 'bridge', autoRegister: true },
+        )
+        console.log(`[L1→L2] Claim succeeded on attempt ${attempt}`)
+        break
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        const isNonexistentMsg =
+          errMsg.includes('nonexistent L1-to-L2 message') ||
+          errMsg.includes('l1_to_l2_msg_exists')
+        if (isNonexistentMsg && attempt < maxAttempts) {
+          options?.onRetry?.(attempt, maxAttempts, retryDelayMs)
+          console.warn(
+            `[L1→L2] Claim attempt ${attempt} failed (message not synced to Azguard node), retrying in ${retryDelayMs / 1000}s...`,
+          )
+          await wait(retryDelayMs)
+          continue
+        }
+        throw err
+      }
+    }
+    return { l2TxHash: result!.txHash, usedBruteForce: false }
+  } else {
+    // ── Brute-force path: try indices 0..bruteForceMaxIndex ──
+    console.log('[L1→L2] Brute-forcing messageLeafIndex (trying 0..', bruteForceMaxIndex - 1, ')...')
+    for (let idx = 0; idx < bruteForceMaxIndex; idx++) {
+      try {
+        console.log('[L1→L2] Trying leafIndex=', idx)
+        const result = await walletAdapter.executeCall(
+          walletAdapter.bridgeAddress,
+          method,
+          [
+            AztecAddress.fromString(aztecAddress),
+            amount,
+            claimSecret,
+            BigInt(idx),
+          ],
+          { contractType: 'bridge', autoRegister: true },
+        )
+        console.log('[L1→L2] Claim succeeded with leafIndex=', idx)
+        return {
+          l2TxHash: result.txHash,
+          usedBruteForce: true,
+          bruteForceLeafIndex: idx,
+        }
+      } catch {
+        console.log('[L1→L2] leafIndex=', idx, 'failed, trying next...')
+      }
+    }
+    throw new Error(
+      `Could not find correct messageLeafIndex after trying 0–${bruteForceMaxIndex - 1}. ` +
+        'The L1→L2 message may not be synced to L2 yet. Try again later.',
+    )
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// DEPOSIT STEPS (useL1BridgeToL2 only)
+// ═════════════════════════════════════════════════════════════════════
+
+// ─── Step 1: Validate wallets and capture block numbers ──────────────
+
+export async function validateAndCaptureBlocks(
+  l1Address: string,
+  aztecAddress: string,
+  walletAdapter: any,
+  logContext?: BridgeLogContext & { amount: string },
+  selectedToken?: Token,
+): Promise<CaptureBlocksResult> {
+  if (!l1Address || !aztecAddress) {
+    console.log({ l1Address, aztecAddress })
+    throw new Error('Required accounts not connected')
+  }
+
+  const nodeInfo = await aztecNode.getNodeInfo()
+  const l1Addresses = nodeInfo?.l1ContractAddresses ?? null
+  console.log('[L1→L2] Node info fetched, outboxAddress:', l1Addresses.outboxAddress.toString())
+  if (!l1Addresses?.outboxAddress.toString()) {
+    throw new Error(
+      'L1 contract addresses not initialized. Please wait for contract initialization to complete.',
+    )
+  }
+
+  if (!walletAdapter) {
+    throw new Error(
+      'Aztec wallet not connected or contracts not initialized. Please wait for wallet initialization to complete.',
+    )
+  }
+
+  let l1BlockNumberBeforeTx: string
+  try {
+    const block = await publicClient.getBlockNumber()
+    l1BlockNumberBeforeTx = block.toString()
+    console.log('[L1→L2] Current L1 block before tx:', l1BlockNumberBeforeTx)
+  } catch (e) {
+    console.warn('[L1→L2] Could not get current L1 block number before tx:', e)
+    throw new Error(
+      'Could not get L1 block number. Please check your connection and try again. Required for recovery.',
+    )
+  }
+
+  let l2BlockNumberBeforeTx: string
+  try {
+    const l2Block = await aztecNode.getBlockNumber()
+    l2BlockNumberBeforeTx = l2Block.toString()
+    console.log('[L1→L2] Current L2 block before tx:', l2BlockNumberBeforeTx)
+  } catch (e) {
+    console.warn('[L1→L2] Could not get current L2 block number before tx:', e)
+    throw new Error(
+      'Could not get L2 block number. Please check your connection and try again. Required for recovery.',
+    )
+  }
+
+  // Log "initiated" if context provided
+  if (logContext) {
+    logInfo('Bridge from L1 to L2 initiated', {
+      ...logContext,
+      direction: BridgeDirection.L1_TO_L2,
+      fromNetwork: 'Ethereum',
+      toNetwork: 'Aztec',
+      fromToken: selectedToken?.symbol ?? 'USDC',
+      toToken: selectedToken?.pairedSymbol ?? 'cUSDC',
+      l1Address,
+      l2Address: aztecAddress,
+      l1BlockNumberBeforeTx,
+      userAction: 'bridge_l1_to_l2_initiated',
+    })
+  }
+
+  return { nodeInfo, l1Addresses, l1BlockNumberBeforeTx, l2BlockNumberBeforeTx }
+}
+
+// ─── Step 2: Generate claim secret, encrypt, backup to server ────────
+
+export async function generateAndBackupClaimSecret(params: {
+  l1Address: string
+  aztecAddress: string
+  amountL1: string
+  amountL2: string
+  amountDisplayL1: string
+  amountDisplayL2: string
+  isPrivacyModeEnabled: boolean
+  l1BlockNumberBeforeTx: string
+  l2BlockNumberBeforeTx: string
+  nodeInfo: any
+  signWaapMessage: (msg: string) => Promise<string | null>
+  selectedToken?: Token
+}): Promise<BackupResult> {
+  const {
+    l1Address, aztecAddress, amountL1, amountL2, amountDisplayL1, amountDisplayL2,
+    isPrivacyModeEnabled, l1BlockNumberBeforeTx, l2BlockNumberBeforeTx, nodeInfo, signWaapMessage,
+    selectedToken,
+  } = params
+
+  const claimSecret = Fr.random()
+  const claimSecretHash = await computeSecretHash(claimSecret)
+  const nodeInfoSnapshot = serializeNodeInfo(nodeInfo)
+  console.log('[L1→L2] Claim secret generated, backing up to backend')
+
+  // Deterministic encryption: same wallet + same message = same key (always recoverable)
+  const keyDerivationDomain = getKeyDerivationDomain()
+  const signingMessage = createSigningMessage(l1Address)
+  const signature = await signWaapMessage(signingMessage)
+  if (!signature) {
+    throw new Error('Failed to sign message for encryption key derivation')
+  }
+  const encryptionKey = await deriveEncryptionKey(l1Address, signature, keyDerivationDomain)
+
+  const payloadToEncrypt = {
+    claimSecret: claimSecret.toString(),
+    claimSecretHash: claimSecretHash.toString(),
+    amount: amountL1,
+    l1Address,
+    l2Address: aztecAddress,
+    isPrivacyModeEnabled,
+    l1BlockNumberBeforeTx,
+    nodeInfo: nodeInfoSnapshot,
+  }
+  console.log('[L1→L2] Payload to encrypt:', {
+    amount: payloadToEncrypt.amount,
+    l1Address: payloadToEncrypt.l1Address,
+    l2Address: payloadToEncrypt.l2Address,
+    isPrivacyModeEnabled: payloadToEncrypt.isPrivacyModeEnabled,
+    l1BlockNumberBeforeTx: payloadToEncrypt.l1BlockNumberBeforeTx,
+  })
+  const encrypted = await encryptData(JSON.stringify(payloadToEncrypt), encryptionKey)
+  console.log('[L1→L2] Encryption done, ciphertext length:', encrypted.ciphertext.length)
+
+  // Recovery-critical fields from nodeInfo
+  const snapshotRollupVersion = nodeInfoSnapshot?.rollupVersion as number | undefined
+  const snapshotL1ChainId = nodeInfoSnapshot?.l1ChainId as number | undefined
+  const snapshotL1Addresses = nodeInfoSnapshot?.l1ContractAddresses as Record<string, string> | undefined
+
+  const reqBody = {
+    encryptedCiphertext: encrypted.ciphertext,
+    encryptedIv: encrypted.iv,
+    encryptedTag: encrypted.tag,
+    keyDerivationMessage: signingMessage,
+    keyDerivationDomain,
+    direction: 'L1_TO_L2',
+    l1Address,
+    l2Address: aztecAddress,
+    amountL1,
+    amountL2,
+    amountDisplayL1,
+    amountDisplayL2,
+    isPrivacyModeEnabled,
+    l1BlockNumberBeforeTx,
+    l2BlockNumberBeforeTx: l2BlockNumberBeforeTx ?? undefined,
+    nodeInfo: nodeInfoSnapshot,
+    rollupVersion: snapshotRollupVersion,
+    chainIdL1: snapshotL1ChainId ?? L1_CHAIN_ID,
+    chainIdL2: L2_CHAIN_ID,
+    portalAddressL1: selectedToken?.l1PortalContract ?? '',
+    bridgeAddressL2: selectedToken?.l2BridgeContract ?? '',
+    l1RollupAddress: snapshotL1Addresses?.rollupAddress,
+    l1OutboxAddress: snapshotL1Addresses?.outboxAddress,
+    l1InboxAddress: snapshotL1Addresses?.inboxAddress,
+    l1RegistryAddress: snapshotL1Addresses?.registryAddress,
+    tokenSymbol: selectedToken?.symbol ?? 'USDC',
+    tokenSymbolL1: selectedToken?.symbol ?? 'USDC',
+    tokenSymbolL2: selectedToken?.pairedSymbol ?? 'cUSDC',
+    tokenNameL1: selectedToken?.title ?? selectedToken?.symbol ?? 'USDC',
+    tokenNameL2: `Clean ${selectedToken?.symbol ?? 'USDC'}`,
+    tokenAddressL1: selectedToken?.l1TokenContract ?? '',
+    tokenAddressL2: selectedToken?.l2TokenContract ?? '',
+    tokenDecimalsL1: selectedToken?.decimals ?? 6,
+    tokenDecimalsL2: selectedToken?.decimals ?? 6,
+    currentStep: 1,
+  }
+  console.log('[L1→L2] POST /api/bridge/operations →', {
+    direction: reqBody.direction,
+    amountL1: reqBody.amountL1,
+    l1BlockNumberBeforeTx: reqBody.l1BlockNumberBeforeTx,
+    l2BlockNumberBeforeTx: reqBody.l2BlockNumberBeforeTx,
+    rollupVersion: reqBody.rollupVersion,
+    chainIdL1: reqBody.chainIdL1,
+    portalAddressL1: reqBody.portalAddressL1,
+    bridgeAddressL2: reqBody.bridgeAddressL2,
+    isPrivacyModeEnabled: reqBody.isPrivacyModeEnabled,
+    currentStep: reqBody.currentStep,
+    hasEncrypted: !!reqBody.encryptedCiphertext,
+    hasNodeInfo: !!reqBody.nodeInfo,
+  })
+
+  let operationId: string
+  try {
+    const res = await api.post('/api/bridge/operations', reqBody)
+    operationId = res.data.operationId
+  } catch (err) {
+    const status = axios.isAxiosError(err) ? err.response?.status : null
+    const errBody = axios.isAxiosError(err)
+      ? JSON.stringify(err.response?.data)
+      : String(err)
+    console.error('[L1→L2] Encrypted backup failed:', status, errBody)
+    throw new Error(
+      'Failed to backup claim secret to server. Bridge aborted to prevent fund loss.',
+    )
+  }
+  console.log('Encrypted claim secret backed up (operationId:', operationId, ')')
+
+  pushToLocalStorageArray(LS_KEY_BRIDGE_DEPOSITS, {
+    id: operationId,
+    claimAmount: amountL1,
+    claimSecret: claimSecret.toString(),
+    claimSecretHash: claimSecretHash.toString(),
+    messageHash: null,
+    messageLeafIndex: null,
+    timestamp: Date.now(),
+    l1Address,
+    l2Address: aztecAddress,
+    success: false,
+    l1TxHash: null,
+    l1TxUrl: null,
+    l1BlockNumberBeforeTx,
+    nodeInfo: nodeInfoSnapshot,
+    isPrivacyModeEnabled,
+    status: BridgeOperationStatus.pending,
+  })
+  console.log('Claim secret stored in localStorage')
+
+  return { operationId, claimSecret, claimSecretHash, nodeInfoSnapshot }
+}
+
+// ─── Step 3: Check and approve token allowance ───────────────────────
+
+export async function checkAndApproveAllowance(
+  l1Address: string,
+  amount: bigint,
+  selectedToken?: Token,
+): Promise<void> {
+  const l1TokenAddress = selectedToken?.l1TokenContract ?? ''
+  const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
+
+  const allowanceData = encodeFunctionData({
+    abi: TestERC20Abi,
+    functionName: 'allowance',
+    args: [l1Address as `0x${string}`, l1PortalAddress as `0x${string}`],
+  })
+
+  const allowance = await requestWaapWallet(WAAP_METHOD.eth_call, [
+    { to: l1TokenAddress, data: allowanceData },
+  ])
+
+  console.log('[L1→L2] Current allowance:', allowance, 'needed:', amount.toString())
+  if (BigInt(allowance as string) < amount) {
+    const approveData = encodeFunctionData({
+      abi: TestERC20Abi,
+      functionName: 'approve',
+      args: [l1PortalAddress as `0x${string}`, amount],
+    })
+
+    const approveTxHash = await requestWaapWallet(
+      WAAP_METHOD.eth_sendTransaction,
+      [{ from: l1Address as `0x${string}`, to: l1TokenAddress, data: approveData }],
+    )
+
+    console.log('[L1→L2] Approve tx sent:', approveTxHash, '— waiting for confirmation...')
+    await publicClient.waitForTransactionReceipt({ hash: approveTxHash })
+    console.log('[L1→L2] Approve tx confirmed')
+  } else {
+    console.log('[L1→L2] Allowance sufficient, skipping approve')
+  }
+}
+
+// ─── Step 4: Send L1 deposit transaction ─────────────────────────────
+
+export async function sendL1DepositTransaction(params: {
+  l1Address: string
+  aztecAddress: string
+  amount: bigint
+  claimSecretHash: Fr
+  claimSecret: Fr
+  isPrivacyModeEnabled: boolean
+  operationId: string
+  selectedToken?: Token
+}): Promise<DepositTxResult> {
+  const {
+    l1Address, aztecAddress, amount, claimSecretHash, claimSecret,
+    isPrivacyModeEnabled, operationId, selectedToken,
+  } = params
+
+  const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
+
+  const functionName = isPrivacyModeEnabled
+    ? 'depositToAztecPrivate'
+    : 'depositToAztecPublic'
+  const args = isPrivacyModeEnabled
+    ? ([amount, claimSecretHash.toString()] as const)
+    : ([aztecAddress as `0x${string}`, amount, claimSecretHash.toString()] as const)
+
+  console.log('[L1→L2] Sending deposit tx:', functionName, 'to portal:', l1PortalAddress, 'amount:', amount.toString())
+  const bridgeData = encodeFunctionData({
+    abi: TokenPortalAbi,
+    functionName,
+    args,
+  })
+
+  const txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
+    { from: l1Address as `0x${string}`, to: l1PortalAddress, data: bridgeData },
+  ])
+
+  console.log('[L1→L2] Deposit tx sent:', txHash)
+
+  const l1TxHash =
+    typeof txHash === 'string'
+      ? txHash
+      : ((txHash as { toString?: () => string })?.toString?.() ?? String(txHash))
+  const l1TxUrl = `https://sepolia.etherscan.io/tx/${l1TxHash}`
+
+  updateLocalStorageItem(
+    LS_KEY_BRIDGE_DEPOSITS,
+    (c: any) => c.claimSecret === claimSecret.toString() && c.status === 'pending' && c.l1Address === l1Address,
+    (c: any) => ({ ...c, l1TxHash, l1TxUrl }),
+  )
+  console.log('L1 tx hash stored immediately in localStorage')
+
+  console.log('[L1→L2] PATCH l1TxHash →', { operationId, l1TxHash })
+  try {
+    await api.patch(`/api/bridge/operations/${operationId}`, { l1TxHash, l1TxUrl })
+    console.log('[L1→L2] l1TxHash stored on backend')
+  } catch (err) {
+    console.warn('[L1→L2] PATCH l1TxHash failed (will retry after receipt):', err)
+  }
+
+  return { txHash, l1TxHash, l1TxUrl }
+}
+
+// ─── Step 5: Wait for receipt and extract deposit event ──────────────
+
+export async function waitForReceiptAndExtractEvent(params: {
+  txHash: any
+  amount: bigint
+  claimSecretHash: Fr
+  claimSecret: Fr
+  aztecAddress: string
+  isPrivacyModeEnabled: boolean
+  l1Address: string
+  selectedToken?: Token
+}): Promise<ReceiptResult> {
+  const {
+    txHash, amount, claimSecretHash, claimSecret, aztecAddress,
+    isPrivacyModeEnabled, l1Address, selectedToken,
+  } = params
+
+  const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
+
+  console.log('[L1→L2] Waiting for deposit tx to be mined...')
+  const txReceipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+
+  const l1TxHash = txReceipt?.transactionHash?.toString()
+  const l1TxUrl = `https://sepolia.etherscan.io/tx/${l1TxHash}`
+  console.log('[L1→L2] Deposit tx confirmed:', l1TxHash, 'status:', txReceipt.status, 'logs:', txReceipt.logs.length)
+
+  const eventName = isPrivacyModeEnabled
+    ? 'DepositToAztecPrivate'
+    : 'DepositToAztecPublic'
+
+  const privateEventFilter = (log: any) =>
+    log.args.amount === amount &&
+    log.args.secretHashForL2MessageConsumption === claimSecretHash.toString()
+
+  const publicEventFilter = (log: any) =>
+    log.args.secretHash === claimSecretHash.toString() &&
+    log.args.amount === amount &&
+    log.args.to === aztecAddress
+
+  const eventFilter = isPrivacyModeEnabled ? privateEventFilter : publicEventFilter
+
+  const log = extractEvent(
+    txReceipt.logs,
+    l1PortalAddress as `0x${string}`,
+    TokenPortalAbi,
+    eventName,
+    eventFilter,
+  )
+
+  const messageHash = log.args.key
+  const messageLeafIndex = log.args.index
+  const messageHashStr = messageHash.toString()
+  const messageLeafIndexStr = messageLeafIndex.toString()
+  console.log('[L1→L2] Event extracted:', { eventName, messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr })
+
+  updateLocalStorageItem(
+    LS_KEY_BRIDGE_DEPOSITS,
+    (c: any) => c.claimSecret === claimSecret.toString() && c.status === BridgeOperationStatus.pending && c.l1Address === l1Address,
+    (c: any) => ({ ...c, messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr }),
+  )
+  console.log('messageHash and messageLeafIndex stored immediately after receipt')
+
+  return { l1TxHash, l1TxUrl, messageHashStr, messageLeafIndexStr, messageHash, messageLeafIndex }
+}
+
+// ─── Step 6: Persist receipt data to backend ─────────────────────────
+
+export async function persistReceiptToBackend(
+  operationId: string | undefined,
+  receiptData: {
+    messageHashStr: string
+    messageLeafIndexStr: string
+    l1TxHash: string
+    l1TxUrl: string
+  },
+): Promise<boolean> {
+  const patchData = {
+    status: 'deposited',
+    messageHash: receiptData.messageHashStr,
+    messageLeafIndex: receiptData.messageLeafIndexStr,
+    l1TxHash: receiptData.l1TxHash,
+    l1TxUrl: receiptData.l1TxUrl,
+    currentStep: 2,
+  }
+  console.log('[L1→L2] PATCH receipt data →', { operationId, ...patchData })
+
+  const succeeded = operationId
+    ? await patchOperationWithRetry(operationId, patchData, { label: 'receipt data' })
+    : false
+
+  if (succeeded) {
+    console.log('messageHash + messageLeafIndex stored on backend')
+  } else {
+    console.error('[Bridge] CRITICAL: Failed to store messageHash on backend after 3 attempts')
+  }
+
+  return succeeded
+}
+
+// ─── Step 7: Update localStorage with full deposit details ───────────
+
+export function finalizeLocalStorageAfterDeposit(params: {
+  claimSecret: Fr
+  claimSecretHash: Fr
+  claimAmount: bigint
+  l1Address: string
+  aztecAddress: string
+  messageHashStr: string
+  messageLeafIndexStr: string
+  l1TxHash: string
+  l1TxUrl: string
+  l1BlockNumberBeforeTx: string
+  nodeInfo: any
+  isPrivacyModeEnabled: boolean
+}): { updatedClaim: any; wasExisting: boolean } {
+  const {
+    claimSecret, claimSecretHash, claimAmount, l1Address, aztecAddress,
+    messageHashStr, messageLeafIndexStr, l1TxHash, l1TxUrl,
+    l1BlockNumberBeforeTx, nodeInfo, isPrivacyModeEnabled,
+  } = params
+
+  const existingClaims = localStorage.getItem(LS_KEY_BRIDGE_DEPOSITS)
+  const claims = existingClaims ? JSON.parse(existingClaims) : []
+
+  const claimIndex = claims.findIndex(
+    (c: any) =>
+      c.claimSecret === claimSecret.toString() &&
+      c.status === BridgeOperationStatus.pending &&
+      c.l1Address === l1Address,
+  )
+
+  let updatedClaim: any = null
+
+  if (claimIndex !== -1) {
+    updatedClaim = {
+      ...claims[claimIndex],
+      messageHash: messageHashStr,
+      messageLeafIndex: messageLeafIndexStr,
+      l1TxHash,
+      l1TxUrl,
+      status: BridgeOperationStatus.deposited,
+    }
+    claims[claimIndex] = updatedClaim
+    localStorage.setItem(LS_KEY_BRIDGE_DEPOSITS, JSON.stringify(claims))
+    console.log('Claim data updated with transaction details')
+    return { updatedClaim, wasExisting: true }
+  }
+
+  console.warn('Pre-stored claim not found, creating new entry (this should not happen)')
+  updatedClaim = {
+    id: Date.now().toString(),
+    claimAmount: claimAmount.toString(),
+    claimSecret: claimSecret.toString(),
+    claimSecretHash: claimSecretHash.toString(),
+    messageHash: messageHashStr,
+    messageLeafIndex: messageLeafIndexStr,
+    timestamp: Date.now(),
+    l1Address,
+    l2Address: aztecAddress,
+    success: false,
+    l1TxHash,
+    l1TxUrl,
+    l1BlockNumberBeforeTx,
+    nodeInfo: serializeNodeInfo(nodeInfo),
+    isPrivacyModeEnabled,
+    status: BridgeOperationStatus.deposited,
+  }
+  claims.push(updatedClaim)
+  localStorage.setItem(LS_KEY_BRIDGE_DEPOSITS, JSON.stringify(claims))
+  return { updatedClaim, wasExisting: false }
+}

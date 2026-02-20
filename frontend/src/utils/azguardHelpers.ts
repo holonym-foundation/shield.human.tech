@@ -86,14 +86,14 @@ export type AzguardOperation =
 
 /** Log full Azguard execute result (handles bigint for JSON) */
 function logAzguardResult(label: string, results: unknown) {
-  console.log(`[Azguard] ${label}`, results)
+  // console.log(`[Azguard] ${label}`, results)
   try {
     const json = JSON.stringify(
       results,
       (_, v) => (typeof v === 'bigint' ? v.toString() : v),
       2
     )
-    console.log(`[Azguard] ${label} (JSON)`, json)
+    // console.log(`[Azguard] ${label} (JSON)`, json)
   } catch {
     // skip if not serializable (e.g. circular)
   }
@@ -271,18 +271,18 @@ export async function executeAzguardCall(
   }
 ): Promise<string> {
   const chain = options?.chain || L2_CHAIN_KEY
-  console.log('[Azguard] executeAzguardCall called', {
-    contract: addressToString(contract),
-    method,
-    args,
-    chain,
-    autoRegister: options?.autoRegister,
-  })
+  // console.log('[Azguard] executeAzguardCall called', {
+  //   contract: addressToString(contract),
+  //   method,
+  //   args,
+  //   chain,
+  //   autoRegister: options?.autoRegister,
+  // })
 
   // Try to execute the call first (fee options give headroom so maxFeesPerGas >= gasFees)
   const callOp = createAzguardCall(contract, method, args)
   const txOp = createAzguardSendTransaction(account, [callOp], DEFAULT_FEE_OPTIONS)
-  console.log('[Azguard] executeAzguardCall sending send_transaction', { account, actions: txOp.actions, fee: txOp.fee })
+  // console.log('[Azguard] executeAzguardCall sending send_transaction', { account, actions: txOp.actions, fee: txOp.fee })
 
   try {
     const results = await azguardClient.execute([txOp])
@@ -300,7 +300,7 @@ export async function executeAzguardCall(
         options?.autoRegister !== false
       ) {
         // Register contract without instance/artifact - Azguard will fetch them from PXE/node
-        console.log('[Azguard] executeAzguardCall retrying with register_contract', { contract: addressToString(contract) })
+        // console.log('[Azguard] executeAzguardCall retrying with register_contract', { contract: addressToString(contract) })
         const operations: AzguardOperation[] = [
           {
             kind: 'register_contract',
@@ -328,7 +328,7 @@ export async function executeAzguardCall(
             )
           }
 
-          console.log('[Azguard] executeAzguardCall success after registration', { txHash: retryTxResult.result })
+          // console.log('[Azguard] executeAzguardCall success after registration', { txHash: retryTxResult.result })
           return retryTxResult.result as string
         } catch (regError) {
           throw regError
@@ -339,7 +339,7 @@ export async function executeAzguardCall(
       }
     }
 
-    console.log('[Azguard] executeAzguardCall success', { txHash: txResult.result })
+    // console.log('[Azguard] executeAzguardCall success', { txHash: txResult.result })
     return txResult.result as string
   } catch (error) {
     console.log('[Azguard] executeAzguardCall error', { error: String(error) })
@@ -370,12 +370,12 @@ export async function executeAzguardCallWithAuthWit(
   method: string,
   args: any[]
 ): Promise<string> {
-  console.log('[Azguard] executeAzguardCallWithAuthWit called', {
-    caller: addressToString(caller),
-    contract: addressToString(contract),
-    method,
-    args,
-  })
+  // console.log('[Azguard] executeAzguardCallWithAuthWit called', {
+  //   caller: addressToString(caller),
+  //   contract: addressToString(contract),
+  //   method,
+  //   args,
+  // })
   try {
     // caller = bridge address (authorized to call token.burn_public)
     // contract = token contract, method = burn_public, args = [userAddress, amount, nonce]
@@ -387,7 +387,7 @@ export async function executeAzguardCallWithAuthWit(
     )
     // Only send the authwit - do NOT call burn_public here; the bridge will call it in exit_to_l1_public
     const txOp = createAzguardSendTransaction(account, [publicAuthWitOp], DEFAULT_FEE_OPTIONS)
-    console.log('[Azguard] executeAzguardCallWithAuthWit sending add_public_authwit', { account, content: publicAuthWitOp.content })
+    // console.log('[Azguard] executeAzguardCallWithAuthWit sending add_public_authwit', { account, content: publicAuthWitOp.content })
 
     const results = await azguardClient.execute([txOp])
     logAzguardResult('executeAzguardCallWithAuthWit response (full)', results)
@@ -407,11 +407,11 @@ export async function executeAzguardCallWithAuthWit(
         )
       }
 
-      console.log('[Azguard] executeAzguardCallWithAuthWit failed', { error: errorMsg })
+      // console.log('[Azguard] executeAzguardCallWithAuthWit failed', { error: errorMsg })
       throw new Error(`Azguard transaction failed: ${errorMsg}`)
     }
 
-    console.log('[Azguard] executeAzguardCallWithAuthWit success', { txHash: results[0].result })
+    // console.log('[Azguard] executeAzguardCallWithAuthWit success', { txHash: results[0].result })
     return results[0].result as string
   } catch (error) {
     console.log('[Azguard] executeAzguardCallWithAuthWit error', { error: String(error) })
@@ -432,7 +432,7 @@ export async function simulateAzguardView(
   method: string,
   args: any[]
 ): Promise<any> {
-  console.log('[Azguard] simulateAzguardView called', { contract: addressToString(contract), method, args })
+  // console.log('[Azguard] simulateAzguardView called', { contract: addressToString(contract), method, args })
   try {
     const callOp = createAzguardCall(contract, method, args)
     const simulateOp: AzguardSimulateViewsOperation = {
@@ -466,7 +466,7 @@ export async function simulateAzguardView(
 
     // Return decoded result
     const result = results[0].result as any
-    console.log('[Azguard] simulateAzguardView success', { hasDecoded: !!result?.decoded?.length, result })
+    // console.log('[Azguard] simulateAzguardView success', { hasDecoded: !!result?.decoded?.length, result })
     if (result.decoded && result.decoded.length > 0) {
       return result.decoded[0]
     }
@@ -497,7 +497,7 @@ export async function simulateAzguardViews(
   calls: SimulateViewCall[]
 ): Promise<any[]> {
   if (calls.length === 0) return []
-  console.log('[Azguard] simulateAzguardViews called', { callCount: calls.length, calls: calls.map((c) => ({ contract: addressToString(c.contract), method: c.method })) })
+  // console.log('[Azguard] simulateAzguardViews called', { callCount: calls.length, calls: calls.map((c) => ({ contract: addressToString(c.contract), method: c.method })) })
   try {
     const callOps = calls.map((c) => createAzguardCall(c.contract, c.method, c.args))
     const simulateOp: AzguardSimulateViewsOperation = {
@@ -526,7 +526,7 @@ export async function simulateAzguardViews(
     }
 
     const result = results[0].result as any
-    console.log('[Azguard] simulateAzguardViews success', { hasDecoded: !!result?.decoded?.length, result })
+    // console.log('[Azguard] simulateAzguardViews success', { hasDecoded: !!result?.decoded?.length, result })
     if (result?.decoded && Array.isArray(result.decoded)) {
       return result.decoded
     }
@@ -559,14 +559,14 @@ export async function executeAzguardWithdrawToL1Batch(
   options?: { chain?: string; autoRegister?: boolean }
 ): Promise<string> {
   const chain = options?.chain || L2_CHAIN_KEY
-  console.log('[Azguard] executeAzguardWithdrawToL1Batch called', {
-    account,
-    l1Address,
-    amount: amount.toString(),
-    bridge: addressToString(bridgeAddress),
-    token: addressToString(tokenAddress),
-    chain,
-  })
+  // console.log('[Azguard] executeAzguardWithdrawToL1Batch called', {
+  //   account,
+  //   l1Address,
+  //   amount: amount.toString(),
+  //   bridge: addressToString(bridgeAddress),
+  //   token: addressToString(tokenAddress),
+  //   chain,
+  // })
 
   const publicAuthWitOp = createAzguardPublicAuthWit(
     bridgeAddress,
@@ -584,11 +584,11 @@ export async function executeAzguardWithdrawToL1Batch(
     [publicAuthWitOp, exitCallOp],
     DEFAULT_FEE_OPTIONS
   )
-  console.log('[Azguard] executeAzguardWithdrawToL1Batch sending send_transaction (auth to burn + exit)', {
-    account,
-    actions: txOp.actions,
-    fee: txOp.fee,
-  })
+  // console.log('[Azguard] executeAzguardWithdrawToL1Batch sending send_transaction (auth to burn + exit)', {
+    // account,
+  //   actions: txOp.actions,
+  //   fee: txOp.fee,
+  // })
 
   try {
     const results = await azguardClient.execute([txOp])
@@ -604,7 +604,7 @@ export async function executeAzguardWithdrawToL1Batch(
           errorMsg.includes('Contract artifact')) &&
         options?.autoRegister !== false
       ) {
-        console.log('[Azguard] executeAzguardWithdrawToL1Batch retrying with register_contract (bridge + token)')
+        // console.log('[Azguard] executeAzguardWithdrawToL1Batch retrying with register_contract (bridge + token)')
         const operations: AzguardOperation[] = [
           {
             kind: 'register_contract',
@@ -659,14 +659,14 @@ export async function executeAzguardWithdrawToL1BatchPrivate(
   options?: { chain?: string; autoRegister?: boolean }
 ): Promise<string> {
   const chain = options?.chain || L2_CHAIN_KEY
-  console.log('[Azguard] executeAzguardWithdrawToL1BatchPrivate called', {
-    account,
-    l1Address,
-    amount: amount.toString(),
-    bridge: addressToString(bridgeAddress),
-    token: addressToString(tokenAddress),
-    chain,
-  })
+    // console.log('[Azguard] executeAzguardWithdrawToL1BatchPrivate called', {
+  //   account,
+  //   l1Address,
+  //   amount: amount.toString(),
+  //   bridge: addressToString(bridgeAddress),
+  //   token: addressToString(tokenAddress),
+  //   chain,
+  // })
 
   const privateAuthWitOp = createAzguardPrivateAuthWit(
     bridgeAddress,
@@ -684,11 +684,11 @@ export async function executeAzguardWithdrawToL1BatchPrivate(
     [privateAuthWitOp, exitCallOp],
     DEFAULT_FEE_OPTIONS
   )
-  console.log('[Azguard] executeAzguardWithdrawToL1BatchPrivate sending send_transaction (private auth to burn + exit)', {
-    account,
-    actions: txOp.actions,
-    fee: txOp.fee,
-  })
+  // console.log('[Azguard] executeAzguardWithdrawToL1BatchPrivate sending send_transaction (private auth to burn + exit)', {
+  //   account,
+  //   actions: txOp.actions,
+  //   fee: txOp.fee,
+  // })
 
   try {
     const results = await azguardClient.execute([txOp])
@@ -704,7 +704,7 @@ export async function executeAzguardWithdrawToL1BatchPrivate(
           errorMsg.includes('Contract artifact')) &&
         options?.autoRegister !== false
       ) {
-        console.log('[Azguard] executeAzguardWithdrawToL1BatchPrivate retrying with register_contract (bridge + token)')
+        // console.log('[Azguard] executeAzguardWithdrawToL1BatchPrivate retrying with register_contract (bridge + token)')
         const operations: AzguardOperation[] = [
           {
             kind: 'register_contract',
@@ -750,7 +750,7 @@ export async function registerAzguardToken(
   account: string,
   tokenAddress: AztecAddress | string
 ): Promise<void> {
-  console.log('[Azguard] registerAzguardToken called', { account, tokenAddress: addressToString(tokenAddress) })
+  // console.log('[Azguard] registerAzguardToken called', { account, tokenAddress: addressToString(tokenAddress) })
   try {
     const registerTokenOp: AzguardRegisterTokenOperation = {
       kind: 'register_token',
@@ -785,7 +785,7 @@ export async function registerAzguardToken(
       }
       throw new Error(`Azguard token registration failed: ${errorMsg}`)
     }
-    console.log('[Azguard] registerAzguardToken success')
+    // console.log('[Azguard] registerAzguardToken success')
   } catch (error) {
     console.log('[Azguard] registerAzguardToken error', { error: String(error) })
     if (error instanceof Error) {

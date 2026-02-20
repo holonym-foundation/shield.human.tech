@@ -1,0 +1,130 @@
+'use client'
+
+import React from 'react'
+import type { BridgeOperation } from '@/hooks/useBridgeOperations'
+import { formatUnits } from 'viem'
+import { L1_TOKEN_METADATA } from '@/config'
+
+const STATUS_STYLES: Record<string, { label: string; className: string }> = {
+  pending: { label: 'Pending', className: 'bg-yellow-100 text-yellow-800' },
+  deposited: { label: 'Deposited', className: 'bg-blue-100 text-blue-800' },
+  claimed: { label: 'Claimed', className: 'bg-purple-100 text-purple-800' },
+  submitted: { label: 'Submitted', className: 'bg-blue-100 text-blue-800' },
+  ready: { label: 'Ready', className: 'bg-indigo-100 text-indigo-800' },
+  pending_finalize: { label: 'Finalizing', className: 'bg-indigo-100 text-indigo-800' },
+  completed: { label: 'Completed', className: 'bg-green-100 text-green-800' },
+  failed: { label: 'Failed', className: 'bg-red-100 text-red-800' },
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const style = STATUS_STYLES[status] ?? {
+    label: status,
+    className: 'bg-gray-100 text-gray-800',
+  }
+  return (
+    <span
+      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.className}`}>
+      {style.label}
+    </span>
+  )
+}
+
+/** True for statuses where the user's funds are locked and can be resumed */
+function isResumable(op: BridgeOperation): boolean {
+  if (op.direction === 'L1_TO_L2') {
+    // L1→L2: resumable if deposited/claimed AND we have at least one recovery path:
+    // - Best: messageHash + messageLeafIndex already stored
+    // - Fallback: l1TxHash → scan receipt for portal events
+    // - Last resort: l1BlockNumberBeforeTx → scan L1 blocks for portal events
+    return (
+      (op.status === 'deposited' || op.status === 'claimed') &&
+      (!!op.messageHash || !!op.l1TxHash || !!op.l1BlockNumberBeforeTx)
+    )
+  }
+  if (op.direction === 'L2_TO_L1') {
+    // L2→L1: resumable when tokens are burned on L2 but L1 withdraw isn't complete.
+    // leafIndex/siblingPath can be recomputed from l2BlockNumber if missing.
+    return (
+      op.status === 'submitted' ||
+      op.status === 'ready' ||
+      op.status === 'pending_finalize'
+    )
+  }
+  return false
+}
+
+interface ActivityCardProps {
+  operation: BridgeOperation
+  onResume: (operation: BridgeOperation) => void
+  resuming: boolean
+}
+
+export default function ActivityCard({
+  operation,
+  onResume,
+  resuming,
+}: ActivityCardProps) {
+  const amount = operation.amountDisplayL1
+    ?? (operation.amountL1 ? formatUnits(BigInt(operation.amountL1), L1_TOKEN_METADATA.decimals) : '?')
+  const date = new Date(operation.createdAt).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const directionLabel =
+    operation.direction === 'L1_TO_L2' ? 'L1 → L2' : 'L2 → L1'
+
+  return (
+    <div className='bg-white rounded-lg p-4 shadow-sm border border-gray-100'>
+      <div className='flex items-center justify-between'>
+        <div className='flex items-center gap-2'>
+          <span className='text-sm font-medium text-gray-600'>
+            {directionLabel}
+          </span>
+          <StatusBadge status={operation.status} />
+        </div>
+        <span className='text-xs text-gray-400'>{date}</span>
+      </div>
+
+      <p className='text-xl font-semibold mt-2'>{amount} USDC</p>
+
+      {operation.lastErrorMessage && (
+        <p className='text-xs text-red-500 mt-1 truncate'>
+          {operation.lastErrorMessage}
+        </p>
+      )}
+
+      <div className='flex items-center gap-3 mt-3'>
+        {operation.l1TxUrl && (
+          <a
+            href={operation.l1TxUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='text-xs font-medium text-blue-600 hover:text-blue-800'>
+            L1 Tx ↗
+          </a>
+        )}
+        {operation.l2TxUrl && (
+          <a
+            href={operation.l2TxUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='text-xs font-medium text-purple-600 hover:text-purple-800'>
+            L2 Tx ↗
+          </a>
+        )}
+
+        {isResumable(operation) && (
+          <button
+            onClick={() => onResume(operation)}
+            disabled={resuming}
+            className='ml-auto text-xs font-semibold text-white bg-black hover:bg-gray-800 disabled:bg-gray-400 px-3 py-1 rounded-lg'>
+            {resuming ? 'Decrypting...' : 'Resume'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}

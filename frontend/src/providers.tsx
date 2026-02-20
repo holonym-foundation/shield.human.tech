@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { ToastContainer } from 'react-toastify'
 import { useWalletStore } from './stores/walletStore'
 import { init as initDatadog } from '@/utils/datadog'
+import AuthSync from '@/components/AuthSync'
 
 function InitializeWaapWallet() {
   const { initializeWaapWallet } = useWalletStore()
@@ -85,6 +86,7 @@ export function Providers({ children }: { children: ReactNode }) {
         <InitializeWaapWallet />
         <InitializeAztecWallet />
         <InitializeDatadog />
+        <AuthSync />
 
         {children}
         <ReactQueryDevtools initialIsOpen={false} />

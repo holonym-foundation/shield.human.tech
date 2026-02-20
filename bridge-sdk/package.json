@@ -1,0 +1,30 @@
+{
+  "name": "@holonym/aztec-bridge-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aztec/aztec.js": "4.0.0-devnet.2-patch.0",
+    "@aztec/ethereum": "4.0.0-devnet.2-patch.0",
+    "@aztec/foundation": "4.0.0-devnet.2-patch.0",
+    "@aztec/l1-artifacts": "4.0.0-devnet.2-patch.0",
+    "@aztec/stdlib": "4.0.0-devnet.2-patch.0",
+    "viem": "^2.22.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

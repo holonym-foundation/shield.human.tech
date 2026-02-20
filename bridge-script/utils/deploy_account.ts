@@ -1,17 +1,17 @@
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee/testing";
 import { getSponsoredFPCInstance } from "./sponsored_fpc.js";
-import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
+
 import { Fr, GrumpkinScalar } from "@aztec/aztec.js/fields";
 import { Logger, createLogger } from "@aztec/aztec.js/log";
 import { setupWallet } from "./setup_wallet.js";
 import { AztecAddress } from "@aztec/stdlib/aztec-address";
 import { AccountManager } from "@aztec/aztec.js/wallet";
-import { TestWallet } from "@aztec/test-wallet/server";
+import { EmbeddedWallet } from "@aztec/wallets/embedded";
 import { getTimeouts } from "../config/config.js";
 
-export async function deploySchnorrAccount(wallet?: TestWallet): Promise<AccountManager> {
+export async function deploySchnorrAccount(wallet?: EmbeddedWallet): Promise<AccountManager> {
     let logger: Logger;
-    logger = createLogger('aztec:');
+    logger = createLogger('aztec:bridge');
     logger.info('👤 Starting Schnorr account deployment...');
 
     // Generate account keys
@@ -30,27 +30,19 @@ export async function deploySchnorrAccount(wallet?: TestWallet): Promise<Account
 
     const deployMethod = await account.getDeployMethod();
 
-    // Setup sponsored FPC
+    // Setup sponsored FPC (already registered with wallet by caller)
     logger.info('💰 Setting up sponsored fee payment for account deployment...');
     const sponsoredFPC = await getSponsoredFPCInstance();
-    logger.info(`💰 Sponsored FPC instance obtained at: ${sponsoredFPC.address}`);
-
-    logger.info('📝 Registering sponsored FPC contract with wallet...');
-    await activeWallet.registerContract(sponsoredFPC, SponsoredFPCContract.artifact);
     const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
     logger.info('✅ Sponsored fee payment method configured for account deployment');
 
     // Deploy account
     const timeouts = getTimeouts();
-    let tx = await deployMethod.send({ from: AztecAddress.ZERO, fee: { paymentMethod: sponsoredPaymentMethod } }).wait({ timeout: timeouts.deployTimeout });
-
-    logger.info(`✅ Account deployment transaction successful!`);
-    logger.info(`📋 Transaction hash: ${tx.txHash}`);
+    await deployMethod.send({ from: AztecAddress.ZERO, fee: { paymentMethod: sponsoredPaymentMethod }, wait: { timeout: timeouts.deployTimeout } });
 
     logger.info('🎉 Schnorr account deployment completed successfully!');
     logger.info(`📋 Account Summary:`);
     logger.info(`   - Address: ${account.address}`);
-    logger.info(`   - Transaction Hash: ${tx.txHash}`);
     logger.info(`   - Fee Payment: Sponsored FPC (${sponsoredFPC.address})`);
 
     return account;

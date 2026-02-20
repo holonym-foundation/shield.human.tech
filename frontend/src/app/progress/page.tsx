@@ -14,7 +14,10 @@ import {
   useL2TokenBalance,
 } from '@/hooks/useL2Operations'
 import { useL1TokenBalances, useL1BridgeToL2 } from '@/hooks/useL1Operations'
+import { useResumeL1BridgeToL2 } from '@/hooks/useResumeL1BridgeToL2'
+import { useResumeL2WithdrawToL1 } from '@/hooks/useResumeL2WithdrawToL1'
 import { BridgeDirection } from '@/types/bridge'
+import { L1_TOKEN_METADATA, L2_TOKEN_METADATA } from '@/config'
 import { useWalletStore } from '@/stores/walletStore'
 import { useToast } from '@/hooks/useToast'
 import { useCountdown } from 'usehooks-ts'
@@ -39,7 +42,13 @@ export default function ProgressPage() {
     l1ToL2Steps,
     l2ToL1Steps,
     resetStepState,
+    recoveryOperationId,
+    recoveryClaimData,
+    recoveryWithdrawalData,
   } = useBridgeStore()
+
+  const isRecoveryMode = !!recoveryOperationId && (!!recoveryClaimData || !!recoveryWithdrawalData)
+  const isL2ToL1Recovery = !!recoveryWithdrawalData
 
   const steps = getProgressSteps()
 
@@ -75,6 +84,17 @@ export default function ProgressPage() {
     isError: withdrawTokensToL1Error,
   } = useL2WithdrawTokensToL1(handleBridgeSuccess)
 
+  // Resume hooks for recovery mode
+  const {
+    mutate: resumeBridge,
+    isError: isResumeBridgeError,
+  } = useResumeL1BridgeToL2(handleBridgeSuccess)
+
+  const {
+    mutate: resumeWithdrawal,
+    isError: isResumeWithdrawalError,
+  } = useResumeL2WithdrawToL1(handleBridgeSuccess)
+
   // console.log({
   //   isBridgeTokensToL2Error,
   //   // withdrawTokensToL1Error,
@@ -84,7 +104,7 @@ export default function ProgressPage() {
   const L2_TO_L1_TIME = 50 * 60 // 50 minutes
   const [count, { startCountdown, stopCountdown, resetCountdown }] =
     useCountdown({
-      countStart: direction === 'L1_TO_L2' ? L1_TO_L2_TIME : L2_TO_L1_TIME, // Convert minutes to seconds
+      countStart: direction === BridgeDirection.L1_TO_L2 ? L1_TO_L2_TIME : L2_TO_L1_TIME, // Convert minutes to seconds
       intervalMs: 1000,
     })
 
@@ -99,7 +119,7 @@ export default function ProgressPage() {
 
   // Initial estimated time (full duration) as MM:SS – shown once complete
   const totalEstimateSeconds =
-    direction === 'L1_TO_L2' ? L1_TO_L2_TIME : L2_TO_L1_TIME
+    direction === BridgeDirection.L1_TO_L2 ? L1_TO_L2_TIME : L2_TO_L1_TIME
   const initialEstimateFormatted = `${Math.floor(totalEstimateSeconds / 60)
     .toString()
     .padStart(2, '0')}:${(totalEstimateSeconds % 60).toString().padStart(2, '0')}`
@@ -107,7 +127,7 @@ export default function ProgressPage() {
   // Calculate total time taken
   const totalTimeTaken = () => {
     const totalSeconds =
-      direction === 'L1_TO_L2' ? L1_TO_L2_TIME : L2_TO_L1_TIME
+      direction === BridgeDirection.L1_TO_L2 ? L1_TO_L2_TIME : L2_TO_L1_TIME
     const timeTaken = totalSeconds - count
     const minutes = Math.floor(timeTaken / 60)
     const seconds = timeTaken % 60
@@ -115,6 +135,24 @@ export default function ProgressPage() {
       .toString()
       .padStart(2, '0')}`
   }
+
+  // Warn user before leaving the page while operation is in progress
+  useEffect(() => {
+    const isInProgress = steps.some((step) => step.status === 'active')
+    if (!isInProgress) return
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [steps])
+
+  // Prefetch routes this page navigates to
+  useEffect(() => {
+    router.prefetch('/complete')
+    router.prefetch('/')
+  }, [router])
 
   // Start countdown when component mounts
   useEffect(() => {
@@ -127,12 +165,30 @@ export default function ProgressPage() {
   // Handle bridge operation
   const handleBridgeOperation = useCallback(async () => {
     try {
-      // L2 to L1: L2 token has 6 decimals
-      const amount = parseUnits(bridgeAmount || '0', 6)
-      if (bridgeConfig.direction === BridgeDirection.L1_TO_L2) {
-        await bridgeTokensToL2(amount)
+      if (isRecoveryMode) {
+        if (isL2ToL1Recovery && recoveryWithdrawalData) {
+          // Resume an incomplete L2→L1 withdrawal
+          await resumeWithdrawal(recoveryWithdrawalData)
+        } else if (recoveryClaimData) {
+          // Resume an incomplete L1→L2 deposit
+          await resumeBridge(recoveryClaimData)
+        }
       } else {
-        await withdrawTokensToL1(amount)
+        // Normal flow — start a new bridge
+        const displayAmount = bridgeAmount || '0'
+        const amountL1 = parseUnits(displayAmount, L1_TOKEN_METADATA.decimals)
+        const amountL2 = parseUnits(displayAmount, L2_TOKEN_METADATA.decimals)
+        const mutationParams = {
+          amountL1: amountL1.toString(),
+          amountL2: amountL2.toString(),
+          amountDisplayL1: displayAmount,
+          amountDisplayL2: displayAmount,
+        }
+        if (bridgeConfig.direction === BridgeDirection.L1_TO_L2) {
+          await bridgeTokensToL2(mutationParams)
+        } else {
+          await withdrawTokensToL1(mutationParams)
+        }
       }
     } catch (error) {
       console.error('Bridge operation failed:', error)
@@ -143,16 +199,26 @@ export default function ProgressPage() {
     bridgeConfig.direction,
     bridgeTokensToL2,
     withdrawTokensToL1,
+    isRecoveryMode,
+    isL2ToL1Recovery,
+    resumeBridge,
+    recoveryClaimData,
+    resumeWithdrawal,
+    recoveryWithdrawalData,
   ])
 
   // Start bridge operation when component mounts
   useEffect(() => {
     // ? added 2 seconds delay because isBridgeTokensToL2Error or withdrawTokensToL1Error is not working as expected when called to early
     setTimeout(() => {
-      if (Number(bridgeAmount) > 0 && !operationStarted.current) {
+      if (isRecoveryMode && !operationStarted.current) {
+        // Recovery mode — resume from where the user left off
         operationStarted.current = true
         handleBridgeOperation()
-      } else if (Number(bridgeAmount) === 0) {
+      } else if (Number(bridgeAmount) > 0 && !operationStarted.current) {
+        operationStarted.current = true
+        handleBridgeOperation()
+      } else if (Number(bridgeAmount) === 0 && !isRecoveryMode) {
         router.push('/')
       }
     }, 2000)
@@ -163,11 +229,12 @@ export default function ProgressPage() {
     withdrawTokensToL1,
     router,
     handleBridgeOperation,
+    isRecoveryMode,
   ])
 
   // Handle errors and stop animation
   useEffect(() => {
-    const hasError = isBridgeTokensToL2Error || withdrawTokensToL1Error
+    const hasError = isBridgeTokensToL2Error || withdrawTokensToL1Error || isResumeBridgeError || isResumeWithdrawalError
     if (hasError) {
       // Stop the timer
       stopCountdown()
@@ -181,6 +248,8 @@ export default function ProgressPage() {
   }, [
     isBridgeTokensToL2Error,
     withdrawTokensToL1Error,
+    isResumeBridgeError,
+    isResumeWithdrawalError,
     steps,
     setProgressStep,
     stopCountdown,
@@ -250,6 +319,13 @@ export default function ProgressPage() {
           <BridgeHeader />
         </div>
 
+        {/* Warning banner */}
+        <div className='bg-yellow-50 border border-yellow-200 rounded-md mt-2 px-3 py-2'>
+          <p className='text-xs text-yellow-800 font-medium text-center'>
+            Please don't reload or close this page, or it may be difficult to recover your funds.
+          </p>
+        </div>
+
         {/* Progress Card */}
         <div className='bg-white rounded-md mt-2 p-4'>
           <div
@@ -291,7 +367,7 @@ export default function ProgressPage() {
               <p className='font-semibold text-14'>{totalTimeTaken()}</p>
             </div>
           )}
-          {(isBridgeTokensToL2Error || withdrawTokensToL1Error) && (
+          {(isBridgeTokensToL2Error || withdrawTokensToL1Error || isResumeBridgeError || isResumeWithdrawalError) && (
             <div className='mt-4 text-red font-semibold text-center'>
               Operation failed. Please try again.
             </div>
@@ -330,7 +406,9 @@ export default function ProgressPage() {
           </div>
           <hr className='text-latest-grey-300 my-3' />
           <p className='text-32 text-black font-medium text-center'>
-            {bridgeAmount} USDC
+            {isRecoveryMode
+              ? `${formatUnits(BigInt((recoveryClaimData?.amount ?? recoveryWithdrawalData?.amount) || '0'), isL2ToL1Recovery ? L2_TOKEN_METADATA.decimals : L1_TOKEN_METADATA.decimals)} USDC`
+              : `${bridgeAmount} USDC`}
           </p>
           <p className='text-center text-16 font-medium text-latest-grey-500 mt-2'>
             {/* ${bridgeConfig.amount} */}
@@ -363,7 +441,9 @@ export default function ProgressPage() {
       <div className='flex flex-row items-center justify-center px-5 mt-4'>
         {(steps.every((step) => step.status === 'completed') ||
           isBridgeTokensToL2Error ||
-          withdrawTokensToL1Error) && (
+          withdrawTokensToL1Error ||
+          isResumeBridgeError ||
+          isResumeWithdrawalError) && (
           <TextButton className='' onClick={() => router.push('/')}>
             Back to Main Screen
           </TextButton>
