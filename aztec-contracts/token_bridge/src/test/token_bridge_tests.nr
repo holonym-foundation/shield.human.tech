@@ -1,7 +1,7 @@
 use crate::TokenBridge;
 use crate::test::utils;
 
-use aztec::protocol_types::{
+use aztec::protocol::{
     address::AztecAddress,
     traits::FromField,
 };

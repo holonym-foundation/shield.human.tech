@@ -12,19 +12,19 @@ use aztec::macros::aztec;
 pub contract TokenBridge {
     use crate::config::{Config, eth_personal_sign_hash};
 
-    use dep::aztec::{
+    use aztec::{
         macros::{functions::{external, initializer, internal, only_self, view}, storage::storage},
-        protocol_types::{
+        protocol::{
             address::{AztecAddress, EthAddress},
             traits::{Deserialize, Packable, Serialize, ToField},
         },
         state_vars::{
-            delayed_public_mutable::DelayedPublicMutable, map::Map, public_mutable::PublicMutable,
+            DelayedPublicMutable, Map, PublicMutable,
             PublicImmutable,
         },
     };
 
-    use dep::token_portal_content_hash_lib::{
+    use token_portal_content_hash_lib::{
         get_mint_to_private_content_hash, get_mint_to_public_content_hash,
         get_withdraw_content_hash,
     };
@@ -133,7 +133,7 @@ pub contract TokenBridge {
         passport_signer_x: [u8; 32],
         passport_signer_y: [u8; 32],
     ) {
-        let sender = self.context.msg_sender().unwrap();
+        let sender = self.msg_sender();
         self.storage.owner.write(sender);
         self.storage.config.initialize(Config { token_minter_proxy, portal });
         self.storage.human_id_attester_pubkey.schedule_value_change(
@@ -155,7 +155,7 @@ pub contract TokenBridge {
         passport_x: [u8; 32],
         passport_y: [u8; 32],
     ) {
-        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
 
         self.storage.human_id_attester_pubkey.schedule_value_change(
             PubKey { x: attester_x, y: attester_y },
@@ -167,20 +167,20 @@ pub contract TokenBridge {
     }
     #[external("public")]
     fn transfer_ownership(new_owner: AztecAddress) {
-        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
         assert(!new_owner.is_zero(), "New owner cannot be zero address");
 
         self.storage.pending_owner.write(new_owner);
     }
     #[external("public")]
     fn cancel_ownership_transfer() {
-        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
         assert(!self.storage.pending_owner.read().is_zero(), "No pending owner");
         self.storage.pending_owner.write(AztecAddress::zero());
     }
     #[external("public")]
     fn claim_ownership() {
-        let sender = self.context.msg_sender().unwrap();
+        let sender = self.msg_sender();
         assert(self.storage.pending_owner.read() == sender, "Only pending owner can claim");
 
         // Perform the transfer
@@ -192,7 +192,7 @@ pub contract TokenBridge {
 
     #[external("public")]
     fn set_paused(paused: bool) {
-        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
         self.storage.is_paused.schedule_value_change(paused);
     }
 
@@ -248,7 +248,7 @@ pub contract TokenBridge {
 
         // Burn tokens
         self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_public(
-            self.context.msg_sender().unwrap(),
+            self.msg_sender(),
             amount,
             authwit_nonce,
         ));
@@ -441,7 +441,7 @@ pub contract TokenBridge {
         assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
         assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
-        let sender = self.context.msg_sender().unwrap();
+        let sender = self.msg_sender();
 
         let mut is_clean_hands = false;
 
@@ -482,7 +482,7 @@ pub contract TokenBridge {
 
         // Burn tokens
         self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_private(
-            self.context.msg_sender().unwrap(),
+            self.msg_sender(),
             amount,
             authwit_nonce,
         ));

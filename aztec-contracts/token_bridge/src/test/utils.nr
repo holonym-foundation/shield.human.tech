@@ -1,7 +1,7 @@
 use crate::TokenBridge;
 
 use aztec::{
-    protocol_types::{
+    protocol::{
         address::{AztecAddress, EthAddress},
         traits::FromField,
     },
