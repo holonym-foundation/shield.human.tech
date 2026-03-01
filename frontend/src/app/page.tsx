@@ -44,7 +44,6 @@ import MetaMaskPrompt from '@/components/model/MetaMaskPrompt'
 import BalanceCard from '@/components/BalanceCard'
 import { logInfo, logError } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
-// import PopupBlockedAlert from '@/components/model/PopupBlockedAlert'
 import { AztecLoginMethod } from '@/types/wallet'
 import EmojiVerificationModal from '@/components/model/EmojiVerificationModal'
 import WalletDiscoveryModal from '@/components/model/WalletDiscoveryModal'
@@ -57,61 +56,6 @@ import {
   MAINTENANCE_MESSAGE,
   MAINTENANCE_TITLE,
 } from '@/config'
-
-// Function to check if popups are blocked (disabled for now, was used for Obsidion)
-// const isPopupBlocked = (): Promise<boolean> => {
-//   return new Promise((resolve) => {
-//     // Log popup test initiation
-//     logInfo('Popup blocking test initiated', {
-//       walletType: null,
-//       loginMethod: null,
-//       walletProvider: null,
-//       address: '',
-//       chainId: null,
-//       testType: 'popup_detection',
-//       userAgent: navigator.userAgent,
-//       timestamp: Date.now(),
-//       userAction: 'popup_detection_test',
-//     })
-//
-//     const popup = window.open('about:blank', '_blank', 'width=1,height=1')
-//     setTimeout(() => {
-//       if (!popup || popup.closed || popup.closed === undefined) {
-//         // Log popup blocked
-//         logInfo('Popups are blocked - user will see popup blocked alert', {
-//           walletType: null,
-//           loginMethod: null,
-//           walletProvider: null,
-//           address: '',
-//           chainId: null,
-//           popupBlocked: true,
-//           popupClosed: popup?.closed,
-//           popupUndefined: popup === undefined,
-//           userAgent: navigator.userAgent,
-//           timestamp: Date.now(),
-//           userAction: 'popup_blocked_detected',
-//         })
-//         resolve(true) // Popups are blocked
-//       } else {
-//         // Log popup allowed
-//         logInfo('Popups are allowed - user can proceed normally', {
-//           walletType: null,
-//           loginMethod: null,
-//           walletProvider: null,
-//           address: '',
-//           chainId: null,
-//           popupBlocked: false,
-//           popupClosed: popup.closed,
-//           userAgent: navigator.userAgent,
-//           timestamp: Date.now(),
-//           userAction: 'popup_allowed_detected',
-//         })
-//         popup.close()
-//         resolve(false) // Popups are allowed
-//       }
-//     }, 50)
-//   })
-// }
 
 const variants = {
   hidden: { opacity: 0, y: 100 },
@@ -138,8 +82,6 @@ export default function Home() {
     'Ethereum'
   )
   const [bridgeCompleted, setBridgeCompleted] = useState(false)
-  // const [arePopupsBlocked, setArePopupsBlocked] = useState<boolean | null>(null)
-  // const [showPopupBlockedAlert, setShowPopupBlockedAlert] = useState(false)
 
   // Notification system
   const notify = useToast()
@@ -428,41 +370,6 @@ export default function Home() {
     })
   }, [])
 
-  // Check if popups are blocked immediately after page load (disabled for now)
-  // useEffect(() => {
-  //   if (typeof window !== 'undefined') {
-  //     // Immediately check if popups are blocked
-  //     isPopupBlocked().then((blocked) => {
-  //       setArePopupsBlocked(blocked)
-  //       if (blocked) {
-  //         console.log('Popups are blocked for this site')
-  //         logInfo('Popups are blocked - showing popup blocked alert to user', {
-  //           walletType: null,
-  //           loginMethod: null,
-  //           walletProvider: null,
-  //           address: '',
-  //           chainId: null,
-  //           blocked,
-  //           alertShown: true,
-  //           userAction: 'popup_blocked_alert_displayed',
-  //         })
-  //         setShowPopupBlockedAlert(true)
-  //       } else {
-  //         // console.log('Popups are allowed for this site')
-  //         logInfo('Popups are allowed - user can proceed with wallet connections', {
-  //           walletType: null,
-  //           loginMethod: null,
-  //           walletProvider: null,
-  //           address: '',
-  //           chainId: null,
-  //           blocked: false,
-  //           userAction: 'popup_allowed_proceed',
-  //         })
-  //       }
-  //     })
-  //   }
-  // }, [])
-
   useEffect(() => {
     resetStepState()
     resetBridgeStore()
@@ -525,26 +432,6 @@ export default function Home() {
             onCancel={cancelWalletConnection}
           />
         )}
-        {/* Popup blocked alert disabled (used for Obsidion)
-        {showPopupBlockedAlert && (
-          <PopupBlockedAlert
-            onClose={() => {
-              // Log when user closes popup blocked alert
-              logInfo('User closed popup blocked alert', {
-                walletType: null,
-                loginMethod: null,
-                walletProvider: null,
-                address: '',
-                chainId: null,
-                userAction: 'popup_blocked_alert_closed',
-                alertClosed: true,
-                userGaveUp: true, // This might indicate user is giving up
-              })
-              setShowPopupBlockedAlert(false)
-            }}
-          />
-        )}
-        */}
         {selectNetwork && (
           <NetworkModal
             setNetworkData={handleSelectNetwork}
@@ -691,19 +578,6 @@ export default function Home() {
                 l2NodeError={l2NodeIsReadyIsError && !l2NodeIsReadyLoading}
                 l2NodeIsReadyLoading={l2NodeIsReadyLoading}
               />
-              
-              {/* Test button for adding token to wallet */}
-              {/* {isAztecConnected && (
-                <div className="px-4 pb-4">
-                  <button
-                    onClick={testAddTokenToWallet}
-                    className="w-full bg-success-500 hover:bg-success-600 text-white font-medium py-2 px-4 rounded-lg transition-colors"
-                  >
-                    Test Add Token to Wallet
-                  </button>
-                </div>
-              )} */}
-              
               <BridgeFooter />
             </div>
           </div>

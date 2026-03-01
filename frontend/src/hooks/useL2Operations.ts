@@ -68,22 +68,7 @@ export const useL2TokenBalance = () => {
         )
       }
 
-      console.time('l2TokenBalance')
       const userAddress = AztecAddress.fromString(aztecAddress)
-
-      // // Use wallet adapter to simulate views
-      // const [privateBalanceResult, publicBalanceResult] = await Promise.all([
-      //   walletAdapter.simulateView(
-      //     walletAdapter.tokenAddress,
-      //     'balance_of_private',
-      //     [userAddress]
-      //   ),
-      //   walletAdapter.simulateView(
-      //     walletAdapter.tokenAddress,
-      //     'balance_of_public',
-      //     [userAddress]
-      //   ),
-      // ])
 
       // Single simulate_views call for both balances
       const tokenAddr = l2TokenAddress || walletAdapter.tokenAddress
@@ -113,7 +98,6 @@ export const useL2TokenBalance = () => {
         tokenDecimals,
       )
 
-      // console.timeEnd('l2TokenBalance')
       return {
         publicBalance: publicBalanceFormat,
         privateBalance: privateBalanceFormat,

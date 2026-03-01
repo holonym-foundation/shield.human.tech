@@ -1,16 +1,13 @@
 'use client'
 
 import { Icon } from '@iconify/react'
-import { useToast } from '@/hooks/useToast'
 import { useWalletStore } from '@/stores/walletStore'
-import { useBridgeStore } from '@/stores/bridgeStore'
 import { useL1TokenBalances } from '@/hooks/useL1Operations'
 import { wait } from '@/utils'
 import { LOGIN_METHODS, WalletType } from '@/types/wallet'
 import Image from 'next/image'
 import Link from 'next/link'
 import React, { useEffect, useRef, useState } from 'react'
-import { Tooltip as ReactTooltip } from 'react-tooltip'
 import { silkUrl } from '@/config/l1.config'
 import { L1_CHAIN_ID } from '@/config'
 import DeploymentSelector from '@/components/DeploymentSelector'
@@ -229,8 +226,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
   } = useWalletStore()
 
 
-  // Add bridge store state for Private Payments toggle
-  const { isPrivacyModeEnabled, setPrivacyModeEnabled } = useBridgeStore()
 
   // Get L1 token balances for native balance display
   const { data: l1TokenBalances = [] } = useL1TokenBalances()
@@ -298,8 +293,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     setMobileMenuOpen(!mobileMenuOpen)
   }
 
-  const notify = useToast()
-
   if (!mounted) {
     return (
       <header className='w-full px-4 flex justify-between items-center'>
@@ -344,53 +337,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
 
         <div className='flex items-center gap-4'>
           <DeploymentSelector />
-          {/* Privacy Mode Toggle UI */}
-          {/* <div className='flex px-[3px] py-[3px] pl-[8px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200'>
-            <Image
-              src='/assets/svg/human.aztec.svg'
-              alt='Aztec'
-              width={28}
-              height={28}
-            />
-            <span className='text-[#0A0A0A] text-[14px] font-[450] leading-[20px] font-sans'>
-              Privacy Mode
-            </span>
-            <button
-              className={`flex w-[40px] h-[24px] py-[3px] px-1 items-center rounded-[8px] transition-all duration-200 border-0 focus:outline-none relative z-10 ${
-                isPrivacyModeEnabled
-                  ? 'bg-[#3B3B3B] justify-end pl-[19px]'
-                  : 'bg-[#D4D4D4] justify-start pr-[19px]'
-              }`}
-              onClick={() => {
-                setPrivacyModeEnabled(!isPrivacyModeEnabled)
-
-                if (!isPrivacyModeEnabled) {
-                  setTimeout(() => {
-                    notify('privacy-mode', {
-                      message:
-                        'Transactions are masked and untraceable, unlike public mode',
-                      heading: 'Private mode activated',
-                    })
-                  }, 1500)
-                } else {
-                  // Dismiss the privacy mode toast when turning off privacy mode
-                  notify.dismiss('privacy-mode-toastId')
-                }
-              }}
-              aria-pressed={isPrivacyModeEnabled}
-              tabIndex={0}
-              style={{ border: 'none' }}>
-              <span className='flex w-[18px] h-[18px] p-[1px] justify-center items-center flex-shrink-0 rounded-[6px] bg-white shadow-[0px_1px_3px_0px_rgba(0,0,0,0.25)] transition-transform duration-200'>
-                <Image
-                  src='/assets/svg/shield.svg'
-                  alt='Shield'
-                  width={14}
-                  height={14}
-                />
-              </span>
-            </button>
-          </div> */}
-
           {/* Wallet Controls */}
           {!isAnyWalletConnected ? (
             <ConnectWalletButton onClick={handleConnectWallet} />
@@ -411,7 +357,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
                 address={aztecAddress || undefined}
                 isConnected={isAztecConnected}
                 walletIcon='/assets/svg/aztec-wallet-logo.svg'
-                // networkIcon='/assets/svg/network-logo.svg'
                 onDisconnect={disconnectAztecWallet}
                 walletType={WalletType.AZTEC}
               />
@@ -492,54 +437,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
 
           <DeploymentSelector />
 
-          {false && (
-          <div className='flex px-[3px] py-[3px] pl-[8px] w-[240px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200 max-w-[190px]'>
-            <Image
-              src='/assets/svg/human.aztec.svg'
-              alt='Aztec'
-              width={28}
-              height={28}
-            />
-            <span className='text-[#0A0A0A] text-[14px] font-[450] leading-[20px] font-sans'>
-              Privacy Mode
-            </span>
-            <button
-              className={`flex w-[40px] h-[24px] py-[3px] px-1 items-center rounded-[8px] transition-all duration-200 border-0 focus:outline-none relative z-10 ${
-                isPrivacyModeEnabled
-                  ? 'bg-[#3B3B3B] justify-end pl-[19px]'
-                  : 'bg-[#D4D4D4] justify-start pr-[19px]'
-              }`}
-              onClick={() => {
-                setPrivacyModeEnabled(!isPrivacyModeEnabled)
-
-                if (!isPrivacyModeEnabled) {
-                  setTimeout(() => {
-                    notify('privacy-mode', {
-                      message:
-                        'Transactions are masked and untraceable, unlike public mode',
-                      heading: 'Private mode activated',
-                    })
-                  }, 1500)
-                } else {
-                  // Dismiss the privacy mode toast when turning off privacy mode
-                  notify.dismiss('privacy-mode-toastId')
-                }
-              }}
-              aria-pressed={isPrivacyModeEnabled}
-              tabIndex={0}
-              style={{ border: 'none' }}>
-              <span className='flex w-[18px] h-[18px] p-[1px] justify-center items-center flex-shrink-0 rounded-[6px] bg-white shadow-[0px_1px_3px_0px_rgba(0,0,0,0.25)] transition-transform duration-200'>
-                <Image
-                  src='/assets/svg/shield.svg'
-                  alt='Shield'
-                  width={14}
-                  height={14}
-                />
-              </span>
-            </button>
-          </div>
-          )}
-
           <div className='flex flex-col items-start gap-3'>
             {!isAnyWalletConnected ? (
               <ConnectWalletButton onClick={handleConnectWallet} />
@@ -549,7 +446,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
                   address={waapAddress || undefined}
                   isConnected={isWaapConnected}
                   walletIcon={walletIcon || '/assets/wallets/wally-dark.svg'}
-                  // networkIcon='/assets/svg/network-logo.svg'
                   balance={l1NativeBalance}
                   onDisconnect={disconnectWaapWallet}
                   walletType={WalletType.WAAP}
@@ -560,7 +456,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
                   address={aztecAddress || undefined}
                   isConnected={isAztecConnected}
                   walletIcon='/assets/svg/aztec-wallet-logo.svg'
-                  // networkIcon='/assets/svg/network-logo.svg'
                   onDisconnect={disconnectAztecWallet}
                   walletType={WalletType.AZTEC}
                 />
@@ -570,15 +465,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
         </div>
       )}
 
-      {/* <ReactTooltip
-        id='privacy-mode-tooltip'
-        place='bottom'
-        className='z-[100]'
-        style={{
-          fontSize: '12px',
-          padding: '4px 8px',
-        }}
-      /> */}
     </header>
   )
 }
