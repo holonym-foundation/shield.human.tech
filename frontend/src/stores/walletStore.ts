@@ -419,11 +419,55 @@ const walletStore = create<WalletState>((set, get) => ({
       // the SDK's internal channel state. User can cancel manually if needed.
       const wallet = await pendingConnection.confirm()
 
-      console.log('[walletStore] confirm() resolved, getting accounts...')
+      console.log('[walletStore] confirm() resolved, requesting capabilities...')
 
-      // Get the account address from the wallet
-      // getAccounts() returns Aliased<AztecAddress>[] — unwrap with .item
-      const accounts = await wallet.getAccounts()
+      // Request capabilities first (preferred flow for external wallets).
+      // This shows a single comprehensive dialog where the user selects
+      // accounts AND grants permissions for simulations/transactions.
+      // Fall back to getAccounts if requestCapabilities is not supported.
+      let accounts: any[] = []
+      try {
+        const capabilities = await wallet.requestCapabilities({
+          version: '1.0' as const,
+          metadata: {
+            name: 'Aztec Bridge',
+            version: '1.0.0',
+            description: 'Bridge assets between L1 and Aztec L2',
+            url: typeof window !== 'undefined' ? window.location.origin : '',
+          },
+          capabilities: [
+            { type: 'accounts', canGet: true, canCreateAuthWit: true },
+            {
+              type: 'contracts',
+              contracts: '*' as any,
+              canRegister: true,
+            },
+            {
+              type: 'simulation',
+              transactions: { scope: '*' as any },
+              utilities: { scope: '*' as any },
+            },
+            {
+              type: 'transaction',
+              scope: '*' as any,
+            },
+          ],
+        })
+        const accountsCap = capabilities.granted.find(
+          (c: any) => c.type === 'accounts'
+        ) as { type: 'accounts'; accounts: any[] } | undefined
+        accounts = accountsCap?.accounts ?? []
+        console.log('[walletStore] requestCapabilities granted', accounts.length, 'account(s)')
+      } catch (capErr) {
+        console.warn('[walletStore] requestCapabilities failed, falling back to getAccounts:', capErr)
+      }
+
+      // Fall back to getAccounts if requestCapabilities didn't yield accounts
+      if (accounts.length === 0) {
+        const fallbackAccounts = await wallet.getAccounts()
+        accounts = fallbackAccounts ?? []
+      }
+
       if (!accounts || accounts.length === 0) {
         throw new Error('No accounts returned from wallet')
       }
@@ -437,9 +481,17 @@ const walletStore = create<WalletState>((set, get) => ({
 
       console.log('[walletStore] Connected to account:', address)
 
-      // Set up disconnect handler
+      // Set up disconnect handler with grace period to absorb spurious
+      // disconnects caused by HMR / Fast Refresh / soft navigations.
       sdkProvider.onDisconnect(() => {
-        get().disconnectAztecWallet()
+        setTimeout(() => {
+          const { sdkProvider: currentProvider } = get()
+          if (currentProvider?.isDisconnected()) {
+            console.warn('[walletStore] Wallet disconnected by extension')
+            showToast('warn', 'Aztec wallet disconnected. Please reconnect to continue.')
+            get().disconnectAztecWallet()
+          }
+        }, 1000)
       })
 
       // Import aztecNode for L1 contract addresses
