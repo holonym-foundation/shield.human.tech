@@ -3,6 +3,15 @@ import webpack from 'webpack';
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // Keep @aztec/bb.js as external on the server so the WASM file resolves
+  // from node_modules instead of being broken by webpack bundling.
+  serverExternalPackages: [
+    '@aztec/bb.js',
+    '@aztec/aztec.js',
+    '@aztec/foundation',
+    '@aztec/stdlib',
+    '@aztec/circuits.js',
+  ],
   // Use webpack for polyfills compatibility
   webpack: (config, { isServer }) => {
     // Add polyfills for Node.js built-ins in the browser

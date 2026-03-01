@@ -5,7 +5,6 @@ import {
   L1_CONTRACT_ADDRESSES,
   L1_TOKENS,
   L2_CHAIN_ID,
-  L2_NODE_URL,
 } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { logError, logInfo } from '@/utils/datadog'
@@ -835,7 +834,7 @@ export const useL2PendingTxCount = () => {
   // Query function without tracking state
   const queryFn = async (): Promise<number> => {
     try {
-      const response = await fetch(L2_NODE_URL, {
+      const response = await fetch('/api/aztec-node', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -849,7 +848,7 @@ export const useL2PendingTxCount = () => {
       })
 
       const data = await response.json()
-      return data.result as number
+      return (data.result as number) ?? 0
     } catch (error) {
       handleL2Error<number>(error, 'NODE')
       throw error

@@ -127,8 +127,8 @@ async function deployTokenPortal(
 ): Promise<EthAddress> {
   return await deployL1Contract(
     l1Client,
-    TokenPortalArtifact.abi,
-    TokenPortalArtifact.bytecode.object as `0x${string}`,
+    TokenPortalAbi,
+    TokenPortalBytecode,
     []
   ).then(({ address }) => address);
 }
@@ -350,7 +350,7 @@ async function deployCompleteTokenSetup(
   logger.info(`🔧 Initializing L1 portal contract for ${tokenConfig.symbol}`);
   const l1Portal = getContract({
     address: l1PortalContractAddress.toString(),
-    abi: TokenPortalArtifact.abi,
+    abi: TokenPortalAbi,
     client: l1Client as any,
   }) as any;
 

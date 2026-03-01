@@ -3,6 +3,15 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { L2_CHAIN_KEY } from '@/config'
+
+async function getContractArtifact(type: 'token' | 'bridge') {
+  if (type === 'bridge') {
+    const { TokenBridgeContract } = await import('@aztec/noir-contracts.js/TokenBridge')
+    return TokenBridgeContract.artifact
+  }
+  const { TokenContract } = await import('@aztec/noir-contracts.js/Token')
+  return TokenContract.artifact
+}
 import { showToast } from '@/hooks/useToast'
 import type {
   Operation,
@@ -299,14 +308,16 @@ export async function executeAzguardCall(
           errorMsg.includes('Contract artifact')) &&
         options?.autoRegister !== false
       ) {
-        // Register contract without instance/artifact - Azguard will fetch them from PXE/node
-        // console.log('[Azguard] executeAzguardCall retrying with register_contract', { contract: addressToString(contract) })
+        // Register contract with artifact so Azguard can interact with it
+        const artifact = options?.contractType
+          ? await getContractArtifact(options.contractType)
+          : undefined
         const operations: AzguardOperation[] = [
           {
             kind: 'register_contract',
             chain,
             address: addressToString(contract),
-            // instance and artifact are optional - Azguard will fetch them from PXE/node
+            ...(artifact ? { artifact } : {}),
           },
           txOp,
         ]
@@ -604,17 +615,22 @@ export async function executeAzguardWithdrawToL1Batch(
           errorMsg.includes('Contract artifact')) &&
         options?.autoRegister !== false
       ) {
-        // console.log('[Azguard] executeAzguardWithdrawToL1Batch retrying with register_contract (bridge + token)')
+        const [bridgeArtifact, tokenArtifact] = await Promise.all([
+          getContractArtifact('bridge'),
+          getContractArtifact('token'),
+        ])
         const operations: AzguardOperation[] = [
           {
             kind: 'register_contract',
             chain,
             address: addressToString(bridgeAddress),
+            artifact: bridgeArtifact,
           },
           {
             kind: 'register_contract',
             chain,
             address: addressToString(tokenAddress),
+            artifact: tokenArtifact,
           },
           txOp,
         ]
@@ -704,17 +720,22 @@ export async function executeAzguardWithdrawToL1BatchPrivate(
           errorMsg.includes('Contract artifact')) &&
         options?.autoRegister !== false
       ) {
-        // console.log('[Azguard] executeAzguardWithdrawToL1BatchPrivate retrying with register_contract (bridge + token)')
+        const [bridgeArtifact, tokenArtifact] = await Promise.all([
+          getContractArtifact('bridge'),
+          getContractArtifact('token'),
+        ])
         const operations: AzguardOperation[] = [
           {
             kind: 'register_contract',
             chain,
             address: addressToString(bridgeAddress),
+            artifact: bridgeArtifact,
           },
           {
             kind: 'register_contract',
             chain,
             address: addressToString(tokenAddress),
+            artifact: tokenArtifact,
           },
           txOp,
         ]

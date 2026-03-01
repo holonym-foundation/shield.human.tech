@@ -16,7 +16,6 @@
  */
 
 import { Fr } from '@aztec/aztec.js/fields'
-import { computeSecretHash } from '@aztec/aztec.js/crypto'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { TestERC20Abi, TokenPortalAbi } from '@aztec/l1-artifacts'
 import { extractEvent } from '@aztec/ethereum/utils'
@@ -117,30 +116,37 @@ export async function pollL1ToL2MessageSync(
   messageHash: string,
   options?: { pollIntervalMs?: number; maxWaitMs?: number },
 ): Promise<MessageSyncResult> {
-  const pollIntervalMs = options?.pollIntervalMs ?? 120_000
-  const maxWaitMs = options?.maxWaitMs ?? 20 * 60 * 1000
+  const pollIntervalMs = options?.pollIntervalMs ?? 30_000
+  const maxWaitMs = options?.maxWaitMs ?? 40 * 60 * 1000
   const messageHashFr = Fr.fromString(messageHash)
   const startWait = Date.now()
+  let pollCount = 0
 
-  console.log('[L1→L2] Polling for L1-to-L2 message sync (messageHash=', messageHash, ')...')
+  console.log('[L1→L2] Polling for L1-to-L2 message sync...')
+  console.log('[L1→L2]   messageHash:', messageHash)
+  console.log('[L1→L2]   messageHashFr:', messageHashFr.toString())
+  console.log('[L1→L2]   pollInterval:', pollIntervalMs / 1000, 's, maxWait:', maxWaitMs / 60_000, 'min')
 
   while (Date.now() - startWait < maxWaitMs) {
+    pollCount++
+    const elapsedSec = Math.round((Date.now() - startWait) / 1000)
     try {
       const messageBlock = await aztecNode.getL1ToL2MessageBlock(messageHashFr)
       if (messageBlock !== undefined) {
-        console.log('[L1→L2] L1-to-L2 message ready (block=', messageBlock, ')')
+        console.log(`[L1→L2] Message ready after ${pollCount} polls (${elapsedSec}s), block=${messageBlock}`)
         return {
           synced: true,
           elapsedMinutes: (Date.now() - startWait) / 60_000,
         }
       }
-      console.log('[L1→L2] Not yet synced, waiting', pollIntervalMs / 1000, 's...')
+      console.log(`[L1→L2] Poll #${pollCount} (${elapsedSec}s): not yet synced, response:`, messageBlock)
     } catch (error) {
-      console.warn('[L1→L2] Poll check failed, retrying:', error)
+      console.warn(`[L1→L2] Poll #${pollCount} (${elapsedSec}s) failed:`, error)
     }
     await wait(pollIntervalMs)
   }
 
+  console.error(`[L1→L2] Message sync timed out after ${pollCount} polls (${maxWaitMs / 60_000} min)`)
   return {
     synced: false,
     elapsedMinutes: (Date.now() - startWait) / 60_000,
@@ -353,7 +359,18 @@ export async function generateAndBackupClaimSecret(params: {
   } = params
 
   const claimSecret = Fr.random()
-  const claimSecretHash = await computeSecretHash(claimSecret)
+  // Compute poseidon2 hash server-side to avoid needing SharedArrayBuffer
+  // (cross-origin isolation headers block wallet iframe/popup communication)
+  const hashRes = await fetch('/api/compute-secret-hash', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ secret: claimSecret.toString() }),
+  })
+  if (!hashRes.ok) {
+    throw new Error('Failed to compute claim secret hash')
+  }
+  const { secretHash } = await hashRes.json()
+  const claimSecretHash = Fr.fromString(secretHash)
   const nodeInfoSnapshot = serializeNodeInfo(nodeInfo)
   console.log('[L1→L2] Claim secret generated, backing up to backend')
 
