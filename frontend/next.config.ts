@@ -2,7 +2,20 @@ import type { NextConfig } from "next";
 import webpack from 'webpack';
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // COOP/COEP headers enable SharedArrayBuffer which Barretenberg WASM needs
+  // for Contract.at().simulate() calls (function selector hashing, ABI encoding).
+  // credentialless COEP allows cross-origin resources (WaaP iframe) to load.
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
+        ],
+      },
+    ]
+  },
   // Keep @aztec/bb.js as external on the server so the WASM file resolves
   // from node_modules instead of being broken by webpack bundling.
   serverExternalPackages: [
