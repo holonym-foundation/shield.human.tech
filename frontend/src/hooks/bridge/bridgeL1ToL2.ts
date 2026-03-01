@@ -205,7 +205,7 @@ export async function executeL2Claim(
             claimSecret,
             messageLeafIndex,
           ],
-          { contractType: 'bridge', autoRegister: true },
+          { contractType: 'bridge' },
         )
         console.log(`[L1→L2] Claim succeeded on attempt ${attempt}`)
         break
@@ -241,7 +241,7 @@ export async function executeL2Claim(
             claimSecret,
             BigInt(idx),
           ],
-          { contractType: 'bridge', autoRegister: true },
+          { contractType: 'bridge' },
         )
         console.log('[L1→L2] Claim succeeded with leafIndex=', idx)
         return {

@@ -20,7 +20,7 @@ import { aztecNode } from '@/aztec'
 export interface WalletContext {
   loginMethod: 'wallet-sdk'
   sdkWallet?: Wallet | null
-  aztecAccount?: any | null
+  aztecAccount?: { address: { toString: () => string }; sdkWallet: Wallet } | null
 }
 
 export interface SimulateViewResult {
@@ -131,7 +131,7 @@ class WalletAdapter {
     contract: AztecAddress | string,
     method: string,
     args: any[],
-    options?: { contractType?: 'token' | 'bridge'; autoRegister?: boolean }
+    options?: { contractType?: 'token' | 'bridge' }
   ): Promise<ExecuteCallResult> {
     const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
     const type = options?.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)

@@ -892,10 +892,7 @@ export const useL2TokenTransfer = () => {
           walletAdapter.tokenAddress,
           method,
           args,
-          {
-            contractType: 'token',
-            autoRegister: true,
-          },
+          { contractType: 'token' },
         )
 
         // Return a receipt-like object for compatibility

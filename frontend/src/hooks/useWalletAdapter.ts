@@ -21,8 +21,9 @@ export function useWalletAdapter() {
     aztecAccount,
   } = useWalletStore()
 
-  const { data: adapter } = useQuery({
-    queryKey: ['walletAdapter', aztecLoginMethod, !!sdkWallet, aztecAccount?.address?.toString()],
+  const accountAddress = aztecAccount?.address?.toString() ?? null
+  const { data: adapter, error } = useQuery({
+    queryKey: ['walletAdapter', aztecLoginMethod, !!sdkWallet, accountAddress],
     queryFn: async () => {
       if (!aztecLoginMethod || !sdkWallet) {
         return null

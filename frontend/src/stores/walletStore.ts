@@ -420,7 +420,7 @@ const walletStore = create<WalletState>((set, get) => ({
       // This shows a single comprehensive dialog where the user selects
       // accounts AND grants permissions for simulations/transactions.
       // Fall back to getAccounts if requestCapabilities is not supported.
-      let accounts: any[] = []
+      let accounts: Array<{ item?: unknown; address?: unknown } | unknown> = []
       try {
         const capabilities = await wallet.requestCapabilities({
           version: '1.0' as const,
@@ -449,8 +449,8 @@ const walletStore = create<WalletState>((set, get) => ({
           ],
         })
         const accountsCap = capabilities.granted.find(
-          (c: any) => c.type === 'accounts'
-        ) as { type: 'accounts'; accounts: any[] } | undefined
+          (c: { type: string }) => c.type === 'accounts'
+        ) as { type: 'accounts'; accounts: Array<{ item?: unknown; address?: unknown }> } | undefined
         accounts = accountsCap?.accounts ?? []
       } catch (capErr) {
         console.warn('[walletStore] requestCapabilities failed, falling back to getAccounts:', capErr)
@@ -465,12 +465,13 @@ const walletStore = create<WalletState>((set, get) => ({
       if (!accounts || accounts.length === 0) {
         throw new Error('No accounts returned from wallet')
       }
-      const rawAccount: any = accounts[0]
-      const aztecAddr = rawAccount?.item ?? rawAccount?.address ?? rawAccount
+      const rawAccount = accounts[0] as { item?: unknown; address?: unknown } | unknown
+      const accountObj = rawAccount as Record<string, unknown> | undefined
+      const aztecAddr = accountObj?.item ?? accountObj?.address ?? rawAccount
       const address = typeof aztecAddr === 'string'
         ? aztecAddr
-        : typeof aztecAddr?.toString === 'function'
-          ? aztecAddr.toString()
+        : typeof (aztecAddr as { toString?: () => string })?.toString === 'function'
+          ? (aztecAddr as { toString: () => string }).toString()
           : String(aztecAddr)
 
       // Set up disconnect handler with grace period to absorb spurious
