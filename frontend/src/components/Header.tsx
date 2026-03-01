@@ -11,7 +11,6 @@ import React, { useEffect, useRef, useState } from 'react'
 import { silkUrl } from '@/config/l1.config'
 import { L1_CHAIN_ID } from '@/config'
 import DeploymentSelector from '@/components/DeploymentSelector'
-import AccountSelectorModal from '@/components/model/AccountSelectorModal'
 
 /** Delay before auto-starting Aztec wallet discovery after WaaP connects. */
 const AZTEC_AUTO_CONNECT_DELAY_MS = 2000
@@ -25,9 +24,15 @@ type WalletDisplayProps = {
   balance?: string
   onClick?: () => void
   onDisconnect?: () => void
-  onSwitchAccount?: () => void
+  availableAccounts?: Array<{ alias: string; address: string }>
+  onSelectAccount?: (account: { alias: string; address: string }) => void
   walletType: WalletType
   loginMethod?: string | null
+}
+
+function truncateAddr(addr: string): string {
+  if (addr.length <= 13) return addr
+  return `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`
 }
 
 const WalletDisplay: React.FC<WalletDisplayProps> = ({
@@ -39,7 +44,8 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
   balance,
   onClick,
   onDisconnect,
-  onSwitchAccount,
+  availableAccounts,
+  onSelectAccount,
   walletType,
   loginMethod,
 }) => {
@@ -150,16 +156,33 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
             </div>
           )}
 
-          {onSwitchAccount && (
-            <div
-              className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer transition-colors duration-150 hover:bg-latest-grey-300'
-              onClick={() => {
-                onSwitchAccount()
-                setShowDropdown(false)
-              }}>
-              <Icon icon='ph:swap' width={20} height={20} />
-              <span>Switch Account</span>
-            </div>
+          {availableAccounts && availableAccounts.length > 1 && onSelectAccount && (
+            <>
+              <div className='border-t border-[#E5E5E5] my-1' />
+              <div className='px-4 py-1'>
+                <span className='text-xs text-gray-400 font-medium'>Switch Account</span>
+              </div>
+              {availableAccounts
+                .filter((acc) => acc.address !== address)
+                .map((acc) => (
+                  <div
+                    key={acc.address}
+                    className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer transition-colors duration-150 hover:bg-latest-grey-300'
+                    onClick={() => {
+                      onSelectAccount(acc)
+                      setShowDropdown(false)
+                    }}>
+                    <Icon icon='ph:wallet' width={18} height={18} className='text-gray-500' />
+                    <div className='flex flex-col'>
+                      <span className='text-sm'>{acc.alias || truncateAddr(acc.address)}</span>
+                      {acc.alias && (
+                        <span className='text-xs text-gray-400'>{truncateAddr(acc.address)}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              <div className='border-t border-[#E5E5E5] my-1' />
+            </>
           )}
 
           <div
@@ -247,9 +270,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     availableAccounts,
     switchAztecAccount,
   } = useWalletStore()
-
-  // Account selector modal state
-  const [showAccountSelector, setShowAccountSelector] = useState(false)
 
 
 
@@ -382,7 +402,8 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
                 isConnected={isAztecConnected}
                 walletIcon='/assets/svg/aztec-wallet-logo.svg'
                 onDisconnect={disconnectAztecWallet}
-                onSwitchAccount={availableAccounts.length > 1 ? () => setShowAccountSelector(true) : undefined}
+                availableAccounts={availableAccounts}
+                onSelectAccount={switchAztecAccount}
                 walletType={WalletType.AZTEC}
               />
             </>
@@ -483,7 +504,8 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
                   isConnected={isAztecConnected}
                   walletIcon='/assets/svg/aztec-wallet-logo.svg'
                   onDisconnect={disconnectAztecWallet}
-                  onSwitchAccount={availableAccounts.length > 1 ? () => setShowAccountSelector(true) : undefined}
+                  availableAccounts={availableAccounts}
+                  onSelectAccount={switchAztecAccount}
                   walletType={WalletType.AZTEC}
                 />
               </>
@@ -492,20 +514,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
         </div>
       )}
 
-      {/* Account Selector Modal */}
-      {showAccountSelector && (
-        <AccountSelectorModal
-          isOpen={true}
-          accounts={availableAccounts}
-          selectedAddress={aztecAddress}
-          onSelect={(account) => {
-            switchAztecAccount(account)
-            setShowAccountSelector(false)
-          }}
-          onCancel={() => setShowAccountSelector(false)}
-          title='Switch Account'
-        />
-      )}
     </header>
   )
 }

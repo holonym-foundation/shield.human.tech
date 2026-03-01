@@ -16,7 +16,7 @@ import type { ChainInfo } from '@aztec/aztec.js/account'
 import { Fr } from '@aztec/aztec.js/fields'
 import { L1_CHAIN_ID, ROLLUP_VERSION } from '@/config'
 
-export const APP_ID = 'aztec-bridge'
+export const APP_ID = 'Human Tech'
 
 let cachedChainInfo: ChainInfo | null = null
 
