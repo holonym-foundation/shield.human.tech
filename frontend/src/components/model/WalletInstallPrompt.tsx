@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 export default function WalletInstallPrompt({ onClose }: { onClose: () => void }) {
   const handleInstallClick = () => {
     window.open(
-      'https://chromewebstore.google.com/detail/azguard-wallet/pliilpflcmabdiapdeihifihkbdfnbmn',
+      'https://github.com/AztecProtocol/aztec-packages/tree/master/yarn-project/wallet',
       '_blank'
     )
   }
@@ -79,7 +79,7 @@ export default function WalletInstallPrompt({ onClose }: { onClose: () => void }
                     alt='Chrome'
                     className='h-6 w-6'
                   />
-                  <span>Go to Chrome Web Store</span>
+                  <span>Get Aztec Wallet</span>
                 </TextButton>
               </motion.div>
 
