@@ -2,7 +2,7 @@ import StyledImage from '../StyledImage'
 import TextButton from '../TextButton'
 import { motion, AnimatePresence } from 'framer-motion'
 
-export default function AzguardPrompt({ onClose }: { onClose: () => void }) {
+export default function WalletInstallPrompt({ onClose }: { onClose: () => void }) {
   const handleInstallClick = () => {
     window.open(
       'https://chromewebstore.google.com/detail/azguard-wallet/pliilpflcmabdiapdeihifihkbdfnbmn',
@@ -12,18 +12,18 @@ export default function AzguardPrompt({ onClose }: { onClose: () => void }) {
 
   return (
     <AnimatePresence>
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
         className='absolute inset-0 bg-latest-grey-1000 z-20 rounded-lg'
       >
-        <motion.div 
+        <motion.div
           initial={{ y: '100%' }}
           animate={{ y: 0 }}
           exit={{ y: '100%' }}
-          transition={{ 
+          transition={{
             type: "spring",
             damping: 25,
             stiffness: 300
@@ -34,9 +34,9 @@ export default function AzguardPrompt({ onClose }: { onClose: () => void }) {
             <div className='flex justify-between items-center mx-2.5 py-1'>
               <p className='text-latest-black-300 font-semibold text-16'>
                 {' '}
-                Protect Your Privacy — <br /> Install Azguard to Continue
+                No Aztec Wallet Detected
               </p>
-              <motion.button 
+              <motion.button
                 onClick={onClose}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}
@@ -51,19 +51,19 @@ export default function AzguardPrompt({ onClose }: { onClose: () => void }) {
             <div className='mt-4 mx-2.5'>
               <p className='text-latest-grey-600 text-14 mb-6'>
                 To use our app seamlessly and protect your information, please
-                install Azguard
+                install an Aztec wallet extension
               </p>
 
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
                 className='bg-latest-grey-200 p-4 rounded-lg mb-6 flex items-center gap-4'
               >
-                <img src='/assets/svg/Azguard.svg' alt='MetaMask' />
+                <img src='/assets/svg/aztec-wallet-logo.svg' alt='Aztec Wallet' className='w-10 h-10' />
 
                 <p className='text-latest-grey-600 text-14'>
-                  Azguard is a secure, privacy-first wallet that keeps your data
+                  An Aztec wallet is a secure, privacy-first wallet that keeps your data
                   safe while you manage your assets
                 </p>
               </motion.div>
@@ -83,7 +83,7 @@ export default function AzguardPrompt({ onClose }: { onClose: () => void }) {
                 </TextButton>
               </motion.div>
 
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.4 }}

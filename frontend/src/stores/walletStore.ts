@@ -1,4 +1,4 @@
-import { L1_CHAIN_ID, L2_CHAIN_KEY } from '@/config'
+import { L1_CHAIN_ID } from '@/config'
 import { waapConfig } from '@/config/l1.config'
 import { showToast } from '@/hooks/useToast'
 import {
@@ -12,11 +12,17 @@ import {
 } from '@/stores/waapWalletHelpers'
 import { AztecLoginMethod, LOGIN_METHODS, WaapLoginMethod, WalletType } from '@/types/wallet'
 import { logError, logInfo } from '@/utils/datadog'
-import { AzguardClient } from '@azguardwallet/client'
+import {
+  discoverWallets,
+  connectToProvider,
+  hashToEmoji,
+  type WalletProvider,
+  type PendingConnection,
+} from '@/utils/walletSdkConnection'
+import type { Wallet } from '@aztec/aztec.js/wallet'
 import { initWaaP } from '@human.tech/waap-sdk'
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { connectWallet } from '../aztec'
 
 // ============================================================================
 // TYPE DECLARATIONS
@@ -24,7 +30,6 @@ import { connectWallet } from '../aztec'
 
 declare global {
   interface Window {
-    azguard?: any
     waap: any
     ethereum?: any
   }
@@ -37,6 +42,17 @@ declare global {
 const AZTEC_WALLET_KEY = 'aztecLoginMethod'
 
 // ============================================================================
+// WALLET CONNECTION PHASE
+// ============================================================================
+
+export type WalletConnectionPhase =
+  | 'idle'
+  | 'discovering'
+  | 'selecting'
+  | 'verifying'
+  | 'connected'
+
+// ============================================================================
 // INTERFACES
 // ============================================================================
 
@@ -45,13 +61,13 @@ interface WalletState {
   // UI STATE
   // ============================================================================
   showWalletModal: boolean
-  showAzguardPrompt: boolean
+  showWalletInstallPrompt: boolean
 
   // ============================================================================
   // UI ACTIONS
   // ============================================================================
   setShowWalletModal: (show: boolean) => void
-  setShowAzguardPrompt: (show: boolean) => void
+  setShowWalletInstallPrompt: (show: boolean) => void
 
   // ============================================================================
   // AZTEC WALLET STATE
@@ -63,9 +79,16 @@ interface WalletState {
   isAztecConnected: boolean
   isAztecConnecting: boolean
   aztecError: Error | null
-  
-  // Client instances
-  azguardClient: AzguardClient | null
+
+  // Wallet SDK instances
+  sdkWallet: Wallet | null
+  sdkProvider: WalletProvider | null
+
+  // Wallet connection flow state
+  walletConnectionPhase: WalletConnectionPhase
+  verificationEmojis: string | null
+  pendingConnection: PendingConnection | null
+  discoveredWallets: Array<{ name: string; provider: WalletProvider }>
 
   // ============================================================================
   // AZTEC WALLET ACTIONS
@@ -78,11 +101,17 @@ interface WalletState {
     isConnected: boolean
     error?: Error | null
   }) => void
-  
+
   // Connection management
-  connectAztecWallet: (type: AztecLoginMethod) => Promise<any>
+  connectAztecWallet: (type?: AztecLoginMethod) => Promise<any>
   disconnectAztecWallet: () => Promise<void>
   initializeAztecWallet: () => Promise<void>
+
+  // Wallet SDK connection flow actions
+  startWalletDiscovery: () => Promise<void>
+  selectWallet: (provider: WalletProvider) => Promise<void>
+  confirmWalletConnection: () => Promise<any>
+  cancelWalletConnection: () => void
 
   // ============================================================================
   // WAAP WALLET STATE
@@ -92,12 +121,12 @@ interface WalletState {
   waapChainId: number | null
   isWaapConnected: boolean
   waapError: Error | null
-  
+
   // Wallet identification
   waapLoginMethod: WaapLoginMethod | null
   waapWalletProvider: string | null
   waapWalletIcon: string | null
-  
+
   // Initialization state
   isWaapInitialized: boolean
 
@@ -106,25 +135,25 @@ interface WalletState {
   // ============================================================================
   // Initialization
   initializeWaapWallet: () => Promise<void>
-  
+
   // Connection management
   connectWaapWallet: () => Promise<void>
   disconnectWaapWallet: () => Promise<void>
-  
+
   // Network management
   switchWaapChain: (chainId: number) => Promise<void>
   getWaapChainId: () => Promise<number>
-  
+
   // Account management
   getWaapAccount: () => Promise<string | null>
   signWaapMessage: (message: string) => Promise<string>
-  
+
   // Wallet identification
   getWaapLoginMethod: () => Promise<WaapLoginMethod | null>
   getWaapWalletProvider: () => string | null
   getWaapWalletIcon: () => string | null
   getAllAvailableWallets: () => string[]
-  
+
   // Utility functions
   refreshWaapWalletInfo: () => Promise<void>
 
@@ -173,7 +202,7 @@ export const requestWaapWallet = async (
 const initialState = {
   // UI State
   showWalletModal: false,
-  showAzguardPrompt: false,
+  showWalletInstallPrompt: false,
 
   // Aztec Wallet State
   aztecLoginMethod: getInitialWalletType(),
@@ -182,7 +211,14 @@ const initialState = {
   isAztecConnected: false,
   isAztecConnecting: false,
   aztecError: null,
-  azguardClient: null,
+  sdkWallet: null,
+  sdkProvider: null,
+
+  // Wallet connection flow state
+  walletConnectionPhase: 'idle' as WalletConnectionPhase,
+  verificationEmojis: null,
+  pendingConnection: null,
+  discoveredWallets: [],
 
   // WaaP Wallet State
   waapAddress: null,
@@ -206,12 +242,12 @@ const walletStore = create<WalletState>((set, get) => ({
   // UI ACTIONS
   // ============================================================================
   setShowWalletModal: (show) => set({ showWalletModal: show }),
-  setShowAzguardPrompt: (show) => set({ showAzguardPrompt: show }),
+  setShowWalletInstallPrompt: (show) => set({ showWalletInstallPrompt: show }),
 
   // ============================================================================
   // AZTEC WALLET ACTIONS
   // ============================================================================
-  
+
   // State management
   setAztecLoginMethod: (type) => {
     if (type) {
@@ -237,123 +273,142 @@ const walletStore = create<WalletState>((set, get) => ({
     })
   },
 
-  // Connection management
-  connectAztecWallet: async (type: AztecLoginMethod) => {
+  // ─── Wallet SDK connection flow ────────────────────────────────────
+
+  startWalletDiscovery: async () => {
+    set({
+      walletConnectionPhase: 'discovering',
+      discoveredWallets: [],
+      isAztecConnecting: true,
+    })
+
+    logInfo('Aztec wallet discovery started', {
+      walletType: WalletType.AZTEC,
+      loginMethod: 'wallet-sdk',
+      address: '',
+      chainId: null,
+      userAction: 'aztec_wallet_discovery_start',
+    })
+
+    const collectedWallets: Array<{ name: string; provider: WalletProvider }> = []
+
+    const discovery = discoverWallets({
+      timeout: 10000,
+      onWalletDiscovered: (provider) => {
+        const entry = { name: provider.name ?? 'Aztec Wallet', provider }
+        collectedWallets.push(entry)
+        set({ discoveredWallets: [...collectedWallets] })
+      },
+    })
+
+    // Wait for discovery to finish
+    const allProviders: WalletProvider[] = []
+    for await (const provider of discovery.wallets) {
+      allProviders.push(provider)
+    }
+
+    if (allProviders.length === 0) {
+      // No wallets found — show install prompt
+      set({
+        walletConnectionPhase: 'idle',
+        isAztecConnecting: false,
+        showWalletInstallPrompt: true,
+        showWalletModal: false,
+      })
+      return
+    }
+
+    if (allProviders.length === 1) {
+      // Auto-select the only wallet
+      await get().selectWallet(allProviders[0])
+    } else {
+      // Multiple wallets — show selection UI
+      set({ walletConnectionPhase: 'selecting' })
+    }
+  },
+
+  selectWallet: async (provider: WalletProvider) => {
     try {
-      // Log wallet connection attempt
-      logInfo('Aztec wallet connection initiated', {
+      set({ walletConnectionPhase: 'verifying' })
+
+      const pending = await connectToProvider(provider)
+      const emojis = hashToEmoji(pending.verificationHash)
+
+      set({
+        pendingConnection: pending,
+        verificationEmojis: emojis,
+        sdkProvider: provider,
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      logError('Failed to establish secure channel', {
         walletType: WalletType.AZTEC,
-        loginMethod: type,
+        loginMethod: 'wallet-sdk',
         address: '',
         chainId: null,
-        userAction: 'aztec_wallet_connection_attempt',
+        userAction: 'aztec_wallet_channel_failed',
+        error: errorMessage,
+      })
+      set({
+        walletConnectionPhase: 'idle',
+        isAztecConnecting: false,
+        pendingConnection: null,
+        verificationEmojis: null,
+      })
+      showToast('error', `Failed to connect wallet: ${errorMessage}`)
+    }
+  },
+
+  confirmWalletConnection: async () => {
+    const { pendingConnection, sdkProvider } = get()
+    if (!pendingConnection || !sdkProvider) return
+
+    try {
+      const wallet = await pendingConnection.confirm()
+
+      // Get the account address from the wallet
+      const accounts = await wallet.getAccounts()
+      if (!accounts || accounts.length === 0) {
+        throw new Error('No accounts returned from wallet')
+      }
+      const address = accounts[0].toString()
+
+      // Set up disconnect handler
+      sdkProvider.onDisconnect(() => {
+        get().disconnectAztecWallet()
       })
 
-      let connectedAccount: any = null
-      let azguardClient: AzguardClient | null = null
+      // Import aztecNode for L1 contract addresses
+      const { aztecNode } = await import('../aztec')
 
-      if (type === 'azguard') {
-        // Check if Azguard is installed
-        if (!(await AzguardClient.isAzguardInstalled())) {
-          throw new Error('Azguard wallet is not installed. Please install it from the Chrome Web Store.')
-        }
-
-        // Create Azguard client
-        // The client automatically restores session from localStorage if it exists
-        azguardClient = await AzguardClient.create()
-        
-        // Handle wallet disconnection
-        azguardClient.onDisconnected.addHandler(() => {
-          get().disconnectAztecWallet()
-        })
-
-        // Handle account changes
-        azguardClient.onAccountsChanged.addHandler((accounts) => {
-          if (accounts.length > 0) {
-            const account = accounts[0]
-            const address = account.split(':').at(-1) || ''
-            get().setAztecState({
-              address,
-              account: {
-                address: { toString: () => address },
-                azguardClient,
-                aztecNode: null,
-              },
-              isConnected: true,
-            })
-          }
-        })
-
-        // Connect to Azguard if not connected
-        if (!azguardClient.connected) {
-          const logoUrl = typeof window !== 'undefined' 
-            ? `${window.location.origin}/assets/svg/human.aztec.svg`
-            : '/assets/svg/human.aztec.svg'
-          
-          await azguardClient.connect(
-            {
-              name: 'Aztec Bridge',
-              description: 'Bridge tokens between Ethereum and Aztec Network',
-              logo: logoUrl,
-              url: typeof window !== 'undefined' ? window.location.origin : undefined,
-            },
-            [
-              {
-                chains: [L2_CHAIN_KEY],
-                methods: ['send_transaction', 'add_private_authwit', 'add_public_authwit', 'call', 'simulate_views', 'register_contract', 'register_token'],
-              },
-            ]
-          )
-        }
-
-        // Get the first account
-        if (azguardClient.accounts.length === 0) {
-          throw new Error('No accounts found in Azguard wallet')
-        }
-
-        const account = azguardClient.accounts[0]
-        const address = account.split(':').at(-1) || ''
-
-        // Store the client
-        set({ azguardClient })
-
-        // Import aztecNode for L1 contract addresses
-        const { aztecNode } = await import('../aztec')
-        
-        // Create a mock account object for compatibility
-        connectedAccount = {
-          address: {
-            toString: () => address,
-          },
-          azguardClient, // Store client reference for contract calls
-          aztecNode, // Add aztecNode for getting L1 contract addresses
-        }
-
-      } else {
-        // Use raven-house SDK for Obsidion wallet (disabled on Devnet 6)
-        connectedAccount = await connectWallet(type)
+      // Create an account-like object for compatibility with existing code
+      const connectedAccount = {
+        address: { toString: () => address },
+        sdkWallet: wallet,
+        aztecNode,
       }
 
-      // Update wallet type
-      get().setAztecLoginMethod(type)
-
-      // Update Aztec state
-      get().setAztecState({
-        address: connectedAccount?.address?.toString() || null,
-        account: connectedAccount,
-        isConnected: !!connectedAccount,
+      // Update all state
+      set({
+        sdkWallet: wallet,
+        walletConnectionPhase: 'connected',
+        pendingConnection: null,
+        verificationEmojis: null,
+        isAztecConnecting: false,
       })
 
-      // Contracts will be initialized automatically by the wallet adapter
-
-      // Close wallet modal
+      get().setAztecLoginMethod('wallet-sdk')
+      get().setAztecState({
+        address,
+        account: connectedAccount,
+        isConnected: true,
+      })
       set({ showWalletModal: false })
 
-      // Log successful wallet connection
-      logInfo('Aztec wallet connected successfully', {
+      logInfo('Aztec wallet connected successfully via wallet-sdk', {
         walletType: WalletType.AZTEC,
-        loginMethod: type,
-        address: connectedAccount?.address?.toString() || '',
+        loginMethod: 'wallet-sdk',
+        address,
         chainId: null,
         userAction: 'aztec_wallet_connection_success',
       })
@@ -361,136 +416,95 @@ const walletStore = create<WalletState>((set, get) => ({
       return connectedAccount
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      logError('Failed to confirm wallet connection', {
+        walletType: WalletType.AZTEC,
+        loginMethod: 'wallet-sdk',
+        address: '',
+        chainId: null,
+        userAction: 'aztec_wallet_confirm_failed',
+        error: errorMessage,
+      })
+      set({
+        walletConnectionPhase: 'idle',
+        isAztecConnecting: false,
+        pendingConnection: null,
+        verificationEmojis: null,
+      })
+      showToast('error', `Failed to confirm connection: ${errorMessage}`)
+    }
+  },
 
-      if (type === 'azguard' && errorMessage.includes('Azguard wallet is not installed')) {
-        // Show Azguard install prompt instead of toast
-        set({ showAzguardPrompt: true, showWalletModal: false })
-        return null
+  cancelWalletConnection: () => {
+    const { pendingConnection } = get()
+    if (pendingConnection) {
+      try {
+        pendingConnection.cancel()
+      } catch {
+        // ignore cancel errors
       }
+    }
+    set({
+      walletConnectionPhase: 'idle',
+      isAztecConnecting: false,
+      pendingConnection: null,
+      verificationEmojis: null,
+      discoveredWallets: [],
+    })
+  },
 
-      // Log wallet connection failure
+  // ─── Connection management (public API) ────────────────────────────
+
+  connectAztecWallet: async (_type?: AztecLoginMethod) => {
+    try {
+      logInfo('Aztec wallet connection initiated', {
+        walletType: WalletType.AZTEC,
+        loginMethod: 'wallet-sdk',
+        address: '',
+        chainId: null,
+        userAction: 'aztec_wallet_connection_attempt',
+      })
+
+      // Start the wallet-sdk discovery flow
+      await get().startWalletDiscovery()
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       logError('Failed to connect Aztec wallet', {
         walletType: WalletType.AZTEC,
-        loginMethod: type,
+        loginMethod: 'wallet-sdk',
         address: '',
         chainId: null,
         userAction: 'aztec_wallet_connection_failure',
         error: errorMessage,
       })
-      
-      showToast(
-        'error',
-        `Failed to connect to ${type} wallet: ${
-          errorMessage
-        }`
-      )
+      showToast('error', `Failed to connect Aztec wallet: ${errorMessage}`)
       throw error
     }
   },
 
   initializeAztecWallet: async () => {
     try {
-      // Check if there's a stored wallet type
       const storedWalletType = getInitialWalletType()
-      
-      if (!storedWalletType) {
-        return
-      }
+      if (!storedWalletType) return
 
       const { isAztecConnected, aztecLoginMethod } = get()
-      if (isAztecConnected && aztecLoginMethod === storedWalletType) {
-        return
-      }
+      if (isAztecConnected && aztecLoginMethod === storedWalletType) return
 
-      if (storedWalletType === 'azguard') {
-        // Try to reconnect to Azguard
-        try {
-          // Check if Azguard is installed
-          if (!(await AzguardClient.isAzguardInstalled())) {
-            // Clear stored wallet type if wallet is not installed
-            get().setAztecLoginMethod(null)
-            return
-          }
-
-          // Create Azguard client
-          const azguardClient = await AzguardClient.create()
-          
-          // Check if already connected (session was restored from localStorage)
-          if (azguardClient.connected && azguardClient.accounts.length > 0) {
-            
-            const account = azguardClient.accounts[0]
-            const address = account.split(':').at(-1) || ''
-
-            // Handle wallet disconnection
-            azguardClient.onDisconnected.addHandler(() => {
-              get().disconnectAztecWallet()
-            })
-
-            // Import aztecNode for L1 contract addresses
-            const { aztecNode } = await import('../aztec')
-            
-            // Create a mock account object for compatibility
-            const connectedAccount = {
-              address: {
-                toString: () => address,
-              },
-              azguardClient,
-              aztecNode,
-            }
-
-            // Store the client and update state
-            set({ azguardClient })
-            get().setAztecLoginMethod('azguard')
-            get().setAztecState({
-              address,
-              account: connectedAccount,
-              isConnected: true,
-            })
-
-            try {
-              // Contracts will be initialized automatically by the wallet adapter
-            } catch (error) {
-              console.error('Failed to initialize L2 contracts:', error)
-            }
-          }
-        } catch (error) {
-          // Don't clear the stored type on error - might be temporary
-        }
-      } else if (storedWalletType === 'obsidion') {
-        // Obsidion SDK is disabled (not yet on Devnet 6)
-        // Try to reconnect to Obsidion using SDK
-        // try {
-        //   const connectedAccount = await connectWallet('obsidion')
-        //
-        //   if (connectedAccount) {
-        //     get().setAztecLoginMethod('obsidion')
-        //     get().setAztecState({
-        //       address: connectedAccount?.address?.toString() || null,
-        //       account: connectedAccount,
-        //       isConnected: !!connectedAccount,
-        //     })
-        //
-        //     try {
-        //       // Contracts will be initialized automatically by the wallet adapter
-        //     } catch (error) {
-        //       console.error('Failed to initialize L2 contracts:', error)
-        //     }
-        //   }
-        // } catch (error) {
-        //   console.error('Failed to reconnect to Obsidion wallet:', error)
-        //   // Don't clear the stored type on error - might be temporary
-        // }
+      // Re-run discovery to see if the wallet is still available
+      // Wallet extensions respond immediately if they have an active session
+      try {
+        await get().startWalletDiscovery()
+      } catch {
+        // Don't clear stored type on error — might be temporary
       }
     } catch (error) {
-      console.error('❌ Failed to initialize Aztec wallet:', error)
+      console.error('Failed to initialize Aztec wallet:', error)
     }
   },
 
   disconnectAztecWallet: async () => {
     try {
-      // Log disconnection attempt
-      const { aztecAddress, azguardClient, aztecLoginMethod } = get()
-      
+      const { aztecAddress, sdkProvider, aztecLoginMethod } = get()
+
       logInfo('Aztec wallet disconnection initiated', {
         walletType: WalletType.AZTEC,
         loginMethod: aztecLoginMethod || null,
@@ -500,27 +514,30 @@ const walletStore = create<WalletState>((set, get) => ({
         userAction: 'aztec_wallet_disconnection_attempt',
       })
 
-      // Disconnect Azguard client if connected
-      if (aztecLoginMethod === 'azguard' && azguardClient) {
+      // Disconnect via provider
+      if (sdkProvider) {
         try {
-          await azguardClient.disconnect()
+          await sdkProvider.disconnect()
         } catch (error) {
-          console.error('Error disconnecting Azguard:', error)
+          console.error('Error disconnecting wallet-sdk provider:', error)
         }
-      } else if (aztecLoginMethod === 'obsidion') {
-        // Disconnect Obsidion wallet using SDK (disabled on Devnet 6)
-        // Obsidion SDK disabled
       }
-      
+
       set({
-        azguardClient: null,
+        sdkWallet: null,
+        sdkProvider: null,
         aztecAddress: null,
         aztecAccount: null,
         isAztecConnected: false,
         aztecLoginMethod: null,
+        walletConnectionPhase: 'idle',
+        pendingConnection: null,
+        verificationEmojis: null,
+        discoveredWallets: [],
       })
 
-      // Log successful disconnection
+      localStorage.removeItem(AZTEC_WALLET_KEY)
+
       logInfo('Aztec wallet disconnected successfully', {
         walletType: WalletType.AZTEC,
         loginMethod: null,
@@ -532,17 +549,17 @@ const walletStore = create<WalletState>((set, get) => ({
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
       set({ aztecError: error })
-      
-      logError('Failed to disconnect Aztec wallet', { 
+
+      logError('Failed to disconnect Aztec wallet', {
         walletType: WalletType.AZTEC,
         loginMethod: null,
         walletProvider: null,
         address: get().aztecAddress || '',
         chainId: null,
         userAction: 'aztec_wallet_disconnection_failure',
-        error 
+        error
       })
-      
+
       showToast('error', `Failed to disconnect Aztec wallet: ${error.message}`)
     }
   },
@@ -550,7 +567,7 @@ const walletStore = create<WalletState>((set, get) => ({
   // ============================================================================
   // WAAP WALLET ACTIONS
   // ============================================================================
-  
+
   // Initialization
   initializeWaapWallet: async () => {
     const { isWaapInitialized } = get()
@@ -567,7 +584,7 @@ const walletStore = create<WalletState>((set, get) => ({
       // Try to get initial account, but don't fail if it's not available
       const initialAccount = await getWaapAccount().catch((err) => {
         console.log(
-          '⚠️ Initial account check failed (this is normal if wallet is not connected):',
+          'Initial account check failed (this is normal if wallet is not connected):',
           err
         )
         return null
@@ -629,24 +646,19 @@ const walletStore = create<WalletState>((set, get) => ({
 
       // For injected wallets, force account selection if multiple wallets are available
       if (result === LOGIN_METHODS.INJECTED && window.ethereum) {
-        // Check if we have multiple wallets via EIP-6963
         const hasMultipleWallets = discoveredProviders.length > 1
-
-        // Also check for multiple wallets via window.ethereum.providers
         const hasMultipleProviders =
           Array.isArray(window.ethereum.providers) &&
           window.ethereum.providers.length > 1
 
         if (hasMultipleWallets || hasMultipleProviders) {
           try {
-            // Force account selection popup
             await window.ethereum.request({
               method: 'wallet_requestPermissions',
               params: [{ eth_accounts: {} }],
             })
           } catch (permissionError) {
             // Some wallets might not support wallet_requestPermissions
-            // This is expected and we should continue normally
           }
         }
       }
@@ -656,11 +668,8 @@ const walletStore = create<WalletState>((set, get) => ({
       await switchWaapChain(L1_CHAIN_ID)
       const chainId = await getWaapChainId()
 
-      // Determine wallet provider based on login method
       const detectedProvider = get().getWaapWalletProvider()
       const walletProvider = getWalletProviderName(result, detectedProvider)
-
-      // Get wallet icon from EIP-6963 if available
       const walletIcon = getEIP6963WalletIcon(address || '')
 
       const state = {
@@ -675,7 +684,6 @@ const walletStore = create<WalletState>((set, get) => ({
 
       set(state)
 
-      // Log successful connection
       logInfo('WaaP wallet connection completed', {
         walletType: WalletType.WAAP,
         loginMethod: result,
@@ -685,7 +693,6 @@ const walletStore = create<WalletState>((set, get) => ({
         userAction: 'waap_wallet_connection_completed',
       })
     } catch (err: any) {
-      // Provide more specific error messages based on the error type
       const errorMessage = err instanceof Error ? err.message : 'Unknown error'
 
       if (errorMessage.includes('No Ethereum wallet extension detected')) {
@@ -713,7 +720,6 @@ const walletStore = create<WalletState>((set, get) => ({
         handleWaapError(err, 'Failed to connect Ethereum wallet', set)
       }
 
-      // Log connection failure
       const { waapLoginMethod, waapWalletProvider, waapAddress, waapChainId } = get()
       logError('Failed to connect WaaP wallet', {
         walletType: WalletType.WAAP,
@@ -725,17 +731,15 @@ const walletStore = create<WalletState>((set, get) => ({
         error: err
       })
 
-      // Show toast for both string and Error objects
       const errorMessageForToast = err instanceof Error ? err.message : String(err)
       showToast('error', errorMessageForToast)
-      
+
       throw err
     }
   },
 
   disconnectWaapWallet: async () => {
     try {
-      // Log disconnection attempt
       const { waapLoginMethod, waapWalletProvider, waapAddress, waapChainId } = get()
       logInfo('WaaP wallet disconnection initiated', {
         walletType: WalletType.WAAP,
@@ -745,7 +749,7 @@ const walletStore = create<WalletState>((set, get) => ({
         chainId: waapChainId,
         userAction: 'waap_wallet_disconnection_attempt',
       })
-      
+
       await window.waap.logout()
     set({
         waapAddress: null,
@@ -756,8 +760,7 @@ const walletStore = create<WalletState>((set, get) => ({
         waapWalletProvider: null,
         waapWalletIcon: null,
       })
-      
-      // Log successful disconnection
+
       logInfo('WaaP wallet disconnected successfully', {
         walletType: WalletType.WAAP,
         loginMethod: waapLoginMethod,
@@ -768,14 +771,14 @@ const walletStore = create<WalletState>((set, get) => ({
       })
     } catch (err) {
       const { waapLoginMethod, waapWalletProvider, waapAddress, waapChainId } = get()
-      logError('Failed to disconnect WaaP wallet', { 
+      logError('Failed to disconnect WaaP wallet', {
         walletType: WalletType.WAAP,
         loginMethod: waapLoginMethod,
         walletProvider: waapWalletProvider,
         address: waapAddress || '',
         chainId: waapChainId,
         userAction: 'waap_wallet_disconnection_failure',
-        error: err 
+        error: err
       })
       showToast('error', 'Failed to disconnect Ethereum wallet')
     }
@@ -784,17 +787,15 @@ const walletStore = create<WalletState>((set, get) => ({
   // Network management
   switchWaapChain: async (chainId: number) => {
     const chainIdHex = `0x${chainId.toString(16)}`
-    
+
     try {
       await requestWaapWallet(WAAP_METHOD.wallet_switchEthereumChain, [
         { chainId: chainIdHex },
       ])
       set({ waapChainId: chainId })
     } catch (err: any) {
-      // Handle specific chain switching errors
-      if (err?.code === 4902 || err?.code === -32603 || 
+      if (err?.code === 4902 || err?.code === -32603 ||
           (err?.message && err.message.includes('Unrecognized chain ID'))) {
-        // Chain not added to wallet, try to add it
         try {
           await requestWaapWallet(WAAP_METHOD.wallet_addEthereumChain, [
             {
@@ -814,9 +815,7 @@ const walletStore = create<WalletState>((set, get) => ({
           handleWaapError(addErr, 'Failed to add and switch to chain', set)
         }
       } else if (err?.code === 4001) {
-        // User rejected the request
         console.log('User rejected chain switch request')
-        // Don't throw error for user rejection, just log it
       } else {
         handleWaapError(err, 'Failed to switch chain', set)
       }
@@ -848,12 +847,11 @@ const walletStore = create<WalletState>((set, get) => ({
       set({ waapAddress: address as `0x${string}`, isWaapConnected: !!address })
       return address
     } catch (err: any) {
-      console.error('❌ getWaapAccount: Error getting account:', err)
+      console.error('getWaapAccount: Error getting account:', err)
 
-      // Handle specific error cases gracefully
       if (err?.code === -32001) {
         console.log(
-          '⚠️ getWaapAccount: Wallet is already processing a connection request'
+          'getWaapAccount: Wallet is already processing a connection request'
         )
         set({ waapAddress: null, isWaapConnected: false, waapError: null })
         return null
@@ -864,7 +862,6 @@ const walletStore = create<WalletState>((set, get) => ({
         return null
       }
 
-      // For other errors, still set disconnected state but don't throw
       set({ waapAddress: null, isWaapConnected: false, waapError: null })
       return null
     }
@@ -898,7 +895,6 @@ const walletStore = create<WalletState>((set, get) => ({
         const loginMethod =
           (await window.waap.getLoginMethod()) as WaapLoginMethod
 
-        // Update state with login method
         set((state) => ({
           ...state,
           waapLoginMethod: loginMethod,
@@ -916,18 +912,15 @@ const walletStore = create<WalletState>((set, get) => ({
     try {
       if (typeof window === 'undefined') return null
 
-      // Get the current connected address to identify which wallet is active
       const { waapAddress } = get()
       if (!waapAddress) return null
 
-      // Try EIP-6963 discovery first (most reliable)
       const eip6963Provider = getEIP6963Provider(waapAddress)
       if (eip6963Provider) {
         set({ waapWalletProvider: eip6963Provider })
         return eip6963Provider
       }
 
-      // Fallback to window.ethereum detection
       if (window.ethereum) {
         const walletName = detectWalletByProvider(window.ethereum)
         set({ waapWalletProvider: walletName })
@@ -944,11 +937,10 @@ const walletStore = create<WalletState>((set, get) => ({
     try {
       if (typeof window === 'undefined') return null
 
-      // Get the current connected address to identify which wallet is active
       const { waapAddress, waapLoginMethod, waapWalletProvider } = get()
       if (!waapAddress) return null
-      
-      const walletIcon =   getWalletIconByMethod(waapLoginMethod, waapWalletProvider, waapAddress)
+
+      const walletIcon = getWalletIconByMethod(waapLoginMethod, waapWalletProvider, waapAddress)
 
       set({ waapWalletIcon: walletIcon })
       return walletIcon
@@ -968,7 +960,6 @@ const walletStore = create<WalletState>((set, get) => ({
 
       const availableWallets: string[] = []
 
-      // First, try EIP-6963 discovery (most reliable)
       if (discoveredProviders.length > 0) {
         for (const { info } of discoveredProviders) {
           if (!availableWallets.includes(info.name)) {
@@ -978,7 +969,6 @@ const walletStore = create<WalletState>((set, get) => ({
         return availableWallets
       }
 
-      // Fallback to window.ethereum detection
       if (window.ethereum) {
         const walletName = detectWalletByProvider(window.ethereum)
         availableWallets.push(walletName)
@@ -995,18 +985,13 @@ const walletStore = create<WalletState>((set, get) => ({
   refreshWaapWalletInfo: async () => {
     try {
       const { getWaapLoginMethod, getWaapWalletProvider, getWaapWalletIcon } = get()
-      
-      // Get login method
+
       await getWaapLoginMethod()
-      
-      // Get wallet provider (this will update state)
       getWaapWalletProvider()
-      
-      // Get wallet icon (this will update state)
       getWaapWalletIcon()
-      
+
     } catch (err) {
-      console.error('❌ Error refreshing wallet info:', err)
+      console.error('Error refreshing wallet info:', err)
     }
   },
 
@@ -1031,7 +1016,7 @@ export const useWalletStore = () =>
       // UI STATE
       // ============================================================================
       showWalletModal: state.showWalletModal,
-      showAzguardPrompt: state.showAzguardPrompt,
+      showWalletInstallPrompt: state.showWalletInstallPrompt,
 
       // ============================================================================
       // AZTEC WALLET STATE
@@ -1043,9 +1028,14 @@ export const useWalletStore = () =>
       isAztecConnected: state.isAztecConnected,
       isAztecConnecting: state.isAztecConnecting,
       aztecError: state.aztecError,
-      
-      // Client instances
-      azguardClient: state.azguardClient,
+
+      // Wallet SDK instances
+      sdkWallet: state.sdkWallet,
+
+      // Wallet connection flow state
+      walletConnectionPhase: state.walletConnectionPhase,
+      verificationEmojis: state.verificationEmojis,
+      discoveredWallets: state.discoveredWallets,
 
       // ============================================================================
       // WAAP WALLET STATE
@@ -1055,7 +1045,7 @@ export const useWalletStore = () =>
       waapChainId: state.waapChainId,
       isWaapConnected: state.isWaapConnected,
       waapError: state.waapError,
-      
+
       // Wallet identification
       waapLoginMethod: state.waapLoginMethod,
       waapWalletProvider: state.waapWalletProvider,
@@ -1065,7 +1055,7 @@ export const useWalletStore = () =>
       // UI ACTIONS
       // ============================================================================
       setShowWalletModal: state.setShowWalletModal,
-      setShowAzguardPrompt: state.setShowAzguardPrompt,
+      setShowWalletInstallPrompt: state.setShowWalletInstallPrompt,
 
       // ============================================================================
       // AZTEC WALLET ACTIONS
@@ -1073,36 +1063,41 @@ export const useWalletStore = () =>
       // State management
       setAztecLoginMethod: state.setAztecLoginMethod,
       setAztecState: state.setAztecState,
-      
+
       // Connection management
       connectAztecWallet: state.connectAztecWallet,
       disconnectAztecWallet: state.disconnectAztecWallet,
       initializeAztecWallet: state.initializeAztecWallet,
+
+      // Wallet SDK flow actions
+      selectWallet: state.selectWallet,
+      confirmWalletConnection: state.confirmWalletConnection,
+      cancelWalletConnection: state.cancelWalletConnection,
 
       // ============================================================================
       // WAAP WALLET ACTIONS
       // ============================================================================
       // Initialization
       initializeWaapWallet: state.initializeWaapWallet,
-      
+
       // Connection management
       connectWaapWallet: state.connectWaapWallet,
       disconnectWaapWallet: state.disconnectWaapWallet,
-      
+
       // Network management
       switchWaapChain: state.switchWaapChain,
       getWaapChainId: state.getWaapChainId,
-      
+
       // Account management
       getWaapAccount: state.getWaapAccount,
       signWaapMessage: state.signWaapMessage,
-      
+
       // Wallet identification
       getWaapLoginMethod: state.getWaapLoginMethod,
       getWaapWalletProvider: state.getWaapWalletProvider,
       getWaapWalletIcon: state.getWaapWalletIcon,
       getAllAvailableWallets: state.getAllAvailableWallets,
-      
+
       // Utility functions
       refreshWaapWalletInfo: state.refreshWaapWalletInfo,
 

@@ -27,11 +27,9 @@ export default function AuthSync() {
   const currentKey = bothConnected ? `${l1Normalized}:${l2Normalized}` : null
 
   const l2WalletProvider =
-    aztecLoginMethod === 'azguard'
-      ? 'Azguard'
-      : aztecLoginMethod === 'obsidion'
-        ? 'Obsidion'
-        : null
+    aztecLoginMethod === 'wallet-sdk'
+      ? 'WalletSDK'
+      : null
 
   useEffect(() => {
     if (!bothConnected) {

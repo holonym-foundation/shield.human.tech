@@ -275,7 +275,7 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       )
     }
 
-    // Extra buffer so the message is visible on the node Azguard uses
+    // Extra buffer so the message is visible on the wallet's node
     console.log('[Resume L1→L2] Final wait before claiming (2 min)...')
     await wait(120_000)
 

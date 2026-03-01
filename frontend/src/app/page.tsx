@@ -45,9 +45,9 @@ import BalanceCard from '@/components/BalanceCard'
 import { logInfo, logError } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 // import PopupBlockedAlert from '@/components/model/PopupBlockedAlert'
-import WalletSelectionModal from '@/components/model/WalletSelectionModal'
 import { AztecLoginMethod } from '@/types/wallet'
-import AzguardPrompt from '@/components/model/AzguardPrompt'
+import EmojiVerificationModal from '@/components/model/EmojiVerificationModal'
+import WalletDiscoveryModal from '@/components/model/WalletDiscoveryModal'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useRouter } from 'next/navigation'
@@ -165,20 +165,26 @@ export default function Home() {
     connectAztecWallet,
     disconnectWaapWallet,
     disconnectAztecWallet,
-    azguardClient,
     waapLoginMethod: loginMethod,
     waapWalletIcon: walletIcon,
     waapWalletProvider: walletProvider,
     getWaapWalletProvider: getWalletProvider,
+    // Wallet SDK connection flow
+    walletConnectionPhase,
+    verificationEmojis,
+    discoveredWallets,
+    selectWallet,
+    confirmWalletConnection,
+    cancelWalletConnection,
   } = useWalletStore()
 
 
   // Get UI state from walletStore
   const {
     showWalletModal,
-    showAzguardPrompt,
+    showWalletInstallPrompt,
     setShowWalletModal,
-    setShowAzguardPrompt,
+    setShowWalletInstallPrompt,
     aztecAddress,
     waapAddress,
   } = useWalletStore()
@@ -367,73 +373,31 @@ export default function Home() {
     }
   }
 
-  // Handle wallet selection
-  const handleWalletSelect = async (type: AztecLoginMethod) => {
+  // Handle wallet selection (starts wallet-sdk discovery flow)
+  const handleWalletSelect = async () => {
     try {
-      // Log wallet selection attempt
-      logInfo('User selected Aztec wallet type', {
-        walletType: WalletType.AZTEC,
-        loginMethod: type,
-        walletProvider: null,
-        address: '',
-        chainId: null,
-        userAction: 'wallet_selection',
-        // popupsBlocked: arePopupsBlocked,
-      })
-      
-      if (type === 'azguard' && !window.azguard) {
-        // Log Azguard not installed
-        logInfo('Azguard wallet not installed - showing prompt', {
-          walletType: WalletType.AZTEC,
-          loginMethod: type,
-          walletProvider: null,
-          address: '',
-          chainId: null,
-          azguardInstalled: false,
-          userAction: 'azguard_not_installed',
-        })
-        setShowAzguardPrompt(true)
-        setShowWalletModal(false)
-        return
-      }
-      
-      // Log wallet connection attempt
       logInfo('Attempting to connect Aztec wallet', {
         walletType: WalletType.AZTEC,
-        loginMethod: type,
+        loginMethod: 'wallet-sdk',
         walletProvider: null,
         address: '',
         chainId: null,
         userAction: 'wallet_connection_attempt',
-        // popupsBlocked: arePopupsBlocked,
       })
-      
-      await connectAztecWallet(type)
+
+      await connectAztecWallet()
       setShowWalletModal(false)
-      
-      // Log successful wallet connection
-      logInfo('Aztec wallet connection successful from UI', {
-        walletType: WalletType.AZTEC,
-        loginMethod: type,
-        walletProvider: null,
-        address: '',
-        chainId: null,
-        userAction: 'wallet_connection_success',
-        // popupsBlocked: arePopupsBlocked,
-      })
     } catch (error) {
-      // Log wallet connection failure
       logError('Aztec wallet connection failed from UI', {
         walletType: WalletType.AZTEC,
-        loginMethod: type,
+        loginMethod: 'wallet-sdk',
         walletProvider: null,
         address: '',
         chainId: null,
         userAction: 'wallet_connection_failure',
-        // popupsBlocked: arePopupsBlocked,
         error: error instanceof Error ? error.message : 'Unknown error',
       })
-      
+
       notify(
         'error',
         `Failed to connect wallet: ${
@@ -539,8 +503,40 @@ export default function Home() {
             message={MAINTENANCE_MESSAGE}
           />
         )}
-        {showAzguardPrompt && (
-          <AzguardPrompt onClose={() => setShowAzguardPrompt(false)} />
+        {showWalletInstallPrompt && (
+          <WalletDiscoveryModal
+            isOpen={true}
+            wallets={[]}
+            isDiscovering={false}
+            onSelectWallet={() => {}}
+            onClose={() => setShowWalletInstallPrompt(false)}
+          />
+        )}
+        {walletConnectionPhase === 'selecting' && (
+          <WalletDiscoveryModal
+            isOpen={true}
+            wallets={discoveredWallets}
+            isDiscovering={false}
+            onSelectWallet={selectWallet}
+            onClose={cancelWalletConnection}
+          />
+        )}
+        {walletConnectionPhase === 'discovering' && (
+          <WalletDiscoveryModal
+            isOpen={true}
+            wallets={discoveredWallets}
+            isDiscovering={true}
+            onSelectWallet={selectWallet}
+            onClose={cancelWalletConnection}
+          />
+        )}
+        {walletConnectionPhase === 'verifying' && verificationEmojis && (
+          <EmojiVerificationModal
+            isOpen={true}
+            emojis={verificationEmojis}
+            onConfirm={confirmWalletConnection}
+            onCancel={cancelWalletConnection}
+          />
         )}
         {/* Popup blocked alert disabled (used for Obsidion)
         {showPopupBlockedAlert && (
@@ -594,12 +590,7 @@ export default function Home() {
             }
           />
         )}
-        {/* Wallet selection modal commented out - directly connecting to Azguard */}
-        {/* <WalletSelectionModal
-          isOpen={showWalletModal}
-          onClose={() => setShowWalletModal(false)}
-          onSelect={handleWalletSelect}
-        /> */}
+        {/* Wallet selection is now handled by WalletDiscoveryModal above */}
 
         <div
           className={`grid grid-rows-[max-content_1fr_max-content] h-full ${
@@ -677,7 +668,7 @@ export default function Home() {
                 isAztecConnected={isAztecConnected}
                 // connectAztec={() => setShowWalletModal(true)}
 
-                connectAztec={() => connectAztecWallet('azguard')}
+                connectAztec={() => connectAztecWallet()}
                 inputRef={inputRef}
                 // Balance and amount states
                 inputAmount={bridgeConfig.amount}

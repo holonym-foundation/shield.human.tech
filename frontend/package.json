@@ -20,7 +20,7 @@
     "db:reset": "prisma migrate reset --force --skip-seed && prisma db push"
   },
   "dependencies": {
-    "@azguardwallet/client": "^0.7.0",
+    "@aztec/wallet-sdk": "4.0.0-devnet.2-patch.0",
     "@aztec/accounts": "4.0.0-devnet.2-patch.0",
     "@aztec/aztec.js": "4.0.0-devnet.2-patch.0",
     "@aztec/ethereum": "4.0.0-devnet.2-patch.0",

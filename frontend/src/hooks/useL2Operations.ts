@@ -452,7 +452,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         if (isArtifactError) {
           notify('error', {
             heading: 'Contract Artifact Not Found',
-            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for Azguard wallet.`,
+            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.`,
           })
         } else {
           notify('error', `Failed to withdraw tokens on L1. ${errorMessage}`)

@@ -258,9 +258,8 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     if (isWaapConnected && !isAztecConnected && walletButtonPressed) {
       // Add a slight delay to avoid UI issues
       const timer = setTimeout(() => {
-        // setShowWalletModal(true)
-        // Directly connect to Azguard instead of showing modal
-        connectAztecWallet('azguard')
+        // Start wallet-sdk discovery flow
+        connectAztecWallet()
         // Reset the button press tracker after connecting
         setWalletButtonPressed(false)
       }, 2000)

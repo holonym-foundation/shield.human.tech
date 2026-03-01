@@ -545,7 +545,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     aztecAccount,
     aztecAddress,
     aztecLoginMethod,
-    azguardClient,
     signWaapMessage,
   } = useWalletStore()
 
@@ -732,7 +731,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         throw new Error(errorMessage)
       }
 
-      // Extra buffer so the message is visible on the node Azguard uses
+      // Extra buffer so the message is visible on the wallet's node
       console.log('[L1→L2] Final wait before claiming (2 min)...')
       await wait(120_000)
 
@@ -984,7 +983,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           console.error('[L1→L2] Bridge failed (artifact not found):', error)
           notify('error', {
             heading: 'Contract Artifact Not Found',
-            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for Azguard wallet.`,
+            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.`,
           })
         } else {
           notify('error', `Bridge transaction failed: ${errorMessage}`)

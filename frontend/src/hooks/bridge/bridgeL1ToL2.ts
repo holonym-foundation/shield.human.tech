@@ -161,7 +161,7 @@ export async function pollL1ToL2MessageSync(
  * Execute claim_public or claim_private on L2.
  *
  * - If messageLeafIndex is provided: retry up to maxAttempts times on
- *   "nonexistent L1-to-L2 message" (Azguard node lag).
+ *   "nonexistent L1-to-L2 message" (wallet node lag).
  * - If messageLeafIndex is null: brute-force indices 0..bruteForceMaxIndex.
  */
 export async function executeL2Claim(
@@ -217,7 +217,7 @@ export async function executeL2Claim(
         if (isNonexistentMsg && attempt < maxAttempts) {
           options?.onRetry?.(attempt, maxAttempts, retryDelayMs)
           console.warn(
-            `[L1→L2] Claim attempt ${attempt} failed (message not synced to Azguard node), retrying in ${retryDelayMs / 1000}s...`,
+            `[L1→L2] Claim attempt ${attempt} failed (message not synced to wallet node), retrying in ${retryDelayMs / 1000}s...`,
           )
           await wait(retryDelayMs)
           continue
