@@ -480,7 +480,9 @@ const walletStore = create<WalletState>((set, get) => ({
             ? (aztecAddr as { toString: () => string }).toString()
             : String(aztecAddr)
         // Extract alias from Aliased<T> wrapper or use empty string
-        const alias = (typeof obj?.alias === 'string' ? obj.alias : '') || ''
+        const rawAlias = (typeof obj?.alias === 'string' ? obj.alias.trim() : '')
+        // Treat generic placeholder names as empty so the UI falls back to truncated address
+        const alias = rawAlias && rawAlias.toLowerCase() !== 'account' ? rawAlias : ''
         return { alias, address }
       })
 
