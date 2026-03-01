@@ -46,6 +46,7 @@ import { logInfo, logError } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { AztecLoginMethod } from '@/types/wallet'
 import EmojiVerificationModal from '@/components/model/EmojiVerificationModal'
+import AccountSelectorModal from '@/components/model/AccountSelectorModal'
 import WalletDiscoveryModal from '@/components/model/WalletDiscoveryModal'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
@@ -118,6 +119,9 @@ export default function Home() {
     selectWallet,
     confirmWalletConnection,
     cancelWalletConnection,
+    // Account selection
+    availableAccounts,
+    selectAccount,
   } = useWalletStore()
 
 
@@ -430,6 +434,29 @@ export default function Home() {
             isConfirming={isAztecConnecting}
             onConfirm={confirmWalletConnection}
             onCancel={cancelWalletConnection}
+          />
+        )}
+        {walletConnectionPhase === 'requesting' && (
+          <div className='absolute inset-0 bg-latest-grey-1000 z-20 rounded-lg flex flex-col items-center justify-center gap-4'>
+            <Oval
+              height={40}
+              width={40}
+              color='#3b82f6'
+              secondaryColor='#93c5fd'
+              strokeWidth={4}
+            />
+            <p className='text-latest-grey-600 text-14 font-medium'>
+              Requesting permissions...
+            </p>
+          </div>
+        )}
+        {walletConnectionPhase === 'account-select' && (
+          <AccountSelectorModal
+            isOpen={true}
+            accounts={availableAccounts}
+            onSelect={selectAccount}
+            onCancel={cancelWalletConnection}
+            title='Select Account'
           />
         )}
         {selectNetwork && (

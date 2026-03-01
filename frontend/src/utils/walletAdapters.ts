@@ -289,17 +289,21 @@ export async function createWalletAdapter(context: WalletContext) {
     throw new Error('Wallet SDK wallet instance not available')
   }
 
-  const accounts = await context.sdkWallet.getAccounts()
-  if (!accounts || accounts.length === 0) {
-    throw new Error('No accounts available in wallet')
+  // Use the already-selected account address from the store
+  let account: AztecAddress
+  if (context.aztecAccount?.address) {
+    const addr = context.aztecAccount.address.toString()
+    account = AztecAddress.fromString(addr)
+  } else {
+    // Fallback: fetch from wallet (shouldn't happen in normal flow)
+    const accounts = await context.sdkWallet.getAccounts()
+    if (!accounts || accounts.length === 0) {
+      throw new Error('No accounts available in wallet')
+    }
+    account = 'item' in accounts[0] ? (accounts[0] as any).item : accounts[0]
   }
 
-  // getAccounts() returns Aliased<AztecAddress>[] — unwrap with .item
-  const account = 'item' in accounts[0] ? (accounts[0] as any).item : accounts[0]
-  const adapter = new WalletAdapter(
-    context.sdkWallet,
-    account
-  )
+  const adapter = new WalletAdapter(context.sdkWallet, account)
 
   // Register token + bridge contracts with the wallet's PXE
   await adapter.initializeContracts()

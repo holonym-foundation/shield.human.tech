@@ -11,30 +11,35 @@ import React, { useEffect, useRef, useState } from 'react'
 import { silkUrl } from '@/config/l1.config'
 import { L1_CHAIN_ID } from '@/config'
 import DeploymentSelector from '@/components/DeploymentSelector'
+import AccountSelectorModal from '@/components/model/AccountSelectorModal'
 
 /** Delay before auto-starting Aztec wallet discovery after WaaP connects. */
 const AZTEC_AUTO_CONNECT_DELAY_MS = 2000
 
 type WalletDisplayProps = {
   address?: string
+  displayName?: string | null
   isConnected: boolean
   walletIcon: string
   networkIcon?: string
   balance?: string
   onClick?: () => void
   onDisconnect?: () => void
+  onSwitchAccount?: () => void
   walletType: WalletType
   loginMethod?: string | null
 }
 
 const WalletDisplay: React.FC<WalletDisplayProps> = ({
   address,
+  displayName,
   isConnected,
   walletIcon,
   networkIcon,
   balance,
   onClick,
   onDisconnect,
+  onSwitchAccount,
   walletType,
   loginMethod,
 }) => {
@@ -106,12 +111,12 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
           <Image src={networkIcon} alt='Network' width={20} height={20} />
         )}
         <div className='flex items-center gap-2'>
-          <span className='text-sm font-medium'>
-            {address
+          <span className='text-sm font-medium' title={address || ''}>
+            {displayName || (address
               ? `${address.substring(0, 6)}...${address.substring(
                   address.length - 4
                 )}`
-              : ''}
+              : '')}
           </span>
           {balance && walletType === WalletType.WAAP && (
             <span className='text-xs text-gray-500'>
@@ -142,6 +147,18 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
               onClick={handleOpenWallet}>
               <Icon icon='majesticons:open' width={20} height={20} />
               <span>Open Human Wallet</span>
+            </div>
+          )}
+
+          {onSwitchAccount && (
+            <div
+              className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer transition-colors duration-150 hover:bg-latest-grey-300'
+              onClick={() => {
+                onSwitchAccount()
+                setShowDropdown(false)
+              }}>
+              <Icon icon='ph:swap' width={20} height={20} />
+              <span>Switch Account</span>
             </div>
           )}
 
@@ -226,7 +243,13 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     waapWalletProvider: walletProvider,
     waapWalletIcon: walletIcon,
     setShowWalletModal,
+    aztecAlias,
+    availableAccounts,
+    switchAztecAccount,
   } = useWalletStore()
+
+  // Account selector modal state
+  const [showAccountSelector, setShowAccountSelector] = useState(false)
 
 
 
@@ -355,9 +378,11 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
 
               <WalletDisplay
                 address={aztecAddress || undefined}
+                displayName={aztecAlias || undefined}
                 isConnected={isAztecConnected}
                 walletIcon='/assets/svg/aztec-wallet-logo.svg'
                 onDisconnect={disconnectAztecWallet}
+                onSwitchAccount={availableAccounts.length > 1 ? () => setShowAccountSelector(true) : undefined}
                 walletType={WalletType.AZTEC}
               />
             </>
@@ -454,9 +479,11 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
 
                 <WalletDisplay
                   address={aztecAddress || undefined}
+                  displayName={aztecAlias || undefined}
                   isConnected={isAztecConnected}
                   walletIcon='/assets/svg/aztec-wallet-logo.svg'
                   onDisconnect={disconnectAztecWallet}
+                  onSwitchAccount={availableAccounts.length > 1 ? () => setShowAccountSelector(true) : undefined}
                   walletType={WalletType.AZTEC}
                 />
               </>
@@ -465,6 +492,20 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
         </div>
       )}
 
+      {/* Account Selector Modal */}
+      {showAccountSelector && (
+        <AccountSelectorModal
+          isOpen={true}
+          accounts={availableAccounts}
+          selectedAddress={aztecAddress}
+          onSelect={(account) => {
+            switchAztecAccount(account)
+            setShowAccountSelector(false)
+          }}
+          onCancel={() => setShowAccountSelector(false)}
+          title='Switch Account'
+        />
+      )}
     </header>
   )
 }

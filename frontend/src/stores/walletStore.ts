@@ -66,6 +66,8 @@ export type WalletConnectionPhase =
   | 'discovering'
   | 'selecting'
   | 'verifying'
+  | 'requesting'       // requestCapabilities in progress
+  | 'account-select'   // user picks which account
   | 'connected'
 
 // ============================================================================
@@ -106,6 +108,10 @@ interface WalletState {
   pendingConnection: PendingConnection | null
   discoveredWallets: Array<{ name: string; provider: WalletProvider }>
 
+  // Account selection state
+  aztecAlias: string | null
+  availableAccounts: Array<{ alias: string; address: string }>
+
   // ============================================================================
   // AZTEC WALLET ACTIONS
   // ============================================================================
@@ -128,6 +134,10 @@ interface WalletState {
   selectWallet: (provider: WalletProvider) => Promise<void>
   confirmWalletConnection: () => Promise<any>
   cancelWalletConnection: () => void
+
+  // Account selection actions
+  selectAccount: (account: { alias: string; address: string }) => Promise<void>
+  switchAztecAccount: (account: { alias: string; address: string }) => void
 
   // ============================================================================
   // WAAP WALLET STATE
@@ -235,6 +245,10 @@ const initialState = {
   verificationEmojis: null,
   pendingConnection: null,
   discoveredWallets: [],
+
+  // Account selection state
+  aztecAlias: null,
+  availableAccounts: [],
 
   // WaaP Wallet State
   waapAddress: null,
@@ -424,39 +438,51 @@ const walletStore = create<WalletState>((set, get) => ({
       // the SDK's internal channel state. User can cancel manually if needed.
       const wallet = await pendingConnection.confirm()
 
+      // Transition to 'requesting' phase while we request capabilities
+      set({
+        walletConnectionPhase: 'requesting',
+        pendingConnection: null,
+        verificationEmojis: null,
+      })
 
       // Request scoped capabilities (preferred flow for external wallets).
       // This shows a single comprehensive dialog where the user selects
       // accounts AND grants permissions for simulations/transactions.
       // Fall back to getAccounts if requestCapabilities is not supported.
-      let accounts: Array<{ item?: unknown; address?: unknown } | unknown> = []
+      let rawAccounts: Array<{ item?: unknown; address?: unknown; alias?: string } | unknown> = []
       try {
         const capabilities = await wallet.requestCapabilities(buildCapabilityManifest())
         const accountsCap = capabilities.granted.find(
           (c: { type: string }) => c.type === 'accounts'
-        ) as { type: 'accounts'; accounts: Array<{ item?: unknown; address?: unknown }> } | undefined
-        accounts = accountsCap?.accounts ?? []
+        ) as { type: 'accounts'; accounts: Array<{ item?: unknown; address?: unknown; alias?: string }> } | undefined
+        rawAccounts = accountsCap?.accounts ?? []
       } catch (capErr) {
         console.warn('[walletStore] requestCapabilities failed, falling back to getAccounts:', capErr)
       }
 
       // Fall back to getAccounts if requestCapabilities didn't yield accounts
-      if (accounts.length === 0) {
+      if (rawAccounts.length === 0) {
         const fallbackAccounts = await wallet.getAccounts()
-        accounts = fallbackAccounts ?? []
+        rawAccounts = fallbackAccounts ?? []
       }
 
-      if (!accounts || accounts.length === 0) {
+      if (!rawAccounts || rawAccounts.length === 0) {
         throw new Error('No accounts returned from wallet')
       }
-      const rawAccount = accounts[0] as { item?: unknown; address?: unknown } | unknown
-      const accountObj = rawAccount as Record<string, unknown> | undefined
-      const aztecAddr = accountObj?.item ?? accountObj?.address ?? rawAccount
-      const address = typeof aztecAddr === 'string'
-        ? aztecAddr
-        : typeof (aztecAddr as { toString?: () => string })?.toString === 'function'
-          ? (aztecAddr as { toString: () => string }).toString()
-          : String(aztecAddr)
+
+      // Parse all accounts into { alias, address } objects
+      const parsedAccounts = rawAccounts.map((raw) => {
+        const obj = raw as Record<string, unknown> | undefined
+        const aztecAddr = obj?.item ?? obj?.address ?? raw
+        const address = typeof aztecAddr === 'string'
+          ? aztecAddr
+          : typeof (aztecAddr as { toString?: () => string })?.toString === 'function'
+            ? (aztecAddr as { toString: () => string }).toString()
+            : String(aztecAddr)
+        // Extract alias from Aliased<T> wrapper or use empty string
+        const alias = (typeof obj?.alias === 'string' ? obj.alias : '') || ''
+        return { alias, address }
+      })
 
       // Set up disconnect handler with grace period to absorb spurious
       // disconnects caused by HMR / Fast Refresh / soft navigations.
@@ -471,42 +497,20 @@ const walletStore = create<WalletState>((set, get) => ({
         }, DISCONNECT_GRACE_MS)
       })
 
-      // Import aztecNode for L1 contract addresses
-      const { aztecNode } = await import('../aztec')
-
-      // Create an account-like object for compatibility with existing code
-      const connectedAccount = {
-        address: { toString: () => address },
-        sdkWallet: wallet,
-        aztecNode,
-      }
-
-      // Update all state
+      // Store wallet and available accounts
       set({
         sdkWallet: wallet,
-        walletConnectionPhase: 'connected',
-        pendingConnection: null,
-        verificationEmojis: null,
+        availableAccounts: parsedAccounts,
         isAztecConnecting: false,
       })
 
-      get().setAztecLoginMethod('wallet-sdk')
-      get().setAztecState({
-        address,
-        account: connectedAccount,
-        isConnected: true,
-      })
-      set({ showWalletModal: false })
-
-      logInfo('Aztec wallet connected successfully via wallet-sdk', {
-        walletType: WalletType.AZTEC,
-        loginMethod: 'wallet-sdk',
-        address,
-        chainId: null,
-        userAction: 'aztec_wallet_connection_success',
-      })
-
-      return connectedAccount
+      if (parsedAccounts.length === 1) {
+        // Single account — auto-select, no extra modal
+        await get().selectAccount(parsedAccounts[0])
+      } else {
+        // Multiple accounts — show account selector modal
+        set({ walletConnectionPhase: 'account-select' })
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       console.error('[walletStore] confirmWalletConnection failed:', errorMessage)
@@ -562,6 +566,83 @@ const walletStore = create<WalletState>((set, get) => ({
       verificationEmojis: null,
       discoveredWallets: [],
     })
+  },
+
+  // ─── Account selection ───────────────────────────────────────────────
+
+  selectAccount: async (account: { alias: string; address: string }) => {
+    const { sdkWallet } = get()
+    if (!sdkWallet) {
+      console.error('[walletStore] selectAccount: sdkWallet is null')
+      return
+    }
+
+    try {
+      // Import aztecNode for L1 contract addresses
+      const { aztecNode } = await import('../aztec')
+
+      // Create an account-like object for compatibility with existing code
+      const connectedAccount = {
+        address: { toString: () => account.address },
+        sdkWallet,
+        aztecNode,
+      }
+
+      // Update all state
+      set({
+        walletConnectionPhase: 'connected',
+        isAztecConnecting: false,
+        aztecAlias: account.alias,
+      })
+
+      get().setAztecLoginMethod('wallet-sdk')
+      get().setAztecState({
+        address: account.address,
+        account: connectedAccount,
+        isConnected: true,
+      })
+      set({ showWalletModal: false })
+
+      logInfo('Aztec wallet connected successfully via wallet-sdk', {
+        walletType: WalletType.AZTEC,
+        loginMethod: 'wallet-sdk',
+        address: account.address,
+        chainId: null,
+        userAction: 'aztec_wallet_connection_success',
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[walletStore] selectAccount failed:', errorMessage)
+      set({
+        walletConnectionPhase: 'idle',
+        isAztecConnecting: false,
+      })
+      showToast('error', `Failed to select account: ${errorMessage}`)
+    }
+  },
+
+  switchAztecAccount: (account: { alias: string; address: string }) => {
+    const { sdkWallet, aztecAccount } = get()
+    if (!sdkWallet) return
+
+    // Reuse the existing aztecNode from the current connectedAccount
+    const existingNode = aztecAccount?.aztecNode
+
+    const connectedAccount = {
+      address: { toString: () => account.address },
+      sdkWallet,
+      aztecNode: existingNode,
+    }
+
+    set({
+      aztecAddress: account.address,
+      aztecAlias: account.alias,
+      aztecAccount: connectedAccount,
+    })
+
+    // No need to re-verify or re-request capabilities — Wallet session persists.
+    // useWalletAdapter queryKey includes accountAddress, so changing aztecAccount
+    // auto-invalidates the adapter cache and triggers a rebuild.
   },
 
   // ─── Connection management (public API) ────────────────────────────
@@ -647,6 +728,8 @@ const walletStore = create<WalletState>((set, get) => ({
         pendingConnection: null,
         verificationEmojis: null,
         discoveredWallets: [],
+        aztecAlias: null,
+        availableAccounts: [],
       })
 
       localStorage.removeItem(AZTEC_WALLET_KEY)
@@ -1177,6 +1260,12 @@ export const useWalletStore = () =>
       selectWallet: state.selectWallet,
       confirmWalletConnection: state.confirmWalletConnection,
       cancelWalletConnection: state.cancelWalletConnection,
+
+      // Account selection
+      aztecAlias: state.aztecAlias,
+      availableAccounts: state.availableAccounts,
+      selectAccount: state.selectAccount,
+      switchAztecAccount: state.switchAztecAccount,
 
       // ============================================================================
       // WAAP WALLET ACTIONS

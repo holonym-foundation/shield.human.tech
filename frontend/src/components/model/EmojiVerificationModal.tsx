@@ -60,8 +60,9 @@ export default function EmojiVerificationModal({
             </div>
             <div className='mt-4 mx-2.5'>
               <p className='text-latest-grey-600 text-14 mb-4'>
-                Verify these emojis match what{' '}
-                <strong>{walletName || 'your wallet'}</strong> is showing
+                This is a security check. Verify these emojis match what{' '}
+                <strong>{walletName || 'your wallet'}</strong> is showing to
+                confirm a secure connection.
               </p>
 
               <motion.div
@@ -91,7 +92,7 @@ export default function EmojiVerificationModal({
                   Cancel
                 </button>
                 <TextButton onClick={onConfirm} disabled={isConfirming} isLoading={isConfirming}>
-                  <span>{isConfirming ? 'Connecting...' : 'Confirm Match'}</span>
+                  <span>{isConfirming ? 'Verifying...' : 'Verify Connection'}</span>
                 </TextButton>
               </motion.div>
 
