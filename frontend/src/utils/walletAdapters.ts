@@ -11,6 +11,7 @@ import { Fr } from '@aztec/aztec.js/fields'
 import { Contract } from '@aztec/aztec.js/contracts'
 import type { Wallet } from '@aztec/aztec.js/wallet'
 import { L1_TOKENS } from '@/config'
+import { aztecNode } from '@/aztec'
 
 // ============================================================================
 // TYPES
@@ -71,8 +72,36 @@ class WalletAdapter {
     this.bridgeAddress = bridgeAddress ?? L1_TOKENS[0]?.l2BridgeContract ?? ''
   }
 
+  /**
+   * Register the token and bridge contracts with the wallet's PXE.
+   * The PXE needs to know about contracts before it can simulate or send calls.
+   */
   async initializeContracts(): Promise<void> {
-    // No-op: artifacts are fetched on demand via Contract.at()
+    const addresses = [
+      { addr: this.tokenAddress, type: 'token' as const },
+      { addr: this.bridgeAddress, type: 'bridge' as const },
+    ].filter(({ addr }) => !!addr)
+
+    await Promise.all(
+      addresses.map(async ({ addr, type }) => {
+        try {
+          const address = AztecAddress.fromString(addr)
+          const [instance, artifact] = await Promise.all([
+            aztecNode.getContract(address),
+            getContractArtifact(type),
+          ])
+          if (instance) {
+            await this.wallet.registerContract(instance, artifact)
+            console.log(`[WalletAdapter] Registered ${type} contract ${addr.slice(0, 14)}...`)
+          } else {
+            console.warn(`[WalletAdapter] Contract instance not found on node for ${type}: ${addr.slice(0, 14)}...`)
+          }
+        } catch (error) {
+          // Contract may already be registered, or node may be unreachable
+          console.warn(`[WalletAdapter] Failed to register ${type} contract:`, error)
+        }
+      })
+    )
   }
 
   async simulateView(
@@ -233,11 +262,21 @@ class WalletAdapter {
   }
 
   async registerToken(tokenAddress: AztecAddress | string): Promise<void> {
-    // With wallet-sdk, contracts are resolved on-demand via Contract.at().
-    // The wallet extension manages its own token registry.
-    // wallet.registerContract() requires a ContractInstanceWithAddress which
-    // is not available from just an address — the extension wallet handles this.
-    console.log('[WalletAdapter] registerToken called for', tokenAddress.toString())
+    const addr = typeof tokenAddress === 'string' ? AztecAddress.fromString(tokenAddress) : tokenAddress
+    const type = resolveArtifactType(addr.toString(), this.bridgeAddress)
+    try {
+      const [instance, artifact] = await Promise.all([
+        aztecNode.getContract(addr),
+        getContractArtifact(type),
+      ])
+      if (instance) {
+        await this.wallet.registerContract(instance, artifact)
+        console.log('[WalletAdapter] Registered token', addr.toString().slice(0, 14) + '...')
+      }
+    } catch (error) {
+      // Contract may already be registered
+      console.warn('[WalletAdapter] Token registration warning:', error)
+    }
   }
 }
 
@@ -261,5 +300,9 @@ export async function createWalletAdapter(context: WalletContext) {
     context.sdkWallet,
     account
   )
+
+  // Register token + bridge contracts with the wallet's PXE
+  await adapter.initializeContracts()
+
   return adapter
 }
