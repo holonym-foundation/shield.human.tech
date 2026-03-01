@@ -498,7 +498,11 @@ const walletStore = create<WalletState>((set, get) => ({
           pendingConnection: null,
           verificationEmojis: null,
         })
-        showToast('error', `Failed to confirm connection: ${errorMessage}`)
+        // Provide a more helpful message for known wallet extension errors
+        const userMessage = errorMessage.includes('missing account data')
+          ? 'Wallet did not provide account data. This wallet may not be compatible — try a different one.'
+          : `Failed to confirm connection: ${errorMessage}`
+        showToast('error', userMessage)
       }
     } finally {
       isConfirmInProgress = false

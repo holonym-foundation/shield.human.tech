@@ -513,20 +513,11 @@ export default function Home() {
             onClose={() => setShowWalletInstallPrompt(false)}
           />
         )}
-        {walletConnectionPhase === 'selecting' && (
+        {(walletConnectionPhase === 'discovering' || walletConnectionPhase === 'selecting') && (
           <WalletDiscoveryModal
             isOpen={true}
             wallets={discoveredWallets}
-            isDiscovering={false}
-            onSelectWallet={selectWallet}
-            onClose={cancelWalletConnection}
-          />
-        )}
-        {walletConnectionPhase === 'discovering' && (
-          <WalletDiscoveryModal
-            isOpen={true}
-            wallets={discoveredWallets}
-            isDiscovering={true}
+            isDiscovering={walletConnectionPhase === 'discovering'}
             onSelectWallet={selectWallet}
             onClose={cancelWalletConnection}
           />
