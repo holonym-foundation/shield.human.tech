@@ -7,6 +7,17 @@ export type L2ErrorType =
   | 'TRANSACTION'
   | 'GENERAL'
 
+function getDefaultValue<T>(type: L2ErrorType): T {
+  switch (type) {
+    case 'BALANCE':
+      return { publicBalance: '0', privateBalance: '0' } as T
+    case 'NODE':
+      return 0 as T
+    default:
+      return null as T
+  }
+}
+
 export const useL2ErrorHandler = () => {
   const notify = useToast()
 
@@ -27,6 +38,15 @@ export const useL2ErrorHandler = () => {
 
     let fullMessage = ''
 
+    // Check for wallet disconnect errors
+    const isWalletDisconnected =
+      /wallet.*disconnect|disconnect.*wallet|backend.*disconnect/i.test(errorMessage)
+    if (isWalletDisconnected) {
+      fullMessage = `${operationMessages[type]} - Wallet connection lost. Please reconnect your Aztec wallet.`
+      notify('error', fullMessage)
+      return getDefaultValue<T>(type)
+    }
+
     // Check for Aztec network / node errors (any node URL or Failed to fetch)
     const isNodeUnavailable =
       errorMessage.includes('500 from server') ||
@@ -40,23 +60,8 @@ export const useL2ErrorHandler = () => {
       fullMessage = `${operationMessages[type]} - ${errorMessage}`
     }
 
-    // Combine operation message with error case message and actual error
-    // const fullMessage = `${operationMessages[type]} - ${errorMessage}`
     notify('error', fullMessage)
-
-    // Return a default value based on the operation type
-    switch (type) {
-      case 'BALANCE':
-        return { publicBalance: '0', privateBalance: '0' } as T
-      case 'NODE':
-        return 0 as T
-      case 'CONTRACT':
-        return null as T
-      case 'TRANSACTION':
-        return null as T
-      default:
-        return null as T
-    }
+    return getDefaultValue<T>(type)
   }
 
   return handleError
