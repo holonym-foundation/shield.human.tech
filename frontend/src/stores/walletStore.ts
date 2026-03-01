@@ -47,6 +47,15 @@ declare global {
 
 const AZTEC_WALLET_KEY = 'aztecLoginMethod'
 
+/** How long to wait for wallet-sdk providers to respond during discovery. */
+const DISCOVERY_TIMEOUT_MS = 5000
+/** Grace period after first wallet discovered before resolving (allows additional wallets). */
+const DISCOVERY_GRACE_MS = 1000
+/** Hard fallback if no wallets respond within this window. */
+const DISCOVERY_FALLBACK_MS = 6000
+/** Grace period before treating a disconnect event as real (absorbs HMR false positives). */
+const DISCONNECT_GRACE_MS = 1000
+
 // ============================================================================
 // WALLET CONNECTION PHASE
 // ============================================================================
@@ -318,25 +327,24 @@ const walletStore = create<WalletState>((set, get) => ({
       let graceTimer: ReturnType<typeof setTimeout> | null = null
 
       activeDiscoverySession = discoverWallets({
-        timeout: 5000,
+        timeout: DISCOVERY_TIMEOUT_MS,
         onWalletDiscovered: (provider) => {
           const entry = { name: provider.name ?? 'Aztec Wallet', provider }
           collectedWallets.push(entry)
           set({ discoveredWallets: [...collectedWallets] })
 
-          // Give a 1s grace period for more wallets, then resolve
           if (graceTimer) clearTimeout(graceTimer)
           graceTimer = setTimeout(() => {
             resolve(collectedWallets.map((w) => w.provider))
-          }, 1000)
+          }, DISCOVERY_GRACE_MS)
         },
       })
 
-      // Fallback: if no wallets respond within 6s, resolve empty
+      // Fallback: if no wallets respond within the timeout, resolve empty
       setTimeout(() => {
         if (graceTimer) clearTimeout(graceTimer)
         resolve(collectedWallets.map((w) => w.provider))
-      }, 6000)
+      }, DISCOVERY_FALLBACK_MS)
     })
 
     isDiscoveryInProgress = false
@@ -479,12 +487,12 @@ const walletStore = create<WalletState>((set, get) => ({
       sdkProvider.onDisconnect(() => {
         setTimeout(() => {
           const { sdkProvider: currentProvider } = get()
-          if (currentProvider?.isDisconnected()) {
+          if (currentProvider?.isDisconnected?.()) {
             console.warn('[walletStore] Wallet disconnected by extension')
             showToast('warn', 'Aztec wallet disconnected. Please reconnect to continue.')
             get().disconnectAztecWallet()
           }
-        }, 1000)
+        }, DISCONNECT_GRACE_MS)
       })
 
       // Import aztecNode for L1 contract addresses

@@ -12,6 +12,9 @@ import { silkUrl } from '@/config/l1.config'
 import { L1_CHAIN_ID } from '@/config'
 import DeploymentSelector from '@/components/DeploymentSelector'
 
+/** Delay before auto-starting Aztec wallet discovery after WaaP connects. */
+const AZTEC_AUTO_CONNECT_DELAY_MS = 2000
+
 type WalletDisplayProps = {
   address?: string
   isConnected: boolean
@@ -252,13 +255,10 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
   // Auto-connect to Aztec when WaaP wallet is connected
   useEffect(() => {
     if (isWaapConnected && !isAztecConnected && walletButtonPressed && walletConnectionPhase === 'idle') {
-      // Add a slight delay to avoid UI issues
       const timer = setTimeout(() => {
-        // Start wallet-sdk discovery flow
         connectAztecWallet()
-        // Reset the button press tracker after connecting
         setWalletButtonPressed(false)
-      }, 2000)
+      }, AZTEC_AUTO_CONNECT_DELAY_MS)
 
       return () => clearTimeout(timer)
     }
