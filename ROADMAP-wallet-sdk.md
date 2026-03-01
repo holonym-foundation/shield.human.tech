@@ -193,7 +193,7 @@ wallet.getAccounts(): Promise<Aliased<AztecAddress>[]>
 
 ---
 
-## 3. Least-Privilege Capability Manifest
+## 3. Least-Privilege Capability Manifest -- DONE (fc2ce83)
 
 ### Problem
 
@@ -233,63 +233,11 @@ This is equivalent to "let this app do anything with any contract" — far more 
 
 **Contract registration**: We register both token and bridge contracts with the wallet PXE.
 
-### Proposed Capability Manifest
+### Implemented
 
-```typescript
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { L1_TOKENS } from '@/config'
+See `frontend/src/utils/walletCapabilities.ts` (commit fc2ce83).
 
-function buildCapabilityManifest() {
-  // Collect all L2 contract addresses we interact with
-  const tokenAddresses = L1_TOKENS.map(t => AztecAddress.fromString(t.l2TokenContract))
-  const bridgeAddresses = L1_TOKENS.map(t => AztecAddress.fromString(t.l2BridgeContract))
-  const allContracts = [...tokenAddresses, ...bridgeAddresses]
-
-  return {
-    version: '1.0' as const,
-    metadata: {
-      name: 'Aztec Bridge',
-      version: '1.0.0',
-      description: 'Bridge assets between L1 and Aztec L2',
-      url: typeof window !== 'undefined' ? window.location.origin : '',
-    },
-    capabilities: [
-      // Accounts: need to get accounts and create auth witnesses for withdrawals
-      { type: 'accounts', canGet: true, canCreateAuthWit: true },
-
-      // Contracts: register only the specific token + bridge contracts
-      { type: 'contracts', contracts: allContracts, canRegister: true },
-
-      // Simulation: only balance queries on token contracts
-      {
-        type: 'simulation',
-        transactions: { scope: [] },  // we don't simulate transactions
-        utilities: {
-          scope: tokenAddresses.map(addr => ({
-            contract: addr,
-            methods: ['balance_of_private', 'balance_of_public'],
-          })),
-        },
-      },
-
-      // Transactions: specific methods on token + bridge contracts
-      {
-        type: 'transaction',
-        scope: [
-          ...tokenAddresses.map(addr => ({
-            contract: addr,
-            methods: ['transfer', 'transfer_to_private', 'burn_public', 'burn_private'],
-          })),
-          ...bridgeAddresses.map(addr => ({
-            contract: addr,
-            methods: ['claim_public', 'claim_private', 'exit_to_l1_public', 'exit_to_l1_private'],
-          })),
-        ],
-      },
-    ],
-  }
-}
-```
+Key finding: `ContractFunctionPattern` is `{ contract: AztecAddress | '*', function: string }` — one function per pattern entry, NOT `{ methods: string[] }`. The implementation uses a `patternsFor()` helper to expand an array of method names into individual patterns.
 
 ### Files Modified
 
@@ -299,32 +247,19 @@ function buildCapabilityManifest() {
 | `utils/walletCapabilities.ts` | **NEW** — `buildCapabilityManifest()` function. Imports `L1_TOKENS` from config. |
 | `config/index.ts` | No changes — already exports `L1_TOKENS` with `l2TokenContract` and `l2BridgeContract`. |
 
-### Implementation Steps
+### Remaining TODO
 
-1. **Research**: Verify `ContractFunctionPattern` type structure in SDK — confirm it accepts `{ contract: AztecAddress, methods: string[] }` format (check `@aztec/aztec.js/wallet/capabilities.d.ts`)
-2. Create `utils/walletCapabilities.ts` with `buildCapabilityManifest()`:
-   - Dynamically reads contract addresses from `L1_TOKENS` config
-   - Builds scoped patterns for simulation and transaction capabilities
-3. Update `confirmWalletConnection()` in `walletStore.ts` to use `buildCapabilityManifest()`
-4. Test that the wallet extension accepts the scoped manifest (some wallets may reject unfamiliar scope formats — need a `'*'` fallback)
-5. Add a fallback: if scoped `requestCapabilities()` throws, retry with wildcard scope and log a warning
-
-### Considerations
-
-- The `ContractFunctionPattern` type may require exact `AztecAddress` objects, not strings — verify against SDK types
-- If future tokens are added (multi-token bridge), the manifest auto-adapts because it reads from `L1_TOKENS` config
-- Some wallet extensions may not support scoped capabilities yet (spec is new) — keep the wildcard fallback
-- The `simulation.transactions` scope is empty because we use `simulateUtility` (view functions), not `simulateTx` for balance queries
-- Auth witness creation is gated by the `accounts` capability's `canCreateAuthWit: true`, not by the transaction scope
+- [ ] Test with actual wallet extension — verify scoped capabilities are accepted (fallback to `'*'` if wallet rejects scoped format)
+- [ ] Add wildcard retry fallback in `confirmWalletConnection` if scoped `requestCapabilities()` fails with a scope-related error
 
 ---
 
 ## Execution Priority
 
-| Priority | Item | Reason |
+| Priority | Item | Status |
 |----------|------|--------|
-| 1 | Item 3 — Least-privilege capabilities | Smallest change, no UI work, immediate security improvement |
-| 2 | Item 1 + 2 — Connection flow + accounts | These are intertwined and should be done together |
+| 1 | Item 3 — Least-privilege capabilities | **DONE** (fc2ce83) |
+| 2 | Item 1 + 2 — Connection flow + accounts | Pending — implement together |
 
 Items 1 and 2 share the `AccountSelectorModal` component and the wallet store refactor, so they should be implemented as a single feature branch.
 
@@ -334,7 +269,7 @@ Items 1 and 2 share the `AccountSelectorModal` component and the wallet store re
 
 Before starting implementation, verify these with the actual SDK:
 
-- [ ] `ContractFunctionPattern` type — does it accept `{ contract: AztecAddress, methods: string[] }` or a different shape?
+- [x] `ContractFunctionPattern` type — `{ contract: AztecAddress | '*', function: string }` (one function per entry, not methods array)
 - [ ] Does the demo-wallet / Aztec Keychain extension support scoped capabilities, or does it only handle `'*'`?
 - [ ] Can `wallet.getAccounts()` be called multiple times after `confirm()`? (Needed for account switching)
 - [ ] Does switching the `from: account` in `simulateView` / `sendTx` work without re-establishing the secure channel?
