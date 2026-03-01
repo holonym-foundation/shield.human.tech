@@ -284,7 +284,6 @@ const walletStore = create<WalletState>((set, get) => ({
   startWalletDiscovery: async () => {
     // Guard against concurrent discovery calls
     if (isDiscoveryInProgress) {
-      console.log('[walletStore] Discovery already in progress, skipping')
       return
     }
 
@@ -394,7 +393,6 @@ const walletStore = create<WalletState>((set, get) => ({
   confirmWalletConnection: async () => {
     // Guard against concurrent confirm calls (e.g. double-click, HMR replay)
     if (isConfirmInProgress) {
-      console.log('[walletStore] confirmWalletConnection: already in progress, skipping')
       return
     }
 
@@ -413,13 +411,10 @@ const walletStore = create<WalletState>((set, get) => ({
     set({ isAztecConnecting: true })
 
     try {
-      console.log('[walletStore] Calling pendingConnection.confirm()...')
-
       // Await confirm() directly — no timeout. The timeout interferes with
       // the SDK's internal channel state. User can cancel manually if needed.
       const wallet = await pendingConnection.confirm()
 
-      console.log('[walletStore] confirm() resolved, requesting capabilities...')
 
       // Request capabilities first (preferred flow for external wallets).
       // This shows a single comprehensive dialog where the user selects
@@ -457,7 +452,6 @@ const walletStore = create<WalletState>((set, get) => ({
           (c: any) => c.type === 'accounts'
         ) as { type: 'accounts'; accounts: any[] } | undefined
         accounts = accountsCap?.accounts ?? []
-        console.log('[walletStore] requestCapabilities granted', accounts.length, 'account(s)')
       } catch (capErr) {
         console.warn('[walletStore] requestCapabilities failed, falling back to getAccounts:', capErr)
       }
@@ -478,8 +472,6 @@ const walletStore = create<WalletState>((set, get) => ({
         : typeof aztecAddr?.toString === 'function'
           ? aztecAddr.toString()
           : String(aztecAddr)
-
-      console.log('[walletStore] Connected to account:', address)
 
       // Set up disconnect handler with grace period to absorb spurious
       // disconnects caused by HMR / Fast Refresh / soft navigations.
@@ -593,7 +585,6 @@ const walletStore = create<WalletState>((set, get) => ({
     // Guard: don't start if already in a connection flow
     const { walletConnectionPhase } = get()
     if (walletConnectionPhase !== 'idle') {
-      console.log('[walletStore] connectAztecWallet: already in progress (phase:', walletConnectionPhase, '), skipping')
       return
     }
 
@@ -719,13 +710,7 @@ const walletStore = create<WalletState>((set, get) => ({
       const { getWaapAccount, switchWaapChain, refreshWaapWalletInfo } = get()
 
       // Try to get initial account, but don't fail if it's not available
-      const initialAccount = await getWaapAccount().catch((err) => {
-        console.log(
-          'Initial account check failed (this is normal if wallet is not connected):',
-          err
-        )
-        return null
-      })
+      const initialAccount = await getWaapAccount().catch(() => null)
 
       // If wallet is already connected, refresh all wallet info
       if (initialAccount) {
@@ -952,7 +937,7 @@ const walletStore = create<WalletState>((set, get) => ({
           handleWaapError(addErr, 'Failed to add and switch to chain', set)
         }
       } else if (err?.code === 4001) {
-        console.log('User rejected chain switch request')
+        // User rejected chain switch — no action needed
       } else {
         handleWaapError(err, 'Failed to switch chain', set)
       }
@@ -987,9 +972,6 @@ const walletStore = create<WalletState>((set, get) => ({
       console.error('getWaapAccount: Error getting account:', err)
 
       if (err?.code === -32001) {
-        console.log(
-          'getWaapAccount: Wallet is already processing a connection request'
-        )
         set({ waapAddress: null, isWaapConnected: false, waapError: null })
         return null
       }

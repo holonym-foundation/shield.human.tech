@@ -191,13 +191,11 @@ export default function Home() {
   } = useWalletStore()
 
   // Success callbacks
-  const mintL1SBTOnSuccess = (data: any) => {
-    console.log('L1 SBT minted:', data)
+  const mintL1SBTOnSuccess = (_data: any) => {
     setShowSBTModal(false)
   }
 
-  const mintL2SBTOnSuccess = (data: any) => {
-    console.log('L2 SBT minted:', data)
+  const mintL2SBTOnSuccess = (_data: any) => {
     setShowSBTModal(false)
   }
 
@@ -256,9 +254,7 @@ export default function Home() {
 
   // Bridge success callback (runs after L1→L2 bridge or L2→L1 withdrawal)
   const handleBridgeSuccess = useCallback(
-    (data: any) => {
-      console.log('[Bridge] handleBridgeSuccess called', { data })
-      console.log('[Bridge] Showing refresh toast, starting L1 + L2 balance refetch...')
+    (_data: any) => {
       notify.promise(
         Promise.all([refetchL1Balance(), refetchL2Balance()]),
         {
@@ -328,7 +324,6 @@ export default function Home() {
   const handleSelectNetwork = (network: NetworkType) => {
     const section = getCurrentSection()
     updateNetwork(section, network)
-    console.log('Selected network:', network)
   }
 
   // Handle token selection with auto-pairing
@@ -343,7 +338,6 @@ export default function Home() {
     if (paired) {
       updateToken(oppositeSection, paired)
     }
-    console.log('Selected token:', token.symbol, '→ paired:', paired?.symbol)
   }
 
   // Input amount change handler
