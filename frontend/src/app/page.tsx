@@ -187,6 +187,7 @@ export default function Home() {
     setShowWalletInstallPrompt,
     aztecAddress,
     waapAddress,
+    isAztecConnecting,
   } = useWalletStore()
 
   // Success callbacks
@@ -534,6 +535,7 @@ export default function Home() {
           <EmojiVerificationModal
             isOpen={true}
             emojis={verificationEmojis}
+            isConfirming={isAztecConnecting}
             onConfirm={confirmWalletConnection}
             onCancel={cancelWalletConnection}
           />

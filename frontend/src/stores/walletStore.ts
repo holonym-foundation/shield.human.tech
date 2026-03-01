@@ -20,9 +20,15 @@ import {
   type PendingConnection,
 } from '@/utils/walletSdkConnection'
 import type { Wallet } from '@aztec/aztec.js/wallet'
+import type { DiscoverySession } from '@/utils/walletSdkConnection'
 import { initWaaP } from '@human.tech/waap-sdk'
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
+
+// Module-level state (not in Zustand — DiscoverySession is not serializable)
+let activeDiscoverySession: DiscoverySession | null = null
+let isDiscoveryInProgress = false
+let isConfirmInProgress = false
 
 // ============================================================================
 // TYPE DECLARATIONS
@@ -276,6 +282,20 @@ const walletStore = create<WalletState>((set, get) => ({
   // ─── Wallet SDK connection flow ────────────────────────────────────
 
   startWalletDiscovery: async () => {
+    // Guard against concurrent discovery calls
+    if (isDiscoveryInProgress) {
+      console.log('[walletStore] Discovery already in progress, skipping')
+      return
+    }
+
+    // Cancel any stale session
+    if (activeDiscoverySession) {
+      try { activeDiscoverySession.cancel() } catch { /* ignore */ }
+      activeDiscoverySession = null
+    }
+
+    isDiscoveryInProgress = true
+
     set({
       walletConnectionPhase: 'discovering',
       discoveredWallets: [],
@@ -298,7 +318,7 @@ const walletStore = create<WalletState>((set, get) => ({
     const result = await new Promise<WalletProvider[]>((resolve) => {
       let graceTimer: ReturnType<typeof setTimeout> | null = null
 
-      discoverWallets({
+      activeDiscoverySession = discoverWallets({
         timeout: 5000,
         onWalletDiscovered: (provider) => {
           const entry = { name: provider.name ?? 'Aztec Wallet', provider }
@@ -320,6 +340,9 @@ const walletStore = create<WalletState>((set, get) => ({
       }, 6000)
     })
 
+    isDiscoveryInProgress = false
+    activeDiscoverySession = null
+
     if (result.length === 0) {
       set({
         walletConnectionPhase: 'idle',
@@ -338,7 +361,7 @@ const walletStore = create<WalletState>((set, get) => ({
 
   selectWallet: async (provider: WalletProvider) => {
     try {
-      set({ walletConnectionPhase: 'verifying' })
+      set({ walletConnectionPhase: 'verifying', isAztecConnecting: false })
 
       const pending = await connectToProvider(provider)
       const emojis = hashToEmoji(pending.verificationHash)
@@ -369,11 +392,34 @@ const walletStore = create<WalletState>((set, get) => ({
   },
 
   confirmWalletConnection: async () => {
+    // Guard against concurrent confirm calls (e.g. double-click, HMR replay)
+    if (isConfirmInProgress) {
+      console.log('[walletStore] confirmWalletConnection: already in progress, skipping')
+      return
+    }
+
     const { pendingConnection, sdkProvider } = get()
-    if (!pendingConnection || !sdkProvider) return
+    if (!pendingConnection || !sdkProvider) {
+      console.warn('[walletStore] confirmWalletConnection: pendingConnection or sdkProvider is null', {
+        hasPending: !!pendingConnection,
+        hasProvider: !!sdkProvider,
+      })
+      return
+    }
+
+    isConfirmInProgress = true
+
+    // Show loading state while confirming
+    set({ isAztecConnecting: true })
 
     try {
+      console.log('[walletStore] Calling pendingConnection.confirm()...')
+
+      // Await confirm() directly — no timeout. The timeout interferes with
+      // the SDK's internal channel state. User can cancel manually if needed.
       const wallet = await pendingConnection.confirm()
+
+      console.log('[walletStore] confirm() resolved, getting accounts...')
 
       // Get the account address from the wallet
       // getAccounts() returns Aliased<AztecAddress>[] — unwrap with .item
@@ -388,6 +434,8 @@ const walletStore = create<WalletState>((set, get) => ({
         : typeof aztecAddr?.toString === 'function'
           ? aztecAddr.toString()
           : String(aztecAddr)
+
+      console.log('[walletStore] Connected to account:', address)
 
       // Set up disconnect handler
       sdkProvider.onDisconnect(() => {
@@ -432,6 +480,7 @@ const walletStore = create<WalletState>((set, get) => ({
       return connectedAccount
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[walletStore] confirmWalletConnection failed:', errorMessage)
       logError('Failed to confirm wallet connection', {
         walletType: WalletType.AZTEC,
         loginMethod: 'wallet-sdk',
@@ -440,13 +489,19 @@ const walletStore = create<WalletState>((set, get) => ({
         userAction: 'aztec_wallet_confirm_failed',
         error: errorMessage,
       })
-      set({
-        walletConnectionPhase: 'idle',
-        isAztecConnecting: false,
-        pendingConnection: null,
-        verificationEmojis: null,
-      })
-      showToast('error', `Failed to confirm connection: ${errorMessage}`)
+      // Only reset state if we're not already connected (avoid nuking a
+      // successful first confirm when a stale second call fails)
+      if (get().walletConnectionPhase !== 'connected') {
+        set({
+          walletConnectionPhase: 'idle',
+          isAztecConnecting: false,
+          pendingConnection: null,
+          verificationEmojis: null,
+        })
+        showToast('error', `Failed to confirm connection: ${errorMessage}`)
+      }
+    } finally {
+      isConfirmInProgress = false
     }
   },
 
@@ -459,6 +514,14 @@ const walletStore = create<WalletState>((set, get) => ({
         // ignore cancel errors
       }
     }
+    // Clean up module-level state
+    if (activeDiscoverySession) {
+      try { activeDiscoverySession.cancel() } catch { /* ignore */ }
+      activeDiscoverySession = null
+    }
+    isDiscoveryInProgress = false
+    isConfirmInProgress = false
+
     set({
       walletConnectionPhase: 'idle',
       isAztecConnecting: false,
@@ -471,6 +534,13 @@ const walletStore = create<WalletState>((set, get) => ({
   // ─── Connection management (public API) ────────────────────────────
 
   connectAztecWallet: async (_type?: AztecLoginMethod) => {
+    // Guard: don't start if already in a connection flow
+    const { walletConnectionPhase } = get()
+    if (walletConnectionPhase !== 'idle') {
+      console.log('[walletStore] connectAztecWallet: already in progress (phase:', walletConnectionPhase, '), skipping')
+      return
+    }
+
     try {
       logInfo('Aztec wallet connection initiated', {
         walletType: WalletType.AZTEC,
@@ -525,12 +595,21 @@ const walletStore = create<WalletState>((set, get) => ({
         }
       }
 
+      // Clean up module-level state
+      if (activeDiscoverySession) {
+        try { activeDiscoverySession.cancel() } catch { /* ignore */ }
+        activeDiscoverySession = null
+      }
+      isDiscoveryInProgress = false
+      isConfirmInProgress = false
+
       set({
         sdkWallet: null,
         sdkProvider: null,
         aztecAddress: null,
         aztecAccount: null,
         isAztecConnected: false,
+        isAztecConnecting: false,
         aztecLoginMethod: null,
         walletConnectionPhase: 'idle',
         pendingConnection: null,

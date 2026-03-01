@@ -221,6 +221,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     isAztecConnected,
     disconnectAztecWallet,
     connectAztecWallet,
+    walletConnectionPhase,
     waapLoginMethod: loginMethod,
     waapWalletProvider: walletProvider,
     waapWalletIcon: walletIcon,
@@ -255,7 +256,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
 
   // Auto-connect to Aztec when WaaP wallet is connected
   useEffect(() => {
-    if (isWaapConnected && !isAztecConnected && walletButtonPressed) {
+    if (isWaapConnected && !isAztecConnected && walletButtonPressed && walletConnectionPhase === 'idle') {
       // Add a slight delay to avoid UI issues
       const timer = setTimeout(() => {
         // Start wallet-sdk discovery flow
@@ -270,6 +271,7 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     isWaapConnected,
     isAztecConnected,
     walletButtonPressed,
+    walletConnectionPhase,
     connectAztecWallet,
   ])
 

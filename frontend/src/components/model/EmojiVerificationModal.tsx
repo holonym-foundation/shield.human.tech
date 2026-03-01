@@ -6,6 +6,7 @@ interface EmojiVerificationModalProps {
   isOpen: boolean
   emojis: string
   walletName?: string
+  isConfirming?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -14,6 +15,7 @@ export default function EmojiVerificationModal({
   isOpen,
   emojis,
   walletName,
+  isConfirming,
   onConfirm,
   onCancel,
 }: EmojiVerificationModalProps) {
@@ -88,8 +90,8 @@ export default function EmojiVerificationModal({
                   className='flex-1 py-3 rounded-[8px] border border-[#D4D4D4] text-latest-grey-600 font-medium hover:bg-latest-grey-200 transition-colors'>
                   Cancel
                 </button>
-                <TextButton onClick={onConfirm}>
-                  <span>Confirm Match</span>
+                <TextButton onClick={onConfirm} disabled={isConfirming} isLoading={isConfirming}>
+                  <span>{isConfirming ? 'Connecting...' : 'Confirm Match'}</span>
                 </TextButton>
               </motion.div>
 

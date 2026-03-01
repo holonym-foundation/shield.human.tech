@@ -14,7 +14,7 @@ import {
 import { hashToEmoji } from '@aztec/wallet-sdk/crypto'
 import type { ChainInfo } from '@aztec/aztec.js/account'
 import { Fr } from '@aztec/aztec.js/fields'
-import { L2_CHAIN_ID } from '@/config'
+import { L1_CHAIN_ID, ROLLUP_VERSION } from '@/config'
 
 export const APP_ID = 'aztec-bridge'
 
@@ -23,8 +23,8 @@ let cachedChainInfo: ChainInfo | null = null
 export function getChainInfo(): ChainInfo {
   if (cachedChainInfo) return cachedChainInfo
   cachedChainInfo = {
-    chainId: new Fr(L2_CHAIN_ID),
-    version: new Fr(0),
+    chainId: new Fr(L1_CHAIN_ID),
+    version: new Fr(ROLLUP_VERSION),
   }
   return cachedChainInfo
 }
