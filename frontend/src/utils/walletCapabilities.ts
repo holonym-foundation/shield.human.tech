@@ -35,9 +35,13 @@ function patternsFor(
 // CONTRACT FUNCTIONS WE ACTUALLY USE
 // ============================================================================
 
-/** Token contract methods we call (via simulateView / sendTx / authWit). */
-const TOKEN_SIMULATION_METHODS = [
+/** Private balance queries — simulated as utilities (no public state). */
+const TOKEN_UTILITY_SIMULATION_METHODS = [
   'balance_of_private',
+] as const
+
+/** Public balance queries — simulated as transactions (reads public state). */
+const TOKEN_TRANSACTION_SIMULATION_METHODS = [
   'balance_of_public',
 ] as const
 
@@ -80,9 +84,14 @@ export function buildCapabilityManifest() {
 
   const allContracts = [...tokenAddresses, ...bridgeAddresses]
 
-  // Build simulation scope (balance queries are utility simulations)
+  // Build simulation scopes
+  // Private balance queries → utility simulations (no public state involved)
   const simulationUtilities: ContractFunctionPattern[] = tokenAddresses.flatMap(
-    (addr) => patternsFor(addr, [...TOKEN_SIMULATION_METHODS]),
+    (addr) => patternsFor(addr, [...TOKEN_UTILITY_SIMULATION_METHODS]),
+  )
+  // Public balance queries → transaction simulations (reads public state)
+  const simulationTransactions: ContractFunctionPattern[] = tokenAddresses.flatMap(
+    (addr) => patternsFor(addr, [...TOKEN_TRANSACTION_SIMULATION_METHODS]),
   )
 
   // Build transaction scope (token transfers/burns + bridge claims/exits)
@@ -98,7 +107,7 @@ export function buildCapabilityManifest() {
   return {
     version: '1.0' as const,
     metadata: {
-      name: 'Aztec Bridge',
+      name: 'Human Tech',
       version: '1.0.0',
       description: 'Bridge assets between L1 and Aztec L2',
       url: typeof window !== 'undefined' ? window.location.origin : '',
@@ -118,10 +127,11 @@ export function buildCapabilityManifest() {
           ]
         : []),
 
-      // Simulation: only balance queries (utilities, not transactions)
+      // Simulation: balance queries split by public (tx) vs private (utility)
       {
         type: 'simulation' as const,
         utilities: { scope: simulationUtilities },
+        transactions: { scope: simulationTransactions },
       },
 
       // Transactions: specific methods on token + bridge contracts
