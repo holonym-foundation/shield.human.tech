@@ -19,6 +19,7 @@ import {
   type WalletProvider,
   type PendingConnection,
 } from '@/utils/walletSdkConnection'
+import { buildCapabilityManifest } from '@/utils/walletCapabilities'
 import type { Wallet } from '@aztec/aztec.js/wallet'
 import type { DiscoverySession } from '@/utils/walletSdkConnection'
 import { initWaaP } from '@human.tech/waap-sdk'
@@ -424,38 +425,13 @@ const walletStore = create<WalletState>((set, get) => ({
       const wallet = await pendingConnection.confirm()
 
 
-      // Request capabilities first (preferred flow for external wallets).
+      // Request scoped capabilities (preferred flow for external wallets).
       // This shows a single comprehensive dialog where the user selects
       // accounts AND grants permissions for simulations/transactions.
       // Fall back to getAccounts if requestCapabilities is not supported.
       let accounts: Array<{ item?: unknown; address?: unknown } | unknown> = []
       try {
-        const capabilities = await wallet.requestCapabilities({
-          version: '1.0' as const,
-          metadata: {
-            name: 'Aztec Bridge',
-            version: '1.0.0',
-            description: 'Bridge assets between L1 and Aztec L2',
-            url: typeof window !== 'undefined' ? window.location.origin : '',
-          },
-          capabilities: [
-            { type: 'accounts', canGet: true, canCreateAuthWit: true },
-            {
-              type: 'contracts',
-              contracts: '*' as any,
-              canRegister: true,
-            },
-            {
-              type: 'simulation',
-              transactions: { scope: '*' as any },
-              utilities: { scope: '*' as any },
-            },
-            {
-              type: 'transaction',
-              scope: '*' as any,
-            },
-          ],
-        })
+        const capabilities = await wallet.requestCapabilities(buildCapabilityManifest())
         const accountsCap = capabilities.granted.find(
           (c: { type: string }) => c.type === 'accounts'
         ) as { type: 'accounts'; accounts: Array<{ item?: unknown; address?: unknown }> } | undefined
