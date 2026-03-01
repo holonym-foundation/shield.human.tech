@@ -367,11 +367,18 @@ const walletStore = create<WalletState>((set, get) => ({
       const wallet = await pendingConnection.confirm()
 
       // Get the account address from the wallet
+      // getAccounts() returns Aliased<AztecAddress>[] — unwrap with .item
       const accounts = await wallet.getAccounts()
       if (!accounts || accounts.length === 0) {
         throw new Error('No accounts returned from wallet')
       }
-      const address = accounts[0].toString()
+      const rawAccount: any = accounts[0]
+      const aztecAddr = rawAccount?.item ?? rawAccount?.address ?? rawAccount
+      const address = typeof aztecAddr === 'string'
+        ? aztecAddr
+        : typeof aztecAddr?.toString === 'function'
+          ? aztecAddr.toString()
+          : String(aztecAddr)
 
       // Set up disconnect handler
       sdkProvider.onDisconnect(() => {
@@ -482,23 +489,9 @@ const walletStore = create<WalletState>((set, get) => ({
   },
 
   initializeAztecWallet: async () => {
-    try {
-      const storedWalletType = getInitialWalletType()
-      if (!storedWalletType) return
-
-      const { isAztecConnected, aztecLoginMethod } = get()
-      if (isAztecConnected && aztecLoginMethod === storedWalletType) return
-
-      // Re-run discovery to see if the wallet is still available
-      // Wallet extensions respond immediately if they have an active session
-      try {
-        await get().startWalletDiscovery()
-      } catch {
-        // Don't clear stored type on error — might be temporary
-      }
-    } catch (error) {
-      console.error('Failed to initialize Aztec wallet:', error)
-    }
+    // No-op on load: discovery is deferred until the user explicitly
+    // clicks "Connect L2 Wallet". We only store the login method so
+    // the UI can remember the user's preference.
   },
 
   disconnectAztecWallet: async () => {
