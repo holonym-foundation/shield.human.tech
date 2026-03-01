@@ -292,35 +292,44 @@ const walletStore = create<WalletState>((set, get) => ({
 
     const collectedWallets: Array<{ name: string; provider: WalletProvider }> = []
 
-    const discovery = discoverWallets({
-      timeout: 10000,
-      onWalletDiscovered: (provider) => {
-        const entry = { name: provider.name ?? 'Aztec Wallet', provider }
-        collectedWallets.push(entry)
-        set({ discoveredWallets: [...collectedWallets] })
-      },
+    // Resolve as soon as the first wallet is discovered (with a short
+    // grace period for additional wallets), NOT after the full timeout.
+    // Waiting the full 5-10s causes stale-provider key exchange timeouts.
+    const result = await new Promise<WalletProvider[]>((resolve) => {
+      let graceTimer: ReturnType<typeof setTimeout> | null = null
+
+      discoverWallets({
+        timeout: 5000,
+        onWalletDiscovered: (provider) => {
+          const entry = { name: provider.name ?? 'Aztec Wallet', provider }
+          collectedWallets.push(entry)
+          set({ discoveredWallets: [...collectedWallets] })
+
+          // Give a 1s grace period for more wallets, then resolve
+          if (graceTimer) clearTimeout(graceTimer)
+          graceTimer = setTimeout(() => {
+            resolve(collectedWallets.map((w) => w.provider))
+          }, 1000)
+        },
+      })
+
+      // Fallback: if no wallets respond within 6s, resolve empty
+      setTimeout(() => {
+        if (graceTimer) clearTimeout(graceTimer)
+        resolve(collectedWallets.map((w) => w.provider))
+      }, 6000)
     })
 
-    // Wait for discovery to finish
-    const allProviders: WalletProvider[] = []
-    for await (const provider of discovery.wallets) {
-      allProviders.push(provider)
-    }
-
-    if (allProviders.length === 0) {
-      // No wallets found — show install prompt
+    if (result.length === 0) {
       set({
         walletConnectionPhase: 'idle',
         isAztecConnecting: false,
         showWalletInstallPrompt: true,
         showWalletModal: false,
       })
-      return
-    }
-
-    if (allProviders.length === 1) {
-      // Auto-select the only wallet
-      await get().selectWallet(allProviders[0])
+    } else if (result.length === 1) {
+      // Auto-select the only wallet — connect immediately
+      await get().selectWallet(result[0])
     } else {
       // Multiple wallets — show selection UI
       set({ walletConnectionPhase: 'selecting' })
