@@ -1,113 +1,250 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { Token } from '../constants/tokens.js';
+import { join, resolve } from 'path';
 
-export interface DeployedContracts {
+// ─── Interfaces ─────────────────────────────────────────────────────────────
+
+export interface DeployedToken {
   symbol: string;
   decimals: number;
   logo: string;
+  // L1 contracts
   l1TokenContract: string;
+  l1PortalContract: string;
+  // L2 contracts
   l2TokenContract: string;
   l2BridgeContract: string;
-  l1PortalContract: string;
+  // Fee infrastructure
   feeAssetHandler: string;
   sponsoredFee: string;
 }
 
-export interface DeployedTokensData {
-  deployedAt: string;
-  sponsoredFeeAddress: string;
-  tokens: DeployedContracts[];
+export interface L1ContractAddresses {
+  rollupAddress: string;
+  registryAddress: string;
+  inboxAddress: string;
+  outboxAddress: string;
 }
 
-const DEPLOYED_TOKENS_FILE = join('constants', 'deployed-tokens.json');
+export interface DeploymentNetwork {
+  name: string;
+  nodeUrl: string;
+  l1RpcUrl: string;
+  l1ChainId: number;
+  l2ChainId: number;
+  aztecVersion: string;
+  rollupVersion: number;
+}
 
-export function ensureDeploymentEnvironment() {
-  // Ensure the constants directory exists
-  const dir = dirname(DEPLOYED_TOKENS_FILE);
+export interface DeploymentFile {
+  id: string;
+  deployedAt: string;
+  network: DeploymentNetwork;
+  l1ContractAddresses: L1ContractAddresses;
+  nodeInfo: Record<string, unknown>;
+  sponsoredFeeAddress: string;
+  tokens: DeployedToken[];
+}
+
+export interface RegistryEntry {
+  id: string;
+  file: string;
+  deployedAt: string;
+  network: string;
+  aztecVersion: string;
+  active: boolean;
+}
+
+export interface DeploymentRegistry {
+  activeDeploymentId: string;
+  deployments: RegistryEntry[];
+}
+
+// ─── Paths ──────────────────────────────────────────────────────────────────
+
+const DEPLOYMENTS_DIR = join('deployments');
+const REGISTRY_FILE = join(DEPLOYMENTS_DIR, 'registry.json');
+const FRONTEND_DEPLOYMENTS = resolve('..', 'frontend', 'src', 'constants', 'deployments.json');
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Auto-derive deployment ID from aztec version + date.
+ * e.g. "4.0.0-devnet.2-patch.0_2026-02-19"
+ */
+export function generateDeploymentId(aztecVersion: string): string {
+  const date = new Date().toISOString().split('T')[0];
+  return `${aztecVersion}_${date}`;
+}
+
+function ensureDir(dir: string) {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
     console.log(`📁 Created directory: ${dir}`);
   }
-  
-  // Create initial JSON file if it doesn't exist
-  if (!existsSync(DEPLOYED_TOKENS_FILE)) {
-    const initialData: DeployedTokensData = {
-      deployedAt: new Date().toISOString(),
-      sponsoredFeeAddress: '',
-      tokens: []
-    };
-    
-    writeFileSync(DEPLOYED_TOKENS_FILE, JSON.stringify(initialData, null, 2), 'utf8');
-    console.log(`📄 Created initial deployment file: ${DEPLOYED_TOKENS_FILE}`);
-  } else {
-    console.log(`📄 Deployment file exists: ${DEPLOYED_TOKENS_FILE}`);
-  }
 }
 
-export function loadExistingDeployments(): DeployedTokensData | null {
-  if (!existsSync(DEPLOYED_TOKENS_FILE)) {
-    return null;
-  }
-  
+function readJson<T>(path: string): T | null {
+  if (!existsSync(path)) return null;
   try {
-    const fileContent = readFileSync(DEPLOYED_TOKENS_FILE, 'utf8');
-    return JSON.parse(fileContent);
-  } catch (error) {
-    console.error('Error reading deployed tokens file:', error);
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
     return null;
   }
 }
 
-export function saveTokenToFile(deployedContract: DeployedContracts, sponsoredFeeAddress: string) {
-  let existingData = loadExistingDeployments();
-  
-  if (!existingData) {
-    existingData = {
-      deployedAt: new Date().toISOString(),
-      sponsoredFeeAddress,
-      tokens: []
-    };
+function writeJson(path: string, data: unknown) {
+  writeFileSync(path, JSON.stringify(data, null, 2), 'utf8');
+}
+
+// ─── Registry ───────────────────────────────────────────────────────────────
+
+export function loadRegistry(): DeploymentRegistry | null {
+  return readJson<DeploymentRegistry>(REGISTRY_FILE);
+}
+
+export function loadActiveDeployment(): DeploymentFile | null {
+  const registry = loadRegistry();
+  if (!registry?.activeDeploymentId) return null;
+  return loadDeploymentById(registry.activeDeploymentId);
+}
+
+export function loadDeploymentById(id: string): DeploymentFile | null {
+  const registry = loadRegistry();
+  const entry = registry?.deployments.find(d => d.id === id);
+  if (!entry) return null;
+  return readJson<DeploymentFile>(join(DEPLOYMENTS_DIR, entry.file));
+}
+
+// ─── Deployment lifecycle ───────────────────────────────────────────────────
+
+/**
+ * Create a new deployment file and register it as active.
+ * Call this once at the start of a deployment run (before deploying tokens).
+ */
+export function createDeployment(params: {
+  nodeUrl: string;
+  l1RpcUrl: string;
+  l1ChainId: number;
+  l2ChainId: number;
+  aztecVersion: string;
+  rollupVersion: number;
+  networkName: string;
+  l1ContractAddresses: L1ContractAddresses;
+  nodeInfo: Record<string, unknown>;
+  sponsoredFeeAddress: string;
+}): DeploymentFile {
+  ensureDir(DEPLOYMENTS_DIR);
+
+  const id = generateDeploymentId(params.aztecVersion);
+  const fileName = `${id}.json`;
+  const filePath = join(DEPLOYMENTS_DIR, fileName);
+
+  // Preserve existing tokens if re-running with the same deployment ID
+  const existing = readJson<DeploymentFile>(filePath);
+  const existingTokens = existing?.tokens ?? [];
+
+  const deployment: DeploymentFile = {
+    id,
+    deployedAt: existing?.deployedAt ?? new Date().toISOString(),
+    network: {
+      name: params.networkName,
+      nodeUrl: params.nodeUrl,
+      l1RpcUrl: params.l1RpcUrl,
+      l1ChainId: params.l1ChainId,
+      l2ChainId: params.l2ChainId,
+      aztecVersion: params.aztecVersion,
+      rollupVersion: params.rollupVersion,
+    },
+    l1ContractAddresses: params.l1ContractAddresses,
+    nodeInfo: params.nodeInfo,
+    sponsoredFeeAddress: params.sponsoredFeeAddress,
+    tokens: existingTokens,
+  };
+
+  writeJson(filePath, deployment);
+  if (existingTokens.length > 0) {
+    console.log(`📄 Updated deployment: deployments/${fileName} (preserved ${existingTokens.length} existing tokens)`);
+  } else {
+    console.log(`📄 Created deployment: deployments/${fileName}`);
   }
-  
-  // Update sponsored fee address if provided
-  if (sponsoredFeeAddress) {
-    existingData.sponsoredFeeAddress = sponsoredFeeAddress;
+
+  // Update registry
+  let registry = loadRegistry() ?? { activeDeploymentId: '', deployments: [] };
+  for (const entry of registry.deployments) entry.active = false;
+
+  const existingIdx = registry.deployments.findIndex(d => d.id === id);
+  const entry: RegistryEntry = {
+    id,
+    file: fileName,
+    deployedAt: deployment.deployedAt,
+    network: params.networkName,
+    aztecVersion: params.aztecVersion,
+    active: true,
+  };
+  if (existingIdx >= 0) registry.deployments[existingIdx] = entry;
+  else registry.deployments.push(entry);
+  registry.activeDeploymentId = id;
+
+  writeJson(REGISTRY_FILE, registry);
+  console.log(`📋 Registry updated: active = ${id}`);
+
+  return deployment;
+}
+
+/**
+ * Add a deployed token to the active deployment file.
+ * Call this after each token deploys successfully (incremental save).
+ */
+export function saveTokenToDeployment(token: DeployedToken, deploymentId?: string): void {
+  const id = deploymentId ?? loadRegistry()?.activeDeploymentId;
+  if (!id) throw new Error('No active deployment to save token to');
+
+  const registry = loadRegistry();
+  const entry = registry?.deployments.find(d => d.id === id);
+  if (!entry) throw new Error(`Deployment ${id} not found in registry`);
+
+  const filePath = join(DEPLOYMENTS_DIR, entry.file);
+  const deployment = readJson<DeploymentFile>(filePath);
+  if (!deployment) throw new Error(`Deployment file not found: ${filePath}`);
+
+  // Replace existing token with same symbol, or append
+  deployment.tokens = deployment.tokens.filter(t => t.symbol !== token.symbol);
+  deployment.tokens.push(token);
+
+  writeJson(filePath, deployment);
+  console.log(`✅ Saved ${token.symbol} to deployment ${id}`);
+}
+
+/**
+ * Load existing tokens from the active deployment (for skip-if-deployed checks).
+ */
+export function loadExistingTokens(): DeployedToken[] {
+  const deployment = loadActiveDeployment();
+  return deployment?.tokens ?? [];
+}
+
+/**
+ * Bundle all deployments + registry into a single JSON for the frontend.
+ * Format: { activeDeploymentId, deployments: DeploymentFile[] }
+ */
+export function copyToFrontend(): void {
+  const registry = loadRegistry();
+  if (!registry || registry.deployments.length === 0) {
+    console.warn('⚠️  No deployments to copy');
+    return;
   }
-  
-  // Remove existing token with same symbol if it exists
-  existingData.tokens = existingData.tokens.filter(token => token.symbol !== deployedContract.symbol);
-  
-  // Add the new token
-  existingData.tokens.push(deployedContract);
-  
-  // Save to file
-  writeFileSync(DEPLOYED_TOKENS_FILE, JSON.stringify(existingData, null, 2), 'utf8');
-  console.log(`✅ Saved ${deployedContract.symbol} contract addresses to ${DEPLOYED_TOKENS_FILE}`);
+
+  const allDeployments: DeploymentFile[] = [];
+  for (const entry of registry.deployments) {
+    const deployment = readJson<DeploymentFile>(join(DEPLOYMENTS_DIR, entry.file));
+    if (deployment) allDeployments.push(deployment);
+  }
+
+  const bundle = {
+    activeDeploymentId: registry.activeDeploymentId,
+    deployments: allDeployments,
+  };
+
+  writeJson(FRONTEND_DEPLOYMENTS, bundle);
+  console.log(`📋 Synced ${allDeployments.length} deployment(s) to frontend: ${FRONTEND_DEPLOYMENTS}`);
 }
-
-export function generateSimpleTypescriptFile() {
-  const fileContent = `// Auto-generated file - Do not edit manually
-// Import deployed tokens from JSON file
-
-import deployedTokensData from './deployed-tokens.json';
-
-export const DEPLOYED_TOKENS = deployedTokensData;
-
-// Helper function to get token by symbol
-export function getTokenBySymbol(symbol: string) {
-  return deployedTokensData.tokens.find(token => token.symbol === symbol);
-}
-
-// Helper function to get all deployed tokens
-export function getAllTokens() {
-  return deployedTokensData.tokens;
-}
-
-export type DeployedToken = typeof deployedTokensData.tokens[0];
-`;
-
-  const filePath = join('constants', 'deployed-tokens.ts');
-  writeFileSync(filePath, fileContent, 'utf8');
-  console.log(`📝 Generated simple TypeScript file: ${filePath}`);
-} 

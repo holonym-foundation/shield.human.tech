@@ -1,4 +1,7 @@
 # Aztec Bridge UI
+A visual overview of the Aztec Bridge flow:
+
+![Aztec Bridge Flow](docs/aztec%20bridge%20flow.png)
 
 A comprehensive bridge application for transferring tokens between Ethereum (L1) and Aztec Network (L2), featuring a modern React/Next.js frontend with seamless Web3 integration.
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Aztec Token Bridge Deployment Script
  *
@@ -24,70 +23,97 @@ import {
 import {
   getContractInstanceFromInstantiationParams,
   type ContractInstanceWithAddress,
-} from '@aztec/aztec.js/contracts'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { RollupContract } from '@aztec/ethereum/contracts'
-import { CheckpointNumber } from '@aztec/foundation/branded-types'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
+} from "@aztec/aztec.js/contracts";
+import {
+  createExtendedL1Client,
+  deployL1Contract,
+  ExtendedViemWalletClient,
+  createEthereumChain,
+  extractEvent,
+} from "@aztec/ethereum";
 import {
   FeeAssetHandlerAbi,
   FeeAssetHandlerBytecode,
-  RollupAbi,
-  TokenPortalAbi,
-  TokenPortalBytecode,
-} from '@aztec/l1-artifacts'
-import { TokenContract } from '@aztec/noir-contracts.js/Token'
+  // TokenPortalAbi,
+  // TokenPortalBytecode,
+} from "@aztec/l1-artifacts";
+import { TokenContract } from "@aztec/noir-contracts.js/Token";
 // import { TokenContract } from '@defi-wonderland/aztec-standards/artifacts/Token.js'
 // import { TokenContract } from './constants/aztec/artifacts/Token.ts'
 import { TokenBridgeContract } from "@aztec/noir-contracts.js/TokenBridge";
 // import { TokenBridgeContract } from './constants/aztec/artifacts/TokenBridge.ts'
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee/testing'
-import { SetPublicAuthwitContractInteraction } from '@aztec/aztec.js/authorization'
-import { EmbeddedWallet } from '@aztec/wallets/embedded'
-import { createAztecNodeClient } from '@aztec/aztec.js/node'
-import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
-import { sha256ToField } from '@aztec/foundation/crypto/sha256'
-import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
-import 'dotenv/config'
+import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee/testing";
+import { TestWallet } from "@aztec/test-wallet/server";
+import { createAztecNodeClient } from "@aztec/aztec.js/node";
+import "dotenv/config";
 // @ts-ignore
-import TestERC20Json from './constants/TestERC20.json'
+import PortalSBTJson from "./constants/PortalSBT.json";
+// @ts-ignore
+import TestERC20Json from "./constants/TestERC20.json";
+// @ts-ignore
+import TokenPortalArtifact from "../l1-contracts/out/TokenPortal.sol/TokenPortal.json";
 
 // Fix the bytecode format
-const TestERC20Abi = TestERC20Json.abi
-const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
+const PortalSBTAbi = PortalSBTJson.abi;
+const PortalSBTBytecode = PortalSBTJson.bytecode.object;
 
-import { createPublicClient, getContract, http, toFunctionSelector } from 'viem'
+const TestERC20Abi = TestERC20Json.abi;
+const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`;
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-import { SponsoredFPCContract, SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC'
-import { setupWallet } from './utils/setup_wallet.js'
-import { deploySchnorrAccount } from './utils/deploy_account.js'
-import { getSponsoredFPCInstance } from './utils/sponsored_fpc.js'
-import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
-  createDeployment,
-  saveTokenToDeployment,
-  loadExistingTokens,
-  copyToFrontend,
-  type DeployedToken,
-  type L1ContractAddresses,
-} from './utils/save_contracts.js'
+  createWalletClient,
+  encodePacked,
+  getContract,
+  hashMessage,
+  hexToBytes,
+  http,
+  keccak256,
+  parseAbi,
+  parseEther,
+} from "viem";
+
+import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
+import { setupWallet } from "./utils/setup_wallet.js";
+import { deploySchnorrAccount } from "./utils/deploy_account.js";
+import { getSponsoredFPCInstance } from "./utils/sponsored_fpc.js";
+import { TOKEN_CONFIGS, TokenConfig } from "./constants/tokens.js";
+import {
+  saveTokenToFile,
+  generateSimpleTypescriptFile,
+  loadExistingDeployments,
+  ensureDeploymentEnvironment,
+  DeployedContracts,
+} from "./utils/save_contracts.js";
 import {
   getAztecNodeUrl,
   getL1RpcUrl,
   getTimeouts,
   isDevnet,
-} from './config/config.js'
-import configManager from './config/config.js'
+} from "./config/config.js";
+import { sepolia } from "viem/chains";
+import { privateKeyToAccount } from "viem/accounts";
 
 // Get environment configuration
-const MNEMONIC = process.env.MNEMONIC || 'test test test test test test test test test test test junk'
-const L1_URL = process.env.L1_URL || getL1RpcUrl()
+const MNEMONIC =
+  process.env.MNEMONIC ||
+  "test test test test test test test test test test test junk";
+const L1_URL = process.env.L1_URL || getL1RpcUrl();
 
-const MINT_AMOUNT = BigInt(1e15)
+const passportApiKey = process.env.PASSPORT_API_KEY;
+const passportScorerId = process.env.PASSPORT_SCORER_ID;
+
+const MINT_AMOUNT = BigInt(1e15);
+
+export const deployPortalSBT = async (
+  l1Client: ExtendedViemWalletClient
+): Promise<EthAddress> => {
+  return await deployL1Contract(
+    l1Client,
+    PortalSBTAbi,
+    PortalSBTBytecode as `0x${string}`,
+    []
+  ).then(({ address }) => address);
+};
 
 async function deployTestERC20(
   l1Client: ExtendedViemWalletClient,
@@ -127,8 +153,8 @@ async function deployTokenPortal(
 ): Promise<EthAddress> {
   return await deployL1Contract(
     l1Client,
-    TokenPortalAbi,
-    TokenPortalBytecode,
+    TokenPortalArtifact.abi,
+    TokenPortalArtifact.bytecode.object as `0x${string}`,
     []
   ).then(({ address }) => address);
 }
@@ -234,7 +260,7 @@ async function mintL1Tokens(
 
 async function deployCompleteTokenSetup(
   tokenConfig: TokenConfig,
-  wallet: EmbeddedWallet,
+  wallet: TestWallet,
   ownerWallet: any,
   ownerAztecAddress: AztecAddress,
   l1Client: ExtendedViemWalletClient,
@@ -242,8 +268,8 @@ async function deployCompleteTokenSetup(
   l1ContractAddresses: any,
   sponsoredPaymentMethod: any,
   logger: Logger
-): Promise<DeployedToken> {
-  logger.info(`\n=== Deploying ${tokenConfig.symbol} Token Setup ===`)
+): Promise<DeployedContracts> {
+  logger.info(`\n=== Deploying ${tokenConfig.symbol} Token Setup ===`);
 
   // Generate unique salts for this token
   const { tokenSalt, bridgeSalt } = generateTokenSalts(tokenConfig.symbol);
@@ -301,40 +327,55 @@ async function deployCompleteTokenSetup(
   );
 
   // Deploy L2 token contract
-  logger.info(`🏗️  Deploying L2 ${tokenConfig.symbol} token contract`)
+  logger.info(`🏗️  Deploying L2 ${tokenConfig.symbol} token contract`);
   const l2TokenContract = await TokenContract.deploy(
     ownerWallet,
     ownerAztecAddress,
     tokenConfig.l2Name,
     tokenConfig.l2Symbol,
     tokenConfig.decimals
-  ).send({
-    from: ownerAztecAddress,
-    contractAddressSalt: tokenSalt,
-    fee: { paymentMethod: sponsoredPaymentMethod },
-    wait: { timeout: getTimeouts().deployTimeout },
-  })
+  )
+    .send({
+      from: ownerAztecAddress,
+      contractAddressSalt: tokenSalt,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+    })
+    .deployed({ timeout: getTimeouts().deployTimeout });
 
   logger.info(
     `✅ L2 ${tokenConfig.symbol} token contract deployed at ${l2TokenContract.address}`
   );
 
   // Deploy L2 bridge contract
-  logger.info(`🌉 Deploying L2 bridge contract for ${tokenConfig.symbol}`)
+  logger.info(`🌉 Deploying L2 bridge contract for ${tokenConfig.symbol}`);
   const l2BridgeContract = await TokenBridgeContract.deploy(
     ownerWallet,
     l2TokenContract.address,
     l1PortalContractAddress
-  ).send({
-    from: ownerAztecAddress,
-    contractAddressSalt: bridgeSalt,
-    fee: { paymentMethod: sponsoredPaymentMethod },
-    wait: { timeout: getTimeouts().deployTimeout },
-  })
+  )
+    .send({
+      from: ownerAztecAddress,
+      contractAddressSalt: bridgeSalt,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+    })
+    .deployed({ timeout: getTimeouts().deployTimeout });
 
   logger.info(
     `✅ L2 ${tokenConfig.symbol} bridge contract deployed at ${l2BridgeContract.address}`
-  )
+  );
+
+  // Register L2 contracts with wallet
+  logger.info(
+    `📝 Registering L2 contracts with wallet for ${tokenConfig.symbol}`
+  );
+  await wallet.registerContract({
+    instance: l2TokenContract.instance,
+    artifact: TokenContract.artifact,
+  });
+  await wallet.registerContract({
+    instance: l2BridgeContract.instance,
+    artifact: TokenBridgeContract.artifact,
+  });
 
   // Set Bridge as a minter
   logger.info(`🔑 Setting bridge as minter for ${tokenConfig.symbol}`);
@@ -343,14 +384,14 @@ async function deployCompleteTokenSetup(
     .send({
       from: ownerAztecAddress,
       fee: { paymentMethod: sponsoredPaymentMethod },
-      wait: { timeout: getTimeouts().txTimeout },
     })
+    .wait({ timeout: getTimeouts().txTimeout });
 
   // Initialize L1 portal contract
   logger.info(`🔧 Initializing L1 portal contract for ${tokenConfig.symbol}`);
   const l1Portal = getContract({
     address: l1PortalContractAddress.toString(),
-    abi: TokenPortalAbi,
+    abi: TokenPortalArtifact.abi,
     client: l1Client as any,
   }) as any;
 
@@ -368,17 +409,14 @@ async function deployCompleteTokenSetup(
 
   logger.info(`✅ L1 portal contract for ${tokenConfig.symbol} initialized`);
 
-  const deployedContract: DeployedToken = {
+  const deployedContract: DeployedContracts = {
     symbol: tokenConfig.symbol,
     decimals: tokenConfig.decimals,
     logo: tokenConfig.logo,
-    // L1 contracts
     l1TokenContract: l1TokenContract.toString(),
-    l1PortalContract: l1PortalContractAddress.toString(),
-    // L2 contracts
     l2TokenContract: l2TokenContract.address.toString(),
     l2BridgeContract: l2BridgeContract.address.toString(),
-    // Fee infrastructure
+    l1PortalContract: l1PortalContractAddress.toString(),
     feeAssetHandler: feeAssetHandler.toString(),
     sponsoredFee: "", // Will be set later
   };
@@ -389,11 +427,11 @@ async function deployCompleteTokenSetup(
 // *************************************
 
 async function main() {
-  let wallet: EmbeddedWallet
-  let logger: Logger
+  let wallet: TestWallet;
+  let logger: Logger;
 
-  logger = createLogger('aztec:bridge')
-  
+  logger = createLogger("aztec:");
+
   // Setup wallet
   wallet = await setupWallet();
 
@@ -447,10 +485,13 @@ async function main() {
     throw error;
   }
 
-  logger.info(' ')
-  logger.info('🔧 Setting up sponsored fee payment contract...')
-  const sponsoredFPC = await getSponsoredFPCInstance()
-  await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact)
+  logger.info(" ");
+  logger.info("🔧 Setting up sponsored fee payment contract...");
+  const sponsoredFPC = await getSponsoredFPCInstance();
+  await wallet.registerContract({
+    instance: sponsoredFPC,
+    artifact: SponsoredFPCContract.artifact,
+  });
   const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(
     sponsoredFPC.address
   );
@@ -462,77 +503,37 @@ async function main() {
   await wallet.registerSender(ownerAztecAddress);
   logger.info(`📍 Owner Aztec Address: ${ownerAztecAddress}`);
 
-  // Create versioned deployment file with network + L1 infra info
-  const rollupVersion = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
-  const l2ChainId = nodeInfo.l1ChainId ^ rollupVersion
-  logger.info('\n🔧 Creating versioned deployment...')
-  // Serialize nodeInfo for storage (convert EthAddress/AztecAddress objects to strings)
-  const serializedNodeInfo: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(nodeInfo)) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      // Nested object (e.g. l1ContractAddresses, protocolContractAddresses)
-      const nested: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        nested[k] = v != null && typeof (v as any).toString === 'function' && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean'
-          ? (v as any).toString()
-          : v
-      }
-      serializedNodeInfo[key] = nested
-    } else {
-      serializedNodeInfo[key] = value != null && typeof (value as any).toString === 'function' && typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean'
-        ? (value as any).toString()
-        : value
-    }
-  }
+  // Ensure deployment environment is ready
+  logger.info("\n🔧 Setting up deployment environment...");
+  ensureDeploymentEnvironment();
 
-  createDeployment({
-    nodeUrl,
-    l1RpcUrl: L1_URL,
-    l1ChainId: nodeInfo.l1ChainId,
-    l2ChainId,
-    aztecVersion: configManager.getConfig().settings.version,
-    rollupVersion,
-    networkName: configManager.getConfig().name,
-    l1ContractAddresses: {
-      rollupAddress: l1ContractAddresses.rollupAddress.toString(),
-      registryAddress: l1ContractAddresses.registryAddress.toString(),
-      inboxAddress: l1ContractAddresses.inboxAddress.toString(),
-      outboxAddress: l1ContractAddresses.outboxAddress.toString(),
-    },
-    nodeInfo: serializedNodeInfo,
-    sponsoredFeeAddress: sponsoredFPC.address.toString(),
-  })
-
-  // Check for existing token deployments (for skip-if-deployed checks)
-  logger.info('\n📋 Checking for existing token deployments...')
-  const existingTokens = loadExistingTokens()
-  if (existingTokens.length > 0) {
+  // Check for existing deployments
+  logger.info("\n📋 Checking for existing deployments...");
+  const existingDeployments = loadExistingDeployments();
+  if (existingDeployments) {
     logger.info(
-      `✅ Found ${existingTokens.length} existing tokens`
-    )
+      `✅ Found existing deployments with ${existingDeployments.tokens.length} tokens`
+    );
     logger.info(
-      `🪙 Deployed tokens: ${existingTokens
+      `🪙 Deployed tokens: ${existingDeployments.tokens
         .map((t) => t.symbol)
         .join(", ")}`
     );
   }
 
   // Deploy all tokens and their related contracts
-  logger.info('\n🚀 Starting deployment of all tokens...')
-  const deployedContracts: DeployedToken[] = []
+  logger.info("\n🚀 Starting deployment of all tokens...");
+  const deployedContracts: DeployedContracts[] = [];
 
   for (const tokenConfig of TOKEN_CONFIGS) {
     // Check if token is already deployed
-    const existingToken = existingTokens.find(
+    const existingToken = existingDeployments?.tokens.find(
       (t) => t.symbol === tokenConfig.symbol
-    )
-    if (existingToken && !tokenConfig.forceDeploy) {
-      logger.info(`⏭️  ${tokenConfig.symbol} already deployed, skipping...`)
-      deployedContracts.push(existingToken)
-      continue
-    }
-    if (existingToken && tokenConfig.forceDeploy) {
-      logger.info(`🔄 ${tokenConfig.symbol} already deployed but forceDeploy is set, redeploying...`)
+    );
+    if (existingToken) {
+      logger.info(`⏭️  ${tokenConfig.symbol} already deployed, skipping...`);
+      deployedContracts.push(existingToken);
+      continue;
     }
 
     try {
@@ -550,9 +551,9 @@ async function main() {
       );
       deployedContract.sponsoredFee = sponsoredFPC.address.toString();
 
-      // Save incrementally to active deployment (survives partial failures)
-      saveTokenToDeployment(deployedContract)
-      deployedContracts.push(deployedContract)
+      // Save immediately after successful deployment
+      saveTokenToFile(deployedContract, sponsoredFPC.address.toString());
+      deployedContracts.push(deployedContract);
       logger.info(
         `✅ Successfully deployed and saved ${tokenConfig.symbol} token setup`
       );
@@ -562,9 +563,10 @@ async function main() {
     }
   }
 
-  // Sync active deployment to frontend
-  copyToFrontend()
-  logger.info('✅ Deployment finalized and synced to frontend')
+  // Generate final TypeScript file
+  logger.info("\n📝 Generating final TypeScript file...");
+  generateSimpleTypescriptFile();
+  logger.info("✅ All contract addresses saved and TypeScript file generated!");
 
   // Example: Test with the first deployed token (USDC)
   if (deployedContracts.length > 0) {
@@ -606,96 +608,164 @@ async function main() {
       wallet
     );
 
-    // Registering here is optional; contract instances already carry artifacts.
-    logger.info('📝 Skipping extra L2 contract registration for testing')
-
-    logger.info('🌉 Bridge tokens publicly')
-    logger.info(`📤 Step 1: Send tokens publicly on L1`)
-
-    // Log current L1 block BEFORE network call so we have a starting point if tx fails or script exits before receipt
-    let l1BlockNumberBeforeTx: bigint | undefined
+    // Register the contracts with wallet for testing
+    logger.info("📝 Registering L2 contracts with wallet for testing...");
     try {
-      const l1Public = createPublicClient({ transport: http(L1_URL) })
-      l1BlockNumberBeforeTx = await l1Public.getBlockNumber()
-      logger.info(`[L1→L2] Current L1 block before tx: ${l1BlockNumberBeforeTx}`)
-    } catch (e) {
-      logger.warn(`[L1→L2] Could not get current L1 block number before tx: ${e}`)
+      await wallet.registerContract({
+        instance: l2TokenContract.instance,
+        artifact: TokenContract.artifact,
+      });
+      await wallet.registerContract({
+        instance: l2BridgeContract.instance,
+        artifact: TokenBridgeContract.artifact,
+      });
+      logger.info("✅ L2 contracts registered with wallet");
+    } catch (error) {
+      logger.warn(
+        `⚠️  Contract registration warning (may already be registered): ${error}`
+      );
     }
 
-    const claim = await l1PortalManager.bridgeTokensPublic(
-      ownerAztecAddress,
-      MINT_AMOUNT,
-      true
-    )
+    logger.info("🌉 Bridge tokens publicly");
+    logger.info(`📤 Step 1: Send tokens publicly on L1`);
+    const [claimSecret, claimSecretHash] = await generateClaimSecret();
+    let cleanHandsProof: readonly [bigint, `0x${string}`];
+    let passportProof: readonly [bigint, bigint, bigint, `0x${string}`];
 
-    // Poll for L1→L2 message sync (same pattern as frontend), then final wait before claim
-    const messageHash =
-      (claim as { messageHash?: string }).messageHash ??
-      (claim as { key?: string }).key
-    if (messageHash) {
-      const pollIntervalMs = 120_000 // 2 minutes
-      const maxWaitMs = 20 * 60 * 1000 // 20 min max
-      const startWait = Date.now()
-      let messageSynced = false
-      const messageHashFr = Fr.fromString(messageHash)
-      logger.info(
-        `⏳ Polling for L1→L2 message sync (messageHash=${messageHash.slice(0, 18)}...)...`
-      )
-      while (Date.now() - startWait < maxWaitMs) {
-        try {
-          const messageBlock = await node.getL1ToL2MessageBlock(messageHashFr)
-          messageSynced = messageBlock !== undefined
-          if (messageSynced) {
-            logger.info(
-              `✅ L1→L2 message ready (block=${messageBlock}), proceeding to claim.`
-            )
-            break
-          }
-          logger.info(
-            `   L1→L2 message not yet synced. Waiting ${pollIntervalMs / 1000}s...`
-          )
-        } catch (e) {
-          logger.warn(`   Poll check failed, retrying: ${e}`)
+    const actionId = 123456789n;
+    const userAddress = l1Client.account.address;
+
+    const resp = await fetch(
+      `https://api.holonym.io/attestation/sbts/clean-hands?action-id=${actionId}&address=${userAddress}`
+    );
+
+    const { signature: cleanHandsSig } = await resp.json();
+
+    if (cleanHandsSig) {
+      cleanHandsProof = [actionId, cleanHandsSig];
+
+      passportProof = [
+        0n, // maxAllowedAmt dummy
+        0n, // nonce dummy
+        0n, // deadline dummy
+        "0x", // passportSig dummy
+      ];
+    }
+    else {
+      logger.info(`Clean Hands missing → Falling back to Passport`);
+
+      if (!passportApiKey || !passportScorerId) {
+        throw new Error("Missing Passport API configuration");
+      }
+
+      const response = await fetch(
+        `https://api.passport.xyz/v2/stamps/${passportScorerId}/score/${userAddress}`,
+        {
+          headers: { "X-API-KEY": passportApiKey },
         }
-        await wait(pollIntervalMs)
-      }
-      if (!messageSynced) {
-        const elapsedMin = (Date.now() - startWait) / 1000 / 60
-        logger.warn(
-          `⚠️ L1→L2 message sync timeout after ${elapsedMin.toFixed(1)} min; attempting claim anyway.`
-        )
-      }
-      const finalWaitMs = 120_000 // 2 minutes 
-      logger.info(
-        `⏳ Final wait before claiming (${finalWaitMs / 1000}s)...`
-      )
-      await wait(finalWaitMs)
-    } else {
-      logger.info(
-        `⚠️ No messageHash on claim; claiming immediately (polling skipped).`
-      )
-    }
+      );
 
+      if (!response.ok) {
+        throw new Error("Failed to fetch Passport score");
+      }
+
+      const data = await response.json();
+      const score = BigInt(parseInt(data.score) || 0);
+
+      let maxAllowedAmt =
+        score < 20n ? parseEther("0.001") : parseEther("1000");
+
+      const nonce = BigInt(Math.floor(Math.random() * 10_000_000));
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
+      const contractAddress = l1PortalContractAddress.toString();
+
+      const messageHash = keccak256(
+        encodePacked(
+          ["address", "uint256", "uint256", "uint256", "address"],
+          [userAddress, maxAllowedAmt, nonce, deadline, contractAddress]
+        )
+      );
+
+      const ethSignedMessageHash = hashMessage({
+        raw: hexToBytes(messageHash),
+      });
+
+      const passportAttestorPrivateKey = process.env
+        .PASSPORT_ATTESTOR_PRIVATE_KEY as `0x${string}`;
+
+      if (!passportAttestorPrivateKey) {
+        throw new Error("Missing passport attestor private key");
+      }
+
+      const account = privateKeyToAccount(passportAttestorPrivateKey);
+
+      const passportAttestorWallet = createWalletClient({
+        account,
+        chain: sepolia,
+        transport: http(),
+      });
+
+      const passportSig = await passportAttestorWallet.signMessage({
+        message: {
+          raw: hexToBytes(ethSignedMessageHash),
+        },
+      });
+
+      cleanHandsProof = [actionId, "0x"];
+      passportProof = [maxAllowedAmt, nonce, deadline, passportSig];
+    }
+    const { request } = await l1Client.simulateContract({
+      address: l1PortalContractAddress.toString(),
+      abi: parseAbi([
+        "function depositToAztecPublic(bytes32,uint256,bytes32,(uint256,bytes),(uint256,uint256,uint256,bytes)) returns (bytes32, uint256)",
+      ]),
+      functionName: "depositToAztecPublic",
+      args: [
+        ownerAztecAddress.toString(),
+        MINT_AMOUNT,
+        claimSecretHash.toString(),
+        cleanHandsProof,
+        passportProof,
+      ],
+      account: l1Client.account,
+    });
+    const txReceipt = await l1Client.waitForTransactionReceipt({
+      hash: await l1Client.writeContract(request),
+    });
+    const log = extractEvent(
+      txReceipt.logs,
+      l1PortalContractAddress.toString(),
+      parseAbi([
+        "event DepositToAztecPublic(bytes32 to, uint256 amount, bytes32 secretHash, bytes32 key, uint256 index)",
+      ]),
+      "DepositToAztecPublic",
+      (log) =>
+        log.args.secretHash === claimSecretHash.toString() &&
+        log.args.amount === MINT_AMOUNT &&
+        log.args.to === ownerAztecAddress.toString(),
+      logger
+    );
+    const messageLeafIndex = log.args.index;
     // Claim tokens publicly on L2
     logger.info(`📥 Step 2: Claim tokens publicly on L2`);
     logger.info(`📋 Claim parameters:`);
     logger.info(`  - 👤 ownerAztecAddress: ${ownerAztecAddress}`);
     logger.info(`  - 💰 MINT_AMOUNT: ${MINT_AMOUNT}`);
-    logger.info(`  - 🔐 claimSecret: ${claim.claimSecret}`);
-    logger.info(`  - 📍 messageLeafIndex: ${claim.messageLeafIndex}`);
+    logger.info(`  - 🔐 claimSecret: ${claimSecret}`);
+    logger.info(`  - 📍 messageLeafIndex: ${messageLeafIndex}`);
 
     await l2BridgeContract.methods
       .claim_public(
         ownerAztecAddress,
         MINT_AMOUNT,
-        claim.claimSecret,
-        claim.messageLeafIndex
+        claimSecret,
+        messageLeafIndex
       )
       .send({
         from: ownerAztecAddress,
         fee: { paymentMethod: sponsoredPaymentMethod },
-        wait: { timeout: getTimeouts().txTimeout },
       })
+      .wait({ timeout: getTimeouts().txTimeout });
     const balance = await l2TokenContract.methods
       .balance_of_public(ownerAztecAddress)
       .simulate({ from: ownerAztecAddress });
@@ -706,8 +776,7 @@ async function main() {
     const nonce = Fr.random();
 
     // Give approval to bridge to burn owner's funds:
-    const authwit = await SetPublicAuthwitContractInteraction.create(
-      wallet,
+    const authwit = await wallet.setPublicAuthWit(
       ownerAztecAddress,
       {
         caller: l2BridgeContract.address,
@@ -721,39 +790,16 @@ async function main() {
     );
     await authwit
       .send({
-        fee: { paymentMethod: sponsoredPaymentMethod as any },
-        wait: { timeout: getTimeouts().txTimeout },
+        fee: { paymentMethod: sponsoredPaymentMethod },
       })
+      .wait({ timeout: getTimeouts().txTimeout });
 
-    const selectorBuf = Buffer.from(
-      toFunctionSelector('withdraw(address,uint256,address)').slice(2),
-      'hex'
-    )
-    const recipient = EthAddress.fromString(ownerEthAddress)
-    const callerOnL1 = EthAddress.ZERO
-    const content = sha256ToField([
-      selectorBuf,
-      recipient.toBuffer32(),
-      new Fr(withdrawAmount).toBuffer(),
-      callerOnL1.toBuffer32(),
-    ])
-    const msgLeaf = computeL2ToL1MessageHash({
-      l2Sender: l2BridgeContract.address,
-      l1Recipient: EthAddress.fromString(firstToken.l1PortalContract),
-      content,
-      rollupVersion: new Fr(rollupVersion),
-      chainId: new Fr(nodeInfo.l1ChainId),
-    })
-
-    // Log current L2 block BEFORE network call so we have a starting point if tx fails or script exits before receipt
-    let l2BlockNumberBeforeTx: number | undefined
-    try {
-      l2BlockNumberBeforeTx = await node.getBlockNumber()
-      logger.info(`[L2→L1] Current L2 block before tx: ${l2BlockNumberBeforeTx}`)
-    } catch (e) {
-      logger.warn(`[L2→L1] Could not get current L2 block number before tx: ${e}`)
-    }
-
+    const l2ToL1Message = await l1PortalManager.getL2ToL1MessageLeaf(
+      withdrawAmount,
+      EthAddress.fromString(ownerEthAddress),
+      l2BridgeContract.address,
+      EthAddress.ZERO
+    );
     const l2TxReceipt = await l2BridgeContract.methods
       .exit_to_l1_public(
         EthAddress.fromString(ownerEthAddress),
@@ -764,105 +810,38 @@ async function main() {
       .send({
         from: ownerAztecAddress,
         fee: { paymentMethod: sponsoredPaymentMethod },
-        wait: { timeout: getTimeouts().txTimeout, returnReceipt: true },
       })
+      .wait({ timeout: getTimeouts().txTimeout });
 
     const newL2Balance = await l2TokenContract.methods
       .balance_of_public(ownerAztecAddress)
       .simulate({ from: ownerAztecAddress });
     logger.info(`💰 New L2 balance of ${ownerAztecAddress} is ${newL2Balance}`);
 
-    const finalWaitMs = 120_000 // 2 minutes 
-    logger.info(`⏳ Final wait before proof (${finalWaitMs / 1000}s)...`)
-    await wait(finalWaitMs)
+    // Wait 45 minutes for L2 to L1 message to be processed
+    logger.info(
+      "⏳ Waiting 45 minutes for L2 to L1 message to be processed before withdrawal..."
+    );
+    const delayMs = 45 * 60 * 1000; // 45 minutes in milliseconds
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    logger.info("✅ 45-minute delay completed, proceeding with withdrawal...");
 
-    const blockNumber = l2TxReceipt.blockNumber! // L2 block where the L2→L1 message was emitted
-
-    // Poll L1 Rollup for proven block (same pattern as frontend), then fallback to fixed wait if needed
-    const rollupAddress =
-      l1ContractAddresses?.rollupAddress != null
-        ? l1ContractAddresses.rollupAddress.toString()
-        : undefined
-    const pollIntervalMs = 120_000 // 2 minutes
-    const maxWaitMs = 50 * 60 * 1000 // 50 min max
-    const startWait = Date.now()
-    let blockProven = false
-    let usedPoll = false
-    if (rollupAddress) {
-      try {
-        logger.info(
-          `⏳ Polling L1 Rollup for proven block (blockNumber=${blockNumber})...`
-        )
-        usedPoll = true
-        while (Date.now() - startWait < maxWaitMs) {
-          const proven = await l1Client.readContract({
-            address: rollupAddress as `0x${string}`,
-            abi: RollupAbi,
-            functionName: 'getProvenCheckpointNumber',
-          })
-          const provenBlock = typeof proven === 'bigint' ? Number(proven) : proven
-          if (provenBlock >= blockNumber) {
-            logger.info(
-              `✅ L2 block ${blockNumber} is proven on L1 (proven=${provenBlock}), proceeding.`
-            )
-            blockProven = true
-            break
-          }
-          logger.info(
-            `   L2 block not yet proven (proven=${provenBlock}, need ${blockNumber}). Waiting ${pollIntervalMs / 1000}s...`
-          )
-          await wait(pollIntervalMs)
-        }
-        if (!blockProven) {
-          logger.warn(
-            `⚠️ Max wait reached; proceeding with L1 withdraw (may revert if block not proven).`
-          )
-        }
-      } catch (e) {
-        logger.warn(`⚠️ L1 Rollup poll failed, using fixed 40 min wait: ${e}`)
-        usedPoll = false
-      }
-    }
-    if (!blockProven && !usedPoll) {
-      logger.info(
-        '⏳ Waiting 40 minutes for L2→L1 message to be processable on L1...'
-      )
-      await wait(40 * 60 * 1000)
-    }
-    // Convert block number → checkpoint → epoch 
-    const rollup = new RollupContract(l1Client, rollupAddress as any)
-    const epoch = await rollup.getEpochNumberForCheckpoint(
-      CheckpointNumber.fromBlockNumber(blockNumber)
-    )
-    logger.info(`📦 Block ${blockNumber} → Epoch ${epoch}`)
-
-    const witness = await computeL2ToL1MembershipWitness(node, epoch, msgLeaf)
-    if (!witness) {
-      throw new Error(`L2→L1 message not found in epoch ${epoch} (block ${blockNumber})`)
-    }
-    const siblingPathHex = witness!.siblingPath
-      .toBufferArray()
-      .map((buf: Buffer) => `0x${buf.toString('hex')}` as `0x${string}`)
-    // Withdraw on L1 (same pattern as Aztec NFT example: direct contract call with siblingPathHex)
-    const l1Portal = getContract({
-      address: firstToken.l1PortalContract as `0x${string}`,
-      abi: TokenPortalAbi,
-      client: l1Client as any,
-    }) as any
-    const withdrawTx = await l1Portal.write.withdraw([
-      ownerEthAddress,
+    const blockNumber = await node.getBlockNumber();
+    // Use node client for L2ToL1MembershipWitness as wallet doesn't have this method
+    const [l2ToL1MessageIndex, siblingPath] = await (
+      node as any
+    ).getL2ToL1MembershipWitness(blockNumber, l2ToL1Message);
+    await l1PortalManager.withdrawFunds(
       withdrawAmount,
-      false,
-      BigInt(epoch),
-      BigInt(witness!.leafIndex),
-      siblingPathHex,
-    ])
-    await l1Client.waitForTransactionReceipt({
-      hash: withdrawTx,
-      timeout: getTimeouts().txTimeout,
-    })
-    const newL1Balance = await l1TokenManager.getL1TokenBalance(ownerEthAddress)
-    logger.info(`💰 New L1 balance of ${ownerEthAddress} is ${newL1Balance}`)
+      EthAddress.fromString(ownerEthAddress),
+      BigInt(l2TxReceipt.blockNumber!),
+      l2ToL1MessageIndex,
+      siblingPath
+    );
+    const newL1Balance = await l1TokenManager.getL1TokenBalance(
+      ownerEthAddress
+    );
+    logger.info(`💰 New L1 balance of ${ownerEthAddress} is ${newL1Balance}`);
   } else {
     logger.warn(
       "⚠️  No tokens were deployed successfully. Skipping bridge test."
