@@ -132,17 +132,32 @@ import configManager from './config/config.js'
 const MNEMONIC = process.env.MNEMONIC || 'test test test test test test test test test test test junk'
 const L1_URL = process.env.L1_URL || getL1RpcUrl()
 
-const MINT_AMOUNT = BigInt(1e15)
-const FEE_BASIS_POINTS = 500n // 5% fee
-const CLEAN_HANDS_CIRCUIT_ID = 1n // arbitrary circuit ID for testing
+const MINT_AMOUNT = BigInt(process.env.MINT_AMOUNT || '1000000000000000') // 1e15
+const FEE_BASIS_POINTS = BigInt(process.env.FEE_BASIS_POINTS || '500') // 5% fee
+const CLEAN_HANDS_CIRCUIT_ID = BigInt(process.env.CLEAN_HANDS_CIRCUIT_ID || '1')
 
-// Temp attestation keys for testing
-// In production these would be managed by the attestation service
-const POCH_ATTESTER_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex
-const PASSPORT_SIGNER_PRIVATE_KEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d' as Hex
+// Attestation/signer keys — MUST be set in .env for production
+const POCH_ATTESTER_PRIVATE_KEY = (process.env.POCH_ATTESTER_PRIVATE_KEY
+  ? (process.env.POCH_ATTESTER_PRIVATE_KEY.startsWith('0x')
+    ? process.env.POCH_ATTESTER_PRIVATE_KEY
+    : `0x${process.env.POCH_ATTESTER_PRIVATE_KEY}`)
+  : '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80') as Hex
+const PASSPORT_SIGNER_PRIVATE_KEY = (process.env.PASSPORT_SIGNER_PRIVATE_KEY
+  ? (process.env.PASSPORT_SIGNER_PRIVATE_KEY.startsWith('0x')
+    ? process.env.PASSPORT_SIGNER_PRIVATE_KEY
+    : `0x${process.env.PASSPORT_SIGNER_PRIVATE_KEY}`)
+  : '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d') as Hex
 
 const pochAttesterAccount = privateKeyToAccount(POCH_ATTESTER_PRIVATE_KEY)
 const passportSignerAccount = privateKeyToAccount(PASSPORT_SIGNER_PRIVATE_KEY)
+
+// ─── Run mode ────────────────────────────────────────────────────────────────
+// RUN_TESTS_ONLY=true  — skip deployment, only run tests against existing tokens
+// DEPLOY_ONLY=true     — deploy tokens but skip tests
+// DEPLOY_TOKEN=USDC    — only deploy this specific token (others skipped even if new)
+const RUN_TESTS_ONLY = process.env.RUN_TESTS_ONLY === 'true'
+const DEPLOY_ONLY = process.env.DEPLOY_ONLY === 'true'
+const DEPLOY_TOKEN = process.env.DEPLOY_TOKEN || '' // e.g. 'USDC'
 
 // ─── Helpers: Public key → [u8; 32] ─────────────────────────────────────────
 
@@ -1503,6 +1518,9 @@ async function main() {
   logger.info(`Passport Signer:  ${passportSignerAccount.address}`)
   logger.info(`Fee Basis Points: ${FEE_BASIS_POINTS}`)
   logger.info(`Circuit ID:       ${CLEAN_HANDS_CIRCUIT_ID}`)
+  if (RUN_TESTS_ONLY) logger.info('Mode: RUN_TESTS_ONLY — skipping deployment')
+  if (DEPLOY_ONLY) logger.info('Mode: DEPLOY_ONLY — skipping tests')
+  if (DEPLOY_TOKEN) logger.info(`Mode: DEPLOY_TOKEN=${DEPLOY_TOKEN} — only deploying this token`)
 
   // Setup wallet
   const wallet = await setupWallet()
@@ -1540,223 +1558,268 @@ async function main() {
 
   const rollupVersion = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
   const l2ChainId = nodeInfo.l1ChainId ^ rollupVersion
-  const tokenConfig = TOKEN_CONFIGS[0]
-  const skipDeploy = process.env.SKIP_DEPLOY === 'true'
+  // Create deployment record (once, before the token loop)
+  const serializedNodeInfo: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(nodeInfo)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const nested: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        nested[k] = v != null && typeof (v as any).toString === 'function' && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean'
+          ? (v as any).toString() : v
+      }
+      serializedNodeInfo[key] = nested
+    } else {
+      serializedNodeInfo[key] = value != null && typeof (value as any).toString === 'function' && typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean'
+        ? (value as any).toString() : value
+    }
+  }
 
-  // Check for existing deployment
+  createDeployment({
+    nodeUrl,
+    l1RpcUrl: L1_URL,
+    l1ChainId: nodeInfo.l1ChainId,
+    l2ChainId,
+    aztecVersion: configManager.getConfig().settings.version,
+    rollupVersion,
+    networkName: configManager.getConfig().name,
+    l1ContractAddresses: {
+      rollupAddress: l1ContractAddresses.rollupAddress.toString(),
+      registryAddress: l1ContractAddresses.registryAddress.toString(),
+      inboxAddress: l1ContractAddresses.inboxAddress.toString(),
+      outboxAddress: l1ContractAddresses.outboxAddress.toString(),
+    },
+    nodeInfo: serializedNodeInfo,
+    sponsoredFeeAddress: sponsoredFPC.address.toString(),
+  })
+
+  // Check for existing token deployments (for skip-if-deployed checks)
+  logger.info('\n📋 Checking for existing token deployments...')
   const existingTokens = loadExistingTokens()
-  const existingToken = existingTokens.find(t => t.symbol === tokenConfig.symbol) as DeployedCompliantToken | undefined
+  if (existingTokens.length > 0) {
+    logger.info(`✅ Found ${existingTokens.length} existing tokens`)
+    logger.info(`🪙 Deployed tokens: ${existingTokens.map((t) => t.symbol).join(', ')}`)
+  }
 
-  let deployed: DeployedCompliantToken
+  const deployedContracts: DeployedCompliantToken[] = []
 
-  if (skipDeploy && existingToken?.l2ProxyContract) {
-    logger.info(`\nSkipping deployment — reusing existing ${tokenConfig.symbol} contracts`)
-    logger.info(`  L1 Portal:  ${existingToken.l1PortalContract}`)
-    logger.info(`  L2 Bridge:  ${existingToken.l2BridgeContract}`)
-    logger.info(`  L2 Proxy:   ${existingToken.l2ProxyContract}`)
-    logger.info(`  L2 Token:   ${existingToken.l2TokenContract}`)
-    deployed = existingToken
+  if (RUN_TESTS_ONLY) {
+    // Skip all deployment — load existing tokens as compliant tokens
+    logger.info('\n⏭️  RUN_TESTS_ONLY: loading existing tokens, skipping deployment...')
+    for (const t of existingTokens) {
+      deployedContracts.push(t as DeployedCompliantToken)
+    }
   } else {
-    if (skipDeploy) {
-      logger.info(`SKIP_DEPLOY set but no existing compliant deployment found, deploying...`)
+    // Determine which tokens to deploy
+    const tokensToProcess = DEPLOY_TOKEN
+      ? TOKEN_CONFIGS.filter(tc => tc.symbol.toUpperCase() === DEPLOY_TOKEN.toUpperCase())
+      : TOKEN_CONFIGS
+
+    if (DEPLOY_TOKEN && tokensToProcess.length === 0) {
+      logger.error(`❌ DEPLOY_TOKEN=${DEPLOY_TOKEN} not found in TOKEN_CONFIGS. Available: ${TOKEN_CONFIGS.map(t => t.symbol).join(', ')}`)
+      process.exit(1)
     }
 
-    // Create deployment record
-    const serializedNodeInfo: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(nodeInfo)) {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        const nested: Record<string, unknown> = {}
-        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-          nested[k] = v != null && typeof (v as any).toString === 'function' && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean'
-            ? (v as any).toString() : v
+    // When deploying a subset, carry over existing tokens that aren't being redeployed
+    if (DEPLOY_TOKEN) {
+      for (const t of existingTokens) {
+        if (t.symbol.toUpperCase() !== DEPLOY_TOKEN.toUpperCase()) {
+          deployedContracts.push(t as DeployedCompliantToken)
         }
-        serializedNodeInfo[key] = nested
-      } else {
-        serializedNodeInfo[key] = value != null && typeof (value as any).toString === 'function' && typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean'
-          ? (value as any).toString() : value
       }
     }
 
-    createDeployment({
-      nodeUrl,
-      l1RpcUrl: L1_URL,
-      l1ChainId: nodeInfo.l1ChainId,
-      l2ChainId,
-      aztecVersion: configManager.getConfig().settings.version,
-      rollupVersion,
-      networkName: configManager.getConfig().name,
-      l1ContractAddresses: {
-        rollupAddress: l1ContractAddresses.rollupAddress.toString(),
-        registryAddress: l1ContractAddresses.registryAddress.toString(),
-        inboxAddress: l1ContractAddresses.inboxAddress.toString(),
-        outboxAddress: l1ContractAddresses.outboxAddress.toString(),
-      },
-      nodeInfo: serializedNodeInfo,
-      sponsoredFeeAddress: sponsoredFPC.address.toString(),
-    })
+    logger.info(`\n🚀 Starting deployment of ${tokensToProcess.length} token(s)...`)
 
-    logger.info(`\nDeploying compliant setup for ${tokenConfig.symbol}...`)
+    for (const tokenConfig of tokensToProcess) {
+      // Check if token is already deployed
+      const existingToken = existingTokens.find(
+        (t) => t.symbol === tokenConfig.symbol
+      ) as DeployedCompliantToken | undefined
+      if (existingToken && existingToken.l2ProxyContract && !tokenConfig.forceDeploy) {
+        logger.info(`⏭️  ${tokenConfig.symbol} already deployed, skipping...`)
+        deployedContracts.push(existingToken)
+        continue
+      }
+      if (existingToken && tokenConfig.forceDeploy) {
+        logger.info(`🔄 ${tokenConfig.symbol} already deployed but forceDeploy is set, redeploying...`)
+      }
 
-    deployed = await deployCompliantTokenSetup(
-      tokenConfig,
-      wallet,
-      ownerAztecAddress,
-      l1Client,
-      ownerEthAddress,
-      l1ContractAddresses,
-      sponsoredPaymentMethod,
-      logger
-    )
-    deployed.sponsoredFee = sponsoredFPC.address.toString()
-    saveTokenToDeployment(deployed)
-    logger.info(`\nAll contracts deployed for ${tokenConfig.symbol}!`)
-  }
+      try {
+        logger.info(`\n🔄 Deploying compliant setup for ${tokenConfig.symbol}...`)
+        const deployed = await deployCompliantTokenSetup(
+          tokenConfig,
+          wallet,
+          ownerAztecAddress,
+          l1Client,
+          ownerEthAddress,
+          l1ContractAddresses,
+          sponsoredPaymentMethod,
+          logger
+        )
+        deployed.sponsoredFee = sponsoredFPC.address.toString()
 
-  // Register contract artifacts with PXE so it can execute private functions.
-  // When deploying fresh, deployment auto-registers. With SKIP_DEPLOY we must do it manually.
-  logger.info(`Registering contract artifacts with PXE...`)
-  const contractsToRegister = [
-    { address: deployed.l2BridgeContract, artifact: TokenBridgeContractArtifact, name: 'TokenBridge' },
-    { address: deployed.l2ProxyContract, artifact: TokenMinterProxyContractArtifact, name: 'TokenMinterProxy' },
-    { address: deployed.l2TokenContract, artifact: TokenContractArtifact, name: 'Token' },
-  ]
-  for (const { address, artifact, name } of contractsToRegister) {
-    const aztecAddr = AztecAddress.fromString(address)
-    const instance = await node.getContract(aztecAddr)
-    if (!instance) {
-      logger.warn(`[PXE] Contract instance not found on node for ${name} at ${address} — may already be registered`)
-      continue
+        // Save incrementally to active deployment (survives partial failures)
+        saveTokenToDeployment(deployed)
+        deployedContracts.push(deployed)
+        logger.info(`✅ Successfully deployed and saved ${tokenConfig.symbol} compliant token setup`)
+      } catch (error) {
+        logger.error(`❌ Failed to deploy ${tokenConfig.symbol}: ${error}`)
+        // Continue with other tokens even if one fails
+      }
     }
-    await wallet.registerContract(instance, artifact)
-    logger.info(`[PXE] Registered ${name} at ${address}`)
+
+    // Sync active deployment to frontend
+    copyToFrontend()
+    logger.info('✅ Deployment finalized and synced to frontend')
   }
 
-  // Instantiate L2 contract handles (reused across tests)
-  const l2BridgeContract = TokenBridgeContract.at(
-    AztecAddress.fromString(deployed.l2BridgeContract),
-    wallet
-  )
-  const l2TokenContract = TokenContract.at(
-    AztecAddress.fromString(deployed.l2TokenContract),
-    wallet
-  )
+  // Run tests against the first deployed compliant token
+  if (DEPLOY_ONLY) {
+    logger.info('\n⏭️  DEPLOY_ONLY: skipping tests')
+  } else if (deployedContracts.length > 0) {
+    const deployed = deployedContracts[0]
+    logger.info(`\n🧪 Running compliant bridge tests against ${deployed.symbol}...`)
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 1: L1 Public Deposit → L2 Public Claim (no attestation)
-  // ════════════════════════════════════════════════════════════════════════════
-  await testPublicBridgeFlow(
-    deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion, logger
-  )
+    // Register contract artifacts with PXE so it can execute private functions.
+    // When deploying fresh, deployment auto-registers. With skip-if-deployed we must do it manually.
+    logger.info(`Registering contract artifacts with PXE...`)
+    const contractsToRegister = [
+      { address: deployed.l2BridgeContract, artifact: TokenBridgeContractArtifact, name: 'TokenBridge' },
+      { address: deployed.l2ProxyContract, artifact: TokenMinterProxyContractArtifact, name: 'TokenMinterProxy' },
+      { address: deployed.l2TokenContract, artifact: TokenContractArtifact, name: 'Token' },
+    ]
+    for (const { address, artifact, name } of contractsToRegister) {
+      const aztecAddr = AztecAddress.fromString(address)
+      const instance = await node.getContract(aztecAddr)
+      if (!instance) {
+        logger.warn(`[PXE] Contract instance not found on node for ${name} at ${address} — may already be registered`)
+        continue
+      }
+      await wallet.registerContract(instance, artifact)
+      logger.info(`[PXE] Registered ${name} at ${address}`)
+    }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 2: L1 Private Deposit (POCH) → L2 Private Claim
-  // ════════════════════════════════════════════════════════════════════════════
-  const pochResult = await testPrivateDepositAndClaimFlow(
-    'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    l1ContractAddresses, sponsoredPaymentMethod, node, logger
-  )
-  logger.info(`POCH deposit+claim result: amountAfterFee=${pochResult.amountAfterFee}`)
+    // Instantiate L2 contract handles (reused across tests)
+    const l2BridgeContract = TokenBridgeContract.at(
+      AztecAddress.fromString(deployed.l2BridgeContract),
+      wallet
+    )
+    const l2TokenContract = TokenContract.at(
+      AztecAddress.fromString(deployed.l2TokenContract),
+      wallet
+    )
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 3: L1 Private Deposit (Passport) → L2 Private Claim
-  // ════════════════════════════════════════════════════════════════════════════
-  const passportResult = await testPrivateDepositAndClaimFlow(
-    'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    l1ContractAddresses, sponsoredPaymentMethod, node, logger
-  )
-  logger.info(`Passport deposit+claim result: amountAfterFee=${passportResult.amountAfterFee}`)
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 1: L1 Public Deposit → L2 Public Claim (no attestation)
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPublicBridgeFlow(
+      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion, logger
+    )
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 4: L2 Public Exit → L1 Withdraw (no attestation)
-  // ════════════════════════════════════════════════════════════════════════════
-  await testPublicExitFlow(
-    deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion,
-    l2BridgeContract, l2TokenContract, logger
-  )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 2: L1 Private Deposit (POCH) → L2 Private Claim
+    // ════════════════════════════════════════════════════════════════════════════
+    const pochResult = await testPrivateDepositAndClaimFlow(
+      'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, logger
+    )
+    logger.info(`POCH deposit+claim result: amountAfterFee=${pochResult.amountAfterFee}`)
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 5: L2 Private Exit (POCH) → L1 Withdraw
-  // ════════════════════════════════════════════════════════════════════════════
-  await testPrivateExitFlow(
-    'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion,
-    l2BridgeContract, l2TokenContract, logger
-  )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 3: L1 Private Deposit (Passport) → L2 Private Claim
+    // ════════════════════════════════════════════════════════════════════════════
+    const passportResult = await testPrivateDepositAndClaimFlow(
+      'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, logger
+    )
+    logger.info(`Passport deposit+claim result: amountAfterFee=${passportResult.amountAfterFee}`)
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 6: L2 Private Exit (Passport) → L1 Withdraw
-  // ════════════════════════════════════════════════════════════════════════════
-  await testPrivateExitFlow(
-    'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion,
-    l2BridgeContract, l2TokenContract, logger
-  )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 4: L2 Public Exit → L1 Withdraw (no attestation)
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPublicExitFlow(
+      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion,
+      l2BridgeContract, l2TokenContract, logger
+    )
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 7: Negative — Public Deposit → Private Claim (should FAIL)
-  // ════════════════════════════════════════════════════════════════════════════
-  await testNegativeCrossClaim(
-    'public_deposit_private_claim', deployed, wallet, ownerAztecAddress,
-    l1Client, ownerEthAddress, sponsoredPaymentMethod, node, logger
-  )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 5: L2 Private Exit (POCH) → L1 Withdraw
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPrivateExitFlow(
+      'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion,
+      l2BridgeContract, l2TokenContract, logger
+    )
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 8: Negative — Private Deposit → Public Claim (should FAIL)
-  // ════════════════════════════════════════════════════════════════════════════
-  await testNegativeCrossClaim(
-    'private_deposit_public_claim', deployed, wallet, ownerAztecAddress,
-    l1Client, ownerEthAddress, sponsoredPaymentMethod, node, logger
-  )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 6: L2 Private Exit (Passport) → L1 Withdraw
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPrivateExitFlow(
+      'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion,
+      l2BridgeContract, l2TokenContract, logger
+    )
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 9: Negative — Wrong Aztec address can't claim_public
-  // ════════════════════════════════════════════════════════════════════════════
-  await testWrongRecipientCantClaimPublic(
-    deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    sponsoredPaymentMethod, node, logger
-  )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 7: Negative — Public Deposit → Private Claim (should FAIL)
+    // ════════════════════════════════════════════════════════════════════════════
+    await testNegativeCrossClaim(
+      'public_deposit_private_claim', deployed, wallet, ownerAztecAddress,
+      l1Client, ownerEthAddress, sponsoredPaymentMethod, node, logger
+    )
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 10: Negative — Wrong secret can't claim_private
-  // ════════════════════════════════════════════════════════════════════════════
-  await testWrongSecretCantClaimPrivate(
-    deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    sponsoredPaymentMethod, node, logger
-  )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 8: Negative — Private Deposit → Public Claim (should FAIL)
+    // ════════════════════════════════════════════════════════════════════════════
+    await testNegativeCrossClaim(
+      'private_deposit_public_claim', deployed, wallet, ownerAztecAddress,
+      l1Client, ownerEthAddress, sponsoredPaymentMethod, node, logger
+    )
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Test 11: Negative — Non-holder can't exit_to_l1_public
-  // ════════════════════════════════════════════════════════════════════════════
-  await testNonHolderCantExit(
-    deployed, wallet, ownerAztecAddress, l2BridgeContract, l2TokenContract,
-    sponsoredPaymentMethod, logger
-  )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 9: Negative — Wrong Aztec address can't claim_public
+    // ════════════════════════════════════════════════════════════════════════════
+    await testWrongRecipientCantClaimPublic(
+      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      sponsoredPaymentMethod, node, logger
+    )
 
-  // Sync to frontend
-  copyToFrontend()
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 10: Negative — Wrong secret can't claim_private
+    // ════════════════════════════════════════════════════════════════════════════
+    await testWrongSecretCantClaimPrivate(
+      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      sponsoredPaymentMethod, node, logger
+    )
 
-  logger.info('\n=== ALL 11 COMPLIANT BRIDGE TESTS COMPLETE ===')
-  logger.info(`Token:           ${tokenConfig.symbol}`)
-  logger.info(`L1 Portal:       ${deployed.l1PortalContract}`)
-  logger.info(`L2 Bridge:       ${deployed.l2BridgeContract}`)
-  logger.info(`L2 Proxy:        ${deployed.l2ProxyContract}`)
-  logger.info(`L2 Token:        ${deployed.l2TokenContract}`)
-  logger.info(`POCH Attester:   ${deployed.humanIdAttester}`)
-  logger.info(`Passport Signer: ${deployed.passportSigner}`)
-  logger.info(`Tests passed:`)
-  logger.info(`  1. L1 Public  → L2 Public  (deposit + claim)`)
-  logger.info(`  2. L1 Private → L2 Private (POCH deposit + claim)`)
-  logger.info(`  3. L1 Private → L2 Private (Passport deposit + claim)`)
-  logger.info(`  4. L2 Public  → L1         (exit_to_l1_public + withdraw)`)
-  logger.info(`  5. L2 Private → L1         (exit_to_l1_private POCH + withdraw)`)
-  logger.info(`  6. L2 Private → L1         (exit_to_l1_private Passport + withdraw)`)
-  logger.info(`  7. NEGATIVE: L1 Public  → L2 Private claim (content hash mismatch)`)
-  logger.info(`  8. NEGATIVE: L1 Private → L2 Public claim  (content hash mismatch)`)
-  logger.info(`  9. NEGATIVE: Wrong Aztec address can't claim_public`)
-  logger.info(` 10. NEGATIVE: Wrong secret can't claim_private`)
-  logger.info(` 11. NEGATIVE: Non-holder can't exit (insufficient balance/no authwit)`)
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 11: Negative — Non-holder can't exit_to_l1_public
+    // ════════════════════════════════════════════════════════════════════════════
+    await testNonHolderCantExit(
+      deployed, wallet, ownerAztecAddress, l2BridgeContract, l2TokenContract,
+      sponsoredPaymentMethod, logger
+    )
+
+    logger.info('\n=== ALL 11 COMPLIANT BRIDGE TESTS COMPLETE ===')
+    logger.info(`Tested against: ${deployed.symbol}`)
+    logger.info(`  L1 Portal:       ${deployed.l1PortalContract}`)
+    logger.info(`  L2 Bridge:       ${deployed.l2BridgeContract}`)
+    logger.info(`  L2 Proxy:        ${deployed.l2ProxyContract}`)
+    logger.info(`  L2 Token:        ${deployed.l2TokenContract}`)
+    logger.info(`  POCH Attester:   ${deployed.humanIdAttester}`)
+    logger.info(`  Passport Signer: ${deployed.passportSigner}`)
+  } else {
+    logger.warn('\n⚠️  No tokens were deployed — skipping tests')
+  }
+
+  // Final summary
+  logger.info('\n=== COMPLIANT DEPLOYMENT SUMMARY ===')
+  logger.info(`Total tokens deployed: ${deployedContracts.length}`)
+  for (const token of deployedContracts) {
+    logger.info(`  ${token.symbol}: L1Portal=${token.l1PortalContract} L2Bridge=${token.l2BridgeContract} L2Token=${token.l2TokenContract}`)
+  }
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1) })
