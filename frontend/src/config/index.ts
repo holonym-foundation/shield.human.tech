@@ -11,68 +11,80 @@ export const MAINTENANCE_TITLE = 'Bridge Under Maintenance'
 
 // -------------------------------------
 
-// since aztec does not have a chain ID yet, i propose to use these values to organise token lists:
-// - testnet: 418719321 // keccak256('aztec-testnet')[0:4]
-// - sandbox:: 147120760, // keccak256('aztec-sandbox')[0:4]
+// Import bundled deployments (auto-synced by deployment script)
+import deploymentsData from '@/constants/deployments.json'
 
-// Import deployed tokens from bridge-script
-import deployedTokensData from '@/constants/deployed-tokens.json'
+// ─── Deployment Selection ─────────────────────────────────────────────
+// On the server, always uses the active deployment.
+// On the client, checks localStorage for a user override.
 
-export const L1_CHAIN_ID = 11155111
-export const L2_CHAIN_ID = 1654394782
+export type DeploymentData = (typeof deploymentsData.deployments)[number]
+
+/** All available deployments (for the version selector) */
+export const ALL_DEPLOYMENTS = deploymentsData.deployments
+export const ACTIVE_DEPLOYMENT_ID = deploymentsData.activeDeploymentId
+
+function getSelectedDeployment(): DeploymentData {
+  let selectedId = deploymentsData.activeDeploymentId
+  if (typeof window !== 'undefined') {
+    try {
+      const override = localStorage.getItem('selectedDeploymentId')
+      if (override) selectedId = override
+    } catch {
+      // Ignore localStorage errors (SSR, security restrictions)
+    }
+  }
+  return (
+    deploymentsData.deployments.find((d) => d.id === selectedId) ??
+    deploymentsData.deployments[0]
+  )
+}
+
+const activeDeployment = getSelectedDeployment()
+
+// ─── Network Constants (from selected deployment) ─────────────────────
+
+export const L1_CHAIN_ID = activeDeployment.network.l1ChainId
+export const L2_CHAIN_ID = activeDeployment.network.l2ChainId
 export const L2_CHAIN_KEY = `aztec:${L2_CHAIN_ID}`
-export const L2_NODE_URL = 'https://next.devnet.aztec-labs.com/'
-// export const L2_NODE_URL = 'https://devnet-6.aztec-labs.com/'
+export const L2_NODE_URL = activeDeployment.network.nodeUrl
+export const DEPLOYMENT_ID = activeDeployment.id
+export const ROLLUP_VERSION = activeDeployment.network.rollupVersion
+export const AZTEC_VERSION = activeDeployment.network.aztecVersion
+
+// L1 Aztec protocol contract addresses (from deployment snapshot)
+export const L1_CONTRACT_ADDRESSES = activeDeployment.l1ContractAddresses
 
 // Aztecscan URLs for different networks
-export const AZTECSCAN_URLS = {
+export const AZTECSCAN_URLS: Record<number, string> = {
   [L2_CHAIN_ID]: 'https://devnet.aztecscan.xyz', // Aztec Devnet
   // Add other chain IDs as needed
   // testnet: 'https://testnet.aztecscan.xyz',
-} as const
+}
 
 // Helper function to get Aztecscan URL for a given chain ID
 export const getAztecscanUrl = (chainId: number): string => {
-  return AZTECSCAN_URLS[chainId as keyof typeof AZTECSCAN_URLS] || 'https://aztecscan.xyz'
+  return AZTECSCAN_URLS[chainId] || 'https://aztecscan.xyz'
 }
 
+// Non-token protocol addresses (SBT, sponsored fee)
 export const ADDRESS = {
   [L1_CHAIN_ID]: {
-    // Sepolia
-    CHAIN_ID: 11155111,
+    CHAIN_ID: L1_CHAIN_ID,
     CHAIN_NAME: 'Sepolia',
     L1: {
       PORTAL_SBT_CONTRACT: '0x983ad7bdc7701a77a6c22e2245d7eafe893b21fe',
-      TOKEN_CONTRACT: deployedTokensData.tokens[0]?.l1TokenContract,
-      FEE_ASSET_HANDLER_CONTRACT: deployedTokensData.tokens[0]?.feeAssetHandler,
-      PORTAL_CONTRACT: deployedTokensData.tokens[0]?.l1PortalContract,
     },
   },
   [L2_CHAIN_ID]: {
-    // Aztec Devnet (l2ChainId = l1ChainId ^ rollupVersion)
     CHAIN_ID: L2_CHAIN_ID,
     CHAIN_NAME: 'Aztec Devnet',
     L2: {
-      TOKEN_CONTRACT: deployedTokensData.tokens[0]?.l2TokenContract,
-      TOKEN_BRIDGE_CONTRACT: deployedTokensData.tokens[0]?.l2BridgeContract,
-      SPONSORED_FEE_PAYMENT_CONTRACT: deployedTokensData.sponsoredFeeAddress,
+      SPONSORED_FEE_PAYMENT_CONTRACT: activeDeployment.sponsoredFeeAddress,
     },
   },
-} as const
+} as Record<number, any>
 
-// L1: {
-//   CHAIN_NAME: 'Sepolia',
-//   NAME: 'Test USDC',
-//   SYMBOL: 'USDC',
-//   TOKEN_CONTRACT: '0x24ca8bf6d17d0f6844eacee733fa183d343c1dc4',
-// }
-
-// L2: {
-// CHAIN_NAME: 'Aztec Testnet',
-//   NAME: 'Clean USDC',
-//   SYMBOL: 'USDC',
-//   TOKEN_CONTRACT: '0x2ab7cf582347c8a2834e0faf98339372118275997e14c5a77054bb345362e878',
-// }
 // -------------------------------------
 
 export const L1_NETWORKS: Network[] = [
@@ -84,26 +96,6 @@ export const L1_NETWORKS: Network[] = [
     network: 'sepolia',
     symbol: 'ETH',
   },
-  // {
-  //   id: 2,
-  //   img: '/assets/svg/op.svg',
-  //   title: 'Optimism',
-  // },
-  // {
-  //   id: 3,
-  //   img: '/assets/svg/polygon.svg',
-  //   title: 'Polygon',
-  // },
-  // {
-  //   id: 4,
-  //   img: '/assets/svg/arbitrum.svg',
-  //   title: 'Arbitrum',
-  // },
-  // {
-  //   id: 5,
-  //   img: '/assets/svg/gn.svg',
-  //   title: 'Gnosis',
-  // },
 ]
 
 export const L2_NETWORKS: Network[] = [
@@ -115,65 +107,78 @@ export const L2_NETWORKS: Network[] = [
     network: 'aztec',
     symbol: 'ETH',
   },
-  // {
-  //   id: 1,
-  //   img: '/assets/svg/aztec.svg',
-  //   title: 'Aztec Optimistic',
-  //   chainId: 1337,
-  //   network: 'aztec',
-  //   symbol: 'ETH',
-  // },
-]
-// -----------------------------
-export const L1_TOKENS: Token[] = [
-  {
-    id: 1,
-    img: '/assets/svg/USDC.svg',
-    title: 'USDC',
-    symbol: 'USDC',
-    decimals: deployedTokensData.tokens[0]?.decimals || 6,
-    address: deployedTokensData.tokens[0]?.l1TokenContract,
-  },
-  // {
-  //   id: 2,
-  //   img: '/assets/svg/USDT.svg',
-  //   title: 'Test USDT',
-  //   symbol: 'USDT',
-  // },
-  // {
-  //   id: 3,
-  //   img: '/assets/svg/ETH.svg',
-  //   title: 'Test ETH',
-  //   symbol: 'ETH',
-  // },
-  // {
-  //   id: 4,
-  //   img: '/assets/svg/XDAI.svg',
-  //   title: 'Test XDAI',
-  //   symbol: 'XDAI',
-  // },
 ]
 
-export const L2_TOKENS: Token[] = [
-  {
-    id: 1,
-    img: '/assets/svg/USDC.svg',
-    title: 'Clean USDC',
-    symbol: 'cUSDC',
-    decimals: deployedTokensData.tokens[0]?.decimals || 6,
-    address: deployedTokensData.tokens[0]?.l2TokenContract,
-  },
-  // {
-  //   id: 2,
-  //   img: '/assets/svg/USDT.svg',
-  //   title: 'Clean USDT',
-  //   symbol: 'USDT',
-  // },
-]
+// ─── Dynamic Token Lists (generated from selected deployment) ─────────
 
-// L2 Token Metadata (static configuration)
+export const L1_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
+  id: i + 1,
+  img: t.logo,
+  title: t.symbol,
+  symbol: t.symbol,
+  decimals: t.decimals,
+  address: t.l1TokenContract,
+  l1TokenContract: t.l1TokenContract,
+  l2TokenContract: t.l2TokenContract,
+  l1PortalContract: t.l1PortalContract,
+  l2BridgeContract: t.l2BridgeContract,
+  feeAssetHandler: t.feeAssetHandler,
+  sponsoredFee: t.sponsoredFee,
+  pairedSymbol: `c${t.symbol}`,
+}))
+
+export const L2_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
+  id: i + 1,
+  img: t.logo,
+  title: `Clean ${t.symbol}`,
+  symbol: `c${t.symbol}`,
+  decimals: t.decimals,
+  address: t.l2TokenContract,
+  l1TokenContract: t.l1TokenContract,
+  l2TokenContract: t.l2TokenContract,
+  l1PortalContract: t.l1PortalContract,
+  l2BridgeContract: t.l2BridgeContract,
+  feeAssetHandler: t.feeAssetHandler,
+  sponsoredFee: t.sponsoredFee,
+  pairedSymbol: t.symbol,
+}))
+
+// ─── Token Lookup Helpers ───────────────────────────────────────────
+
+/** Get the L2 paired token for an L1 token (by matching deployment data) */
+export function getL2PairedToken(l1Token: Token): Token | undefined {
+  return L2_TOKENS.find((t) => t.l1TokenContract === l1Token.l1TokenContract)
+}
+
+/** Get the L1 paired token for an L2 token (by matching deployment data) */
+export function getL1PairedToken(l2Token: Token): Token | undefined {
+  return L1_TOKENS.find((t) => t.l1TokenContract === l2Token.l1TokenContract)
+}
+
+/** Get all contract addresses for a token by symbol (L1 symbol, e.g. "USDC") */
+export function getTokenContracts(symbol: string) {
+  const deployed = activeDeployment.tokens.find((t) => t.symbol === symbol)
+  if (!deployed) return null
+  return {
+    l1TokenContract: deployed.l1TokenContract,
+    l2TokenContract: deployed.l2TokenContract,
+    l1PortalContract: deployed.l1PortalContract,
+    l2BridgeContract: deployed.l2BridgeContract,
+    feeAssetHandler: deployed.feeAssetHandler,
+    sponsoredFee: deployed.sponsoredFee,
+  }
+}
+
+// ─── Token Metadata (derived from first token for backward compat) ──
+
+export const L1_TOKEN_METADATA = {
+  name: activeDeployment.tokens[0]?.symbol || 'USDC',
+  symbol: activeDeployment.tokens[0]?.symbol || 'USDC',
+  decimals: activeDeployment.tokens[0]?.decimals || 6,
+} as const
+
 export const L2_TOKEN_METADATA = {
-  name: 'Test USDC',
-  symbol: 'USDC',
-  decimals: deployedTokensData.tokens[0]?.decimals || 6,
+  name: `Clean ${activeDeployment.tokens[0]?.symbol || 'USDC'}`,
+  symbol: `c${activeDeployment.tokens[0]?.symbol || 'USDC'}`,
+  decimals: activeDeployment.tokens[0]?.decimals || 6,
 } as const

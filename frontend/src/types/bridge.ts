@@ -1,7 +1,5 @@
-export enum BridgeDirection {
-  L1_TO_L2 = 'L1_TO_L2',
-  L2_TO_L1 = 'L2_TO_L1',
-}
+import { BridgeDirection } from '@prisma/client'
+export { BridgeDirection }
 
 export interface Network {
   id: number;
@@ -19,6 +17,14 @@ export interface Token {
   symbol: string;
   decimals: number;
   address: string;
+  // Bridge contract info (populated from deployed-tokens.json)
+  l1TokenContract?: string;
+  l2TokenContract?: string;
+  l1PortalContract?: string;
+  l2BridgeContract?: string;
+  feeAssetHandler?: string;
+  sponsoredFee?: string;
+  pairedSymbol?: string;
 }
 
 export interface BridgeSectionState {

@@ -78,6 +78,12 @@ const DEFAULT_TOAST_OPTIONS: ToastOptions = {
   transition: Slide,
 }
 
+/** Error toasts stay open until the user clicks the X button. */
+const ERROR_TOAST_OPTIONS: Partial<ToastOptions> = {
+  autoClose: false,
+  closeOnClick: false,
+}
+
 const LOADING_TOAST_OPTIONS: Partial<ToastOptions> = {
   closeButton: false,
   closeOnClick: false,
@@ -132,8 +138,11 @@ const createToast = (
   options: ToastOptions = {}
 ) => {
   const Component = TOAST_COMPONENTS[type]
-  const toastOptions = createMergedOptions({}, options)
-  
+  const toastOptions = createMergedOptions(
+    type === 'error' ? ERROR_TOAST_OPTIONS : {},
+    options,
+  )
+
   return toast(
     React.createElement(Component, {
       heading,
@@ -174,8 +183,11 @@ const updateToastState = (
   options: ToastOptions = {}
 ) => {
   const Component = TOAST_COMPONENTS[type]
-  const mergedOptions = createMergedOptions({}, options)
-  
+  const mergedOptions = createMergedOptions(
+    type === 'error' ? ERROR_TOAST_OPTIONS : {},
+    options,
+  )
+
   toast.update(toastId, {
     render: React.createElement(Component, { heading, message }),
     className: `${type}-toast from-loading`,

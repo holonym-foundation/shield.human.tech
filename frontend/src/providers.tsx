@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { ToastContainer } from 'react-toastify'
 import { useWalletStore } from './stores/walletStore'
 import { init as initDatadog } from '@/utils/datadog'
+import AuthSync from '@/components/AuthSync'
 
 function InitializeWaapWallet() {
   const { initializeWaapWallet } = useWalletStore()
@@ -23,12 +24,12 @@ function InitializeAztecWallet() {
   const { initializeAztecWallet } = useWalletStore()
 
   useEffect(() => {
-    // Add a small delay to ensure other initializations are complete
+    // Small delay to ensure wallet extensions have loaded their content scripts
     const timer = setTimeout(() => {
       initializeAztecWallet().catch((err: unknown) => {
         console.error('Failed to initialize Aztec wallet:', err)
       })
-    }, 500) // Small delay to ensure Azguard extension is ready
+    }, 500)
 
     return () => clearTimeout(timer)
   }, [initializeAztecWallet])
@@ -85,6 +86,7 @@ export function Providers({ children }: { children: ReactNode }) {
         <InitializeWaapWallet />
         <InitializeAztecWallet />
         <InitializeDatadog />
+        <AuthSync />
 
         {children}
         <ReactQueryDevtools initialIsOpen={false} />

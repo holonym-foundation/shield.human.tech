@@ -39,15 +39,15 @@ import BridgeFooter from '@/components/BridgeFooter'
 import BridgeHeader from '@/components/BridgeHeader'
 import { motion, AnimatePresence } from 'framer-motion'
 import BridgeActionButton from '@/components/BridgeActionButton'
-import { L1_NETWORKS, L2_NETWORKS, L1_TOKENS, L2_TOKENS, ADDRESS } from '@/config'
+import { L1_CHAIN_ID, L1_NETWORKS, L2_NETWORKS, L1_TOKENS, L2_TOKENS, getL2PairedToken, getL1PairedToken } from '@/config'
 import MetaMaskPrompt from '@/components/model/MetaMaskPrompt'
 import BalanceCard from '@/components/BalanceCard'
 import { logInfo, logError } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
-// import PopupBlockedAlert from '@/components/model/PopupBlockedAlert'
-import WalletSelectionModal from '@/components/model/WalletSelectionModal'
 import { AztecLoginMethod } from '@/types/wallet'
-import AzguardPrompt from '@/components/model/AzguardPrompt'
+import EmojiVerificationModal from '@/components/model/EmojiVerificationModal'
+import AccountSelectorModal from '@/components/model/AccountSelectorModal'
+import WalletDiscoveryModal from '@/components/model/WalletDiscoveryModal'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useRouter } from 'next/navigation'
@@ -57,61 +57,6 @@ import {
   MAINTENANCE_MESSAGE,
   MAINTENANCE_TITLE,
 } from '@/config'
-
-// Function to check if popups are blocked (disabled for now, was used for Obsidion)
-// const isPopupBlocked = (): Promise<boolean> => {
-//   return new Promise((resolve) => {
-//     // Log popup test initiation
-//     logInfo('Popup blocking test initiated', {
-//       walletType: null,
-//       loginMethod: null,
-//       walletProvider: null,
-//       address: '',
-//       chainId: null,
-//       testType: 'popup_detection',
-//       userAgent: navigator.userAgent,
-//       timestamp: Date.now(),
-//       userAction: 'popup_detection_test',
-//     })
-//
-//     const popup = window.open('about:blank', '_blank', 'width=1,height=1')
-//     setTimeout(() => {
-//       if (!popup || popup.closed || popup.closed === undefined) {
-//         // Log popup blocked
-//         logInfo('Popups are blocked - user will see popup blocked alert', {
-//           walletType: null,
-//           loginMethod: null,
-//           walletProvider: null,
-//           address: '',
-//           chainId: null,
-//           popupBlocked: true,
-//           popupClosed: popup?.closed,
-//           popupUndefined: popup === undefined,
-//           userAgent: navigator.userAgent,
-//           timestamp: Date.now(),
-//           userAction: 'popup_blocked_detected',
-//         })
-//         resolve(true) // Popups are blocked
-//       } else {
-//         // Log popup allowed
-//         logInfo('Popups are allowed - user can proceed normally', {
-//           walletType: null,
-//           loginMethod: null,
-//           walletProvider: null,
-//           address: '',
-//           chainId: null,
-//           popupBlocked: false,
-//           popupClosed: popup.closed,
-//           userAgent: navigator.userAgent,
-//           timestamp: Date.now(),
-//           userAction: 'popup_allowed_detected',
-//         })
-//         popup.close()
-//         resolve(false) // Popups are allowed
-//       }
-//     }, 50)
-//   })
-// }
 
 const variants = {
   hidden: { opacity: 0, y: 100 },
@@ -138,8 +83,6 @@ export default function Home() {
     'Ethereum'
   )
   const [bridgeCompleted, setBridgeCompleted] = useState(false)
-  // const [arePopupsBlocked, setArePopupsBlocked] = useState<boolean | null>(null)
-  // const [showPopupBlockedAlert, setShowPopupBlockedAlert] = useState(false)
 
   // Notification system
   const notify = useToast()
@@ -165,32 +108,40 @@ export default function Home() {
     connectAztecWallet,
     disconnectWaapWallet,
     disconnectAztecWallet,
-    azguardClient,
     waapLoginMethod: loginMethod,
     waapWalletIcon: walletIcon,
     waapWalletProvider: walletProvider,
     getWaapWalletProvider: getWalletProvider,
+    // Wallet SDK connection flow
+    walletConnectionPhase,
+    verificationEmojis,
+    discoveredWallets,
+    selectWallet,
+    confirmWalletConnection,
+    cancelWalletConnection,
+    // Account selection
+    availableAccounts,
+    selectAccount,
   } = useWalletStore()
 
 
   // Get UI state from walletStore
   const {
     showWalletModal,
-    showAzguardPrompt,
+    showWalletInstallPrompt,
     setShowWalletModal,
-    setShowAzguardPrompt,
+    setShowWalletInstallPrompt,
     aztecAddress,
     waapAddress,
+    isAztecConnecting,
   } = useWalletStore()
 
   // Success callbacks
-  const mintL1SBTOnSuccess = (data: any) => {
-    console.log('L1 SBT minted:', data)
+  const mintL1SBTOnSuccess = (_data: any) => {
     setShowSBTModal(false)
   }
 
-  const mintL2SBTOnSuccess = (data: any) => {
-    console.log('L2 SBT minted:', data)
+  const mintL2SBTOnSuccess = (_data: any) => {
     setShowSBTModal(false)
   }
 
@@ -210,12 +161,13 @@ export default function Home() {
 
   // native token
   const sepoliaNativeTokens = l1TokenBalances.find(
-    (token) => token.type === 'native' && token.network?.chainId === 11155111
+    (token) => token.type === 'native' && token.network?.chainId === L1_CHAIN_ID
   )
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted
 
+  const selectedFromToken = bridgeConfig.from.token
   const l1Balance = l1TokenBalances.find(
-    (token) => token.type === 'erc20' && token.network?.chainId === 11155111 && token.address === ADDRESS[11155111].L1.TOKEN_CONTRACT
+    (token) => token.type === 'erc20' && token.network?.chainId === L1_CHAIN_ID && token.address === (selectedFromToken?.l1TokenContract ?? L1_TOKENS[0]?.l1TokenContract)
   )?.balance_formatted
 
   // const { data: l1NativeBalance } = useL1NativeBalance()
@@ -248,9 +200,7 @@ export default function Home() {
 
   // Bridge success callback (runs after L1→L2 bridge or L2→L1 withdrawal)
   const handleBridgeSuccess = useCallback(
-    (data: any) => {
-      console.log('[Bridge] handleBridgeSuccess called', { data })
-      console.log('[Bridge] Showing refresh toast, starting L1 + L2 balance refetch...')
+    (_data: any) => {
       notify.promise(
         Promise.all([refetchL1Balance(), refetchL2Balance()]),
         {
@@ -320,14 +270,20 @@ export default function Home() {
   const handleSelectNetwork = (network: NetworkType) => {
     const section = getCurrentSection()
     updateNetwork(section, network)
-    console.log('Selected network:', network)
   }
 
-  // Handle token selection
+  // Handle token selection with auto-pairing
   const handleSelectToken = (token: TokenType) => {
     const section = getCurrentSection()
     updateToken(section, token)
-    console.log('Selected token:', token)
+    // Auto-pair: set the counterpart on the other side
+    const oppositeSection = getOppositeSection()
+    const paired = section === 'from'
+      ? (bridgeConfig.direction === BridgeDirection.L1_TO_L2 ? getL2PairedToken(token) : getL1PairedToken(token))
+      : (bridgeConfig.direction === BridgeDirection.L1_TO_L2 ? getL1PairedToken(token) : getL2PairedToken(token))
+    if (paired) {
+      updateToken(oppositeSection, paired)
+    }
   }
 
   // Input amount change handler
@@ -358,73 +314,31 @@ export default function Home() {
     }
   }
 
-  // Handle wallet selection
-  const handleWalletSelect = async (type: AztecLoginMethod) => {
+  // Handle wallet selection (starts wallet-sdk discovery flow)
+  const handleWalletSelect = async () => {
     try {
-      // Log wallet selection attempt
-      logInfo('User selected Aztec wallet type', {
-        walletType: WalletType.AZTEC,
-        loginMethod: type,
-        walletProvider: null,
-        address: '',
-        chainId: null,
-        userAction: 'wallet_selection',
-        // popupsBlocked: arePopupsBlocked,
-      })
-      
-      if (type === 'azguard' && !window.azguard) {
-        // Log Azguard not installed
-        logInfo('Azguard wallet not installed - showing prompt', {
-          walletType: WalletType.AZTEC,
-          loginMethod: type,
-          walletProvider: null,
-          address: '',
-          chainId: null,
-          azguardInstalled: false,
-          userAction: 'azguard_not_installed',
-        })
-        setShowAzguardPrompt(true)
-        setShowWalletModal(false)
-        return
-      }
-      
-      // Log wallet connection attempt
       logInfo('Attempting to connect Aztec wallet', {
         walletType: WalletType.AZTEC,
-        loginMethod: type,
+        loginMethod: 'wallet-sdk',
         walletProvider: null,
         address: '',
         chainId: null,
         userAction: 'wallet_connection_attempt',
-        // popupsBlocked: arePopupsBlocked,
       })
-      
-      await connectAztecWallet(type)
+
+      await connectAztecWallet()
       setShowWalletModal(false)
-      
-      // Log successful wallet connection
-      logInfo('Aztec wallet connection successful from UI', {
-        walletType: WalletType.AZTEC,
-        loginMethod: type,
-        walletProvider: null,
-        address: '',
-        chainId: null,
-        userAction: 'wallet_connection_success',
-        // popupsBlocked: arePopupsBlocked,
-      })
     } catch (error) {
-      // Log wallet connection failure
       logError('Aztec wallet connection failed from UI', {
         walletType: WalletType.AZTEC,
-        loginMethod: type,
+        loginMethod: 'wallet-sdk',
         walletProvider: null,
         address: '',
         chainId: null,
         userAction: 'wallet_connection_failure',
-        // popupsBlocked: arePopupsBlocked,
         error: error instanceof Error ? error.message : 'Unknown error',
       })
-      
+
       notify(
         'error',
         `Failed to connect wallet: ${
@@ -435,10 +349,15 @@ export default function Home() {
   }
 
 
+  // Prefetch routes this page navigates to
+  useEffect(() => {
+    router.prefetch('/progress')
+  }, [router])
+
   // Page visit tracking and component mount effects
   useEffect(() => {
     setMounted(true)
-    
+
     // Log page visit/session start
     logInfo('User session started - page loaded', {
       walletType: null,
@@ -454,41 +373,6 @@ export default function Home() {
       userAction: 'session_start',
     })
   }, [])
-
-  // Check if popups are blocked immediately after page load (disabled for now)
-  // useEffect(() => {
-  //   if (typeof window !== 'undefined') {
-  //     // Immediately check if popups are blocked
-  //     isPopupBlocked().then((blocked) => {
-  //       setArePopupsBlocked(blocked)
-  //       if (blocked) {
-  //         console.log('Popups are blocked for this site')
-  //         logInfo('Popups are blocked - showing popup blocked alert to user', {
-  //           walletType: null,
-  //           loginMethod: null,
-  //           walletProvider: null,
-  //           address: '',
-  //           chainId: null,
-  //           blocked,
-  //           alertShown: true,
-  //           userAction: 'popup_blocked_alert_displayed',
-  //         })
-  //         setShowPopupBlockedAlert(true)
-  //       } else {
-  //         // console.log('Popups are allowed for this site')
-  //         logInfo('Popups are allowed - user can proceed with wallet connections', {
-  //           walletType: null,
-  //           loginMethod: null,
-  //           walletProvider: null,
-  //           address: '',
-  //           chainId: null,
-  //           blocked: false,
-  //           userAction: 'popup_allowed_proceed',
-  //         })
-  //       }
-  //     })
-  //   }
-  // }, [])
 
   useEffect(() => {
     resetStepState()
@@ -525,29 +409,56 @@ export default function Home() {
             message={MAINTENANCE_MESSAGE}
           />
         )}
-        {showAzguardPrompt && (
-          <AzguardPrompt onClose={() => setShowAzguardPrompt(false)} />
-        )}
-        {/* Popup blocked alert disabled (used for Obsidion)
-        {showPopupBlockedAlert && (
-          <PopupBlockedAlert
-            onClose={() => {
-              // Log when user closes popup blocked alert
-              logInfo('User closed popup blocked alert', {
-                walletType: null,
-                loginMethod: null,
-                walletProvider: null,
-                address: '',
-                chainId: null,
-                userAction: 'popup_blocked_alert_closed',
-                alertClosed: true,
-                userGaveUp: true, // This might indicate user is giving up
-              })
-              setShowPopupBlockedAlert(false)
-            }}
+        {showWalletInstallPrompt && (
+          <WalletDiscoveryModal
+            isOpen={true}
+            wallets={[]}
+            isDiscovering={false}
+            onSelectWallet={() => {}}
+            onClose={() => setShowWalletInstallPrompt(false)}
           />
         )}
-        */}
+        {(walletConnectionPhase === 'discovering' || walletConnectionPhase === 'selecting') && (
+          <WalletDiscoveryModal
+            isOpen={true}
+            wallets={discoveredWallets}
+            isDiscovering={walletConnectionPhase === 'discovering'}
+            onSelectWallet={selectWallet}
+            onClose={cancelWalletConnection}
+          />
+        )}
+        {walletConnectionPhase === 'verifying' && verificationEmojis && (
+          <EmojiVerificationModal
+            isOpen={true}
+            emojis={verificationEmojis}
+            isConfirming={isAztecConnecting}
+            onConfirm={confirmWalletConnection}
+            onCancel={cancelWalletConnection}
+          />
+        )}
+        {walletConnectionPhase === 'requesting' && (
+          <div className='absolute inset-0 bg-latest-grey-1000 z-20 rounded-lg flex flex-col items-center justify-center gap-4'>
+            <Oval
+              height={40}
+              width={40}
+              color='#3b82f6'
+              secondaryColor='#93c5fd'
+              strokeWidth={4}
+            />
+            <p className='text-latest-grey-600 text-14 font-medium'>
+              Requesting permissions...
+            </p>
+          </div>
+        )}
+        {walletConnectionPhase === 'account-select' && (
+          <AccountSelectorModal
+            isOpen={true}
+            accounts={availableAccounts}
+            onSelect={selectAccount}
+            onCancel={cancelWalletConnection}
+            title='Select Account'
+          />
+        )}
         {selectNetwork && (
           <NetworkModal
             setNetworkData={handleSelectNetwork}
@@ -580,12 +491,7 @@ export default function Home() {
             }
           />
         )}
-        {/* Wallet selection modal commented out - directly connecting to Azguard */}
-        {/* <WalletSelectionModal
-          isOpen={showWalletModal}
-          onClose={() => setShowWalletModal(false)}
-          onSelect={handleWalletSelect}
-        /> */}
+        {/* Wallet selection is now handled by WalletDiscoveryModal above */}
 
         <div
           className={`grid grid-rows-[max-content_1fr_max-content] h-full ${
@@ -663,7 +569,7 @@ export default function Home() {
                 isAztecConnected={isAztecConnected}
                 // connectAztec={() => setShowWalletModal(true)}
 
-                connectAztec={() => connectAztecWallet('azguard')}
+                connectAztec={() => connectAztecWallet()}
                 inputRef={inputRef}
                 // Balance and amount states
                 inputAmount={bridgeConfig.amount}
@@ -699,19 +605,6 @@ export default function Home() {
                 l2NodeError={l2NodeIsReadyIsError && !l2NodeIsReadyLoading}
                 l2NodeIsReadyLoading={l2NodeIsReadyLoading}
               />
-              
-              {/* Test button for adding token to wallet */}
-              {/* {isAztecConnected && (
-                <div className="px-4 pb-4">
-                  <button
-                    onClick={testAddTokenToWallet}
-                    className="w-full bg-success-500 hover:bg-success-600 text-white font-medium py-2 px-4 rounded-lg transition-colors"
-                  >
-                    Test Add Token to Wallet
-                  </button>
-                </div>
-              )} */}
-              
               <BridgeFooter />
             </div>
           </div>

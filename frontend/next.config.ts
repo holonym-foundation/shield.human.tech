@@ -2,7 +2,21 @@ import type { NextConfig } from "next";
 import webpack from 'webpack';
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // NOTE: COOP/COEP headers were removed because 'same-origin' COOP blocks
+  // the WaaP/Silk iframe (waap.xyz) from communicating via postMessage,
+  // breaking L1 wallet connections entirely. SharedArrayBuffer (needed by
+  // Barretenberg WASM) works on localhost without these headers. For
+  // production, a different strategy is needed (e.g. service worker proxy
+  // or isolating WASM in a cross-origin-isolated iframe).
+  // Keep @aztec/bb.js as external on the server so the WASM file resolves
+  // from node_modules instead of being broken by webpack bundling.
+  serverExternalPackages: [
+    '@aztec/bb.js',
+    '@aztec/aztec.js',
+    '@aztec/foundation',
+    '@aztec/stdlib',
+    '@aztec/circuits.js',
+  ],
   // Use webpack for polyfills compatibility
   webpack: (config, { isServer }) => {
     // Add polyfills for Node.js built-ins in the browser

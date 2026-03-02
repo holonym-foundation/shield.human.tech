@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createPublicClient, createWalletClient, http, custom, parseUnits  } from 'viem'
+import { createPublicClient, createWalletClient, http, parseUnits } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { sepolia } from 'viem/chains'
-import { ADDRESS } from '@/config'
+import { L1_TOKENS } from '@/config'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 
 // Configure Vercel function timeout (300 seconds for Pro plan)
@@ -35,8 +35,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
     }
 
-    // Get the recipient address from the request body
-    const { address } = await request.json()
+    // Get the recipient address and token address from the request body
+    const { address, tokenAddress } = await request.json()
 
     // Validate recipient address
     if (!address || typeof address !== 'string' || !address.startsWith('0x')) {
@@ -45,6 +45,27 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // Validate token address — must be explicitly provided
+    if (!tokenAddress || typeof tokenAddress !== 'string' || !tokenAddress.startsWith('0x')) {
+      return NextResponse.json(
+        { error: 'Invalid or missing tokenAddress (must be 0x-prefixed)' },
+        { status: 400 }
+      )
+    }
+
+    // Verify the requested token is a known deployed token
+    const isKnownToken = L1_TOKENS.some(
+      (t) => t.l1TokenContract?.toLowerCase() === tokenAddress.toLowerCase()
+    )
+    if (!isKnownToken) {
+      return NextResponse.json(
+        { error: 'Token address is not a recognized deployed token' },
+        { status: 400 }
+      )
+    }
+
+    const tokenContractAddress = tokenAddress
 
     try {
       console.log('Creating account from private key...')
@@ -59,7 +80,7 @@ export async function POST(request: NextRequest) {
 
       // Get token decimals from contract
       const decimals = await publicClient.readContract({
-        address: ADDRESS[11155111].L1.TOKEN_CONTRACT as `0x${string}`,
+        address: tokenContractAddress as `0x${string}`,
         abi: TestERC20Abi,
         functionName: 'decimals',
       })
@@ -67,46 +88,11 @@ export async function POST(request: NextRequest) {
       // Calculate mint amount with proper decimals
       const MINT_AMOUNT = parseUnits(TOKEN_AMOUNT.toString(), decimals)
 
-      // Create wallet with private key - using local signing
+      // Create wallet with private key - viem auto-signs locally with http transport
       const walletClient = createWalletClient({
         account,
         chain: sepolia,
-        transport: custom({
-          request: async ({ method, params }) => {
-            // Handle method locally
-            if (method === 'eth_sendTransaction') {
-              // Extract transaction parameters
-              const tx = params[0] as any
-
-              // Get nonce for the account
-              const nonce = await publicClient.getTransactionCount({
-                address: account.address,
-              })
-
-              // Sign the transaction locally
-              const signedTx = await account.signTransaction({
-                to: tx.to as `0x${string}`,
-                data: tx.data as `0x${string}`,
-                nonce,
-                gasPrice: await publicClient.getGasPrice(),
-                gas: BigInt(1000000), // Set appropriate gas limit
-              })
-
-              // Send the raw transaction
-              const hash = await publicClient.sendRawTransaction({
-                serializedTransaction: signedTx,
-              })
-
-              return hash
-            }
-
-            // For other methods, use the publicClient
-            return publicClient.request({
-              method,
-              params,
-            })
-          },
-        }),
+        transport: http(rpcUrl),
       })
       // get native balance
       const nativeBalance = await publicClient.getBalance({
@@ -121,19 +107,23 @@ export async function POST(request: NextRequest) {
 
       try {
         // Simulate the transaction
-        const { request: contractWriteRequest } =
-          await publicClient.simulateContract({
-            address: ADDRESS[11155111].L1.TOKEN_CONTRACT as `0x${string}`,
-            abi: TestERC20Abi,
-            functionName: 'mint',
-            args: [address as `0x${string}`, MINT_AMOUNT],
-            account: account.address,
-          })
+        await publicClient.simulateContract({
+          address: tokenContractAddress as `0x${string}`,
+          abi: TestERC20Abi,
+          functionName: 'mint',
+          args: [address as `0x${string}`, MINT_AMOUNT],
+          account,
+        })
 
         console.log('Simulation successful, sending transaction')
 
-        // Send the transaction
-        const hash = await walletClient.writeContract(contractWriteRequest)
+        // Send the transaction (walletClient has local account, signs + sends raw tx)
+        const hash = await walletClient.writeContract({
+          address: tokenContractAddress as `0x${string}`,
+          abi: TestERC20Abi,
+          functionName: 'mint',
+          args: [address as `0x${string}`, MINT_AMOUNT],
+        })
         console.log(`Token mint transaction sent: ${hash}`)
 
         // Wait for the transaction to be mined
