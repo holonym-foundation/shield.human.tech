@@ -112,13 +112,13 @@ pub contract TokenBridge {
         pending_owner: PublicMutable<AztecAddress, Context>,
         config: PublicImmutable<Config, Context>,
         // clean hands and passport verification vars
-        human_id_attester_pubkey: DelayedPublicMutable<PubKey, 60, Context>,
-        clean_hands_circuit_id: DelayedPublicMutable<Field, 60, Context>,
-        passport_signer_pubkey: DelayedPublicMutable<PubKey, 60, Context>,
+        human_id_attester_pubkey: DelayedPublicMutable<PubKey, 600, Context>,
+        clean_hands_circuit_id: DelayedPublicMutable<Field, 600, Context>,
+        passport_signer_pubkey: DelayedPublicMutable<PubKey, 600, Context>,
         // Mapping: user address => nonce => consumed status
         clean_hands_nonces: Map<AztecAddress, Map<Field, PublicMutable<bool, Context>, Context>, Context>,
         passport_nonces: Map<AztecAddress, Map<Field, PublicMutable<bool, Context>, Context>, Context>,
-        is_paused: DelayedPublicMutable<bool, 60, Context>,
+        is_paused: PublicMutable<bool, Context>,
     }
 
     // Constructs the contract.
@@ -144,7 +144,7 @@ pub contract TokenBridge {
         self.storage.passport_signer_pubkey.schedule_value_change(
             PubKey { x: passport_signer_x, y: passport_signer_y },
         );
-        self.storage.is_paused.schedule_value_change(false);
+        self.storage.is_paused.write(false);
     }
 
     #[external("public")]
@@ -193,7 +193,7 @@ pub contract TokenBridge {
     #[external("public")]
     fn set_paused(paused: bool) {
         assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
-        self.storage.is_paused.schedule_value_change(paused);
+        self.storage.is_paused.write(paused);
     }
 
     #[external("private")]
@@ -211,7 +211,7 @@ pub contract TokenBridge {
     // Consumes a L1->L2 message and calls the token contract to mint the appropriate amount publicly
     #[external("public")]
     fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field) {
-        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        assert(self.storage.is_paused.read() == false, "Bridge is paused");
         assert(amount > 0, "Amount must be greater than zero");
         let content_hash = get_mint_to_public_content_hash(to, amount);
 
@@ -238,7 +238,7 @@ pub contract TokenBridge {
         caller_on_l1: EthAddress, // ethereum address that can call this function on the L1 portal (0x0 if anyone can call)
         authwit_nonce: Field, // nonce used in the approval message by `msg.sender` to let bridge burn their tokens on L2
     ) {
-        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        assert(self.storage.is_paused.read() == false, "Bridge is paused");
         assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
 
@@ -264,7 +264,7 @@ pub contract TokenBridge {
         secret_for_L1_to_L2_message_consumption: Field, // secret used to consume the L1 to L2 message
         message_leaf_index: Field,
     ) {
-        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        self.enqueue_self._assert_not_paused();
         assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
 
@@ -326,6 +326,12 @@ pub contract TokenBridge {
             signature,
             personal_sign_hash,
         )
+    }
+
+    #[external("public")]
+    #[only_self]
+    fn _assert_not_paused() {
+        assert(self.storage.is_paused.read() == false, "Bridge is paused");
     }
 
     // Public function to verify the deadline
@@ -438,7 +444,7 @@ pub contract TokenBridge {
         clean_hands: CleanHandsData,
         passport: PassportData,
     ) {
-        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        self.enqueue_self._assert_not_paused();
         assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
         let sender = self.msg_sender();

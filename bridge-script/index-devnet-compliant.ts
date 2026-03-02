@@ -907,10 +907,9 @@ async function testPrivateExitFlow(
   logger.info(`[L2] Creating private authwit for proxy to burn ${withdrawAmount} tokens`)
   const proxyAddress = AztecAddress.fromString(deployed.l2ProxyContract)
   const burnAction = l2TokenContract.methods.burn_private(ownerAztecAddress, withdrawAmount, authwitNonce)
-  const innerHash = await computeInnerAuthWitHashFromAction(proxyAddress, burnAction)
-  await wallet.createAuthWit(ownerAztecAddress, {
-    consumer: AztecAddress.fromString(deployed.l2TokenContract),
-    innerHash,
+  const burnAuthWitness = await wallet.createAuthWit(ownerAztecAddress, {
+    caller: proxyAddress,
+    call: await burnAction.getFunctionCall(),
   })
   logger.info(`[L2] Private AuthWit created and stored in PXE`)
 
@@ -972,6 +971,7 @@ async function testPrivateExitFlow(
       from: ownerAztecAddress,
       fee: { paymentMethod: sponsoredPaymentMethod },
       wait: { timeout: getTimeouts().txTimeout, returnReceipt: true },
+      authWitnesses: [burnAuthWitness],
     },
     logger,
   )
@@ -1213,7 +1213,7 @@ async function testWrongRecipientCantClaimPublic(
   )
 
   // Try claiming with a DIFFERENT address (random)
-  const wrongAddress = AztecAddress.fromString('0x' + 'ab'.repeat(32))
+  const wrongAddress = AztecAddress.fromString('0x' + '01'.repeat(32))
   logger.info(`[L2] Attempting claim_public with wrong to=${wrongAddress} (should FAIL)`)
   try {
     await l2BridgeContract.methods
@@ -1759,4 +1759,4 @@ async function main() {
   logger.info(` 11. NEGATIVE: Non-holder can't exit (insufficient balance/no authwit)`)
 }
 
-main()
+main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1) })
