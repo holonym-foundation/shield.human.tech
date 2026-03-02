@@ -112,13 +112,13 @@ pub contract TokenBridge {
         pending_owner: PublicMutable<AztecAddress, Context>,
         config: PublicImmutable<Config, Context>,
         // clean hands and passport verification vars
-        human_id_attester_pubkey: DelayedPublicMutable<PubKey, 1, Context>,
-        clean_hands_circuit_id: DelayedPublicMutable<Field, 1, Context>,
-        passport_signer_pubkey: DelayedPublicMutable<PubKey, 1, Context>,
+        human_id_attester_pubkey: DelayedPublicMutable<PubKey, 60, Context>,
+        clean_hands_circuit_id: DelayedPublicMutable<Field, 60, Context>,
+        passport_signer_pubkey: DelayedPublicMutable<PubKey, 60, Context>,
         // Mapping: user address => nonce => consumed status
         clean_hands_nonces: Map<AztecAddress, Map<Field, PublicMutable<bool, Context>, Context>, Context>,
         passport_nonces: Map<AztecAddress, Map<Field, PublicMutable<bool, Context>, Context>, Context>,
-        is_paused: DelayedPublicMutable<bool, 1, Context>,
+        is_paused: DelayedPublicMutable<bool, 60, Context>,
     }
 
     // Constructs the contract.
