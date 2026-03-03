@@ -382,34 +382,49 @@ const walletStore = create<WalletState>((set, get) => ({
   },
 
   selectWallet: async (provider: WalletProvider) => {
-    try {
-      set({ walletConnectionPhase: 'verifying', isAztecConnecting: false })
+    const MAX_KEY_EXCHANGE_RETRIES = 2
+    set({ walletConnectionPhase: 'verifying', isAztecConnecting: false })
 
-      const pending = await connectToProvider(provider)
-      const emojis = hashToEmoji(pending.verificationHash)
+    for (let attempt = 1; attempt <= MAX_KEY_EXCHANGE_RETRIES; attempt++) {
+      try {
+        const pending = await connectToProvider(provider)
+        const emojis = hashToEmoji(pending.verificationHash)
 
-      set({
-        pendingConnection: pending,
-        verificationEmojis: emojis,
-        sdkProvider: provider,
-      })
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      logError('Failed to establish secure channel', {
-        walletType: WalletType.AZTEC,
-        loginMethod: 'wallet-sdk',
-        address: '',
-        chainId: null,
-        userAction: 'aztec_wallet_channel_failed',
-        error: errorMessage,
-      })
-      set({
-        walletConnectionPhase: 'idle',
-        isAztecConnecting: false,
-        pendingConnection: null,
-        verificationEmojis: null,
-      })
-      showToast('error', `Failed to connect wallet: ${errorMessage}`)
+        set({
+          pendingConnection: pending,
+          verificationEmojis: emojis,
+          sdkProvider: provider,
+        })
+        return // success — exit
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+        const isTimeout = errorMessage.toLowerCase().includes('timeout')
+
+        if (isTimeout && attempt < MAX_KEY_EXCHANGE_RETRIES) {
+          console.warn(`[walletStore] Key exchange attempt ${attempt} timed out, retrying...`)
+          continue
+        }
+
+        logError('Failed to establish secure channel', {
+          walletType: WalletType.AZTEC,
+          loginMethod: 'wallet-sdk',
+          address: '',
+          chainId: null,
+          userAction: 'aztec_wallet_channel_failed',
+          error: errorMessage,
+          attempt,
+        })
+        set({
+          walletConnectionPhase: 'idle',
+          isAztecConnecting: false,
+          pendingConnection: null,
+          verificationEmojis: null,
+        })
+        const userMessage = isTimeout
+          ? 'Wallet took too long to respond. Please try connecting again.'
+          : `Failed to connect wallet: ${errorMessage}`
+        showToast('error', userMessage)
+      }
     }
   },
 

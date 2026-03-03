@@ -329,48 +329,63 @@ export default function ProgressPage() {
         </div>
 
         {/* Progress Card */}
-        <div className='bg-white rounded-md mt-2 p-4'>
-          <div className='flex items-center justify-center'>
-            <StyledImage
-              src={steps.every((step) => step.status === 'completed')
-                ? '/assets/svg/transactionComplete.svg'
-                : '/assets/svg/progress.svg'}
-              alt=''
-              className='h-[56px] w-[56px]'
-            />
-          </div>
-          <p className='text-center font-semibold text-md mt-5'>
-            {steps.every((step) => step.status === 'completed')
-              ? 'Transaction complete'
-              : 'Transaction in progress'}
-          </p>
+        {(() => {
+          const isAllComplete = steps.every((step) => step.status === 'completed')
+          const hasError = isBridgeTokensToL2Error || withdrawTokensToL1Error || isResumeBridgeError || isResumeWithdrawalError
 
-          <div className='mt-5'>
-            <LoadingStepsBars steps={steps} currentStep={progressStep - 1} />
-          </div>
-          <hr className='text-latest-grey-300 my-3' />
-          <div className='flex justify-between mt-[2px]'>
-            <p className='text-14 font-medium text-latest-grey-100'>
-              Estimated time{' '}
-            </p>
-            <p className='font-semibold text-14'>
-              ~{steps.every((step) => step.status === 'completed') ? initialEstimateFormatted : formattedTime()}
-            </p>
-          </div>
-          {steps.every((step) => step.status === 'completed') && (
-            <div className='flex justify-between mt-[2px]'>
-              <p className='text-14 font-medium text-latest-grey-100'>
-                Total time taken{' '}
+          const icon = hasError
+            ? '/assets/svg/alert.svg'
+            : isAllComplete
+            ? '/assets/svg/transactionComplete.svg'
+            : '/assets/svg/progress.svg'
+
+          const heading = hasError
+            ? 'Something went wrong'
+            : isAllComplete
+            ? 'Transaction complete'
+            : 'Transaction in progress'
+
+          return (
+            <div className='bg-white rounded-md mt-2 p-4'>
+              <div className='flex items-center justify-center'>
+                <StyledImage src={icon} alt='' className='h-[56px] w-[56px]' />
+              </div>
+              <p className={`text-center font-semibold text-md mt-5 ${hasError ? 'text-[#B91C1C]' : ''}`}>
+                {heading}
               </p>
-              <p className='font-semibold text-14'>{totalTimeTaken()}</p>
+              {hasError && (
+                <p className='text-center text-12 text-latest-grey-500 mt-1'>
+                  The transaction was cancelled or could not be completed. You can safely go back and try again.
+                </p>
+              )}
+
+              <div className='mt-5'>
+                <LoadingStepsBars steps={steps} currentStep={progressStep - 1} />
+              </div>
+              {!hasError && (
+                <>
+                  <hr className='text-latest-grey-300 my-3' />
+                  <div className='flex justify-between mt-[2px]'>
+                    <p className='text-14 font-medium text-latest-grey-100'>
+                      Estimated time{' '}
+                    </p>
+                    <p className='font-semibold text-14'>
+                      ~{isAllComplete ? initialEstimateFormatted : formattedTime()}
+                    </p>
+                  </div>
+                  {isAllComplete && (
+                    <div className='flex justify-between mt-[2px]'>
+                      <p className='text-14 font-medium text-latest-grey-100'>
+                        Total time taken{' '}
+                      </p>
+                      <p className='font-semibold text-14'>{totalTimeTaken()}</p>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-          )}
-          {(isBridgeTokensToL2Error || withdrawTokensToL1Error || isResumeBridgeError || isResumeWithdrawalError) && (
-            <div className='mt-4 text-red font-semibold text-center'>
-              Operation failed. Please try again.
-            </div>
-          )}
-        </div>
+          )
+        })()}
 
         {/* Transaction Details */}
         <div className='bg-[#F5F5F5] rounded-md mt-4 p-4'>

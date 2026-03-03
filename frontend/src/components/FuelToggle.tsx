@@ -38,15 +38,12 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
         <span className='text-sm font-medium text-latest-grey-700'>
           Fund your Aztec gas account
         </span>
-        <div className='relative'>
-          <input
-            type='checkbox'
-            className='sr-only peer'
-            checked={fuelEnabled}
-            onChange={(e) => onToggle(e.target.checked)}
-          />
-          <div className='w-9 h-5 bg-gray-300 peer-checked:bg-blue-500 rounded-full transition-colors' />
-          <div className='absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow peer-checked:translate-x-4 transition-transform' />
+        <div
+          className='relative cursor-pointer'
+          onClick={() => onToggle(!fuelEnabled)}
+        >
+          <div className={`w-9 h-5 rounded-full transition-colors ${fuelEnabled ? 'bg-blue-500' : 'bg-gray-300'}`} />
+          <div className={`absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${fuelEnabled ? 'translate-x-4' : ''}`} />
         </div>
       </label>
       <p className='text-xs text-latest-grey-500 mt-1'>
