@@ -45,6 +45,8 @@ export default function ProgressPage() {
     recoveryOperationId,
     recoveryClaimData,
     recoveryWithdrawalData,
+    fuelEnabled,
+    fuelAmount: fuelAmountStr,
   } = useBridgeStore()
 
   const isRecoveryMode = !!recoveryOperationId && (!!recoveryClaimData || !!recoveryWithdrawalData)
@@ -410,9 +412,11 @@ export default function ProgressPage() {
               ? `${formatUnits(BigInt((recoveryClaimData?.amount ?? recoveryWithdrawalData?.amount) || '0'), isL2ToL1Recovery ? L2_TOKEN_METADATA.decimals : L1_TOKEN_METADATA.decimals)} USDC`
               : `${bridgeAmount} USDC`}
           </p>
-          <p className='text-center text-16 font-medium text-latest-grey-500 mt-2'>
-            {/* ${bridgeConfig.amount} */}
-          </p>
+          {!isRecoveryMode && fuelEnabled && Number(fuelAmountStr) > 0 && (
+            <p className='text-center text-12 font-medium text-latest-grey-500 mt-1'>
+              {(Number(bridgeAmount) - Number(fuelAmountStr)).toFixed(2)} USDC to bridge + {Number(fuelAmountStr).toFixed(2)} USDC to top up Fee Juice
+            </p>
+          )}
         </div>
       </div>
 

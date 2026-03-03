@@ -119,6 +119,53 @@ export const useL2TokenBalance = () => {
   })
 }
 
+const FEE_JUICE_ADDRESS =
+  '0x0000000000000000000000000000000000000000000000000000000000000005'
+const FEE_JUICE_DECIMALS = 18
+
+export const useL2FeeJuiceBalance = () => {
+  const { aztecAddress } = useWalletStore()
+  const handleL2Error = useL2ErrorHandler()
+  const walletAdapter = useWalletAdapter()
+
+  const queryKey = ['l2FeeJuiceBalance', aztecAddress]
+
+  const queryFn = async (): Promise<string> => {
+    try {
+      if (!aztecAddress) {
+        throw new Error('Aztec address not found')
+      }
+      if (!walletAdapter) {
+        throw new Error(
+          'Aztec wallet not connected or contracts not initialized',
+        )
+      }
+
+      const userAddress = AztecAddress.fromString(aztecAddress)
+
+      const [publicBalanceResult] = await walletAdapter.simulateViews([
+        {
+          contract: FEE_JUICE_ADDRESS,
+          method: 'balance_of_public',
+          args: [userAddress],
+        },
+      ])
+
+      const publicBalance = BigInt(publicBalanceResult.result.toString())
+      return formatUnits(publicBalance, FEE_JUICE_DECIMALS)
+    } catch (error) {
+      handleL2Error<string>(error, 'BALANCE')
+      throw error
+    }
+  }
+
+  return useQuery<string, Error>({
+    queryKey,
+    queryFn,
+    enabled: !!aztecAddress && !!walletAdapter,
+  })
+}
+
 export function useL1ContractAddresses() {
   const { isAztecConnected } = useWalletStore()
 

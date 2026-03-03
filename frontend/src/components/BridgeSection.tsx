@@ -26,6 +26,7 @@ interface BridgeSectionProps {
   inputRef: React.RefObject<HTMLInputElement>
   onSwap?: () => void
   isPrivacyModeEnabled: boolean
+  feeJuiceBalance?: string
 }
 
 const BridgeSection: React.FC<BridgeSectionProps> = ({
@@ -42,6 +43,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
   inputRef,
   onSwap,
   isPrivacyModeEnabled,
+  feeJuiceBalance,
 }) => {
   // Normalize balances to strings
   const l1NativeBalanceStr =

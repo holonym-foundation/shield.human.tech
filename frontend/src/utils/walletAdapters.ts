@@ -131,18 +131,25 @@ class WalletAdapter {
     contract: AztecAddress | string,
     method: string,
     args: any[],
-    options?: { contractType?: 'token' | 'bridge' }
+    options?: { contractType?: 'token' | 'bridge'; fee?: { paymentMethod: any } }
   ): Promise<ExecuteCallResult> {
     const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
     const type = options?.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
     const artifact = await getContractArtifact(type)
     const instance = await Contract.at(addr, artifact, this.wallet)
+    const sendOpts: any = { from: this.account }
+    if (options?.fee) sendOpts.fee = options.fee
     const receipt = await instance.methods[method](...args)
-      .send({ from: this.account })
+      .send(sendOpts)
     return {
       txHash: receipt.txHash.toString(),
       blockNumber: receipt.blockNumber,
     }
+  }
+
+  /** Expose the underlying SDK wallet (needed for FeeJuicePaymentMethodWithClaim) */
+  get sdkWallet(): Wallet {
+    return this.wallet
   }
 
   async executeCallWithAuthWit(

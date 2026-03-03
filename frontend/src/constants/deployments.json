@@ -166,6 +166,8 @@
         "realProofs": false
       },
       "sponsoredFeeAddress": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+      "bridgeAndFuelAddress": "0x0f7877C422d57F85c8A1BfA94524cfE00B76866a",
+      "mockFuelSwapAddress": "0x2936A451E509B28b8011e9D77ead711F39636dd4",
       "tokens": [
         {
           "symbol": "USDC",

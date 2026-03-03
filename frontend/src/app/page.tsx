@@ -19,6 +19,7 @@ import {
   useL2HasSoulboundToken,
   useL2MintSoulboundToken,
   useL2TokenBalance,
+  useL2FeeJuiceBalance,
   useL2WithdrawTokensToL1,
   useL1ContractAddresses,
   useL2NodeIsReady,
@@ -52,10 +53,12 @@ import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useRouter } from 'next/navigation'
 import MaintenanceOverlay from '@/components/MaintenanceOverlay'
+import FuelToggle from '@/components/FuelToggle'
 import {
   MAINTENANCE_MODE,
   MAINTENANCE_MESSAGE,
   MAINTENANCE_TITLE,
+  BRIDGE_AND_FUEL_ADDRESS,
 } from '@/config'
 
 const variants = {
@@ -98,6 +101,10 @@ export default function Home() {
     setBridgeConfig,
     resetStepState,
     reset: resetBridgeStore,
+    fuelEnabled,
+    fuelAmount,
+    setFuelEnabled,
+    setFuelAmount,
   } = useBridgeStore()
 
   // Get wallet state from useWalletStore
@@ -194,6 +201,8 @@ export default function Home() {
 
   const l2PrivateBalance = l2Balance?.privateBalance
   const l2PublicBalance = l2Balance?.publicBalance
+  const { data: feeJuiceBalance, refetch: refetchFeeJuiceBalance } =
+    useL2FeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
     useL2MintSoulboundToken(mintL2SBTOnSuccess)
@@ -202,7 +211,7 @@ export default function Home() {
   const handleBridgeSuccess = useCallback(
     (_data: any) => {
       notify.promise(
-        Promise.all([refetchL1Balance(), refetchL2Balance()]),
+        Promise.all([refetchL1Balance(), refetchL2Balance(), refetchFeeJuiceBalance()]),
         {
           pending: 'Refreshing L1 and L2 balances...',
           success: 'Balances updated',
@@ -219,7 +228,7 @@ export default function Home() {
         setBridgeCompleted(false)
       }, 3000)
     },
-    [refetchL1Balance, refetchL2Balance, setBridgeConfig, bridgeConfig, notify]
+    [refetchL1Balance, refetchL2Balance, refetchFeeJuiceBalance, setBridgeConfig, bridgeConfig, notify]
   )
 
   const { mutate: bridgeTokensToL2, isPending: bridgeTokensToL2Pending } =
@@ -532,7 +541,22 @@ export default function Home() {
                     inputRef={inputRef as React.RefObject<HTMLInputElement>}
                     onSwap={swapDirection}
                     isPrivacyModeEnabled={isPrivacyModeEnabled}
+                    feeJuiceBalance={feeJuiceBalance}
                   />
+                  {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
+                    !isPrivacyModeEnabled &&
+                    !!BRIDGE_AND_FUEL_ADDRESS && (
+                    <FuelToggle
+                      fuelEnabled={fuelEnabled}
+                      fuelAmount={fuelAmount}
+                      bridgeAmount={bridgeConfig.amount}
+                      tokenSymbol={bridgeConfig.from.token?.symbol ?? 'USDC'}
+                      tokenDecimals={bridgeConfig.from.token?.decimals ?? 6}
+                      onToggle={setFuelEnabled}
+                      onAmountChange={setFuelAmount}
+                      feeJuiceBalance={feeJuiceBalance}
+                    />
+                  )}
                   <TransactionBreakdown
                     isOpen={false}
                     onToggle={() => setShowBreakdown(true)}
