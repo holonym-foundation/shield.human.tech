@@ -333,12 +333,6 @@ export default function ProgressPage() {
           const isAllComplete = steps.every((step) => step.status === 'completed')
           const hasError = isBridgeTokensToL2Error || withdrawTokensToL1Error || isResumeBridgeError || isResumeWithdrawalError
 
-          const icon = hasError
-            ? '/assets/svg/alert.svg'
-            : isAllComplete
-            ? '/assets/svg/transactionComplete.svg'
-            : '/assets/svg/progress.svg'
-
           const heading = hasError
             ? 'Something went wrong'
             : isAllComplete
@@ -348,7 +342,17 @@ export default function ProgressPage() {
           return (
             <div className='bg-white rounded-md mt-2 p-4'>
               <div className='flex items-center justify-center'>
-                <StyledImage src={icon} alt='' className='h-[56px] w-[56px]' />
+                {hasError ? (
+                  <svg width='56' height='56' viewBox='0 0 25 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
+                    <path d='M12.5004 8.99998V13M12.5004 17H12.5104M22.2304 18L14.2304 3.99998C14.056 3.69218 13.803 3.43617 13.4973 3.25805C13.1917 3.07993 12.8442 2.98608 12.4904 2.98608C12.1366 2.98608 11.7892 3.07993 11.4835 3.25805C11.1778 3.43617 10.9249 3.69218 10.7504 3.99998L2.75042 18C2.5741 18.3053 2.48165 18.6519 2.48243 19.0045C2.48321 19.3571 2.5772 19.7032 2.75486 20.0078C2.93253 20.3124 3.18757 20.5646 3.49411 20.7388C3.80066 20.9131 4.14783 21.0032 4.50042 21H20.5004C20.8513 20.9996 21.1959 20.9069 21.4997 20.7313C21.8035 20.5556 22.0556 20.3031 22.2309 19.9991C22.4062 19.6951 22.4985 19.3504 22.4984 18.9995C22.4983 18.6486 22.4059 18.3039 22.2304 18Z' stroke='#B91C1C' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'/>
+                  </svg>
+                ) : (
+                  <StyledImage
+                    src={isAllComplete ? '/assets/svg/transactionComplete.svg' : '/assets/svg/progress.svg'}
+                    alt=''
+                    className='h-[56px] w-[56px]'
+                  />
+                )}
               </div>
               <p className={`text-center font-semibold text-md mt-5 ${hasError ? 'text-[#B91C1C]' : ''}`}>
                 {heading}

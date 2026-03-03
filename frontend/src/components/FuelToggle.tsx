@@ -34,18 +34,24 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   return (
     <div className='bg-[#F5F5F5] rounded-md p-3 mt-3'>
       {/* Toggle row */}
-      <label className='flex items-center justify-between cursor-pointer'>
+      <div
+        className='flex items-center justify-between cursor-pointer'
+        onClick={() => onToggle(!fuelEnabled)}
+      >
         <span className='text-sm font-medium text-latest-grey-700'>
           Fund your Aztec gas account
         </span>
-        <div
-          className='relative cursor-pointer'
-          onClick={() => onToggle(!fuelEnabled)}
-        >
-          <div className={`w-9 h-5 rounded-full transition-colors ${fuelEnabled ? 'bg-blue-500' : 'bg-gray-300'}`} />
-          <div className={`absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${fuelEnabled ? 'translate-x-4' : ''}`} />
+        <div className='relative'>
+          <div
+            className='w-9 h-5 rounded-full transition-colors'
+            style={{ backgroundColor: fuelEnabled ? '#3b82f6' : '#d1d5db' }}
+          />
+          <div
+            className='absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform'
+            style={{ transform: fuelEnabled ? 'translateX(1rem)' : 'translateX(0)' }}
+          />
         </div>
-      </label>
+      </div>
       <p className='text-xs text-latest-grey-500 mt-1'>
         Current gas balance: {feeJuiceBalance ?? '--'} FJ
       </p>
