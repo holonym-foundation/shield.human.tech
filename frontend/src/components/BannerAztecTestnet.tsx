@@ -11,7 +11,7 @@ const BannerAztecTestnet = () => {
   const { data: networkHealth } = useNetworkHealth()
 
   const isNetworkDown = networkHealth?.isNetworkDown
-  const isCongested = pendingTxCount && pendingTxCount > 40
+  const isCongested = pendingTxCount != null && pendingTxCount > 40
 
   return (
     <>

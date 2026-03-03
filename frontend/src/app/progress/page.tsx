@@ -330,23 +330,19 @@ export default function ProgressPage() {
 
         {/* Progress Card */}
         <div className='bg-white rounded-md mt-2 p-4'>
-          <div
-            className='flex items-center justify-center cursor-pointer'
-            // onClick={async () => {
-            //   const amount = parseUnits(bridgeAmount || '0', 6) // Assuming 6 decimals for USDC
-            //   await bridgeTokensToL2(amount)
-            // }}
-          >
+          <div className='flex items-center justify-center'>
             <StyledImage
-              src='/assets/svg/progress.svg'
+              src={steps.every((step) => step.status === 'completed')
+                ? '/assets/svg/transactionComplete.svg'
+                : '/assets/svg/progress.svg'}
               alt=''
               className='h-[56px] w-[56px]'
             />
           </div>
-          <p
-            onClick={() => router.push('/complete')}
-            className='text-center font-semibold text-md mt-5'>
-            Transaction in progress
+          <p className='text-center font-semibold text-md mt-5'>
+            {steps.every((step) => step.status === 'completed')
+              ? 'Transaction complete'
+              : 'Transaction in progress'}
           </p>
 
           <div className='mt-5'>
@@ -442,7 +438,7 @@ export default function ProgressPage() {
         )}
       </div>
 
-      <div className='flex flex-row items-center justify-center px-5 mt-4'>
+      <div className='flex flex-row items-center justify-center px-5 mt-4 mb-6'>
         {(steps.every((step) => step.status === 'completed') ||
           isBridgeTokensToL2Error ||
           withdrawTokensToL1Error ||
