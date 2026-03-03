@@ -38,12 +38,12 @@ export const useL2ErrorHandler = () => {
 
     let fullMessage = ''
 
-    // Check for wallet disconnect errors
+    // Check for wallet disconnect errors — silently return defaults.
+    // The disconnect handler in walletStore already shows a toast when
+    // the disconnection is unexpected; showing it again per-query is noisy.
     const isWalletDisconnected =
       /wallet.*disconnect|disconnect.*wallet|backend.*disconnect/i.test(errorMessage)
     if (isWalletDisconnected) {
-      fullMessage = `${operationMessages[type]} - Wallet connection lost. Please reconnect your Aztec wallet.`
-      notify('error', fullMessage)
       return getDefaultValue<T>(type)
     }
 

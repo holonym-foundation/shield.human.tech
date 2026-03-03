@@ -64,3 +64,18 @@ export function formatFuelDisplay(rawFj: bigint): string {
   const usdValue = (Number(rawFj) / 1e18) * getFeeJuicePriceUsd()
   return `${fjStr} FJ (~$${usdValue.toFixed(2)})`
 }
+
+/**
+ * Convert a USD amount to the equivalent token amount (human-readable string).
+ * e.g. usdToTokenAmount(5, "USDC") → "5" (at $1/USDC)
+ *      usdToTokenAmount(5, "ETH")  → "0.002" (at $2500/ETH)
+ */
+export function usdToTokenAmount(usdAmount: number, tokenSymbol: string): string {
+  const pricePerToken = getTokenPriceUsd(tokenSymbol)
+  if (pricePerToken <= 0) return '0'
+  const tokenAmount = usdAmount / pricePerToken
+  // Use enough precision to avoid rounding to 0 for expensive tokens
+  if (tokenAmount >= 1) return tokenAmount.toFixed(2)
+  if (tokenAmount >= 0.01) return tokenAmount.toFixed(4)
+  return tokenAmount.toFixed(6)
+}

@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { computeFuelOutput, formatFjAmount, getFeeJuicePriceUsd } from '@/utils/fuelPricing'
+import { computeFuelOutput, formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
 
 interface FuelToggleProps {
   fuelEnabled: boolean
@@ -14,7 +14,7 @@ interface FuelToggleProps {
   feeJuiceBalance?: string
 }
 
-const PRESETS = ['1', '5', '10']
+const USD_PRESETS = [1, 5, 10]
 
 const FuelToggle: React.FC<FuelToggleProps> = ({
   fuelEnabled,
@@ -31,6 +31,11 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   const isValid = fuelNum > 0 && fuelNum < bridgeNum
   const netBridge = bridgeNum - fuelNum
 
+  // Check which USD preset is currently selected (if any)
+  const activePreset = USD_PRESETS.find(
+    (usd) => fuelAmount === usdToTokenAmount(usd, tokenSymbol)
+  )
+
   return (
     <div className='bg-[#F5F5F5] rounded-md p-3 mt-3'>
       {/* Toggle row */}
@@ -39,7 +44,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
         onClick={() => onToggle(!fuelEnabled)}
       >
         <span className='text-sm font-medium text-latest-grey-700'>
-          Fund your Aztec gas account
+          Top up gas balance
         </span>
         <div className='relative'>
           <div
@@ -53,17 +58,17 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
         </div>
       </div>
       <p className='text-xs text-latest-grey-500 mt-1'>
-        Current gas balance: {feeJuiceBalance ?? '--'} FJ
+        Current balance: {feeJuiceBalance ?? '--'} FJ
       </p>
 
       {fuelEnabled && (
         <div className='mt-3 space-y-2'>
-          {/* Amount input + presets */}
+          {/* USD preset buttons + custom input */}
           <div className='flex items-center gap-2'>
             <input
               type='text'
               inputMode='decimal'
-              placeholder='Amount'
+              placeholder={`Amount in ${tokenSymbol}`}
               value={fuelAmount}
               onChange={(e) => {
                 const v = e.target.value
@@ -71,42 +76,44 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
               }}
               className='flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500'
             />
-            {PRESETS.map((preset) => (
-              <button
-                key={preset}
-                onClick={() => onAmountChange(preset)}
-                className={`px-2 py-1 text-xs rounded border ${
-                  fuelAmount === preset
-                    ? 'border-blue-500 bg-blue-50 text-blue-600'
-                    : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                }`}
-              >
-                {preset}
-              </button>
-            ))}
+            {USD_PRESETS.map((usd) => {
+              const tokenEquiv = usdToTokenAmount(usd, tokenSymbol)
+              return (
+                <button
+                  key={usd}
+                  onClick={() => onAmountChange(tokenEquiv)}
+                  title={`${tokenEquiv} ${tokenSymbol}`}
+                  className={`px-2 py-1 text-xs rounded border ${
+                    activePreset === usd
+                      ? 'border-blue-500 bg-blue-50 text-blue-600'
+                      : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                  }`}
+                >
+                  ${usd}
+                </button>
+              )
+            })}
           </div>
 
           {/* Breakdown */}
           {fuelAmount && (
             <div className='text-xs text-latest-grey-700 space-y-0.5'>
               {isValid ? (
-                <>
-                  {(() => {
-                    const fjOutput = computeFuelOutput(fuelAmount, tokenDecimals, tokenSymbol)
-                    const fjDisplay = formatFjAmount(fjOutput)
-                    const usdValue = (Number(fjOutput) / 1e18) * getFeeJuicePriceUsd()
-                    return (
-                      <>
-                        <p>
-                          Swapping {fuelNum.toFixed(2)} {tokenSymbol} → ~{fjDisplay} FJ (~${usdValue.toFixed(2)})
-                        </p>
-                        <p>
-                          You&apos;ll receive: {netBridge.toFixed(2)} {tokenSymbol} + ~{fjDisplay} Fee Juice
-                        </p>
-                      </>
-                    )
-                  })()}
-                </>
+                (() => {
+                  const fjOutput = computeFuelOutput(fuelAmount, tokenDecimals, tokenSymbol)
+                  const fjDisplay = formatFjAmount(fjOutput)
+                  const usdValue = (Number(fjOutput) / 1e18) * getFeeJuicePriceUsd()
+                  return (
+                    <>
+                      <p>
+                        Swapping {fuelNum} {tokenSymbol} → ~{fjDisplay} FJ (~${usdValue.toFixed(2)})
+                      </p>
+                      <p>
+                        You&apos;ll receive: {netBridge} {tokenSymbol} + ~{fjDisplay} Fee Juice
+                      </p>
+                    </>
+                  )
+                })()
               ) : fuelNum >= bridgeNum ? (
                 <p className='text-red-500'>
                   Gas amount must be less than bridge amount

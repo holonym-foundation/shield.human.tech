@@ -112,6 +112,11 @@ interface WalletState {
   aztecAlias: string | null
   availableAccounts: Array<{ alias: string; address: string }>
 
+  // Connection generation counter — increments on each successful connection.
+  // Used by useWalletAdapter to bust the React Query cache so a fresh adapter
+  // is created for each connection (prevents stale adapter reuse after disconnect).
+  connectionGeneration: number
+
   // ============================================================================
   // AZTEC WALLET ACTIONS
   // ============================================================================
@@ -250,6 +255,9 @@ const initialState = {
   aztecAlias: null,
   availableAccounts: [],
 
+  // Connection generation counter
+  connectionGeneration: 0,
+
   // WaaP Wallet State
   waapAddress: null,
   waapChainId: null,
@@ -336,8 +344,7 @@ const walletStore = create<WalletState>((set, get) => ({
     const collectedWallets: Array<{ name: string; provider: WalletProvider }> = []
 
     // Resolve as soon as the first wallet is discovered (with a short
-    // grace period for additional wallets), NOT after the full timeout.
-    // Waiting the full 5-10s causes stale-provider key exchange timeouts.
+    // grace period for additional wallets), NOT after the full 60s timeout.
     const result = await new Promise<WalletProvider[]>((resolve) => {
       let graceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -364,6 +371,14 @@ const walletStore = create<WalletState>((set, get) => ({
 
     isDiscoveryInProgress = false
     activeDiscoverySession = null
+
+    // If the user already clicked a wallet while discovery was still running
+    // (phase moved past 'discovering'/'selecting'), don't interfere — the
+    // connection flow is already in progress.
+    const currentPhase = get().walletConnectionPhase
+    if (currentPhase !== 'discovering' && currentPhase !== 'selecting') {
+      return
+    }
 
     if (result.length === 0) {
       set({
@@ -595,12 +610,14 @@ const walletStore = create<WalletState>((set, get) => ({
         aztecNode,
       }
 
-      // Update all state
-      set({
-        walletConnectionPhase: 'connected',
+      // Update all state — increment connectionGeneration so the adapter
+      // cache (useWalletAdapter) is busted and a fresh adapter is created.
+      set((prev) => ({
+        walletConnectionPhase: 'connected' as const,
         isAztecConnecting: false,
         aztecAlias: account.alias,
-      })
+        connectionGeneration: prev.connectionGeneration + 1,
+      }))
 
       get().setAztecLoginMethod('wallet-sdk')
       get().setAztecState({
@@ -1273,6 +1290,9 @@ export const useWalletStore = () =>
       availableAccounts: state.availableAccounts,
       selectAccount: state.selectAccount,
       switchAztecAccount: state.switchAztecAccount,
+
+      // Connection generation (for cache busting)
+      connectionGeneration: state.connectionGeneration,
 
       // ============================================================================
       // WAAP WALLET ACTIONS
