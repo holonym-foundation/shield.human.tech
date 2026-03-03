@@ -37,7 +37,7 @@ export function discoverWallets(opts?: {
   return manager.getAvailableWallets({
     chainInfo: getChainInfo(),
     appId: APP_ID,
-    timeout: opts?.timeout ?? 10000,
+    timeout: opts?.timeout ?? 60000,
     onWalletDiscovered: opts?.onWalletDiscovered,
   })
 }

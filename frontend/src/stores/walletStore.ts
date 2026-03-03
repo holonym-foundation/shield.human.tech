@@ -48,12 +48,12 @@ declare global {
 
 const AZTEC_WALLET_KEY = 'aztecLoginMethod'
 
-/** How long to wait for wallet-sdk providers to respond during discovery. */
-const DISCOVERY_TIMEOUT_MS = 5000
+/** How long to wait for wallet-sdk providers to respond during discovery (SDK default: 60s). */
+const DISCOVERY_TIMEOUT_MS = 60000
 /** Grace period after first wallet discovered before resolving (allows additional wallets). */
-const DISCOVERY_GRACE_MS = 1000
+const DISCOVERY_GRACE_MS = 2000
 /** Hard fallback if no wallets respond within this window. */
-const DISCOVERY_FALLBACK_MS = 6000
+const DISCOVERY_FALLBACK_MS = 62000
 /** Grace period before treating a disconnect event as real (absorbs HMR false positives). */
 const DISCONNECT_GRACE_MS = 1000
 
