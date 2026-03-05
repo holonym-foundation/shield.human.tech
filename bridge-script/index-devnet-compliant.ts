@@ -40,6 +40,10 @@ import { createAztecNodeClient } from '@aztec/aztec.js/node'
 import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
 import { sha256ToField } from '@aztec/foundation/crypto/sha256'
 import { computeL2ToL1MessageHash, computeSecretHash } from '@aztec/stdlib/hash'
+import { Schnorr } from '@aztec/foundation/crypto/schnorr'
+import { deriveSigningKey } from '@aztec/stdlib/keys'
+import { computeInnerAuthWitHash } from '@aztec/stdlib/auth-witness'
+import { GrumpkinScalar } from '@aztec/foundation/curves/grumpkin'
 import 'dotenv/config'
 
 // Custom L2 contracts (from codegen)
@@ -151,6 +155,13 @@ const PASSPORT_SIGNER_PRIVATE_KEY = (process.env.PASSPORT_SIGNER_PRIVATE_KEY
 const pochAttesterAccount = privateKeyToAccount(POCH_ATTESTER_PRIVATE_KEY)
 const passportSignerAccount = privateKeyToAccount(PASSPORT_SIGNER_PRIVATE_KEY)
 
+// L2 Grumpkin keys for Schnorr attestation signing (separate from L1 ECDSA keys)
+// Default test values must fit within the BN254 field modulus (~2^254)
+const L2_POCH_ATTESTER_PRIVATE_KEY = process.env.L2_POCH_ATTESTER_PRIVATE_KEY
+  || '0000000000000000000000000000000000000000000000000000000000001234'
+const L2_PASSPORT_SIGNER_PRIVATE_KEY = process.env.L2_PASSPORT_SIGNER_PRIVATE_KEY
+  || '0000000000000000000000000000000000000000000000000000000000005678'
+
 // ─── Run mode ────────────────────────────────────────────────────────────────
 // RUN_TESTS_ONLY=true  — skip deployment, only run tests against existing tokens
 // DEPLOY_ONLY=true     — deploy tokens but skip tests
@@ -158,26 +169,226 @@ const passportSignerAccount = privateKeyToAccount(PASSPORT_SIGNER_PRIVATE_KEY)
 const RUN_TESTS_ONLY = process.env.RUN_TESTS_ONLY === 'true'
 const DEPLOY_ONLY = process.env.DEPLOY_ONLY === 'true'
 const DEPLOY_TOKEN = process.env.DEPLOY_TOKEN || '' // e.g. 'USDC'
+const PROFILE_ENABLED = process.env.PROFILE === 'true'
 
-// ─── Helpers: Public key → [u8; 32] ─────────────────────────────────────────
+// ─── L2 Grumpkin key derivation ──────────────────────────────────────────────
 
-function pubKeyToCoords(uncompressedPubKey: Hex): { x: number[]; y: number[] } {
-  // Uncompressed key: 0x04 || x(32 bytes) || y(32 bytes)
-  const hex = uncompressedPubKey.startsWith('0x04')
-    ? uncompressedPubKey.slice(4)
-    : uncompressedPubKey.slice(2)
-  const xHex = hex.slice(0, 64)
-  const yHex = hex.slice(64, 128)
+const schnorr = new Schnorr()
 
-  const toBytes = (h: string): number[] => {
-    const arr: number[] = []
-    for (let i = 0; i < h.length; i += 2) {
-      arr.push(parseInt(h.slice(i, i + 2), 16))
-    }
-    return arr
+async function deriveL2SigningKeyAndPubkey(hexPrivateKey: string) {
+  const secretKey = Fr.fromString(hexPrivateKey.startsWith('0x') ? hexPrivateKey : `0x${hexPrivateKey}`)
+  const signingKey = deriveSigningKey(secretKey)
+  const pubkey = await schnorr.computePublicKey(signingKey)
+  return { signingKey, pubkey }
+}
+
+// Lazily initialized L2 key pairs
+let l2PochSigningKey: GrumpkinScalar
+let l2PochPubkey: { x: Fr; y: Fr }
+let l2PassportSigningKey: GrumpkinScalar
+let l2PassportPubkey: { x: Fr; y: Fr }
+
+async function initL2Keys() {
+  if (!l2PochSigningKey) {
+    const poch = await deriveL2SigningKeyAndPubkey(L2_POCH_ATTESTER_PRIVATE_KEY)
+    l2PochSigningKey = poch.signingKey
+    l2PochPubkey = { x: poch.pubkey.x, y: poch.pubkey.y }
   }
+  if (!l2PassportSigningKey) {
+    const passport = await deriveL2SigningKeyAndPubkey(L2_PASSPORT_SIGNER_PRIVATE_KEY)
+    l2PassportSigningKey = passport.signingKey
+    l2PassportPubkey = { x: passport.pubkey.x, y: passport.pubkey.y }
+  }
+}
 
-  return { x: toBytes(xHex), y: toBytes(yHex) }
+// ─── Profiling ───────────────────────────────────────────────────────────────
+
+import { writeFileSync, existsSync, readFileSync, mkdirSync } from 'fs'
+import { join } from 'path'
+
+const PROFILE_OUTPUT_DIR = join(import.meta.dirname ?? '.', 'profiling-results')
+const profileResults: ProfileEntry[] = []
+
+const WASM_PROVING_MULTIPLIER = 4.5 // native-to-WASM slowdown estimate
+
+interface ProfileStepEntry {
+  functionName: string
+  gateCount: number
+  witgenMs: number | null       // witness generation time for this circuit
+  simulationMs: number | null   // total oracle/simulation time within this circuit
+}
+
+interface ProfileEntry {
+  label: string
+  timestamp: string
+  executionSteps: ProfileStepEntry[]
+  totalGates: number
+  totalWitgenMs: number
+  totalSimulationMs: number
+  provingMs: number | null
+  estimatedWasmProvingMs: number | null
+  assessment: string
+  timings: Record<string, number>
+  stats: Record<string, any>
+}
+
+function getAssessment(totalGates: number): string {
+  if (totalGates < 50_000) return 'EXCELLENT (< 50k gates)'
+  if (totalGates < 200_000) return 'ACCEPTABLE (50k-200k gates)'
+  if (totalGates < 500_000) return 'NEEDS OPTIMIZATION (200k-500k gates)'
+  return 'REQUIRES OPTIMIZATION (> 500k gates)'
+}
+
+async function profileIfEnabled(
+  label: string,
+  interaction: any,
+  opts: { from: any; fee: any; authWitnesses?: any[] },
+  logger: Logger,
+) {
+  if (!PROFILE_ENABLED) return
+  try {
+    logger.info(`[PROFILE] Profiling ${label}...`)
+    const result = await interaction.profile({
+      from: opts.from,
+      fee: opts.fee,
+      profileMode: 'full' as const,
+      skipProofGeneration: false,
+      ...(opts.authWitnesses ? { authWitnesses: opts.authWitnesses } : {}),
+    })
+
+    // Build per-function timing lookup from stats.timings.perFunction
+    const perFunction: any[] = result.stats?.timings?.perFunction ?? []
+    const witgenByIndex = new Map<number, number>()
+    const simByIndex = new Map<number, number>()
+    for (let i = 0; i < perFunction.length; i++) {
+      const pf = perFunction[i]
+      if (pf?.time != null) witgenByIndex.set(i, pf.time)
+      // Sum all oracle call times as "simulation" time for this step
+      if (pf?.oracles) {
+        let oracleTotal = 0
+        for (const oracleCalls of Object.values(pf.oracles) as any[]) {
+          for (const t of oracleCalls.times ?? []) oracleTotal += t
+        }
+        if (oracleTotal > 0) simByIndex.set(i, oracleTotal)
+      }
+    }
+
+    // Build profile entry
+    const steps: ProfileStepEntry[] = []
+    let totalGates = 0
+    let totalWitgenMs = 0
+    let totalSimulationMs = 0
+
+    if (result.executionSteps?.length > 0) {
+      const pad = (s: string, n: number) => String(s).padEnd(n)
+      const numFmt = (n: number) => n.toLocaleString()
+      const msFmt = (n: number | null) => n != null ? n.toFixed(1) + 'ms' : '-'
+
+      logger.info(`[PROFILE] ┌── ${label} ──`)
+      logger.info(`[PROFILE] │ ${pad('Function', 45)} ${pad('Gates', 12)} ${pad('Witgen', 12)} ${pad('Sim/Oracle', 12)} Subtotal`)
+      logger.info(`[PROFILE] │ ${'─'.repeat(85)}`)
+      for (let i = 0; i < result.executionSteps.length; i++) {
+        const step = result.executionSteps[i]
+        const gates = step.gateCount ?? 0
+        const witgen = witgenByIndex.get(i) ?? null
+        const sim = simByIndex.get(i) ?? null
+        totalGates += gates
+        if (witgen != null) totalWitgenMs += witgen
+        if (sim != null) totalSimulationMs += sim
+        steps.push({ functionName: step.functionName, gateCount: gates, witgenMs: witgen, simulationMs: sim })
+        logger.info(`[PROFILE] │ ${pad(step.functionName, 45)} ${pad(numFmt(gates), 12)} ${pad(msFmt(witgen), 12)} ${pad(msFmt(sim), 12)} ${numFmt(totalGates)}`)
+      }
+      const assessment = getAssessment(totalGates)
+      logger.info(`[PROFILE] │ ${'─'.repeat(85)}`)
+      logger.info(`[PROFILE] │ ${pad('TOTAL', 45)} ${pad(numFmt(totalGates), 12)} ${pad(msFmt(totalWitgenMs), 12)} ${pad(msFmt(totalSimulationMs), 12)}`)
+      logger.info(`[PROFILE] │ Assessment: ${assessment}`)
+    }
+
+    // Extract top-level timings
+    const timings: Record<string, number> = {}
+    const provingMs = result.stats?.timings?.proving ?? null
+    const estimatedWasmProvingMs = provingMs != null ? provingMs * WASM_PROVING_MULTIPLIER : null
+    if (result.stats?.timings) {
+      for (const [key, value] of Object.entries(result.stats.timings)) {
+        if (typeof value === 'number') {
+          timings[key] = value
+        }
+      }
+    }
+
+    // Timing summary
+    logger.info(`[PROFILE] │`)
+    logger.info(`[PROFILE] │ Timing Breakdown:`)
+    logger.info(`[PROFILE] │   Simulation (oracle calls):  ${totalSimulationMs.toFixed(1)}ms`)
+    logger.info(`[PROFILE] │   Witness generation:         ${totalWitgenMs.toFixed(1)}ms`)
+    logger.info(`[PROFILE] │   Proving (native):           ${provingMs != null ? provingMs.toFixed(1) + 'ms' : 'N/A'}`)
+    logger.info(`[PROFILE] │   Proving (est. WASM ~${WASM_PROVING_MULTIPLIER}x):  ${estimatedWasmProvingMs != null ? estimatedWasmProvingMs.toFixed(1) + 'ms' : 'N/A'}`)
+    logger.info(`[PROFILE] │   Total:                      ${timings.total?.toFixed(1) ?? 'N/A'}ms`)
+    logger.info(`[PROFILE] └${'─'.repeat(90)}`)
+
+    // Store full result
+    const entry: ProfileEntry = {
+      label,
+      timestamp: new Date().toISOString(),
+      executionSteps: steps,
+      totalGates,
+      totalWitgenMs,
+      totalSimulationMs,
+      provingMs,
+      estimatedWasmProvingMs,
+      assessment: getAssessment(totalGates),
+      timings,
+      stats: result.stats ?? {},
+    }
+    profileResults.push(entry)
+  } catch (e: any) {
+    logger.warn(`[PROFILE] Could not profile ${label}: ${e.message?.slice(0, 150)}`)
+  }
+}
+
+function saveProfilingResults(logger: Logger) {
+  if (!PROFILE_ENABLED || profileResults.length === 0) return
+  try {
+    if (!existsSync(PROFILE_OUTPUT_DIR)) {
+      mkdirSync(PROFILE_OUTPUT_DIR, { recursive: true })
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const outPath = join(PROFILE_OUTPUT_DIR, `profile-${timestamp}.json`)
+
+    // Summary for quick comparison
+    const summary = profileResults.map(r => ({
+      function: r.label,
+      totalGates: r.totalGates,
+      assessment: r.assessment,
+      steps: r.executionSteps.length,
+      totalWitgenMs: r.totalWitgenMs,
+      totalSimulationMs: r.totalSimulationMs,
+      provingMs: r.provingMs,
+      estimatedWasmProvingMs: r.estimatedWasmProvingMs,
+      timings: r.timings,
+    }))
+
+    const output = {
+      runDate: new Date().toISOString(),
+      environment: process.env.AZTEC_ENV || 'sandbox',
+      summary,
+      details: profileResults,
+    }
+
+    writeFileSync(outPath, JSON.stringify(output, null, 2))
+    logger.info(`[PROFILE] Results saved to ${outPath}`)
+
+    // Also append to a running history file for tracking changes over time
+    const historyPath = join(PROFILE_OUTPUT_DIR, 'profile-history.jsonl')
+    for (const entry of summary) {
+      const line = JSON.stringify({ ...entry, runDate: output.runDate, environment: output.environment })
+      writeFileSync(historyPath, line + '\n', { flag: 'a' })
+    }
+    logger.info(`[PROFILE] History appended to ${historyPath}`)
+  } catch (e: any) {
+    logger.warn(`[PROFILE] Could not save results: ${e.message}`)
+  }
 }
 
 // ─── L1 Contract Deployment ──────────────────────────────────────────────────
@@ -320,31 +531,12 @@ async function signPassportAttestation(params: {
   return signature
 }
 
-// ─── Helpers: byte conversions for L2 attestation signing ────────────────────
-
-function bigIntToBytes32(value: bigint): Uint8Array {
-  const hex = value.toString(16).padStart(64, '0')
-  const bytes = new Uint8Array(32)
-  for (let i = 0; i < 32; i++) {
-    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-  }
-  return bytes
-}
-
-/** Strip v from a 65-byte hex signature, return r||s as number[64] */
-function hexSigToU8_64(sig: Hex): number[] {
-  const hex = sig.startsWith('0x') ? sig.slice(2) : sig
-  const arr: number[] = []
-  for (let i = 0; i < 128; i += 2) {
-    arr.push(parseInt(hex.slice(i, i + 2), 16))
-  }
-  return arr
-}
+// ─── L2 Schnorr attestation signing ──────────────────────────────────────────
 
 /**
- * Sign a Clean Hands (POCH) attestation for the L2 bridge.
- * L2 verification builds: circuit_id(32 BE) || action_id(32 BE) || nonce(32 BE) || user_address(last 20 bytes of Field BE)
- * Then keccak256 → eth_personal_sign_hash → ECDSA verify against stored pubkey.
+ * Sign a Clean Hands (POCH) attestation for the L2 bridge using Schnorr/Grumpkin.
+ * L2 verification: compute_inner_authwit_hash([circuitId, actionId, nonce, userAddress])
+ * then Schnorr verify against stored Grumpkin pubkey.
  */
 async function signL2CleanHandsAttestation(params: {
   circuitId: bigint
@@ -352,25 +544,21 @@ async function signL2CleanHandsAttestation(params: {
   nonce: bigint
   userAztecAddress: AztecAddress
 }): Promise<number[]> {
-  const buf = new Uint8Array(116)
-  buf.set(bigIntToBytes32(params.circuitId), 0)
-  buf.set(bigIntToBytes32(params.actionId), 32)
-  buf.set(bigIntToBytes32(params.nonce), 64)
-  const addrBytes = bigIntToBytes32(BigInt(params.userAztecAddress.toString()))
-  buf.set(addrBytes.slice(12, 32), 96)
-
-  const digest = keccak256(buf as any)
-  const signature = await signMessage({
-    privateKey: POCH_ATTESTER_PRIVATE_KEY,
-    message: { raw: digest },
-  })
-  return hexSigToU8_64(signature)
+  await initL2Keys()
+  const hash = await computeInnerAuthWitHash([
+    new Fr(params.circuitId),
+    new Fr(params.actionId),
+    new Fr(params.nonce),
+    new Fr(BigInt(params.userAztecAddress.toString())),
+  ])
+  const sig = await schnorr.constructSignature(hash.toBuffer(), l2PochSigningKey)
+  return [...sig.toBuffer()]
 }
 
 /**
- * Sign a Passport attestation for the L2 bridge.
- * L2 verification builds: user(32 BE) || max_amount(32 BE) || nonce(32 BE) || deadline(32 BE) || bridge_address(32 BE)
- * Then keccak256 → eth_personal_sign_hash → ECDSA verify against stored pubkey.
+ * Sign a Passport attestation for the L2 bridge using Schnorr/Grumpkin.
+ * L2 verification: compute_inner_authwit_hash([userAddress, maxAmount, nonce, deadline, bridgeAddress])
+ * then Schnorr verify against stored Grumpkin pubkey.
  */
 async function signL2PassportAttestation(params: {
   userAztecAddress: AztecAddress
@@ -379,19 +567,16 @@ async function signL2PassportAttestation(params: {
   deadline: bigint
   bridgeAddress: AztecAddress
 }): Promise<number[]> {
-  const buf = new Uint8Array(160)
-  buf.set(bigIntToBytes32(BigInt(params.userAztecAddress.toString())), 0)
-  buf.set(bigIntToBytes32(params.maxAmount), 32)
-  buf.set(bigIntToBytes32(params.nonce), 64)
-  buf.set(bigIntToBytes32(params.deadline), 96)
-  buf.set(bigIntToBytes32(BigInt(params.bridgeAddress.toString())), 128)
-
-  const digest = keccak256(buf as any)
-  const signature = await signMessage({
-    privateKey: PASSPORT_SIGNER_PRIVATE_KEY,
-    message: { raw: digest },
-  })
-  return hexSigToU8_64(signature)
+  await initL2Keys()
+  const hash = await computeInnerAuthWitHash([
+    new Fr(BigInt(params.userAztecAddress.toString())),
+    new Fr(params.maxAmount),
+    new Fr(params.nonce),
+    new Fr(params.deadline),
+    new Fr(BigInt(params.bridgeAddress.toString())),
+  ])
+  const sig = await schnorr.constructSignature(hash.toBuffer(), l2PassportSigningKey)
+  return [...sig.toBuffer()]
 }
 
 // ─── Salt generation ─────────────────────────────────────────────────────────
@@ -427,8 +612,7 @@ async function deployCompliantTokenSetup(
   logger.info(`\n=== Deploying COMPLIANT ${tokenConfig.symbol} Token Setup ===`)
 
   const { tokenSalt, bridgeSalt, proxySalt } = generateTokenSalts(tokenConfig.symbol)
-  const pochCoords = pubKeyToCoords(pochAttesterAccount.publicKey)
-  const passportCoords = pubKeyToCoords(passportSignerAccount.publicKey)
+  await initL2Keys()
 
   // ── Step 1: Deploy L1 TestERC20 ──
   logger.info(`[L1] Deploying ${tokenConfig.symbol} ERC20`)
@@ -493,11 +677,11 @@ async function deployCompliantTokenSetup(
     wallet,
     l2ProxyContract.address,     // token_minter_proxy
     l1PortalContractAddress,     // portal
-    pochCoords.x,                // human_id_attester_x
-    pochCoords.y,                // human_id_attester_y
+    l2PochPubkey.x,              // human_id_attester_x (Grumpkin)
+    l2PochPubkey.y,              // human_id_attester_y (Grumpkin)
     CLEAN_HANDS_CIRCUIT_ID,      // circuit_id
-    passportCoords.x,            // passport_signer_x
-    passportCoords.y,            // passport_signer_y
+    l2PassportPubkey.x,          // passport_signer_x (Grumpkin)
+    l2PassportPubkey.y,          // passport_signer_y (Grumpkin)
   ).send({
     from: ownerAztecAddress,
     contractAddressSalt: bridgeSalt,
@@ -642,6 +826,14 @@ async function testPublicBridgeFlow(
     wallet
   )
 
+  // Profile claim_public before sending
+  await profileIfEnabled(
+    'claim_public',
+    l2BridgeContract.methods.claim_public(ownerAztecAddress, amountAfterFee, secret, leafIndex),
+    { from: ownerAztecAddress, fee: { paymentMethod: sponsoredPaymentMethod } },
+    logger,
+  )
+
   await l2BridgeContract.methods
     .claim_public(ownerAztecAddress, amountAfterFee, secret, leafIndex)
     .send({
@@ -710,6 +902,19 @@ async function testPublicExitFlow(
   )
   const recipient = EthAddress.fromString(ownerEthAddress)
   const callerOnL1 = EthAddress.ZERO
+
+  // Profile exit_to_l1_public before sending
+  await profileIfEnabled(
+    'exit_to_l1_public',
+    l2BridgeContract.methods.exit_to_l1_public(
+      EthAddress.fromString(ownerEthAddress),
+      withdrawAmount,
+      EthAddress.ZERO,
+      nonce
+    ),
+    { from: ownerAztecAddress, fee: { paymentMethod: sponsoredPaymentMethod } },
+    logger,
+  )
 
   const l2TxReceipt = await l2BridgeContract.methods
     .exit_to_l1_public(
@@ -868,6 +1073,14 @@ async function testPrivateDepositAndClaimFlow(
     wallet
   )
 
+  // Profile claim_private before sending
+  await profileIfEnabled(
+    `claim_private (${label})`,
+    l2BridgeContract.methods.claim_private(ownerAztecAddress, amountAfterFee, secret, leafIndex),
+    { from: ownerAztecAddress, fee: { paymentMethod: sponsoredPaymentMethod } },
+    logger,
+  )
+
   await sendPrivateWithRetry(
     () => l2BridgeContract.methods.claim_private(ownerAztecAddress, amountAfterFee, secret, leafIndex),
     {
@@ -972,6 +1185,21 @@ async function testPrivateExitFlow(
   )
   const recipient = EthAddress.fromString(ownerEthAddress)
   const callerOnL1 = EthAddress.ZERO
+
+  // Profile exit_to_l1_private before sending
+  await profileIfEnabled(
+    `exit_to_l1_private (${label})`,
+    l2BridgeContract.methods.exit_to_l1_private(
+      EthAddress.fromString(ownerEthAddress),
+      withdrawAmount,
+      EthAddress.ZERO,
+      authwitNonce,
+      cleanHandsData,
+      passportData,
+    ),
+    { from: ownerAztecAddress, fee: { paymentMethod: sponsoredPaymentMethod }, authWitnesses: [burnAuthWitness] },
+    logger,
+  )
 
   const l2TxReceipt = await sendPrivateWithRetry(
     () => l2BridgeContract.methods.exit_to_l1_private(
@@ -1673,11 +1901,14 @@ async function main() {
     logger.info('✅ Deployment finalized and synced to frontend')
   }
 
-  // Run tests against the first deployed compliant token
+  // Run tests against the deployed/targeted token
   if (DEPLOY_ONLY) {
     logger.info('\n⏭️  DEPLOY_ONLY: skipping tests')
   } else if (deployedContracts.length > 0) {
-    const deployed = deployedContracts[0]
+    // When DEPLOY_TOKEN is set, test against that specific token (not the first in the list)
+    const deployed = DEPLOY_TOKEN
+      ? deployedContracts.find(t => t.symbol.toUpperCase() === DEPLOY_TOKEN.toUpperCase()) ?? deployedContracts[0]
+      : deployedContracts[0]
     logger.info(`\n🧪 Running compliant bridge tests against ${deployed.symbol}...`)
 
     // Register contract artifacts with PXE so it can execute private functions.
@@ -1820,6 +2051,9 @@ async function main() {
   for (const token of deployedContracts) {
     logger.info(`  ${token.symbol}: L1Portal=${token.l1PortalContract} L2Bridge=${token.l2BridgeContract} L2Token=${token.l2TokenContract}`)
   }
+
+  // Save profiling results
+  saveProfilingResults(logger)
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1) })

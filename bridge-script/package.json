@@ -12,6 +12,7 @@
     "deploy-devnet:compliant": "DEPLOY_ONLY=true node --import tsx index-devnet-compliant.ts",
     "deploy-devnet:compliant:token": "DEPLOY_ONLY=true DEPLOY_TOKEN=${TOKEN} node --import tsx index-devnet-compliant.ts",
     "test-devnet:compliant": "RUN_TESTS_ONLY=true node --import tsx index-devnet-compliant.ts",
+    "profile-devnet:compliant": "PROFILE=true RUN_TESTS_ONLY=true node --import tsx index-devnet-compliant.ts",
     "test": "jest",
     "fees": "node --loader ts-node/esm scripts/fees.ts",
     "clean": "rm -rf ./src/artifacts ./target",
