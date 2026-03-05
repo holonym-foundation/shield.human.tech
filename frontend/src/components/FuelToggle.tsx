@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { computeFuelOutput, formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
+import { UNISWAP_FUEL_SWAP_ADDRESS } from '@/config'
 
 interface FuelToggleProps {
   fuelEnabled: boolean
@@ -12,6 +13,7 @@ interface FuelToggleProps {
   onToggle: (enabled: boolean) => void
   onAmountChange: (amount: string) => void
   feeJuiceBalance?: string
+  slippageBps?: number
 }
 
 const USD_PRESETS = [1, 5, 10]
@@ -25,7 +27,9 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   onToggle,
   onAmountChange,
   feeJuiceBalance,
+  slippageBps = 300,
 }) => {
+  const isUniswapEnabled = !!UNISWAP_FUEL_SWAP_ADDRESS
   const bridgeNum = Number(bridgeAmount) || 0
   const fuelNum = Number(fuelAmount) || 0
   const isValid = fuelNum > 0 && fuelNum < bridgeNum
@@ -106,11 +110,16 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                   return (
                     <>
                       <p>
-                        Swapping {fuelNum} {tokenSymbol} → ~{fjDisplay} FJ (~${usdValue.toFixed(2)})
+                        Swapping {fuelNum} {tokenSymbol} → ~{fjDisplay} FJ{isUniswapEnabled ? ' (live quote)' : ''} (~${usdValue.toFixed(2)})
                       </p>
                       <p>
                         You&apos;ll receive: {netBridge} {tokenSymbol} + ~{fjDisplay} Fee Juice
                       </p>
+                      {isUniswapEnabled && (
+                        <p className='text-latest-grey-400'>
+                          Max slippage: {(slippageBps / 100).toFixed(1)}% via Uniswap V4
+                        </p>
+                      )}
                     </>
                   )
                 })()

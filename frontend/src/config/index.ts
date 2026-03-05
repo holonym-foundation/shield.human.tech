@@ -76,6 +76,24 @@ export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuicePortalAddress ?? '') as `0x${string}`
 export const FEE_JUICE_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
+export const UNISWAP_FUEL_SWAP_ADDRESS: `0x${string}` =
+  ((activeDeployment as any).uniswapFuelSwapAddress ?? '') as `0x${string}`
+
+// ─── Uniswap V4 Sepolia Constants ───────────────────────────────────
+export const V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as const
+export const V4_QUOTER = '0x61b3f2011a92d183c7dbadbda940a7555ccf9227' as const
+export const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as const
+export const AZTEC_WETH_POOL_FEE = 3000 as const // 0.3% — for intermediate hops (Token/WETH)
+export const AZTEC_WETH_POOL_TICK_SPACING = 60 as const
+
+// FEE pool parameters (ETH/FEE or WETH/FEE — the final hop to FeeJuice)
+export const FEE_POOL_FEE = 500 as const // 0.05%
+export const FEE_POOL_TICK_SPACING = 10 as const
+
+// Native ETH pool support: mainnet AZTEC/FeeJuice pool uses native ETH, not WETH.
+// Set to true on mainnet, false on Sepolia (which uses WETH/FEE pool).
+export const FEE_POOL_USES_NATIVE_ETH = true as const
+export const NATIVE_ETH = '0x0000000000000000000000000000000000000000' as const
 
 // Non-token protocol addresses (SBT, sponsored fee)
 export const ADDRESS = {

@@ -99,8 +99,10 @@ interface BridgeStoreState
   // Fuel (gas funding) state
   fuelEnabled: boolean
   fuelAmount: string
+  fuelSlippageBps: number
   setFuelEnabled: (enabled: boolean) => void
   setFuelAmount: (amount: string) => void
+  setFuelSlippageBps: (bps: number) => void
 
   // Step actions
   setHeaderStep: (
@@ -225,6 +227,7 @@ const initialState = {
   isPrivacyModeEnabled: getInitialPrivacyMode(),
   fuelEnabled: false,
   fuelAmount: '',
+  fuelSlippageBps: 300, // 3% default
 } as const
 
 const bridgeStore = create<BridgeStoreState>((set, get) => ({
@@ -247,8 +250,10 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   // Fuel (gas funding) actions
   fuelEnabled: false,
   fuelAmount: '',
+  fuelSlippageBps: 300,
   setFuelEnabled: (enabled: boolean) => set({ fuelEnabled: enabled, fuelAmount: enabled ? '' : '' }),
   setFuelAmount: (amount: string) => set({ fuelAmount: amount }),
+  setFuelSlippageBps: (bps: number) => set({ fuelSlippageBps: bps }),
 
   // Step actions
   setHeaderStep: (
@@ -435,8 +440,10 @@ export const useBridgeStore = () =>
       // Fuel (gas funding)
       fuelEnabled: state.fuelEnabled,
       fuelAmount: state.fuelAmount,
+      fuelSlippageBps: state.fuelSlippageBps,
       setFuelEnabled: state.setFuelEnabled,
       setFuelAmount: state.setFuelAmount,
+      setFuelSlippageBps: state.setFuelSlippageBps,
 
       // Recovery
       recoveryOperationId: state.recoveryOperationId,

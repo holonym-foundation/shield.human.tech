@@ -9,5 +9,6 @@ via_ir = true
 remappings = [
   "@oz/=lib/openzeppelin-contracts/contracts/",
   "@aztec/=lib/aztec-contracts/l1-contracts/src",
-  "@test/=test"
+  "@test/=test",
+  "@uniswap/v4-core/=lib/v4-core/"
 ]

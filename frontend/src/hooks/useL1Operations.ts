@@ -57,8 +57,10 @@ import {
 import {
   BRIDGE_AND_FUEL_ADDRESS,
   MOCK_FUEL_SWAP_ADDRESS,
+  UNISWAP_FUEL_SWAP_ADDRESS,
 } from '@/config'
-import { getMockFuelQuote } from '@/utils/fuelQuote'
+import { getMockFuelQuote, getUniswapFuelQuote } from '@/utils/fuelQuote'
+import { buildSwapRoute, getV4Quote } from '@/utils/fuelPricing'
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
@@ -581,17 +583,49 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
     // Build fuel params if fuel is enabled (public L1→L2 only)
     let fuel: FuelParams | undefined
-    if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr && BRIDGE_AND_FUEL_ADDRESS && MOCK_FUEL_SWAP_ADDRESS) {
+    if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr && BRIDGE_AND_FUEL_ADDRESS) {
       const fuelAmountTokenUnits = BigInt(
         Math.floor(Number(fuelAmountStr) * 10 ** (selectedToken?.decimals ?? 6))
       )
       if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amount) {
-        const fuelQuote = getMockFuelQuote({
-          mockFuelSwapAddress: MOCK_FUEL_SWAP_ADDRESS,
-          bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
-          fuelAmount: fuelAmountTokenUnits,
-          inputDecimals: selectedToken?.decimals ?? 6,
-        })
+        let fuelQuote: FuelParams['fuelQuote']
+
+        if (UNISWAP_FUEL_SWAP_ADDRESS) {
+          // Real Uniswap V4 swap
+          const { poolKeys, zeroForOnes } = buildSwapRoute(
+            (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
+          )
+          const activeDeployment = (await import('@/constants/deployments.json')).default
+          const l1RpcUrl = activeDeployment.deployments.find(
+            (d: { id: string }) => d.id === activeDeployment.activeDeploymentId,
+          )?.network.l1RpcUrl ?? ''
+          const expectedOutput = await getV4Quote({
+            poolKeys,
+            zeroForOnes,
+            inputAmount: fuelAmountTokenUnits,
+            l1RpcUrl,
+          })
+          fuelQuote = getUniswapFuelQuote({
+            uniswapFuelSwapAddress: UNISWAP_FUEL_SWAP_ADDRESS,
+            bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
+            fuelAmount: fuelAmountTokenUnits,
+            expectedOutput,
+            slippageBps: 300, // 3%
+            poolKeys,
+            zeroForOnes,
+          })
+        } else if (MOCK_FUEL_SWAP_ADDRESS) {
+          // Devnet mock fallback
+          fuelQuote = getMockFuelQuote({
+            mockFuelSwapAddress: MOCK_FUEL_SWAP_ADDRESS,
+            bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
+            fuelAmount: fuelAmountTokenUnits,
+            inputDecimals: selectedToken?.decimals ?? 6,
+          })
+        } else {
+          throw new Error('No fuel swap contract configured')
+        }
+
         fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
         console.log('[L1→L2] Fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), expectedOutput: fuelQuote.expectedOutput.toString() })
       }
