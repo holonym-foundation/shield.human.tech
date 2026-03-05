@@ -1,10 +1,3 @@
-/**
- * Wallet SDK connection helpers
- *
- * Wraps @aztec/wallet-sdk discovery and secure channel establishment
- * for use by the wallet store.
- */
-
 import {
   WalletManager,
   type WalletProvider,

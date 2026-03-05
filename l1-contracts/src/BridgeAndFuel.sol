@@ -58,6 +58,7 @@ contract BridgeAndFuel {
         token.forceApprove(p.swapAllowanceTarget, p.fuelAmount);
         (bool swapOk,) = p.swapTarget.call(swapData);
         require(swapOk, "BridgeAndFuel: swap failed");
+        token.forceApprove(p.swapAllowanceTarget, 0);
 
         // 3. Check we received enough Fee Juice & deposit via FeeJuicePortal
         bytes32 fuelKey;

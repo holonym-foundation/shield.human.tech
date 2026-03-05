@@ -16,6 +16,20 @@ interface FuelToggleProps {
 
 const USD_PRESETS = [1, 5, 10]
 
+function FuelBreakdown({ fuelAmount, fuelNum, netBridge, tokenDecimals, tokenSymbol }: {
+  fuelAmount: string; fuelNum: number; netBridge: number; tokenDecimals: number; tokenSymbol: string
+}) {
+  const fjOutput = computeFuelOutput(fuelAmount, tokenDecimals, tokenSymbol)
+  const fjDisplay = formatFjAmount(fjOutput)
+  const usdValue = (Number(fjOutput) / 1e18) * getFeeJuicePriceUsd()
+  return (
+    <>
+      <p>Swapping {fuelNum} {tokenSymbol} → ~{fjDisplay} FJ (~${usdValue.toFixed(2)})</p>
+      <p>You&apos;ll receive: {netBridge} {tokenSymbol} + ~{fjDisplay} Fee Juice</p>
+    </>
+  )
+}
+
 const FuelToggle: React.FC<FuelToggleProps> = ({
   fuelEnabled,
   fuelAmount,
@@ -38,7 +52,6 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
 
   return (
     <div className='bg-[#F5F5F5] rounded-md p-3 mt-3'>
-      {/* Toggle row */}
       <div
         className='flex items-center justify-between cursor-pointer'
         onClick={() => onToggle(!fuelEnabled)}
@@ -63,7 +76,6 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
 
       {fuelEnabled && (
         <div className='mt-3 space-y-2'>
-          {/* USD preset buttons + custom input */}
           <div className='flex items-center gap-2'>
             <input
               type='text'
@@ -95,25 +107,10 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
             })}
           </div>
 
-          {/* Breakdown */}
           {fuelAmount && (
             <div className='text-xs text-latest-grey-700 space-y-0.5'>
               {isValid ? (
-                (() => {
-                  const fjOutput = computeFuelOutput(fuelAmount, tokenDecimals, tokenSymbol)
-                  const fjDisplay = formatFjAmount(fjOutput)
-                  const usdValue = (Number(fjOutput) / 1e18) * getFeeJuicePriceUsd()
-                  return (
-                    <>
-                      <p>
-                        Swapping {fuelNum} {tokenSymbol} → ~{fjDisplay} FJ (~${usdValue.toFixed(2)})
-                      </p>
-                      <p>
-                        You&apos;ll receive: {netBridge} {tokenSymbol} + ~{fjDisplay} Fee Juice
-                      </p>
-                    </>
-                  )
-                })()
+                <FuelBreakdown fuelAmount={fuelAmount} fuelNum={fuelNum} netBridge={netBridge} tokenDecimals={tokenDecimals} tokenSymbol={tokenSymbol} />
               ) : fuelNum >= bridgeNum ? (
                 <p className='text-red-500'>
                   Gas amount must be less than bridge amount

@@ -51,6 +51,6 @@ contract MockFuelSwap {
             feeAssetHandler.mint(address(this));
         }
 
-        feeJuice.transfer(msg.sender, output);
+        feeJuice.safeTransfer(msg.sender, output);
     }
 }

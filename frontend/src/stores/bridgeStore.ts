@@ -247,7 +247,7 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   // Fuel (gas funding) actions
   fuelEnabled: false,
   fuelAmount: '',
-  setFuelEnabled: (enabled: boolean) => set({ fuelEnabled: enabled, fuelAmount: enabled ? '' : '' }),
+  setFuelEnabled: (enabled: boolean) => set({ fuelEnabled: enabled, fuelAmount: '' }),
   setFuelAmount: (amount: string) => set({ fuelAmount: amount }),
 
   // Step actions
