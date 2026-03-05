@@ -69,7 +69,21 @@ export async function authenticateRequest(request: NextRequest): Promise<{
       },
     }
   } catch (error) {
-    console.error('Authentication error:', error)
+    const isPrismaError =
+      error instanceof Error &&
+      (error.constructor.name.startsWith('Prisma') ||
+        error.message.includes('Can\'t reach database server') ||
+        error.message.includes('Connection refused'))
+
+    if (isPrismaError) {
+      console.error('[auth] Database connection failed:', error.message)
+      return {
+        success: false,
+        error: 'Database connection failed — is PostgreSQL running?',
+      }
+    }
+
+    console.error('[auth] Authentication error:', error)
     return {
       success: false,
       error: 'Authentication failed',

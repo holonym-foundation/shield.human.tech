@@ -17,6 +17,7 @@ import {
   L1_TOKENS,
   L2_CHAIN_ID,
 } from '@/config'
+import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, encodeFunctionData } from 'viem'
@@ -51,7 +52,13 @@ import {
   waitForReceiptAndExtractEvent,
   persistReceiptToBackend,
   finalizeLocalStorageAfterDeposit,
+  type FuelParams,
 } from './bridge/bridgeL1ToL2'
+import {
+  BRIDGE_AND_FUEL_ADDRESS,
+  MOCK_FUEL_SWAP_ADDRESS,
+} from '@/config'
+import { getMockFuelQuote } from '@/utils/fuelQuote'
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
@@ -545,7 +552,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     aztecAccount,
     aztecAddress,
     aztecLoginMethod,
-    azguardClient,
     signWaapMessage,
   } = useWalletStore()
 
@@ -557,7 +563,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
   } = useWalletStore()
 
   const queryClient = useQueryClient()
-  const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled, bridgeConfig } =
+  const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled, bridgeConfig, fuelEnabled, fuelAmount: fuelAmountStr } =
     useBridgeStore()
   const notify = useToast()
 
@@ -572,6 +578,24 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
   }): Promise<string | undefined> => {
     const { amountL1, amountL2, amountDisplayL1, amountDisplayL2 } = params
     const amount = BigInt(amountL1)
+
+    // Build fuel params if fuel is enabled (public L1→L2 only)
+    let fuel: FuelParams | undefined
+    if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr && BRIDGE_AND_FUEL_ADDRESS && MOCK_FUEL_SWAP_ADDRESS) {
+      const fuelAmountTokenUnits = BigInt(
+        Math.floor(Number(fuelAmountStr) * 10 ** (selectedToken?.decimals ?? 6))
+      )
+      if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amount) {
+        const fuelQuote = getMockFuelQuote({
+          mockFuelSwapAddress: MOCK_FUEL_SWAP_ADDRESS,
+          bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
+          fuelAmount: fuelAmountTokenUnits,
+          inputDecimals: selectedToken?.decimals ?? 6,
+        })
+        fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
+        console.log('[L1→L2] Fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), expectedOutput: fuelQuote.expectedOutput.toString() })
+      }
+    }
     if (!l1Address) {
       throw new Error('Ethereum wallet not connected')
     }
@@ -617,11 +641,12 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         nodeInfo,
         signWaapMessage,
         selectedToken,
+        fuel,
       })
       operationId = backup.operationId
-      
+
       // ─── Step 3: Check allowance and approve ────────────────────────
-      await checkAndApproveAllowance(l1Address, amount, selectedToken)
+      await checkAndApproveAllowance(l1Address, amount, selectedToken, fuel)
 
       // ─── Step 4: Send L1 deposit transaction ────────────────────────
       // ═══ DANGER ZONE: tokens are locked on L1 after this ═══
@@ -639,6 +664,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
         operationId: backup.operationId,
         selectedToken,
+        fuel: fuel && backup.fuelSecretHash ? { ...fuel, fuelSecretHash: backup.fuelSecretHash } : undefined,
       })
       // 🔒 Funds are now POTENTIALLY locked on L1 — from this point, the outer catch must
       // NEVER mark the operation as 'failed'.
@@ -654,6 +680,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
         l1Address,
         selectedToken,
+        fuel,
       })
       receiptData = receipt
       setTransactionUrls(receipt.l1TxUrl, null)
@@ -709,7 +736,16 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       setProgressStep(1, 'completed')
       setProgressStep(2, 'active')
 
-      const syncResult = await pollL1ToL2MessageSync(receipt.messageHash.toString())
+      // Poll for both messages in parallel when fuel is enabled
+      const syncPromises: Promise<any>[] = [
+        pollL1ToL2MessageSync(receipt.messageHash.toString()),
+      ]
+      if (fuel && receipt.fuelMessageHash) {
+        syncPromises.push(pollL1ToL2MessageSync(receipt.fuelMessageHash.toString()))
+      }
+      const syncResults = await Promise.all(syncPromises)
+      const syncResult = syncResults[0]
+
       if (!syncResult.synced) {
         const errorMessage = `L1-to-L2 message sync timeout after ${syncResult.elapsedMinutes.toFixed(1)} minutes`
         console.error(errorMessage)
@@ -732,7 +768,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         throw new Error(errorMessage)
       }
 
-      // Extra buffer so the message is visible on the node Azguard uses
+      // Extra buffer so the message is visible on the wallet's node
       console.log('[L1→L2] Final wait before claiming (2 min)...')
       await wait(120_000)
 
@@ -748,10 +784,27 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           )
         }
 
+        // Build fee payment method if fuel is enabled
+        let feeOption: { fee: { paymentMethod: any } } | undefined
+        if (fuel && backup.fuelSecret && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
+          try {
+            const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+            const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
+              claimAmount: receipt.fuelAmount,
+              claimSecret: backup.fuelSecret,
+              messageLeafIndex: BigInt(receipt.fuelMessageLeafIndexStr!),
+            })
+            feeOption = { fee: { paymentMethod } }
+            console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim')
+          } catch (err) {
+            console.warn('[L1→L2] Failed to create FeeJuicePaymentMethodWithClaim, falling back to default:', err)
+          }
+        }
+
         const claimResult = await executeL2Claim(
           { walletAdapter, aztecAddress, isPrivacyModeEnabled: isPrivacyModeEnabled ?? false },
           {
-            amount,
+            amount: fuel ? amount - fuel.fuelAmount : amount,
             claimSecret: backup.claimSecret,
             messageLeafIndex: BigInt(receipt.messageLeafIndexStr),
           },
@@ -762,6 +815,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             onRetry: (attempt, maxAttempts, delayMs) => {
               notify('info', `L2 node hasn't synced this message yet. Retrying in ${Math.round(delayMs / 60_000)} min (${attempt}/${maxAttempts})...`)
             },
+            feeOption,
           },
         )
 
@@ -984,7 +1038,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           console.error('[L1→L2] Bridge failed (artifact not found):', error)
           notify('error', {
             heading: 'Contract Artifact Not Found',
-            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for Azguard wallet.`,
+            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.`,
           })
         } else {
           notify('error', `Bridge transaction failed: ${errorMessage}`)

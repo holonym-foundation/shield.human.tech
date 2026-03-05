@@ -67,6 +67,16 @@ export const getAztecscanUrl = (chainId: number): string => {
   return AZTECSCAN_URLS[chainId] || 'https://aztecscan.xyz'
 }
 
+// ─── BridgeAndFuel / Fuel Swap Addresses ─────────────────────────────
+export const BRIDGE_AND_FUEL_ADDRESS: `0x${string}` =
+  ((activeDeployment as any).bridgeAndFuelAddress ?? '') as `0x${string}`
+export const MOCK_FUEL_SWAP_ADDRESS: `0x${string}` =
+  ((activeDeployment as any).mockFuelSwapAddress ?? '') as `0x${string}`
+export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
+  (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuicePortalAddress ?? '') as `0x${string}`
+export const FEE_JUICE_ADDRESS: `0x${string}` =
+  (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
+
 // Non-token protocol addresses (SBT, sponsored fee)
 export const ADDRESS = {
   [L1_CHAIN_ID]: {

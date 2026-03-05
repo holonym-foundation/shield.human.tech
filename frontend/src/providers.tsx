@@ -24,12 +24,12 @@ function InitializeAztecWallet() {
   const { initializeAztecWallet } = useWalletStore()
 
   useEffect(() => {
-    // Add a small delay to ensure other initializations are complete
+    // Small delay to ensure wallet extensions have loaded their content scripts
     const timer = setTimeout(() => {
       initializeAztecWallet().catch((err: unknown) => {
         console.error('Failed to initialize Aztec wallet:', err)
       })
-    }, 500) // Small delay to ensure Azguard extension is ready
+    }, 500)
 
     return () => clearTimeout(timer)
   }, [initializeAztecWallet])

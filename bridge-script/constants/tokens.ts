@@ -6,6 +6,8 @@ export interface TokenConfig {
   l2Name: string
   l2Symbol: string
   logo: string
+  /** Pre-existing L1 token address. If set, skip TestERC20 deployment. */
+  l1TokenAddress?: string
   /** Set to true to force redeploy even if already deployed */
   forceDeploy?: boolean
 }
@@ -66,6 +68,16 @@ export const TOKEN_CONFIGS: TokenConfig[] = [
     l2Name: 'Clean WBTC',
     l2Symbol: 'cWBTC',
     logo: '/assets/svg/WBTC.svg',
+  },
+  {
+    symbol: 'WETH',
+    decimals: 18,
+    l1Name: 'Wrapped Ether',
+    l1Symbol: 'WETH',
+    l2Name: 'Clean WETH',
+    l2Symbol: 'cWETH',
+    logo: '/assets/svg/ETH.svg',
+    l1TokenAddress: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14',
   },
 ]
 

@@ -16,6 +16,8 @@ const LoadingStepsBars: React.FC<LoadingStepsBarsProps> = ({
   steps,
   currentStep,
 }) => {
+  const allCompleted = steps.every((s) => s.status === 'completed')
+
   return (
     <div className='w-full max-w-md mx-auto'>
       {/* Progress segments container */}
@@ -37,7 +39,9 @@ const LoadingStepsBars: React.FC<LoadingStepsBarsProps> = ({
                     isError
                       ? 'bg-red'
                       : isCompleted
-                      ? 'bg-[#FF990A]'
+                      ? allCompleted
+                        ? 'bg-[#22C55E]'
+                        : 'bg-[#FF990A]'
                       : 'bg-[#9D9D9D]'
                   }`}
                   initial={{ width: 0 }}
