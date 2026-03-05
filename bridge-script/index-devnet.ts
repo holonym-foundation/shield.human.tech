@@ -53,10 +53,18 @@ import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
 import 'dotenv/config'
 // @ts-ignore
 import TestERC20Json from './constants/TestERC20.json'
+// @ts-ignore
+import BridgeAndFuelJson from '../l1-contracts/out/BridgeAndFuel.sol/BridgeAndFuel.json'
+// @ts-ignore
+import MockFuelSwapJson from '../l1-contracts/out/MockFuelSwap.sol/MockFuelSwap.json'
 
 // Fix the bytecode format
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
+const BridgeAndFuelAbi = BridgeAndFuelJson.abi
+const BridgeAndFuelBytecode = BridgeAndFuelJson.bytecode.object as `0x${string}`
+const MockFuelSwapAbi = MockFuelSwapJson.abi
+const MockFuelSwapBytecode = MockFuelSwapJson.bytecode.object as `0x${string}`
 
 import { createPublicClient, getContract, http, toFunctionSelector } from 'viem'
 
@@ -70,6 +78,7 @@ import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
   createDeployment,
   saveTokenToDeployment,
+  saveFuelInfraToDeployment,
   loadExistingTokens,
   copyToFrontend,
   type DeployedToken,
@@ -248,32 +257,41 @@ async function deployCompleteTokenSetup(
   // Generate unique salts for this token
   const { tokenSalt, bridgeSalt } = generateTokenSalts(tokenConfig.symbol);
 
-  // Deploy L1 token contract
-  logger.info(
-    `🏗️  Deploying L1 ${tokenConfig.symbol} with decimals ${tokenConfig.decimals} token contract`
-  );
-  const l1TokenContract = await deployTestERC20(
-    l1Client,
-    tokenConfig.l1Name,
-    tokenConfig.l1Symbol,
-    tokenConfig.decimals
-  );
-  logger.info(
-    `✅ L1 ${
-      tokenConfig.symbol
-    } token contract deployed at ${l1TokenContract.toString()}`
-  );
+  // Deploy or resolve L1 token contract
+  let l1TokenContract: EthAddress
 
-  // Mint tokens to owner
-  const mintAmount = BigInt(1000000000000000000);
-  await mintL1Tokens(
-    l1Client,
-    ownerEthAddress,
-    l1TokenContract,
-    mintAmount,
-    logger,
-    tokenConfig.symbol
-  );
+  if (tokenConfig.l1TokenAddress) {
+    // Pre-existing L1 token (e.g. real WETH on Sepolia)
+    l1TokenContract = EthAddress.fromString(tokenConfig.l1TokenAddress)
+    logger.info(
+      `Using pre-existing L1 ${tokenConfig.symbol} at ${l1TokenContract.toString()}`
+    )
+  } else {
+    // Deploy mock TestERC20
+    logger.info(
+      `🏗️  Deploying L1 ${tokenConfig.symbol} with decimals ${tokenConfig.decimals} token contract`
+    )
+    l1TokenContract = await deployTestERC20(
+      l1Client,
+      tokenConfig.l1Name,
+      tokenConfig.l1Symbol,
+      tokenConfig.decimals
+    )
+    logger.info(
+      `✅ L1 ${tokenConfig.symbol} token contract deployed at ${l1TokenContract.toString()}`
+    )
+
+    // Mint tokens to owner (only for TestERC20)
+    const mintAmount = BigInt(1000000000000000000)
+    await mintL1Tokens(
+      l1Client,
+      ownerEthAddress,
+      l1TokenContract,
+      mintAmount,
+      logger,
+      tokenConfig.symbol
+    )
+  }
 
   // Deploy fee asset handler
   logger.info(`🔧 Deploying fee asset handler for ${tokenConfig.symbol}`);
@@ -287,9 +305,11 @@ async function deployCompleteTokenSetup(
     } deployed at ${feeAssetHandler.toString()}`
   );
 
-  // Add minter
-  logger.info(`🔑 Adding minter for ${tokenConfig.symbol}`);
-  await addMinter(l1Client, l1TokenContract, feeAssetHandler);
+  // Add minter — only for TestERC20 tokens (real tokens don't support addMinter)
+  if (!tokenConfig.l1TokenAddress) {
+    logger.info(`🔑 Adding minter for ${tokenConfig.symbol}`);
+    await addMinter(l1Client, l1TokenContract, feeAssetHandler);
+  }
 
   // Deploy L1 portal contract
   logger.info(`🌉 Deploying L1 portal contract for ${tokenConfig.symbol}`);
@@ -560,6 +580,43 @@ async function main() {
       logger.error(`❌ Failed to deploy ${tokenConfig.symbol}: ${error}`);
       // Continue with other tokens even if one fails
     }
+  }
+
+  // Deploy BridgeAndFuel + MockFuelSwap (fuel infrastructure)
+  try {
+    logger.info('\n=== Deploying Fuel Infrastructure ===')
+
+    logger.info('Deploying BridgeAndFuel contract...')
+    const bridgeAndFuelAddress = await deployL1Contract(
+      l1Client,
+      BridgeAndFuelAbi,
+      BridgeAndFuelBytecode,
+      []
+    ).then(({ address }) => address)
+    logger.info(`BridgeAndFuel deployed at ${bridgeAndFuelAddress.toString()}`)
+
+    // MockFuelSwap needs: feeJuiceAddress, feeAssetHandlerAddress, rate (1:1 = 1e18)
+    const feeJuiceAddress = (l1ContractAddresses as any).feeJuiceAddress?.toString()
+    const feeAssetHandlerAddress = (l1ContractAddresses as any).feeAssetHandlerAddress?.toString()
+    if (!feeJuiceAddress || !feeAssetHandlerAddress) {
+      throw new Error('Missing feeJuiceAddress or feeAssetHandlerAddress from node info')
+    }
+
+    logger.info('Deploying MockFuelSwap contract...')
+    const mockFuelSwapAddress = await deployL1Contract(
+      l1Client,
+      MockFuelSwapAbi,
+      MockFuelSwapBytecode,
+      [feeJuiceAddress, feeAssetHandlerAddress, BigInt(1e18)] // 1:1 rate
+    ).then(({ address }) => address)
+    logger.info(`MockFuelSwap deployed at ${mockFuelSwapAddress.toString()}`)
+
+    saveFuelInfraToDeployment({
+      bridgeAndFuelAddress: bridgeAndFuelAddress.toString(),
+      mockFuelSwapAddress: mockFuelSwapAddress.toString(),
+    })
+  } catch (error) {
+    logger.error(`Failed to deploy fuel infrastructure: ${error}`)
   }
 
   // Sync active deployment to frontend

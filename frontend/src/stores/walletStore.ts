@@ -50,10 +50,6 @@ const AZTEC_WALLET_KEY = 'aztecLoginMethod'
 
 /** How long to wait for wallet-sdk providers to respond during discovery (SDK default: 60s). */
 const DISCOVERY_TIMEOUT_MS = 60000
-/** Grace period after first wallet discovered before resolving (allows additional wallets). */
-const DISCOVERY_GRACE_MS = 2000
-/** Hard fallback if no wallets respond within this window. */
-const DISCOVERY_FALLBACK_MS = 62000
 /** Grace period before treating a disconnect event as real (absorbs HMR false positives). */
 const DISCONNECT_GRACE_MS = 1000
 
@@ -314,10 +310,7 @@ const walletStore = create<WalletState>((set, get) => ({
   // ─── Wallet SDK connection flow ────────────────────────────────────
 
   startWalletDiscovery: async () => {
-    // Guard against concurrent discovery calls
-    if (isDiscoveryInProgress) {
-      return
-    }
+    if (isDiscoveryInProgress) return
 
     // Cancel any stale session
     if (activeDiscoverySession) {
@@ -343,64 +336,61 @@ const walletStore = create<WalletState>((set, get) => ({
 
     const collectedWallets: Array<{ name: string; provider: WalletProvider }> = []
 
-    // Resolve as soon as the first wallet is discovered (with a short
-    // grace period for additional wallets), NOT after the full 60s timeout.
-    const result = await new Promise<WalletProvider[]>((resolve) => {
-      let graceTimer: ReturnType<typeof setTimeout> | null = null
+    activeDiscoverySession = discoverWallets({
+      timeout: DISCOVERY_TIMEOUT_MS,
+      onWalletDiscovered: (provider) => {
+        const entry = { name: provider.name ?? 'Aztec Wallet', provider }
+        collectedWallets.push(entry)
+        set({ discoveredWallets: [...collectedWallets] })
 
-      activeDiscoverySession = discoverWallets({
-        timeout: DISCOVERY_TIMEOUT_MS,
-        onWalletDiscovered: (provider) => {
-          const entry = { name: provider.name ?? 'Aztec Wallet', provider }
-          collectedWallets.push(entry)
-          set({ discoveredWallets: [...collectedWallets] })
-
-          if (graceTimer) clearTimeout(graceTimer)
-          graceTimer = setTimeout(() => {
-            resolve(collectedWallets.map((w) => w.provider))
-          }, DISCOVERY_GRACE_MS)
-        },
-      })
-
-      // Fallback: if no wallets respond within the timeout, resolve empty
-      setTimeout(() => {
-        if (graceTimer) clearTimeout(graceTimer)
-        resolve(collectedWallets.map((w) => w.provider))
-      }, DISCOVERY_FALLBACK_MS)
+        // Transition to 'selecting' on first wallet — user can click immediately
+        const { walletConnectionPhase } = get()
+        if (walletConnectionPhase === 'discovering') {
+          set({ walletConnectionPhase: 'selecting' })
+        }
+      },
     })
 
-    isDiscoveryInProgress = false
-    activeDiscoverySession = null
+    // Don't block on discovery — let it run in the background.
+    // selectWallet cancels the session once the user picks a wallet.
+    // We only need to handle the "no wallets found" timeout case.
+    const session = activeDiscoverySession
+    session.done.catch(() => { /* cancelled or timed out — that's fine */ }).finally(() => {
+      // Only clean up if this is still the active session (not replaced by a new one)
+      if (activeDiscoverySession === session) {
+        isDiscoveryInProgress = false
+        activeDiscoverySession = null
+      }
 
-    // If the user already clicked a wallet while discovery was still running
-    // (phase moved past 'discovering'/'selecting'), don't interfere — the
-    // connection flow is already in progress.
-    const currentPhase = get().walletConnectionPhase
-    if (currentPhase !== 'discovering' && currentPhase !== 'selecting') {
-      return
-    }
-
-    if (result.length === 0) {
-      set({
-        walletConnectionPhase: 'idle',
-        isAztecConnecting: false,
-        showWalletInstallPrompt: true,
-        showWalletModal: false,
-      })
-    } else if (result.length === 1) {
-      // Auto-select the only wallet — connect immediately
-      await get().selectWallet(result[0])
-    } else {
-      // Multiple wallets — show selection UI
-      set({ walletConnectionPhase: 'selecting' })
-    }
+      // If still in discovering/selecting phase and no wallets found, show install prompt
+      const { walletConnectionPhase, discoveredWallets } = get()
+      if (
+        (walletConnectionPhase === 'discovering' || walletConnectionPhase === 'selecting') &&
+        discoveredWallets.length === 0
+      ) {
+        set({
+          walletConnectionPhase: 'idle',
+          isAztecConnecting: false,
+          showWalletInstallPrompt: true,
+          showWalletModal: false,
+        })
+      }
+    })
   },
 
   selectWallet: async (provider: WalletProvider) => {
     try {
+      // Cancel discovery — user already picked a wallet, no need to wait
+      if (activeDiscoverySession) {
+        try { activeDiscoverySession.cancel() } catch { /* ignore */ }
+        activeDiscoverySession = null
+        isDiscoveryInProgress = false
+      }
+
       set({ walletConnectionPhase: 'verifying', isAztecConnecting: false })
 
       const pending = await connectToProvider(provider)
+
       const emojis = hashToEmoji(pending.verificationHash)
 
       set({

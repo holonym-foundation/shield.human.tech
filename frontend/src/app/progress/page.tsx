@@ -354,7 +354,7 @@ export default function ProgressPage() {
                   />
                 )}
               </div>
-              <p className={`text-center font-semibold text-md mt-5 ${hasError ? 'text-[#B91C1C]' : ''}`}>
+              <p className={`text-center font-semibold text-md mt-5 ${hasError ? 'text-[#B91C1C]' : isAllComplete ? 'text-green-600' : ''}`}>
                 {heading}
               </p>
               {hasError && (

@@ -1,5 +1,5 @@
 {
-  "activeDeploymentId": "4.0.0-devnet.2-patch.0_2026-02-28",
+  "activeDeploymentId": "4.0.0-devnet.2-patch.0_2026-03-05",
   "deployments": [
     {
       "id": "4.0.0-devnet.2-patch.0_2026-02-19",
@@ -13,6 +13,14 @@
       "id": "4.0.0-devnet.2-patch.0_2026-02-28",
       "file": "4.0.0-devnet.2-patch.0_2026-02-28.json",
       "deployedAt": "2026-02-28T19:37:25.646Z",
+      "network": "devnet",
+      "aztecVersion": "4.0.0-devnet.2-patch.0",
+      "active": false
+    },
+    {
+      "id": "4.0.0-devnet.2-patch.0_2026-03-05",
+      "file": "4.0.0-devnet.2-patch.0_2026-03-05.json",
+      "deployedAt": "2026-03-05T10:35:38.807Z",
       "network": "devnet",
       "aztecVersion": "4.0.0-devnet.2-patch.0",
       "active": true
