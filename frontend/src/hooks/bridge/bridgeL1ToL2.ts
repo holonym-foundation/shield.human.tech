@@ -212,6 +212,8 @@ export async function executeL2Claim(
     onRetry?: (attempt: number, maxAttempts: number, retryDelayMs: number) => void
     /** Fee payment option (e.g. FeeJuicePaymentMethodWithClaim for self-paying gas) */
     feeOption?: { fee: { paymentMethod: any } }
+    /** Extra calls to batch atomically with the token claim (e.g. BridgedFPC.mint) */
+    batchWith?: { contract: string; method: string; args: any[]; contractType?: string }[]
   },
 ): Promise<L2ClaimResult> {
   const { walletAdapter, aztecAddress, isPrivacyModeEnabled } = deps
@@ -229,17 +231,35 @@ export async function executeL2Claim(
       try {
         options?.onAttempt?.(attempt, maxAttempts)
         console.log(`[L1→L2] Claim attempt ${attempt}/${maxAttempts}...`)
-        result = await walletAdapter.executeCall(
-          walletAdapter.bridgeAddress,
+
+        const tokenClaimCall = {
+          contract: walletAdapter.bridgeAddress,
           method,
-          [
+          args: [
             AztecAddress.fromString(aztecAddress),
             amount,
             claimSecret,
             messageLeafIndex,
           ],
-          { contractType: 'bridge', ...options?.feeOption },
-        )
+          contractType: 'bridge' as const,
+        }
+
+        if (options?.batchWith?.length) {
+          // Batch token claim + extra calls (e.g. BridgedFPC.mint) in one tx
+          console.log(`[L1→L2] Batching token claim with ${options.batchWith.length} extra call(s)`)
+          result = await walletAdapter.executeBatch(
+            [tokenClaimCall, ...options.batchWith],
+            options?.feeOption,
+          )
+        } else {
+          result = await walletAdapter.executeCall(
+            tokenClaimCall.contract,
+            tokenClaimCall.method,
+            tokenClaimCall.args,
+            { contractType: 'bridge', ...options?.feeOption },
+          )
+        }
+
         console.log(`[L1→L2] Claim succeeded on attempt ${attempt}`)
         break
       } catch (err) {
