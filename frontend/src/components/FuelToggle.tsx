@@ -88,23 +88,23 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
       {fuelEnabled && (
         <div className='mt-3 space-y-2'>
           {hasBridgedFpc && (
-            <div className='flex rounded-md overflow-hidden border border-gray-200 text-xs'>
+            <div className='flex rounded-md overflow-hidden border border-gray-300 text-xs'>
               <button
                 onClick={() => onFuelTypeChange('public')}
-                className={`flex-1 py-1.5 px-2 font-medium transition-colors ${
+                className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
                   fuelType === 'public'
-                    ? 'bg-gray-900 text-white'
-                    : 'bg-white text-gray-500 hover:bg-gray-50'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
               >
                 Public FJ
               </button>
               <button
                 onClick={() => onFuelTypeChange('private')}
-                className={`flex-1 py-1.5 px-2 font-medium transition-colors ${
+                className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
                   fuelType === 'private'
-                    ? 'bg-gray-900 text-white'
-                    : 'bg-white text-gray-500 hover:bg-gray-50'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
               >
                 Private wFJ

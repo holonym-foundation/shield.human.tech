@@ -1,7 +1,7 @@
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
-import { Contract } from '@aztec/aztec.js/contracts'
+import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
 import type { Wallet } from '@aztec/aztec.js/wallet'
 import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
 import { aztecNode } from '@/aztec'
@@ -139,6 +139,34 @@ class WalletAdapter {
     if (options?.fee) sendOpts.fee = options.fee
     const receipt = await instance.methods[method](...args)
       .send(sendOpts)
+    return {
+      txHash: receipt.txHash.toString(),
+      blockNumber: receipt.blockNumber,
+    }
+  }
+
+  /**
+   * Execute multiple contract calls as a single L2 transaction.
+   * Each call is built into an interaction, then batched and sent atomically.
+   */
+  async executeBatch(
+    calls: { contract: AztecAddress | string; method: string; args: any[]; contractType?: ContractType }[],
+    options?: { fee?: { paymentMethod: any } }
+  ): Promise<ExecuteCallResult> {
+    const interactions = await Promise.all(
+      calls.map(async (call) => {
+        const addr = typeof call.contract === 'string' ? AztecAddress.fromString(call.contract) : call.contract
+        const type = call.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
+        const artifact = await getContractArtifact(type)
+        const instance = await Contract.at(addr, artifact, this.wallet)
+        return instance.methods[call.method](...call.args)
+      })
+    )
+
+    const batch = new BatchCall(this.wallet, interactions)
+    const sendOpts: any = { from: this.account }
+    if (options?.fee) sendOpts.fee = options.fee
+    const receipt = await batch.send(sendOpts)
     return {
       txHash: receipt.txHash.toString(),
       blockNumber: receipt.blockNumber,

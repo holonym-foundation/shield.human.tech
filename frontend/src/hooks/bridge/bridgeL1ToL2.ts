@@ -965,9 +965,9 @@ export function finalizeLocalStorageAfterDeposit(params: {
 /**
  * Execute L2 claim of FeeJuice to BridgedFPC + mint private wFJ notes.
  *
- * Two calls:
- *   1. FeeJuice.claim(fpcAddress, amount, secret, leafIndex)
- *   2. BridgedFPC.mint(amount, salt, leafIndex)
+ * Batched into a single L2 transaction:
+ *   1. FeeJuice.claim(fpcAddress, amount, secret, leafIndex) — credits FPC's public balance
+ *   2. BridgedFPC.mint(amount, salt, leafIndex) — creates private wFJ notes for user
  */
 export async function executePrivateFuelL2ClaimAndMint(
   deps: L2ClaimDeps,
@@ -979,35 +979,27 @@ export async function executePrivateFuelL2ClaimAndMint(
     messageLeafIndex: bigint
   },
 ): Promise<{ l2TxHash: string }> {
-  const { walletAdapter, aztecAddress } = deps
+  const { walletAdapter } = deps
   const { fpcAddress, amount, secret, salt, messageLeafIndex } = params
 
   const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
 
-  // Step 1: Claim FeeJuice to the FPC's public balance
-  console.log('[PrivateFuel] Step 1: FeeJuice.claim to FPC...')
-  await walletAdapter.executeCall(
-    FEE_JUICE_L2_ADDRESS,
-    'claim',
-    [
-      AztecAddress.fromString(fpcAddress),
-      amount,
-      secret,
-      messageLeafIndex,
-    ],
-    { contractType: 'fee_juice' },
-  )
-  console.log('[PrivateFuel] FeeJuice.claim succeeded')
-
-  // Step 2: BridgedFPC.mint — creates private wFJ notes for the user
-  console.log('[PrivateFuel] Step 2: BridgedFPC.mint...')
-  const result = await walletAdapter.executeCall(
-    fpcAddress,
-    'mint',
-    [amount, salt, messageLeafIndex],
-    { contractType: 'bridged_fpc' },
-  )
-  console.log('[PrivateFuel] BridgedFPC.mint succeeded:', result.txHash)
+  console.log('[PrivateFuel] Batching FeeJuice.claim + BridgedFPC.mint...')
+  const result = await walletAdapter.executeBatch([
+    {
+      contract: FEE_JUICE_L2_ADDRESS,
+      method: 'claim',
+      args: [AztecAddress.fromString(fpcAddress), amount, secret, messageLeafIndex],
+      contractType: 'fee_juice',
+    },
+    {
+      contract: fpcAddress,
+      method: 'mint',
+      args: [amount, salt, messageLeafIndex],
+      contractType: 'bridged_fpc',
+    },
+  ])
+  console.log('[PrivateFuel] Batch succeeded:', result.txHash)
 
   return { l2TxHash: result.txHash }
 }
