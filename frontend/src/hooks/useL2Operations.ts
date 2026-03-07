@@ -163,6 +163,7 @@ export const useL2FeeJuiceBalance = () => {
     queryKey,
     queryFn,
     enabled: !!aztecAddress && !!walletAdapter,
+    refetchInterval: 30_000,
   })
 }
 

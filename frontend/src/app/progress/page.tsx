@@ -12,6 +12,7 @@ import { formatUnits, parseUnits } from 'viem'
 import {
   useL2WithdrawTokensToL1,
   useL2TokenBalance,
+  useL2FeeJuiceBalance,
 } from '@/hooks/useL2Operations'
 import { useL1TokenBalances, useL1BridgeToL2 } from '@/hooks/useL1Operations'
 import { useResumeL1BridgeToL2 } from '@/hooks/useResumeL1BridgeToL2'
@@ -59,16 +60,17 @@ export default function ProgressPage() {
   // Refetch balances when bridge/withdrawal completes (show toast on progress page too)
   const { refetch: refetchL1Balance } = useL1TokenBalances()
   const { refetch: refetchL2Balance } = useL2TokenBalance()
+  const { refetch: refetchFeeJuiceBalance } = useL2FeeJuiceBalance()
   const handleBridgeSuccess = useCallback(() => {
     notify.promise(
-      Promise.all([refetchL1Balance(), refetchL2Balance()]),
+      Promise.all([refetchL1Balance(), refetchL2Balance(), refetchFeeJuiceBalance()]),
       {
         pending: 'Refreshing L1 and L2 balances...',
         success: 'Balances updated',
         error: 'Failed to refresh balances',
       }
     )
-  }, [notify, refetchL1Balance, refetchL2Balance])
+  }, [notify, refetchL1Balance, refetchL2Balance, refetchFeeJuiceBalance])
 
   // Bridge operations
   const {
