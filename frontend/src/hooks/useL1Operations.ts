@@ -877,16 +877,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           currentStep: 4,
         })
 
-        // ─── Step 9b: Private fuel L2 claim + mint (if applicable) ────
-        if (privateFuel && backup.privateFuelSecret && backup.privateFuelSalt && receipt.fuelMessageLeafIndexStr) {
+        // ─── Step 9b: Private fuel L2 mint (if applicable) ────
+        // BridgedFPC.mint internally claims FeeJuice to itself, then mints
+        // private wFJ notes for the user. Only the salt + leafIndex are needed.
+        if (privateFuel && backup.privateFuelSalt && receipt.fuelMessageLeafIndexStr) {
           try {
-            console.log('[L1→L2] Executing private fuel L2 claim + mint...')
+            console.log('[L1→L2] Executing BridgedFPC.mint...')
             await executePrivateFuelL2ClaimAndMint(
               { walletAdapter, aztecAddress, isPrivacyModeEnabled: isPrivacyModeEnabled ?? false },
               {
                 fpcAddress: privateFuel.fpcAddress,
                 amount: receipt.fuelAmount ?? privateFuel.fuelAmount,
-                secret: backup.privateFuelSecret,
                 salt: backup.privateFuelSalt,
                 messageLeafIndex: BigInt(receipt.fuelMessageLeafIndexStr),
               },

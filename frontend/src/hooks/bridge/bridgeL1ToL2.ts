@@ -963,43 +963,36 @@ export function finalizeLocalStorageAfterDeposit(params: {
 // ═════════════════════════════════════════════════════════════════════
 
 /**
- * Execute L2 claim of FeeJuice to BridgedFPC + mint private wFJ notes.
+ * Mint private wFJ via BridgedFPC.
  *
- * Batched into a single L2 transaction:
- *   1. FeeJuice.claim(fpcAddress, amount, secret, leafIndex) — credits FPC's public balance
- *   2. BridgedFPC.mint(amount, salt, leafIndex) — creates private wFJ notes for user
+ * The mint function internally:
+ *   1. Derives secret = poseidon2([salt, self.address], DOM_SEP_FPC_BRIDGE_SECRET)
+ *   2. Calls FeeJuice.claim(self, amount, secret, leafIndex) as an enqueued public call
+ *   3. Creates private wFJ notes for the caller
+ *
+ * The user only calls mint — the contract handles the FeeJuice claim internally,
+ * so no public link between user and the FJ deposit is created.
  */
 export async function executePrivateFuelL2ClaimAndMint(
   deps: L2ClaimDeps,
   params: {
     fpcAddress: string
     amount: bigint
-    secret: Fr
     salt: Fr
     messageLeafIndex: bigint
   },
 ): Promise<{ l2TxHash: string }> {
   const { walletAdapter } = deps
-  const { fpcAddress, amount, secret, salt, messageLeafIndex } = params
+  const { fpcAddress, amount, salt, messageLeafIndex } = params
 
-  const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
-
-  console.log('[PrivateFuel] Batching FeeJuice.claim + BridgedFPC.mint...')
-  const result = await walletAdapter.executeBatch([
-    {
-      contract: FEE_JUICE_L2_ADDRESS,
-      method: 'claim',
-      args: [AztecAddress.fromString(fpcAddress), amount, secret, messageLeafIndex],
-      contractType: 'fee_juice',
-    },
-    {
-      contract: fpcAddress,
-      method: 'mint',
-      args: [amount, salt, messageLeafIndex],
-      contractType: 'bridged_fpc',
-    },
-  ])
-  console.log('[PrivateFuel] Batch succeeded:', result.txHash)
+  console.log('[PrivateFuel] Calling BridgedFPC.mint...')
+  const result = await walletAdapter.executeCall(
+    fpcAddress,
+    'mint',
+    [amount, salt, messageLeafIndex],
+    { contractType: 'bridged_fpc' },
+  )
+  console.log('[PrivateFuel] BridgedFPC.mint succeeded:', result.txHash)
 
   return { l2TxHash: result.txHash }
 }
