@@ -71,6 +71,7 @@ import { createPublicClient, getContract, http, toFunctionSelector } from 'viem'
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 import { SponsoredFPCContract, SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC'
+import { registerBridgedContract, BridgedFPCContractArtifact } from '@defi-wonderland/aztec-fee-payment'
 import { setupWallet } from './utils/setup_wallet.js'
 import { deploySchnorrAccount } from './utils/deploy_account.js'
 import { getSponsoredFPCInstance } from './utils/sponsored_fpc.js'
@@ -79,6 +80,7 @@ import {
   createDeployment,
   saveTokenToDeployment,
   saveFuelInfraToDeployment,
+  saveBridgedFpcToDeployment,
   loadExistingTokens,
   copyToFrontend,
   type DeployedToken,
@@ -617,6 +619,19 @@ async function main() {
     })
   } catch (error) {
     logger.error(`Failed to deploy fuel infrastructure: ${error}`)
+  }
+
+  // Register BridgedFPC (private fee payment contract)
+  try {
+    logger.info('\n=== Registering BridgedFPC (Private Fee Payment) ===')
+    const bridgedFPC = await registerBridgedContract(wallet, Fr.ZERO)
+    logger.info(`BridgedFPC registered at ${bridgedFPC.address.toString()}`)
+
+    // Save BridgedFPC address to deployment
+    saveBridgedFpcToDeployment(bridgedFPC.address.toString())
+    logger.info('BridgedFPC address saved to deployment')
+  } catch (error) {
+    logger.error(`Failed to register BridgedFPC: ${error}`)
   }
 
   // Sync active deployment to frontend

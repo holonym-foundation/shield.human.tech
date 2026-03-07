@@ -20,6 +20,7 @@ import {
   useL2MintSoulboundToken,
   useL2TokenBalance,
   useL2FeeJuiceBalance,
+  useL2PrivateFeeJuiceBalance,
   useL2WithdrawTokensToL1,
   useL1ContractAddresses,
   useL2NodeIsReady,
@@ -103,8 +104,10 @@ export default function Home() {
     reset: resetBridgeStore,
     fuelEnabled,
     fuelAmount,
+    fuelType,
     setFuelEnabled,
     setFuelAmount,
+    setFuelType,
   } = useBridgeStore()
 
   // Get wallet state from useWalletStore
@@ -203,6 +206,7 @@ export default function Home() {
   const l2PublicBalance = l2Balance?.publicBalance
   const { data: feeJuiceBalance, refetch: refetchFeeJuiceBalance } =
     useL2FeeJuiceBalance()
+  const { data: privateFeeJuiceBalance } = useL2PrivateFeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
     useL2MintSoulboundToken(mintL2SBTOnSuccess)
@@ -555,6 +559,9 @@ export default function Home() {
                       onToggle={setFuelEnabled}
                       onAmountChange={setFuelAmount}
                       feeJuiceBalance={feeJuiceBalance}
+                      privateFeeJuiceBalance={privateFeeJuiceBalance}
+                      fuelType={fuelType}
+                      onFuelTypeChange={setFuelType}
                     />
                   )}
                   <TransactionBreakdown

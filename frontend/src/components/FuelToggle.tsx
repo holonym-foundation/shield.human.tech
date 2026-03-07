@@ -79,35 +79,41 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
         </div>
       </div>
       <div className='text-xs text-latest-grey-500 mt-1 space-y-0.5'>
-        <p>Public FJ: {feeJuiceBalance ?? '--'}</p>
+        <div className='flex justify-between'>
+          <span>Public Fee Juice:</span>
+          <span className='font-semibold'>{feeJuiceBalance ?? '--'}</span>
+        </div>
         {hasBridgedFpc && (
-          <p>Private wFJ: {privateFeeJuiceBalance ?? '--'}</p>
+          <div className='flex justify-between'>
+            <span>Private Fee Juice:</span>
+            <span className='font-semibold'>{privateFeeJuiceBalance ?? '--'}</span>
+          </div>
         )}
       </div>
 
       {fuelEnabled && (
         <div className='mt-3 space-y-2'>
           {hasBridgedFpc && (
-            <div className='flex rounded-md overflow-hidden border border-gray-300 text-xs'>
+            <div className='flex rounded-md overflow-hidden border border-gray-200 text-xs'>
               <button
                 onClick={() => onFuelTypeChange('public')}
                 className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
                   fuelType === 'public'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    ? 'bg-black text-white'
+                    : 'bg-white text-gray-500 hover:bg-gray-50'
                 }`}
               >
-                Public FJ
+                Public
               </button>
               <button
                 onClick={() => onFuelTypeChange('private')}
                 className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
                   fuelType === 'private'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    ? 'bg-black text-white'
+                    : 'bg-white text-gray-500 hover:bg-gray-50'
                 }`}
               >
-                Private wFJ
+                Private
               </button>
             </div>
           )}

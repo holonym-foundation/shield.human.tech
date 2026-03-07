@@ -1,6 +1,7 @@
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { aztecNode } from '@/aztec'
 import {
+  BRIDGED_FPC_ADDRESS,
   L1_CHAIN_ID,
   L1_CONTRACT_ADDRESSES,
   L1_TOKENS,
@@ -163,6 +164,53 @@ export const useL2FeeJuiceBalance = () => {
     queryKey,
     queryFn,
     enabled: !!aztecAddress && !!walletAdapter,
+    refetchInterval: 30_000,
+  })
+}
+
+export const useL2PrivateFeeJuiceBalance = () => {
+  const { aztecAddress } = useWalletStore()
+  const handleL2Error = useL2ErrorHandler()
+  const walletAdapter = useWalletAdapter()
+
+  const queryKey = ['l2PrivateFeeJuiceBalance', aztecAddress]
+
+  const queryFn = async (): Promise<string> => {
+    try {
+      if (!aztecAddress) {
+        throw new Error('Aztec address not found')
+      }
+      if (!walletAdapter) {
+        throw new Error(
+          'Aztec wallet not connected or contracts not initialized',
+        )
+      }
+      if (!BRIDGED_FPC_ADDRESS) {
+        return '0'
+      }
+
+      const userAddress = AztecAddress.fromString(aztecAddress)
+
+      const [balanceResult] = await walletAdapter.simulateViews([
+        {
+          contract: BRIDGED_FPC_ADDRESS,
+          method: 'balance_of',
+          args: [userAddress],
+        },
+      ])
+
+      const balance = BigInt(balanceResult.result.toString())
+      return formatUnits(balance, FEE_JUICE_DECIMALS)
+    } catch (error) {
+      handleL2Error<string>(error, 'BALANCE')
+      throw error
+    }
+  }
+
+  return useQuery<string, Error>({
+    queryKey,
+    queryFn,
+    enabled: !!aztecAddress && !!walletAdapter && !!BRIDGED_FPC_ADDRESS,
     refetchInterval: 30_000,
   })
 }

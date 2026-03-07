@@ -20,6 +20,7 @@
     "db:reset": "prisma migrate reset --force --skip-seed && prisma db push"
   },
   "dependencies": {
+    "@defi-wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-b6315f1/defi-wonderland-aztec-fee-payment-4.0.0-devnet.2-patch.1-prerelease.b6315f1.tgz",
     "@aztec/wallet-sdk": "4.0.0-devnet.2-patch.3",
     "@aztec/accounts": "4.0.0-devnet.2-patch.3",
     "@aztec/aztec.js": "4.0.0-devnet.2-patch.3",
