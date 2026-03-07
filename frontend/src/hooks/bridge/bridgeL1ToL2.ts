@@ -82,6 +82,12 @@ export interface FuelParams {
   fuelQuote: FuelQuote
 }
 
+/** Parameters for private fuel (BridgedFPC) flow. */
+export interface PrivateFuelParams {
+  fuelAmount: bigint
+  fpcAddress: string
+}
+
 // ─── Deposit Step Result Types ───────────────────────────────────────
 
 export interface CaptureBlocksResult {
@@ -98,6 +104,12 @@ export interface BackupResult {
   nodeInfoSnapshot: any
   fuelSecret?: Fr
   fuelSecretHash?: Fr
+  /** For private fuel (BridgedFPC): the random salt used in secret derivation */
+  privateFuelSalt?: Fr
+  /** For private fuel (BridgedFPC): the derived secret */
+  privateFuelSecret?: Fr
+  /** For private fuel (BridgedFPC): hash of the derived secret */
+  privateFuelSecretHash?: Fr
 }
 
 export interface DepositTxResult {
@@ -373,6 +385,7 @@ export async function generateAndBackupClaimSecret(params: {
   signWaapMessage: (msg: string) => Promise<string | null>
   selectedToken?: Token
   fuel?: FuelParams
+  privateFuel?: PrivateFuelParams
 }): Promise<BackupResult> {
   const {
     l1Address, aztecAddress, amountL1, amountL2, amountDisplayL1, amountDisplayL2,
@@ -518,10 +531,15 @@ export async function generateAndBackupClaimSecret(params: {
   })
   console.log('Claim secret stored in localStorage')
 
-  // Generate fuel secrets if fuel is enabled
+  // Generate fuel secrets.
+  // Public fuel: random secret + hash → used with FeeJuicePaymentMethodWithClaim on L2.
+  // Private fuel: derived secret (poseidon2([salt, fpcAddress], DOM_SEP)) + hash → FJ
+  //   deposited to FPC on L1, then FeeJuice.claim + BridgedFPC.mint on L2.
+  // When private fuel is active, fuel is also set (for the swap quote), but we skip
+  // the public fuel secret since it would be unused — private fuel has its own secret.
   let fuelSecret: Fr | undefined
   let fuelSecretHash: Fr | undefined
-  if (params.fuel) {
+  if (params.fuel && !params.privateFuel) {
     fuelSecret = Fr.random()
     const fuelHashRes = await fetch('/api/compute-secret-hash', {
       method: 'POST',
@@ -533,10 +551,39 @@ export async function generateAndBackupClaimSecret(params: {
     }
     const { secretHash: fuelHashStr } = await fuelHashRes.json()
     fuelSecretHash = Fr.fromString(fuelHashStr)
-    console.log('[L1→L2] Fuel secret generated')
+    console.log('[L1→L2] Public fuel secret generated')
   }
 
-  return { operationId, claimSecret, claimSecretHash, nodeInfoSnapshot, fuelSecret, fuelSecretHash }
+  let privateFuelSalt: Fr | undefined
+  let privateFuelSecret: Fr | undefined
+  let privateFuelSecretHash: Fr | undefined
+  if (params.privateFuel) {
+    privateFuelSalt = Fr.random()
+    // Derive BridgedFPC secret: poseidon2([salt, claimer], DOM_SEP)
+    // claimer = FPC address, computed server-side
+    const pfHashRes = await fetch('/api/compute-secret-hash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'fpc-bridge',
+        salt: privateFuelSalt.toString(),
+        claimer: params.privateFuel.fpcAddress,
+      }),
+    })
+    if (!pfHashRes.ok) {
+      throw new Error('Failed to compute private fuel secret hash')
+    }
+    const { secret: pfSecret, secretHash: pfSecretHash } = await pfHashRes.json()
+    privateFuelSecret = Fr.fromString(pfSecret)
+    privateFuelSecretHash = Fr.fromString(pfSecretHash)
+    console.log('[L1→L2] Private fuel (BridgedFPC) secret generated')
+  }
+
+  return {
+    operationId, claimSecret, claimSecretHash, nodeInfoSnapshot,
+    fuelSecret, fuelSecretHash,
+    privateFuelSalt, privateFuelSecret, privateFuelSecretHash,
+  }
 }
 
 // ─── Step 3: Check and approve token allowance ───────────────────────
@@ -595,10 +642,11 @@ export async function sendL1DepositTransaction(params: {
   operationId: string
   selectedToken?: Token
   fuel?: FuelParams & { fuelSecretHash: Fr }
+  privateFuel?: PrivateFuelParams & { secretHash: Fr }
 }): Promise<DepositTxResult> {
   const {
     l1Address, aztecAddress, amount, claimSecretHash, claimSecret,
-    isPrivacyModeEnabled, operationId, selectedToken, fuel,
+    isPrivacyModeEnabled, operationId, selectedToken, fuel, privateFuel,
   } = params
 
   let txHash: any
@@ -618,8 +666,9 @@ export async function sendL1DepositTransaction(params: {
           totalAmount: amount,
           fuelAmount: fuel.fuelAmount,
           aztecRecipient: aztecAddress as `0x${string}`,
+          fuelRecipient: (privateFuel?.fpcAddress ?? aztecAddress) as `0x${string}`,
           tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
-          fuelSecretHash: fuel.fuelSecretHash.toString() as `0x${string}`,
+          fuelSecretHash: (privateFuel ? privateFuel.secretHash : fuel.fuelSecretHash).toString() as `0x${string}`,
           feeJuicePortal: FEE_JUICE_PORTAL_ADDRESS,
           swapTarget: fuel.fuelQuote.swapTarget,
           swapAllowanceTarget: fuel.fuelQuote.swapAllowanceTarget,
@@ -907,4 +956,58 @@ export function finalizeLocalStorageAfterDeposit(params: {
   claims.push(updatedClaim)
   localStorage.setItem(LS_KEY_BRIDGE_DEPOSITS, JSON.stringify(claims))
   return { updatedClaim, wasExisting: false }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// PRIVATE FUEL (BridgedFPC): L1 Deposit + L2 Claim & Mint
+// ═════════════════════════════════════════════════════════════════════
+
+/**
+ * Execute L2 claim of FeeJuice to BridgedFPC + mint private wFJ notes.
+ *
+ * Two calls:
+ *   1. FeeJuice.claim(fpcAddress, amount, secret, leafIndex)
+ *   2. BridgedFPC.mint(amount, salt, leafIndex)
+ */
+export async function executePrivateFuelL2ClaimAndMint(
+  deps: L2ClaimDeps,
+  params: {
+    fpcAddress: string
+    amount: bigint
+    secret: Fr
+    salt: Fr
+    messageLeafIndex: bigint
+  },
+): Promise<{ l2TxHash: string }> {
+  const { walletAdapter, aztecAddress } = deps
+  const { fpcAddress, amount, secret, salt, messageLeafIndex } = params
+
+  const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
+
+  // Step 1: Claim FeeJuice to the FPC's public balance
+  console.log('[PrivateFuel] Step 1: FeeJuice.claim to FPC...')
+  await walletAdapter.executeCall(
+    FEE_JUICE_L2_ADDRESS,
+    'claim',
+    [
+      AztecAddress.fromString(fpcAddress),
+      amount,
+      secret,
+      messageLeafIndex,
+    ],
+    { contractType: 'fee_juice' },
+  )
+  console.log('[PrivateFuel] FeeJuice.claim succeeded')
+
+  // Step 2: BridgedFPC.mint — creates private wFJ notes for the user
+  console.log('[PrivateFuel] Step 2: BridgedFPC.mint...')
+  const result = await walletAdapter.executeCall(
+    fpcAddress,
+    'mint',
+    [amount, salt, messageLeafIndex],
+    { contractType: 'bridged_fpc' },
+  )
+  console.log('[PrivateFuel] BridgedFPC.mint succeeded:', result.txHash)
+
+  return { l2TxHash: result.txHash }
 }

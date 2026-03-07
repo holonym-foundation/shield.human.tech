@@ -140,6 +140,7 @@ contract BridgeAndFuelTest is Test {
             totalAmount: totalAmount,
             fuelAmount: fuelAmount,
             aztecRecipient: aztecRecipient,
+            fuelRecipient: aztecRecipient,
             tokenSecretHash: tokenSecretHash,
             fuelSecretHash: fuelSecretHash,
             feeJuicePortal: address(feeJuicePortal),

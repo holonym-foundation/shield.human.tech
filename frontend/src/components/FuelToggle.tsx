@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { computeFuelOutput, formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
+import { BRIDGED_FPC_ADDRESS } from '@/config'
 
 interface FuelToggleProps {
   fuelEnabled: boolean
@@ -12,6 +13,9 @@ interface FuelToggleProps {
   onToggle: (enabled: boolean) => void
   onAmountChange: (amount: string) => void
   feeJuiceBalance?: string
+  privateFeeJuiceBalance?: string
+  fuelType: 'public' | 'private'
+  onFuelTypeChange: (type: 'public' | 'private') => void
 }
 
 const USD_PRESETS = [1, 5, 10]
@@ -39,11 +43,15 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   onToggle,
   onAmountChange,
   feeJuiceBalance,
+  privateFeeJuiceBalance,
+  fuelType,
+  onFuelTypeChange,
 }) => {
   const bridgeNum = Number(bridgeAmount) || 0
   const fuelNum = Number(fuelAmount) || 0
   const isValid = fuelNum > 0 && fuelNum < bridgeNum
   const netBridge = bridgeNum - fuelNum
+  const hasBridgedFpc = !!BRIDGED_FPC_ADDRESS
 
   // Check which USD preset is currently selected (if any)
   const activePreset = USD_PRESETS.find(
@@ -70,12 +78,40 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
           />
         </div>
       </div>
-      <p className='text-xs text-latest-grey-500 mt-1'>
-        Current balance: {feeJuiceBalance ?? '--'} FJ
-      </p>
+      <div className='text-xs text-latest-grey-500 mt-1 space-y-0.5'>
+        <p>Public FJ: {feeJuiceBalance ?? '--'}</p>
+        {hasBridgedFpc && (
+          <p>Private wFJ: {privateFeeJuiceBalance ?? '--'}</p>
+        )}
+      </div>
 
       {fuelEnabled && (
         <div className='mt-3 space-y-2'>
+          {hasBridgedFpc && (
+            <div className='flex rounded-md overflow-hidden border border-gray-200 text-xs'>
+              <button
+                onClick={() => onFuelTypeChange('public')}
+                className={`flex-1 py-1.5 px-2 font-medium transition-colors ${
+                  fuelType === 'public'
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-white text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                Public FJ
+              </button>
+              <button
+                onClick={() => onFuelTypeChange('private')}
+                className={`flex-1 py-1.5 px-2 font-medium transition-colors ${
+                  fuelType === 'private'
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-white text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                Private wFJ
+              </button>
+            </div>
+          )}
+
           <div className='flex items-center gap-2'>
             <input
               type='text'

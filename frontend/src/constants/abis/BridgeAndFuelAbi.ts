@@ -17,6 +17,7 @@ export const BridgeAndFuelAbi = [
           { name: 'totalAmount', type: 'uint256' },
           { name: 'fuelAmount', type: 'uint256' },
           { name: 'aztecRecipient', type: 'bytes32' },
+          { name: 'fuelRecipient', type: 'bytes32' },
           { name: 'tokenSecretHash', type: 'bytes32' },
           { name: 'fuelSecretHash', type: 'bytes32' },
           { name: 'feeJuicePortal', type: 'address' },
@@ -35,6 +36,7 @@ export const BridgeAndFuelAbi = [
     name: 'BridgeWithFuel',
     inputs: [
       { name: 'aztecRecipient', type: 'bytes32', indexed: true },
+      { name: 'fuelRecipient', type: 'bytes32', indexed: false },
       { name: 'tokenKey', type: 'bytes32', indexed: false },
       { name: 'tokenIndex', type: 'uint256', indexed: false },
       { name: 'tokenAmount', type: 'uint256', indexed: false },

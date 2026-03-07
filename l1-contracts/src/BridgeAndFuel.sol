@@ -21,6 +21,7 @@ contract BridgeAndFuel {
         uint256 totalAmount;
         uint256 fuelAmount;
         bytes32 aztecRecipient;
+        bytes32 fuelRecipient;
         bytes32 tokenSecretHash;
         bytes32 fuelSecretHash;
         address feeJuicePortal;
@@ -31,6 +32,7 @@ contract BridgeAndFuel {
 
     event BridgeWithFuel(
         bytes32 indexed aztecRecipient,
+        bytes32 fuelRecipient,
         bytes32 tokenKey,
         uint256 tokenIndex,
         uint256 tokenAmount,
@@ -71,7 +73,7 @@ contract BridgeAndFuel {
 
             feeJuiceToken.forceApprove(p.feeJuicePortal, fuelReceived);
             (fuelKey, fuelIndex) =
-                IFeeJuicePortal(p.feeJuicePortal).depositToAztecPublic(p.aztecRecipient, fuelReceived, p.fuelSecretHash);
+                IFeeJuicePortal(p.feeJuicePortal).depositToAztecPublic(p.fuelRecipient, fuelReceived, p.fuelSecretHash);
         }
 
         // 4. Deposit remaining tokens via TokenPortal
@@ -82,6 +84,7 @@ contract BridgeAndFuel {
         // 5. Emit composite event
         emit BridgeWithFuel(
             p.aztecRecipient,
+            p.fuelRecipient,
             tokenKey,
             tokenIndex,
             bridgeAmount,
