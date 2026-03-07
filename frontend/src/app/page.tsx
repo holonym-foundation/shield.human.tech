@@ -213,7 +213,7 @@ export default function Home() {
       notify.promise(
         Promise.all([refetchL1Balance(), refetchL2Balance(), refetchFeeJuiceBalance()]),
         {
-          pending: 'Refreshing L1 and L2 balances...',
+          pending: 'Refreshing balances...',
           success: 'Balances updated',
           error: 'Failed to refresh balances',
         }
