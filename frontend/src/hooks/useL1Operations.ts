@@ -43,7 +43,6 @@ import {
 import {
   pollL1ToL2MessageSync,
   executeL2Claim,
-  executePrivateFuelL2ClaimAndMint,
 } from './bridge/bridgeL1ToL2'
 import {
   validateAndCaptureBlocks,
@@ -813,9 +812,27 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           )
         }
 
-        // Build fee payment method if public fuel is enabled (skip for private fuel — FJ goes to FPC, not user)
+        // Build fee payment method for the L2 claim transaction:
+        // - Public fuel: FeeJuicePaymentMethodWithClaim (claim FJ to user, pay gas)
+        // - Private fuel: BridgedMintAndPayFeePaymentMethod (FeeJuice.claim + mint_and_pay_fee, all private)
         let feeOption: { fee: { paymentMethod: any } } | undefined
-        if (fuel && !privateFuel && backup.fuelSecret && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
+        if (privateFuel && backup.privateFuelSecret && backup.privateFuelSalt && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
+          try {
+            const { BridgedMintAndPayFeePaymentMethod } = await import('@defi-wonderland/aztec-fee-payment')
+            const { Fr: FieldFr } = await import('@aztec/aztec.js/fields')
+            const paymentMethod = new BridgedMintAndPayFeePaymentMethod(
+              AztecAddress.fromString(privateFuel.fpcAddress),
+              receipt.fuelAmount,
+              backup.privateFuelSecret,
+              backup.privateFuelSalt,
+              new FieldFr(BigInt(receipt.fuelMessageLeafIndexStr!)),
+            )
+            feeOption = { fee: { paymentMethod } }
+            console.log('[L1→L2] Using BridgedMintAndPayFeePaymentMethod for L2 claim (private fuel)')
+          } catch (err) {
+            console.warn('[L1→L2] Failed to create BridgedMintAndPayFeePaymentMethod, falling back to default:', err)
+          }
+        } else if (fuel && !privateFuel && backup.fuelSecret && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
           try {
             const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
             const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
@@ -824,7 +841,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               messageLeafIndex: BigInt(receipt.fuelMessageLeafIndexStr!),
             })
             feeOption = { fee: { paymentMethod } }
-            console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim')
+            console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim (public fuel)')
           } catch (err) {
             console.warn('[L1→L2] Failed to create FeeJuicePaymentMethodWithClaim, falling back to default:', err)
           }
@@ -876,31 +893,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           completedAt: new Date().toISOString(),
           currentStep: 4,
         })
-
-        // ─── Step 9b: Private fuel L2 mint (if applicable) ────────────
-        if (privateFuel && backup.privateFuelSalt && receipt.fuelMessageLeafIndexStr) {
-          try {
-            console.log('[L1→L2] Executing BridgedFPC.mint...')
-            notify('info', 'Minting private Fee Juice (wFJ)...')
-            await executePrivateFuelL2ClaimAndMint(
-              { walletAdapter, aztecAddress, isPrivacyModeEnabled: isPrivacyModeEnabled ?? false },
-              {
-                fpcAddress: privateFuel.fpcAddress,
-                amount: receipt.fuelAmount ?? privateFuel.fuelAmount,
-                salt: backup.privateFuelSalt,
-                messageLeafIndex: BigInt(receipt.fuelMessageLeafIndexStr),
-              },
-            )
-            console.log('[L1→L2] BridgedFPC.mint succeeded')
-            notify('success', 'Private Fee Juice (wFJ) minted successfully!')
-          } catch (err) {
-            console.error('[L1→L2] BridgedFPC.mint failed (non-fatal):', err)
-            notify('warn', {
-              heading: 'Private Fuel Mint Failed',
-              message: 'Could not mint private Fee Juice. Your token bridge succeeded. You can retry the private fuel claim later.',
-            })
-          }
-        }
 
         // ─── Step 10: Bridge Complete ─────────────────────────────────
         setProgressStep(3, 'completed')

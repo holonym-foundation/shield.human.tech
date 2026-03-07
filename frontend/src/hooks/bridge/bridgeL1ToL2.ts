@@ -535,8 +535,9 @@ export async function generateAndBackupClaimSecret(params: {
 
   // Generate fuel secrets.
   // Public fuel: random secret + hash → used with FeeJuicePaymentMethodWithClaim on L2.
-  // Private fuel: derived secret (poseidon2([salt, fpcAddress], DOM_SEP)) + hash → FJ
-  //   deposited to FPC on L1, then FeeJuice.claim + BridgedFPC.mint on L2.
+  // Private fuel: derived secret (poseidon2([salt, userAddress], DOM_SEP)) + hash → FJ
+  //   deposited to FPC on L1, then BridgedMintAndPayFeePaymentMethod on L2
+  //   (FeeJuice.claim + BridgedFPC.mint_and_pay_fee, all private, in one tx).
   // When private fuel is active, fuel is also set (for the swap quote), but we skip
   // the public fuel secret since it would be unused — private fuel has its own secret.
   let fuelSecret: Fr | undefined
@@ -562,14 +563,14 @@ export async function generateAndBackupClaimSecret(params: {
   if (params.privateFuel) {
     privateFuelSalt = Fr.random()
     // Derive BridgedFPC secret: poseidon2([salt, claimer], DOM_SEP)
-    // claimer = FPC address, computed server-side
+    // claimer = user's Aztec address (the contract uses msg_sender() as claimer)
     const pfHashRes = await fetch('/api/compute-secret-hash', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         type: 'fpc-bridge',
         salt: privateFuelSalt.toString(),
-        claimer: params.privateFuel.fpcAddress,
+        claimer: params.aztecAddress,
       }),
     })
     if (!pfHashRes.ok) {
@@ -960,41 +961,3 @@ export function finalizeLocalStorageAfterDeposit(params: {
   return { updatedClaim, wasExisting: false }
 }
 
-// ═════════════════════════════════════════════════════════════════════
-// PRIVATE FUEL (BridgedFPC): L1 Deposit + L2 Claim & Mint
-// ═════════════════════════════════════════════════════════════════════
-
-/**
- * Mint private wFJ via BridgedFPC.
- *
- * The mint function internally:
- *   1. Derives secret = poseidon2([salt, self.address], DOM_SEP_FPC_BRIDGE_SECRET)
- *   2. Calls FeeJuice.claim(self, amount, secret, leafIndex) as an enqueued public call
- *   3. Creates private wFJ notes for the caller
- *
- * The user only calls mint — the contract handles the FeeJuice claim internally,
- * so no public link between user and the FJ deposit is created.
- */
-export async function executePrivateFuelL2ClaimAndMint(
-  deps: L2ClaimDeps,
-  params: {
-    fpcAddress: string
-    amount: bigint
-    salt: Fr
-    messageLeafIndex: bigint
-  },
-): Promise<{ l2TxHash: string }> {
-  const { walletAdapter } = deps
-  const { fpcAddress, amount, salt, messageLeafIndex } = params
-
-  console.log('[PrivateFuel] Calling BridgedFPC.mint...')
-  const result = await walletAdapter.executeCall(
-    fpcAddress,
-    'mint',
-    [amount, salt, messageLeafIndex],
-    { contractType: 'bridged_fpc' },
-  )
-  console.log('[PrivateFuel] BridgedFPC.mint succeeded:', result.txHash)
-
-  return { l2TxHash: result.txHash }
-}
