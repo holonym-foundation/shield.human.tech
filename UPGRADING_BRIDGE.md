@@ -6,7 +6,7 @@
 2. Pull the latest `aztec-starter` from GitHub.
 3. Compare `aztec-starter` vs `bridge-script` imports/syntax and update `bridge-script` accordingly.
 
-## 2) Aztec sandbox version
+## 2) Aztec CLI version
 
 Check current version:
 
@@ -14,79 +14,73 @@ Check current version:
 aztec --version
 ```
 
-Expected current version:
+Upgrade to latest:
 
 ```
-aztec-up 3.0.0-devnet.6-patch.1
+aztec-up 4.0.0-devnet.2-patch.3
 ```
 
-Upgrade to latest (pulls Docker image):
-
-```
-aztec-up 4.0.0-devnet.2-patch.0
-```
-
-Note: You can delete the old Docker image from Docker Desktop to free up space.
-
-## 3) Update devnet config
-
-Update `bridge-script/config/devnet.json` to the latest version and devnet URL.
-
-## 4) Start Aztec sandbox (latest)
-
-Run this in the main project root where the `.env` file exists with `L1_URL`, `BOOTNODE`, and `L1_CHAIN_ID`.
-
-Get the bootnode URL from:
-https://docs.aztec.network/developers/getting_started_on_devnet#step-1-set-up-your-environment
-
-```
-source .env
-aztec start --local-network --port 8081 --pxe --pxe.nodeUrl=$BOOTNODE --pxe.proverEnabled true --l1-chain-id $L1_CHAIN_ID
-```
-
-## 5) Update `bridge-script/package.json` Aztec dependencies
+## 3) Update `bridge-script/package.json` Aztec dependencies
 
 Reference: https://www.npmjs.com/package/@aztec/accounts?activeTab=versions
 
-Use the following versions:
+Update all `@aztec/*` packages to match the new version. Also update `frontend/package.json` Aztec dependencies.
+
+## 4) Compile Solidity contracts
 
 ```
-"@aztec/accounts": "4.0.0-devnet.2-patch.0",
-"@aztec/aztec.js": "4.0.0-devnet.2-patch.0",
-"@aztec/ethereum": "4.0.0-devnet.2-patch.0",
-"@aztec/foundation": "4.0.0-devnet.2-patch.0",
-"@aztec/kv-store": "^4.0.0-devnet.2-patch.0",
-"@aztec/l1-artifacts": "4.0.0-devnet.2-patch.0",
-"@aztec/noir-contracts.js": "4.0.0-devnet.2-patch.0",
-"@aztec/protocol-contracts": "4.0.0-devnet.2-patch.0",
-"@aztec/pxe": "4.0.0-devnet.2-patch.0",
-"@aztec/stdlib": "4.0.0-devnet.2-patch.0",
-"@aztec/test-wallet": "4.0.0-devnet.2-patch.0",
+cd l1-contracts
+forge build
 ```
 
-## 6) Install packages and deploy contracts
+This generates the `out/` directory with contract artifacts (BridgeAndFuel, MockFuelSwap, etc.) needed by the deployment script.
 
-Install dependencies and deploy the contracts using the updated versions.
+## 5) Deploy contracts to devnet
 
-## 6.1) If contract JSON changes, upload artifacts
+**No local Aztec node or PXE is needed** — the deployment script connects directly to the remote devnet node.
 
-If the compiled contract JSON changes, upload the updated contract artifact to the Aztec registry so wallets (Azguard) can register and simulate it correctly:
+```
+cd bridge-script
+MNEMONIC="your twelve word mnemonic here" pnpm start-devnet
+```
+
+The script will:
+- Deploy TestERC20 tokens (USDC, USDT, DAI, HUMN, GOAT, WBTC) on L1
+- Use pre-existing WETH on Sepolia
+- Deploy TokenPortal, TokenContract, TokenBridgeContract for each token
+- Deploy BridgeAndFuel, MockFuelSwap, and FeeAssetHandler
+- Save deployment data to `deployments/` and `frontend/src/constants/deployments.json`
+
+## 6) If contract JSON changes, upload artifacts
+
+If the compiled Noir contract JSON changes, upload the updated contract artifact to the Aztec registry so wallets can register and simulate it correctly:
 
 https://devnet.aztec-registry.xyz/
 
-## 6.2) Verify deployment on AztecScan
+## 7) Verify deployment on AztecScan
 
 Check the deployed contract transaction effects on AztecScan:
 
-https://devnet.aztecscan.xyz/tx-effects/0x0aa2cd8f8be0fd235cfcdbc7cc5f5ae833d404745e7f01b6b1198272c4465913
+https://devnet.aztecscan.xyz/
 
-## 7) Update frontend after deployment
+## 8) Update frontend after deployment
 
-1. Remove `node_modules` and `.next` from `frontend`.
+1. Remove `.next` from `frontend` (stale cache).
 2. Run `pnpm install` in `frontend`.
-3. Update frontend contract addresses.
-4. Update Aztec packages in `frontend/package.json`.
-5. Update node URL in `frontend/src/aztec.ts`.
+3. Deployment addresses are written automatically by the deploy script to `frontend/src/constants/deployments.json`.
+4. Update Aztec packages in `frontend/package.json` if needed.
+5. Restart with `pnpm dev` (use `--webpack` flag, not Turbopack).
+
+## 9) (Optional) Run a local PXE connected to devnet
+
+Only needed for local development — NOT required for deployment or the frontend.
+
+```
+export L1_CHAIN_ID=11155111
+export BOOTNODE=https://v4-devnet-2.aztec-labs.com
+
+aztec start --port 8081 --pxe --pxe.nodeUrl=$BOOTNODE --pxe.proverEnabled true --l1-chain-id $L1_CHAIN_ID
+```
 
 ## Troubleshooting
 

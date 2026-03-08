@@ -42,6 +42,8 @@ export interface DeploymentFile {
   l1ContractAddresses: L1ContractAddresses;
   nodeInfo: Record<string, unknown>;
   sponsoredFeeAddress: string;
+  bridgeAndFuelAddress?: string;
+  mockFuelSwapAddress?: string;
   tokens: DeployedToken[];
 }
 
@@ -213,6 +215,31 @@ export function saveTokenToDeployment(token: DeployedToken, deploymentId?: strin
 
   writeJson(filePath, deployment);
   console.log(`✅ Saved ${token.symbol} to deployment ${id}`);
+}
+
+/**
+ * Save BridgeAndFuel / MockFuelSwap addresses to the active deployment.
+ */
+export function saveFuelInfraToDeployment(params: {
+  bridgeAndFuelAddress: string;
+  mockFuelSwapAddress: string;
+}, deploymentId?: string): void {
+  const id = deploymentId ?? loadRegistry()?.activeDeploymentId;
+  if (!id) throw new Error('No active deployment to save fuel infra to');
+
+  const registry = loadRegistry();
+  const entry = registry?.deployments.find(d => d.id === id);
+  if (!entry) throw new Error(`Deployment ${id} not found in registry`);
+
+  const filePath = join(DEPLOYMENTS_DIR, entry.file);
+  const deployment = readJson<DeploymentFile>(filePath);
+  if (!deployment) throw new Error(`Deployment file not found: ${filePath}`);
+
+  deployment.bridgeAndFuelAddress = params.bridgeAndFuelAddress;
+  deployment.mockFuelSwapAddress = params.mockFuelSwapAddress;
+
+  writeJson(filePath, deployment);
+  console.log(`✅ Saved fuel infra to deployment ${id}`);
 }
 
 /**

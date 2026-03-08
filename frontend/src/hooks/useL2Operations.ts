@@ -69,22 +69,7 @@ export const useL2TokenBalance = () => {
         )
       }
 
-      console.time('l2TokenBalance')
       const userAddress = AztecAddress.fromString(aztecAddress)
-
-      // // Use wallet adapter to simulate views
-      // const [privateBalanceResult, publicBalanceResult] = await Promise.all([
-      //   walletAdapter.simulateView(
-      //     walletAdapter.tokenAddress,
-      //     'balance_of_private',
-      //     [userAddress]
-      //   ),
-      //   walletAdapter.simulateView(
-      //     walletAdapter.tokenAddress,
-      //     'balance_of_public',
-      //     [userAddress]
-      //   ),
-      // ])
 
       // Single simulate_views call for both balances
       const tokenAddr = l2TokenAddress || walletAdapter.tokenAddress
@@ -114,7 +99,6 @@ export const useL2TokenBalance = () => {
         tokenDecimals,
       )
 
-      // console.timeEnd('l2TokenBalance')
       return {
         publicBalance: publicBalanceFormat,
         privateBalance: privateBalanceFormat,
@@ -133,6 +117,54 @@ export const useL2TokenBalance = () => {
     meta: {
       persist: true, // Mark this query for persistence
     },
+  })
+}
+
+const FEE_JUICE_ADDRESS =
+  '0x0000000000000000000000000000000000000000000000000000000000000005'
+const FEE_JUICE_DECIMALS = 18
+
+export const useL2FeeJuiceBalance = () => {
+  const { aztecAddress } = useWalletStore()
+  const handleL2Error = useL2ErrorHandler()
+  const walletAdapter = useWalletAdapter()
+
+  const queryKey = ['l2FeeJuiceBalance', aztecAddress]
+
+  const queryFn = async (): Promise<string> => {
+    try {
+      if (!aztecAddress) {
+        throw new Error('Aztec address not found')
+      }
+      if (!walletAdapter) {
+        throw new Error(
+          'Aztec wallet not connected or contracts not initialized',
+        )
+      }
+
+      const userAddress = AztecAddress.fromString(aztecAddress)
+
+      const [publicBalanceResult] = await walletAdapter.simulateViews([
+        {
+          contract: FEE_JUICE_ADDRESS,
+          method: 'balance_of_public',
+          args: [userAddress],
+        },
+      ])
+
+      const publicBalance = BigInt(publicBalanceResult.result.toString())
+      return formatUnits(publicBalance, FEE_JUICE_DECIMALS)
+    } catch (error) {
+      handleL2Error<string>(error, 'BALANCE')
+      throw error
+    }
+  }
+
+  return useQuery<string, Error>({
+    queryKey,
+    queryFn,
+    enabled: !!aztecAddress && !!walletAdapter,
+    refetchInterval: 30_000,
   })
 }
 
@@ -453,7 +485,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         if (isArtifactError) {
           notify('error', {
             heading: 'Contract Artifact Not Found',
-            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for Azguard wallet.`,
+            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.`,
           })
         } else {
           notify('error', `Failed to withdraw tokens on L1. ${errorMessage}`)
@@ -849,7 +881,7 @@ export const useL2PendingTxCount = () => {
       })
 
       const data = await response.json()
-      return data.result as number
+      return (data.result as number) ?? 0
     } catch (error) {
       handleL2Error<number>(error, 'NODE')
       throw error
@@ -909,10 +941,7 @@ export const useL2TokenTransfer = () => {
           walletAdapter.tokenAddress,
           method,
           args,
-          {
-            contractType: 'token',
-            autoRegister: true,
-          },
+          { contractType: 'token' },
         )
 
         // Return a receipt-like object for compatibility

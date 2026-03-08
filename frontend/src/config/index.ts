@@ -58,14 +58,21 @@ export const L1_CONTRACT_ADDRESSES = activeDeployment.l1ContractAddresses
 // Aztecscan URLs for different networks
 export const AZTECSCAN_URLS: Record<number, string> = {
   [L2_CHAIN_ID]: 'https://devnet.aztecscan.xyz', // Aztec Devnet
-  // Add other chain IDs as needed
-  // testnet: 'https://testnet.aztecscan.xyz',
 }
 
-// Helper function to get Aztecscan URL for a given chain ID
+
 export const getAztecscanUrl = (chainId: number): string => {
   return AZTECSCAN_URLS[chainId] || 'https://aztecscan.xyz'
 }
+
+export const BRIDGE_AND_FUEL_ADDRESS: `0x${string}` =
+  ((activeDeployment as any).bridgeAndFuelAddress ?? '') as `0x${string}`
+export const MOCK_FUEL_SWAP_ADDRESS: `0x${string}` =
+  ((activeDeployment as any).mockFuelSwapAddress ?? '') as `0x${string}`
+export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
+  (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuicePortalAddress ?? '') as `0x${string}`
+export const FEE_JUICE_ADDRESS: `0x${string}` =
+  (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
 
 // Non-token protocol addresses (SBT, sponsored fee)
 export const ADDRESS = {
@@ -102,7 +109,7 @@ export const L2_NETWORKS: Network[] = [
   {
     id: 2,
     img: '/assets/svg/aztec.svg',
-    title: 'Aztec Tesnet',
+    title: 'Aztec Testnet',
     chainId: L2_CHAIN_ID,
     network: 'aztec',
     symbol: 'ETH',

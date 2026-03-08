@@ -90,6 +90,11 @@ model BridgeActivity {
   messageHash     String? // L1→L2 message key (from portal event); used for sync check and claim
   messageLeafIndex String? // L1→L2 leaf index; required for claim_public/claim_private on L2
 
+  // --- L1→L2 fuel recovery (when BridgeAndFuel path used) ---
+  fuelMessageHash     String? // Fuel message key from BridgeWithFuel event (fuelKey)
+  fuelMessageLeafIndex String? // Fuel leaf index from BridgeWithFuel event (fuelIndex)
+  fuelAmount           String? // Fuel amount received (in smallest unit, from BridgeWithFuel event)
+
   // --- L2→L1 withdrawal recovery (for L1 withdraw proof) ---
   l2BlockNumber      String? // L2 block where exit tx was included; required for witness and L1 withdraw
   l2BlockNumberBeforeTx String? // L2 block number captured before sending exit tx; starting point if receipt lost

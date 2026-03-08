@@ -6,6 +6,8 @@ export interface TokenConfig {
   l2Name: string
   l2Symbol: string
   logo: string
+  /** Pre-existing L1 token address. If set, skip TestERC20 deployment. */
+  l1TokenAddress?: string
   /** Set to true to force redeploy even if already deployed */
   forceDeploy?: boolean
 }
@@ -18,7 +20,7 @@ export const TOKEN_CONFIGS: TokenConfig[] = [
     l1Symbol: 'USDC',
     l2Name: 'Clean USDC',
     l2Symbol: 'cUSDC',
-    logo: '/assets/svg/USDC.svg',
+    logo: '/assets/tokens/usdc-xl.svg',
     // forceDeploy: false
   },
   {
@@ -28,7 +30,7 @@ export const TOKEN_CONFIGS: TokenConfig[] = [
     l1Symbol: 'USDT',
     l2Name: 'Clean USDT',
     l2Symbol: 'cUSDT',
-    logo: '/assets/svg/USDT.svg',
+    logo: '/assets/tokens/usdt-xl.svg',
   },
   {
     symbol: 'DAI',
@@ -37,7 +39,7 @@ export const TOKEN_CONFIGS: TokenConfig[] = [
     l1Symbol: 'DAI',
     l2Name: 'Clean DAI',
     l2Symbol: 'cDAI',
-    logo: '/assets/svg/DAI.svg',
+    logo: '/assets/tokens/dai-xl.svg',
   },
   {
     symbol: 'HUMN',
@@ -46,7 +48,7 @@ export const TOKEN_CONFIGS: TokenConfig[] = [
     l1Symbol: 'HUMN',
     l2Name: 'Clean HUMN',
     l2Symbol: 'cHUMN',
-    logo: '/assets/svg/HUMAN.svg',
+    logo: '/assets/tokens/humn.jpg',
     // forceDeploy: true,
   },
   {
@@ -56,7 +58,7 @@ export const TOKEN_CONFIGS: TokenConfig[] = [
     l1Symbol: 'GOAT',
     l2Name: 'Clean GOAT',
     l2Symbol: 'cGOAT',
-    logo: '/assets/svg/GOAT.svg',
+    logo: '/assets/tokens/goat.png',
   },
   {
     symbol: 'WBTC',
@@ -65,7 +67,17 @@ export const TOKEN_CONFIGS: TokenConfig[] = [
     l1Symbol: 'WBTC',
     l2Name: 'Clean WBTC',
     l2Symbol: 'cWBTC',
-    logo: '/assets/svg/WBTC.svg',
+    logo: '/assets/tokens/wbtc.png',
+  },
+  {
+    symbol: 'WETH',
+    decimals: 18,
+    l1Name: 'Wrapped Ether',
+    l1Symbol: 'WETH',
+    l2Name: 'Clean WETH',
+    l2Symbol: 'cWETH',
+    logo: '/assets/tokens/weth-xl.svg',
+    l1TokenAddress: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14',
   },
 ]
 

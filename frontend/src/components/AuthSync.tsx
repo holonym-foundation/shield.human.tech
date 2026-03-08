@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import { useWalletStore } from '@/stores/walletStore'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { api } from '@/lib/api'
+import { showToast } from '@/hooks/useToast'
 
 /**
  * When both L1 (Waap) and L2 (Aztec) wallets are connected, authenticate with the backend.
@@ -26,11 +27,9 @@ export default function AuthSync() {
   const currentKey = bothConnected ? `${l1Normalized}:${l2Normalized}` : null
 
   const l2WalletProvider =
-    aztecLoginMethod === 'azguard'
-      ? 'Azguard'
-      : aztecLoginMethod === 'obsidion'
-        ? 'Obsidion'
-        : null
+    aztecLoginMethod === 'wallet-sdk'
+      ? 'WalletSDK'
+      : null
 
   useEffect(() => {
     if (!bothConnected) {
@@ -75,7 +74,12 @@ export default function AuthSync() {
       })
       .catch((err) => {
         if (!cancelled) {
-          console.error('[AuthSync] authenticate failed:', err)
+          const msg = err?.response?.data?.error || err?.message || 'Unknown error'
+          console.warn('[AuthSync] authenticate failed:', msg, err)
+          showToast('warn', {
+            message: `Authentication failed: ${msg}`,
+            heading: 'Auth Error',
+          })
         }
       })
 

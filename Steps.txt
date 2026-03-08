@@ -1,13 +1,13 @@
 Steps:
 
+## 1. Install Aztec CLI
+
 zsh -i <(curl -s https://install.aztec.network)
+aztec --version
+
+## 2. Compile Aztec (Noir) contracts
 
 cd aztec-contracts/token_bridge
-aztec-nargo compile
-aztec codegen target -o src/artifacts
-
-
-cd aztec-contracts/nft_contract
 aztec-nargo compile
 aztec codegen target -o src/artifacts
 
@@ -15,13 +15,36 @@ cd aztec-contracts/token
 aztec-nargo compile
 aztec codegen target -o src/artifacts
 
+## 3. Compile Solidity contracts (required before deployment)
 
-aztec --version
-VERSION=1.0.0-staging.2 aztec --version
+cd l1-contracts
+forge build
 
+## 4. Deploy contracts to devnet
 
-source .env
-aztec start --local-network --port 8081 --pxe --pxe.nodeUrl=$BOOTNODE --pxe.proverEnabled true --l1-chain-id $L1_CHAIN_ID
+NOTE: No local Aztec node or PXE is needed — the deployment script connects
+directly to the remote devnet node.
+
+cd bridge-script
+MNEMONIC="your twelve word mnemonic here" pnpm start-devnet
+
+The script will deploy all L1 and L2 contracts (TestERC20 tokens, TokenPortal,
+TokenContract, TokenBridgeContract, BridgeAndFuel, MockFuelSwap, FeeAssetHandler)
+and save deployment data to deployments/ and frontend/src/constants/deployments.json.
+
+## 5. (Optional) Run a local PXE connected to devnet
+
+Only needed if you want a local PXE for development — NOT required for deployment.
+
+export L1_CHAIN_ID=11155111
+export BOOTNODE=https://v4-devnet-2.aztec-labs.com
+
+aztec start --port 8081 --pxe --pxe.nodeUrl=$BOOTNODE --pxe.proverEnabled true --l1-chain-id $L1_CHAIN_ID
+
+## 6. Run the frontend
+
+cd frontend
+pnpm dev
 
 
 ################################ OLD COMMANDS #################################
@@ -31,8 +54,6 @@ VERSION=1.0.0-staging.2 aztec start --sandbox
 
 VERSION=1.0.0-staging.2 aztec start --port 8081 --pxe --pxe.nodeUrl=$BOOTNODE --pxe.proverEnabled true --l1-chain-id $L1_CHAIN_ID
 
-
 aztec start --port 8080 --pxe --pxe.nodeUrl=https://aztec-testnet-fullnode.zkv.xyz --pxe.proverEnabled true --l1-chain-id 11155111
-
 
 aztec start --port 8080 --pxe --pxe.nodeUrl=$BOOTNODE --pxe.proverEnabled true --l1-chain-id $L1_CHAIN_ID --rollup-version 1714840162

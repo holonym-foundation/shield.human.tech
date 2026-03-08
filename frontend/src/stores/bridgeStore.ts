@@ -96,6 +96,12 @@ interface BridgeStoreState
   isPrivacyModeEnabled: boolean
   setPrivacyModeEnabled: (enabled: boolean) => void
 
+  // Fuel (gas funding) state
+  fuelEnabled: boolean
+  fuelAmount: string
+  setFuelEnabled: (enabled: boolean) => void
+  setFuelAmount: (amount: string) => void
+
   // Step actions
   setHeaderStep: (
     step: number,
@@ -217,6 +223,8 @@ const initialState = {
   ...initialTransactionState,
   ...initialRecoveryState,
   isPrivacyModeEnabled: getInitialPrivacyMode(),
+  fuelEnabled: false,
+  fuelAmount: '',
 } as const
 
 const bridgeStore = create<BridgeStoreState>((set, get) => ({
@@ -235,6 +243,12 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
     }
     set({ isPrivacyModeEnabled: enabled })
   },
+
+  // Fuel (gas funding) actions
+  fuelEnabled: false,
+  fuelAmount: '',
+  setFuelEnabled: (enabled: boolean) => set({ fuelEnabled: enabled, fuelAmount: '' }),
+  setFuelAmount: (amount: string) => set({ fuelAmount: amount }),
 
   // Step actions
   setHeaderStep: (
@@ -370,6 +384,8 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
     recoveryOperationId: null,
     recoveryClaimData: null,
     recoveryWithdrawalData: null,
+    fuelEnabled: false,
+    fuelAmount: '',
   })),
 }))
 
@@ -415,6 +431,12 @@ export const useBridgeStore = () =>
       // Privacy Mode toggle
       isPrivacyModeEnabled: state.isPrivacyModeEnabled,
       setPrivacyModeEnabled: state.setPrivacyModeEnabled,
+
+      // Fuel (gas funding)
+      fuelEnabled: state.fuelEnabled,
+      fuelAmount: state.fuelAmount,
+      setFuelEnabled: state.setFuelEnabled,
+      setFuelAmount: state.setFuelAmount,
 
       // Recovery
       recoveryOperationId: state.recoveryOperationId,
