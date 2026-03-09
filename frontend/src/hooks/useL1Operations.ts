@@ -59,6 +59,11 @@ import {
   MOCK_FUEL_SWAP_ADDRESS,
 } from '@/config'
 import { getMockFuelQuote } from '@/utils/fuelQuote'
+import {
+  createSigningMessage,
+  deriveEncryptionKey,
+  decryptData,
+} from '@/utils/encryption'
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
@@ -825,7 +830,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         // Update localStorage with claim success
         updateLocalStorageItem(
           LS_KEY_BRIDGE_DEPOSITS,
-          (c: any) => c.claimSecret === backup.claimSecret.toString() && c.l1Address === l1Address,
+          (c: any) => c.id === operationId,
           (c: any) => ({
             ...c,
             success: true,
@@ -1136,12 +1141,28 @@ export function useExportClaimData() {
       const claims = JSON.parse(existingClaims)
       const claim = claims.find((c: any) => c.id === claimId)
 
-      if (!claim || !claim.claimSecret) {
-        notify('error', 'Claim secret not found')
+      if (!claim || !claim.encryptedCiphertext) {
+        notify('error', 'Encrypted claim data not found')
         return false
       }
 
-      const success = await copyToClipboard(claim.claimSecret)
+      // Decrypt the claim secret from the encrypted localStorage entry
+      const signingMessage = createSigningMessage(claim.l1Address)
+      const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [
+        signingMessage,
+        claim.l1Address,
+      ]) as string
+      const encryptionKey = await deriveEncryptionKey(claim.l1Address, signature, claim.keyDerivationDomain)
+      const decrypted = JSON.parse(
+        await decryptData(claim.encryptedCiphertext, claim.encryptedIv, claim.encryptedTag, encryptionKey)
+      )
+
+      if (!decrypted.claimSecret) {
+        notify('error', 'Claim secret not found in decrypted data')
+        return false
+      }
+
+      const success = await copyToClipboard(decrypted.claimSecret)
       if (success) {
         notify('success', 'Claim secret copied to clipboard!')
         return true

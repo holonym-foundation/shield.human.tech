@@ -134,9 +134,12 @@ export const exportWithdrawalData = (withdrawalData: any) => {
   const exportData = {
     type: BridgeDirection.L2_TO_L1,
     timestamp: new Date().toISOString(),
-    warning: '⚠️ CRITICAL: Keep this file safe! If you lose the nonce, your funds will be permanently locked.',
+    warning: '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
     data: {
-      nonce: withdrawalData.nonce,
+      encryptedCiphertext: withdrawalData.encryptedCiphertext,
+      encryptedIv: withdrawalData.encryptedIv,
+      encryptedTag: withdrawalData.encryptedTag,
+      keyDerivationDomain: withdrawalData.keyDerivationDomain,
       l2TxHash: withdrawalData.l2TxHash,
       l2BlockNumber:
         withdrawalData.l2BlockNumber ??

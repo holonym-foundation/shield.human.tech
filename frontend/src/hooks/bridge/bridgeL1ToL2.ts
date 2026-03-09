@@ -504,7 +504,11 @@ export async function generateAndBackupClaimSecret(params: {
   pushToLocalStorageArray(LS_KEY_BRIDGE_DEPOSITS, {
     id: operationId,
     claimAmount: amountL1,
-    claimSecret: claimSecret.toString(),
+    // Secrets stored encrypted only — never plaintext in localStorage
+    encryptedCiphertext: encrypted.ciphertext,
+    encryptedIv: encrypted.iv,
+    encryptedTag: encrypted.tag,
+    keyDerivationDomain,
     claimSecretHash: claimSecretHash.toString(),
     messageHash: null,
     messageLeafIndex: null,
@@ -518,13 +522,11 @@ export async function generateAndBackupClaimSecret(params: {
     nodeInfo: nodeInfoSnapshot,
     isPrivacyModeEnabled,
     status: BridgeOperationStatus.pending,
-    ...(fuelSecret && fuelSecretHash ? {
-      fuelSecret: fuelSecret.toString(),
-      fuelSecretHash: fuelSecretHash.toString(),
+    ...(fuelSecret ? {
       fuelAmount: params.fuel?.fuelAmount.toString(),
     } : {}),
   })
-  console.log('Claim secret stored in localStorage')
+  console.log('Encrypted claim data stored in localStorage')
 
   return { operationId, claimSecret, claimSecretHash, nodeInfoSnapshot, fuelSecret, fuelSecretHash }
 }
@@ -656,7 +658,7 @@ export async function sendL1DepositTransaction(params: {
 
   updateLocalStorageItem(
     LS_KEY_BRIDGE_DEPOSITS,
-    (c: any) => c.claimSecret === claimSecret.toString() && c.status === 'pending' && c.l1Address === l1Address,
+    (c: any) => c.id === operationId,
     (c: any) => ({ ...c, l1TxHash, l1TxUrl }),
   )
   console.log('L1 tx hash stored immediately in localStorage')
@@ -739,7 +741,7 @@ export async function waitForReceiptAndExtractEvent(params: {
 
     updateLocalStorageItem(
       LS_KEY_BRIDGE_DEPOSITS,
-      (c: any) => c.claimSecret === claimSecret.toString() && c.status === BridgeOperationStatus.pending && c.l1Address === l1Address,
+      (c: any) => c.l1Address === l1Address && c.status === BridgeOperationStatus.pending,
       (c: any) => ({
         ...c,
         messageHash: messageHashStr,
@@ -791,7 +793,7 @@ export async function waitForReceiptAndExtractEvent(params: {
 
   updateLocalStorageItem(
     LS_KEY_BRIDGE_DEPOSITS,
-    (c: any) => c.claimSecret === claimSecret.toString() && c.status === BridgeOperationStatus.pending && c.l1Address === l1Address,
+    (c: any) => c.l1Address === l1Address && c.status === BridgeOperationStatus.pending,
     (c: any) => ({ ...c, messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr }),
   )
   console.log('messageHash and messageLeafIndex stored immediately after receipt')
@@ -868,9 +870,8 @@ export function finalizeLocalStorageAfterDeposit(params: {
 
   const claimIndex = claims.findIndex(
     (c: any) =>
-      c.claimSecret === claimSecret.toString() &&
-      c.status === BridgeOperationStatus.pending &&
-      c.l1Address === l1Address,
+      c.l1Address === l1Address &&
+      c.status === BridgeOperationStatus.pending,
   )
 
   let updatedClaim: any = null
@@ -894,7 +895,6 @@ export function finalizeLocalStorageAfterDeposit(params: {
   updatedClaim = {
     id: Date.now().toString(),
     claimAmount: claimAmount.toString(),
-    claimSecret: claimSecret.toString(),
     claimSecretHash: claimSecretHash.toString(),
     messageHash: messageHashStr,
     messageLeafIndex: messageLeafIndexStr,

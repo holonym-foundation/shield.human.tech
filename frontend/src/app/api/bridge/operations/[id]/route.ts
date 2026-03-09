@@ -88,8 +88,6 @@ export async function PATCH(
       'encryptedCiphertext',
       'encryptedIv',
       'encryptedTag',
-      'l1Address',
-      'l2Address',
       'amountL1',
       'amountL2',
       'direction',

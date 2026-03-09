@@ -560,7 +560,7 @@ export async function encryptAndBackupWithdrawalNonce(params: {
   }
   console.log('[L2→L1] Encrypted nonce backed up (operationId:', operationId, ')')
 
-  // Secondary: localStorage backup
+  // Secondary: localStorage backup (secrets stored encrypted only — never plaintext)
   pushToLocalStorageArray(LS_KEY_BRIDGE_WITHDRAWALS, {
     id: operationId,
     operationId,
@@ -569,7 +569,10 @@ export async function encryptAndBackupWithdrawalNonce(params: {
     amount: amountL2,
     l1Address,
     l2Address: aztecAddress,
-    nonce: nonce.toString(),
+    encryptedCiphertext: encrypted.ciphertext,
+    encryptedIv: encrypted.iv,
+    encryptedTag: encrypted.tag,
+    keyDerivationDomain,
     success: false,
     status: BridgeOperationStatus.pending,
     l2TxHash: null as string | null,

@@ -15,8 +15,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, parseUnits } from 'viem'
 import { useToast, useToastMutation } from './useToast'
 import { wait, exportWithdrawalData, copyToClipboard } from '@/utils'
+import {
+  createSigningMessage,
+  deriveEncryptionKey,
+  decryptData,
+} from '@/utils/encryption'
 import { useL2ErrorHandler } from '@/utils/l2ErrorHandler'
-import { useWalletStore } from '@/stores/walletStore'
+import { requestWaapWallet, WAAP_METHOD, useWalletStore } from '@/stores/walletStore'
 import { useWalletAdapter } from './useWalletAdapter'
 import {
   LS_KEY_BRIDGE_WITHDRAWALS,
@@ -765,11 +770,28 @@ export function useExportWithdrawalData() {
       }
       const withdrawals = JSON.parse(raw)
       const w = withdrawals.find((x: any) => x.id === withdrawalId)
-      if (!w?.nonce) {
-        notify('error', 'Nonce not found')
+      if (!w?.encryptedCiphertext) {
+        notify('error', 'Encrypted withdrawal data not found')
         return false
       }
-      const ok = await copyToClipboard(w.nonce)
+
+      // Decrypt the nonce from the encrypted localStorage entry
+      const signingMessage = createSigningMessage(w.l1Address)
+      const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [
+        signingMessage,
+        w.l1Address,
+      ]) as string
+      const encryptionKey = await deriveEncryptionKey(w.l1Address, signature, w.keyDerivationDomain)
+      const decrypted = JSON.parse(
+        await decryptData(w.encryptedCiphertext, w.encryptedIv, w.encryptedTag, encryptionKey)
+      )
+
+      if (!decrypted.nonce) {
+        notify('error', 'Nonce not found in decrypted data')
+        return false
+      }
+
+      const ok = await copyToClipboard(decrypted.nonce)
       if (ok) notify('success', 'Nonce copied to clipboard!')
       else notify('error', 'Failed to copy')
       return ok
