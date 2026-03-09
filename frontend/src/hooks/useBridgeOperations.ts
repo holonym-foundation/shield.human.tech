@@ -8,6 +8,7 @@ import {
   decryptData,
 } from '@/utils/encryption'
 import type { BridgeActivityData } from '@/utils/encryption'
+import { logInfo } from '@/utils/datadog'
 
 /** Shape returned by GET /api/bridge/operations */
 export interface BridgeOperation {
@@ -28,11 +29,16 @@ export interface BridgeOperation {
   messageHash: string | null
   messageLeafIndex: string | null
   l1BlockNumberBeforeTx: string | null
+  // L1→L2 fuel recovery fields
+  fuelMessageHash: string | null
+  fuelMessageLeafIndex: string | null
+  fuelAmount: string | null
   // L2→L1 recovery fields
   l2BlockNumber: string | null
   l2BlockNumberBeforeTx: string | null
   l2ToL1MessageIndex: string | null
   siblingPath: string[] | null
+  epoch: number | null
   recipientL1Address: string | null
   // Recovery-critical contract & version snapshot
   rollupVersion: number | null
@@ -116,6 +122,16 @@ export async function decryptOperationPayload(
     operation.encryptedTag,
     key,
   )
+
+  logInfo('bridge.decrypt_operation', {
+    operationId: operation.id,
+    direction: operation.direction,
+    status: operation.status,
+    l1Address,
+    isPrivacyModeEnabled: operation.isPrivacyModeEnabled,
+    tokenSymbol: operation.tokenSymbol,
+    userAction: 'decrypt_operation_payload',
+  })
 
   return JSON.parse(plaintext) as BridgeActivityData
 }

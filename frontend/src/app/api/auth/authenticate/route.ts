@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyMessage } from 'viem'
 import { prisma } from '@/lib/prisma'
 import { signJWT } from '@/lib/jwt'
 import {
@@ -7,11 +8,26 @@ import {
   sanitizeString,
 } from '@/lib/validation'
 
+/**
+ * Build the deterministic auth message that the frontend signs.
+ * Must match the message constructed in AuthSync.tsx.
+ */
+function buildAuthMessage(l1Address: string, l2Address: string): string {
+  return [
+    'Aztec Bridge - Authenticate',
+    '',
+    'Sign this message to prove you own this wallet.',
+    'This does not cost any gas.',
+    '',
+    `L1 Wallet: ${l1Address.toLowerCase()}`,
+    `L2 Wallet: ${l2Address.toLowerCase()}`,
+  ].join('\n')
+}
 
 /**
  * POST /api/auth/authenticate
  * Find or create User by (l1Address, l2Address); store L1/L2 login method and provider.
- * Auth when both L1 and L2 are connected. See frontend/prisma/USER_AND_AUTH_DESIGN.md.
+ * Requires a wallet signature to prove ownership of the L1 address.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -20,6 +36,7 @@ export async function POST(request: NextRequest) {
     // ── Sanitize inputs ─────────────────────────────────────────────────
     const normalizedL1 = sanitizeEthAddress(body.l1Address)
     const normalizedL2 = sanitizeHexString(body.l2Address, 130)
+    const signature = sanitizeString(body.signature, 200)
     const l1LoginMethod = sanitizeString(body.l1LoginMethod, 50)
     const l1WalletProvider = sanitizeString(body.l1WalletProvider, 100)
     const l2LoginMethod = sanitizeString(body.l2LoginMethod, 50)
@@ -37,6 +54,34 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+    if (!signature) {
+      return NextResponse.json(
+        { error: 'Missing wallet signature. Please sign to prove wallet ownership.' },
+        { status: 400 }
+      )
+    }
+
+    // ── Verify wallet signature ─────────────────────────────────────────
+    const message = buildAuthMessage(normalizedL1, normalizedL2)
+    const isValid = await verifyMessage({
+      address: normalizedL1 as `0x${string}`,
+      message,
+      signature: signature as `0x${string}`,
+    })
+
+    if (!isValid) {
+      console.warn('[auth/authenticate] Invalid signature for', normalizedL1)
+      return NextResponse.json(
+        { error: 'Invalid wallet signature. The signature does not match the claimed L1 address.' },
+        { status: 401 }
+      )
+    }
+
+    // Extract client IP from headers (works behind proxies / Vercel)
+    const clientIp =
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+      request.headers.get('x-real-ip') ??
+      null
 
     const user = await prisma.user.upsert({
       where: {
@@ -52,12 +97,16 @@ export async function POST(request: NextRequest) {
         l1WalletProvider: l1WalletProvider ?? null,
         l2LoginMethod: l2LoginMethod ?? null,
         l2WalletProvider: l2WalletProvider ?? null,
+        lastLoginAt: new Date(),
+        lastLoginIp: clientIp,
       },
       update: {
         ...(l1LoginMethod !== undefined && { l1LoginMethod }),
         ...(l1WalletProvider !== undefined && { l1WalletProvider }),
         ...(l2LoginMethod !== undefined && { l2LoginMethod }),
         ...(l2WalletProvider !== undefined && { l2WalletProvider }),
+        lastLoginAt: new Date(),
+        lastLoginIp: clientIp,
       },
       select: {
         id: true,

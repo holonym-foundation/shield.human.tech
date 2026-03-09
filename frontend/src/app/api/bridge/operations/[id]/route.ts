@@ -16,7 +16,7 @@ import {
 
 /** Valid forward-only status transitions. Any status can transition to 'failed'. */
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  pending: ['deposited', 'claimed', 'completed', 'failed'],
+  pending: ['submitted', 'deposited', 'completed', 'failed'],
   deposited: ['claimed', 'completed', 'failed'],
   claimed: ['completed', 'failed'],
   submitted: ['ready', 'pending_finalize', 'completed', 'failed'],
@@ -79,6 +79,8 @@ export async function PATCH(
     const fuelMessageHash = sanitizeHexString(body.fuelMessageHash, 130)
     const fuelMessageLeafIndex = sanitizeNumericString(body.fuelMessageLeafIndex)
     const fuelAmount = sanitizeNumericString(body.fuelAmount)
+    // L2→L1 witness epoch
+    const epoch = sanitizeInt(body.epoch, 0, 1_000_000_000)
 
 
     // ── Immutable field guard ───────────────────────────────────────────
@@ -187,6 +189,8 @@ export async function PATCH(
     if (fuelMessageHash) updateData.fuelMessageHash = fuelMessageHash
     if (fuelMessageLeafIndex) updateData.fuelMessageLeafIndex = fuelMessageLeafIndex
     if (fuelAmount) updateData.fuelAmount = fuelAmount
+    // L2→L1 witness epoch
+    if (epoch != null) updateData.epoch = epoch
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json(

@@ -5,7 +5,7 @@ import { useWalletStore } from '@/stores/walletStore'
 import { useWalletAdapter } from './useWalletAdapter'
 import { useToast } from './useToast'
 import { wait } from '@/utils'
-import { getAztecscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
+import { getAztecscanUrl, L1_CHAIN_ID, L2_CHAIN_ID } from '@/config'
 import { BridgeOperationStatus } from '@prisma/client'
 import { TokenPortalAbi } from '@aztec/l1-artifacts'
 import { extractEvent } from '@aztec/ethereum/utils'
@@ -81,8 +81,7 @@ async function recoverFromBlockScan(
 ): Promise<{ messageHash: string; messageLeafIndex: string }> {
   const fromBlock = BigInt(l1BlockNumberBeforeTx)
   const currentBlock = await publicClient.getBlockNumber()
-  // Scan up to 2000 blocks (enough for ~7 hours at 12s/block)
-  const toBlock = fromBlock + 2000n > currentBlock ? currentBlock : fromBlock + 2000n
+  const toBlock = currentBlock
 
   console.log('[Resume L1→L2] Scanning L1 blocks', fromBlock.toString(), '→', toBlock.toString(), 'for portal events...')
 
@@ -190,10 +189,12 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       )
     }
 
-    const portalAddress = portalAddressL1 || L1_TOKENS[0]?.l1PortalContract || ''
     if (!portalAddressL1) {
-      console.warn('[Resume L1→L2] portalAddressL1 not stored in operation — falling back to L1_TOKENS[0]. This may be wrong for multi-token operations.')
+      throw new Error(
+        'portalAddressL1 not stored in operation. Cannot resume without knowing which token portal to use. Contact support with your operation ID.',
+      )
     }
+    const portalAddress = portalAddressL1
 
     // ═══════════════════════════════════════════════════════════════════════
     // RECOVERY: Recover messageHash + messageLeafIndex if missing
@@ -312,15 +313,15 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     const l2TxUrl = `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${l2TxHash}`
     setTransactionUrls(l1TxUrl ?? null, l2TxUrl)
 
-    // Backend: mark operation as completed
+    // Backend: mark operation as completed (retry — critical for DB consistency)
     console.log('[Resume L1→L2] PATCH completed →', { operationId, status: 'completed', l2TxHash, currentStep: 4 })
-    patchOperationAsync(operationId, {
+    await patchOperationWithRetry(operationId, {
       status: 'completed',
       l2TxHash,
       l2TxUrl,
       completedAt: new Date().toISOString(),
       currentStep: 4,
-    })
+    }, { label: 'L1→L2 resume completion' })
 
     // Update localStorage
     updateLocalStorageItem(

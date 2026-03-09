@@ -4,10 +4,13 @@ import { useWalletStore } from '@/stores/walletStore'
 import { useToast } from './useToast'
 import { wait } from '@/utils'
 import { aztecNode } from '@/aztec'
-import { L1_CHAIN_ID, L1_TOKENS, L1_CONTRACT_ADDRESSES } from '@/config'
+import { L1_CHAIN_ID, L1_CONTRACT_ADDRESSES } from '@/config'
+import { BridgeOperationStatus } from '@prisma/client'
 import {
+  LS_KEY_BRIDGE_WITHDRAWALS,
   patchOperationWithRetry,
   patchOperationAsync,
+  updateLocalStorageItem,
 } from './bridge/bridgeUtils'
 import {
   computeL2ToL1MessageLeaf,
@@ -108,14 +111,15 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
       throw new Error('L1 address not available for withdrawal')
     }
 
-    // Use config defaults if DB values are missing (legacy operations stored before multi-token)
     if (!portalAddressL1) {
-      console.warn('[Resume L2→L1] portalAddressL1 not stored in operation — falling back to L1_TOKENS[0]. This may be wrong for multi-token operations.')
-      portalAddressL1 = L1_TOKENS[0]?.l1PortalContract || ''
+      throw new Error(
+        'portalAddressL1 not stored in operation. Cannot resume without knowing which token portal to use. Contact support with your operation ID.',
+      )
     }
     if (!bridgeAddressL2) {
-      console.warn('[Resume L2→L1] bridgeAddressL2 not stored in operation — falling back to L1_TOKENS[0]. This may be wrong for multi-token operations.')
-      bridgeAddressL2 = L1_TOKENS[0]?.l2BridgeContract || ''
+      throw new Error(
+        'bridgeAddressL2 not stored in operation. Cannot resume without knowing which L2 bridge contract to use. Contact support with your operation ID.',
+      )
     }
 
     // Show L2 tx URL if available
@@ -148,14 +152,78 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
         l2BlockNumber = String(blockNum)
         patchOperationAsync(operationId, { l2BlockNumber: String(blockNum) })
       } else if (l2BlockNumberBeforeTx) {
+        // Fallback: scan L2 blocks from l2BlockNumberBeforeTx to find the burn tx.
+        // We compute the expected L2→L1 message leaf and try each block as the witness source.
         const startBlock = Number(l2BlockNumberBeforeTx)
         const currentBlock = await aztecNode.getBlockNumber()
-        console.log('[Resume L2→L1] Scanning L2 blocks', startBlock, '→', currentBlock, 'for tx...')
-        throw new Error(
-          `l2BlockNumber missing and no l2TxHash to recover it. ` +
-          `We know the tx was after L2 block ${startBlock}. ` +
-          'Please contact support with your operation ID.',
-        )
+        console.log('[Resume L2→L1] l2TxHash missing — scanning L2 blocks', startBlock, '→', currentBlock, 'for matching witness...')
+
+        if (rollupVersion == null) {
+          const nodeInfo = await aztecNode.getNodeInfo()
+          rollupVersion = rollupVersion ?? nodeInfo?.rollupVersion
+          chainIdL1 = chainIdL1 ?? (nodeInfo?.l1ChainId as number | undefined) ?? L1_CHAIN_ID
+          const l1Addresses = nodeInfo?.l1ContractAddresses as Record<string, any> | undefined
+          l1RollupAddress = l1RollupAddress ?? l1Addresses?.rollupAddress?.toString()
+        }
+        if (rollupVersion == null || !l1RollupAddress) {
+          throw new Error(
+            `l2BlockNumber and l2TxHash both missing. Rollup info unavailable for block scan. ` +
+            `We know the tx was after L2 block ${startBlock}. Contact support with your operation ID.`,
+          )
+        }
+
+        const msgLeaf = computeL2ToL1MessageLeaf({
+          l1Recipient: withdrawRecipient,
+          amount: BigInt(amount),
+          l2BridgeAddress: bridgeAddressL2,
+          portalAddress: portalAddressL1,
+          rollupVersion,
+          chainId: chainIdL1 ?? L1_CHAIN_ID,
+        })
+
+        let foundBlock: number | undefined
+        for (let b = startBlock; b <= currentBlock; b++) {
+          try {
+            const result = await computeWitness(b, msgLeaf, l1RollupAddress)
+            if (result.leafIndex != null) {
+              foundBlock = b
+              l2ToL1MessageIndex = result.leafIndex
+              siblingPath = result.siblingPath
+              withdrawEpoch = result.epoch
+              console.log('[Resume L2→L1] Found burn tx in L2 block', b, 'leafIndex=', result.leafIndex)
+              break
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : ''
+            if (msg.includes('message not found') || msg.includes('does not match')) {
+              // Expected: this block doesn't contain our message — continue scanning
+              continue
+            }
+            // Unexpected RPC/network error — log and continue (don't abort entire scan)
+            console.warn('[Resume L2→L1] Error scanning block', b, ':', msg)
+          }
+        }
+
+        if (!foundBlock) {
+          throw new Error(
+            `Could not find L2→L1 message in blocks ${startBlock}–${currentBlock}. ` +
+            'The burn tx may not have been mined yet. Try resuming again later, or contact support.',
+          )
+        }
+
+        blockNum = foundBlock
+        l2BlockNumber = String(foundBlock)
+        patchOperationAsync(operationId, { l2BlockNumber: String(foundBlock) })
+
+        // Also persist the recovered witness data
+        patchOperationWithRetry(operationId, {
+          status: 'ready',
+          l2ToL1MessageIndex,
+          siblingPath,
+          epoch: withdrawEpoch != null ? Number(withdrawEpoch) : undefined,
+          l2BlockNumber: String(foundBlock),
+          currentStep: 3,
+        }, { label: 'recovered witness from block scan' })
       } else {
         throw new Error(
           'Cannot recover witness: no l2BlockNumber, l2TxHash, or l2BlockNumberBeforeTx. Contact support.',
@@ -207,6 +275,7 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
         status: 'ready',
         l2ToL1MessageIndex,
         siblingPath,
+        epoch: withdrawEpoch != null ? Number(withdrawEpoch) : undefined,
         currentStep: 3,
       }, { label: 'witness data' })
       if (ok) {
@@ -295,15 +364,29 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
 
     setTransactionUrls(withdrawResult.l1TxUrl, l2TxUrl ?? null)
 
-    // Mark as completed on backend
+    // Mark as completed on backend (retry — critical for DB consistency)
     console.log('[Resume L2→L1] PATCH completed →', { operationId, status: 'completed', l1TxHash: withdrawResult.l1TxHash, currentStep: 5 })
-    patchOperationAsync(operationId, {
+    await patchOperationWithRetry(operationId, {
       status: 'completed',
       l1TxHash: withdrawResult.l1TxHash,
       l1TxUrl: withdrawResult.l1TxUrl,
       completedAt: new Date().toISOString(),
       currentStep: 5,
-    })
+    }, { label: 'L2→L1 resume completion' })
+
+    // Update localStorage to match server state
+    updateLocalStorageItem(
+      LS_KEY_BRIDGE_WITHDRAWALS,
+      (w: any) => w.id === operationId,
+      (w: any) => ({
+        ...w,
+        success: true,
+        status: BridgeOperationStatus.completed,
+        l1TxHash: withdrawResult.l1TxHash,
+        l1TxUrl: withdrawResult.l1TxUrl,
+        completedAt: Date.now(),
+      }),
+    )
 
     setProgressStep(4, 'completed')
 

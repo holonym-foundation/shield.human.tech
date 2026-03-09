@@ -50,6 +50,8 @@ model User {
   l2LoginMethod  String?  // azguard | obsidion (AztecLoginMethod)
   l2WalletProvider String? // e.g. "Azguard", "Obsidion"
   defaultPrivacyMode Boolean? // Sync from frontend localStorage "privacyModeEnabled"
+  lastLoginAt    DateTime? // Updated on each successful authenticate call
+  lastLoginIp    String?   // IP address from the most recent authenticate request
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -101,6 +103,7 @@ model BridgeActivity {
   l2BlockNumberBeforeTx String? // L2 block number captured before sending exit tx; starting point if receipt lost
   l2ToL1MessageIndex String? // Leaf index in L2→L1 message tree (same as frontend l2ToL1MessageIndex)
   siblingPath       Json?   // Merkle sibling path (array of hex strings) for L1 portal withdraw
+  epoch             Int?    // L2→L1: epoch derived from l2BlockNumber; needed for L1 withdraw proof
 
   // --- L1→L2 recovery hint ---
   l1BlockNumberBeforeTx String? // L1 block number captured before sending deposit tx; starting point if receipt lost
@@ -159,6 +162,9 @@ model BridgeActivity {
   l1OutboxAddress   String? // node.l1ContractAddresses.outboxAddress
   l1RollupAddress   String? // node.l1ContractAddresses.rollupAddress
   l1RegistryAddress String? // node.l1ContractAddresses.registryAddress
+
+  // --- Client IP (for audit trail per-operation) ---
+  clientIp  String?  // IP address of the client that initiated this operation
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -25,20 +25,13 @@ const FAUCET_AMOUNT = parseEther('0.02')
 // Rate limiting is handled by the client using localStorage to prevent
 // users from requesting tokens more than once in 24 hours
 
-let privateKey = process.env.FAUCET_PRIVATE_KEY
-const rpcUrl = process.env.ETHEREUM_RPC_URL
-
-if (!privateKey) {
-  throw new Error('FAUCET_PRIVATE_KEY is not set')
-}
-
-if (!rpcUrl) {
-  throw new Error('ETHEREUM_RPC_URL is not set')
-}
-
-// Make sure it has 0x prefix
-if (!privateKey.startsWith('0x')) {
-  privateKey = `0x${privateKey}`
+function getPrivateKeyAndRpc() {
+  let privateKey = process.env.FAUCET_PRIVATE_KEY
+  const rpcUrl = process.env.ETHEREUM_RPC_URL
+  if (!privateKey) throw new Error('FAUCET_PRIVATE_KEY is not set')
+  if (!rpcUrl) throw new Error('ETHEREUM_RPC_URL is not set')
+  if (!privateKey.startsWith('0x')) privateKey = `0x${privateKey}`
+  return { privateKey: privateKey as `0x${string}`, rpcUrl }
 }
 
 export async function POST(request: NextRequest) {
@@ -66,9 +59,10 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+      const { privateKey, rpcUrl } = getPrivateKeyAndRpc()
       console.log('Creating account from private key...')
       // Create the account
-      const account = privateKeyToAccount(privateKey as `0x${string}`)
+      const account = privateKeyToAccount(privateKey)
 
       // Create public client for reading
       const publicClient = createPublicClient({

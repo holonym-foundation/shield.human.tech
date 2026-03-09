@@ -753,6 +753,7 @@ export async function fetchNodeInfoAndComputeWitness(params: {
     status: 'ready',
     l2ToL1MessageIndex: leafIndex,
     siblingPath,
+    epoch: epoch != null ? Number(epoch) : undefined,
     currentStep: 3,
   }, { label: 'witness data' })
 

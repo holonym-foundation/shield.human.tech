@@ -38,6 +38,7 @@ import { networkConfig, silkUrl } from '@/config/l1.config'
 import {
   LS_KEY_BRIDGE_DEPOSITS,
   patchOperationAsync,
+  patchOperationWithRetry,
   updateLocalStorageItem,
 } from './bridge/bridgeUtils'
 import {
@@ -825,6 +826,13 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         const l2TxHash = claimResult.l2TxHash
         const l2TxUrl = `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${l2TxHash}`
 
+        // Persist brute-forced leaf index back to server if it was discovered
+        if (claimResult.usedBruteForce && claimResult.bruteForceLeafIndex != null) {
+          patchOperationAsync(operationId, {
+            messageLeafIndex: claimResult.bruteForceLeafIndex.toString(),
+          })
+        }
+
         setTransactionUrls(receipt.l1TxUrl, l2TxUrl)
 
         // Update localStorage with claim success
@@ -842,14 +850,14 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         )
         console.log('✅ L2 claim success stored (status=completed, l2TxHash)')
 
-        // 🔒 PATCH: mark operation as completed on server
-        patchOperationAsync(operationId, {
+        // 🔒 PATCH: mark operation as completed on server (retry — critical for DB consistency)
+        await patchOperationWithRetry(operationId, {
           status: 'completed',
           l2TxHash,
           l2TxUrl,
           completedAt: new Date().toISOString(),
           currentStep: 4,
-        })
+        }, { label: 'L1→L2 completion' })
 
         // ─── Step 10: Bridge Complete ─────────────────────────────────
         setProgressStep(3, 'completed')
@@ -871,8 +879,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           amount: amount.toString(),
           l1Address: l1Address,
           l2Address: aztecAddress,
-          txHash: l2TxHash,
+          l1TxHash: receipt.l1TxHash,
+          l2TxHash,
           aztecscanUrl: l2TxUrl,
+          usedFuel: !!fuel,
+          isPrivacyModeEnabled,
           userAction: 'bridge_l1_to_l2_completed',
         })
 
@@ -1156,6 +1167,14 @@ export function useExportClaimData() {
       const decrypted = JSON.parse(
         await decryptData(claim.encryptedCiphertext, claim.encryptedIv, claim.encryptedTag, encryptionKey)
       )
+
+      logInfo('bridge.decrypt_claim_secret', {
+        l1Address: claim.l1Address,
+        operationId: claim.id,
+        tokenSymbol: claim.tokenSymbol,
+        amount: claim.amount?.toString(),
+        userAction: 'copy_claim_secret',
+      })
 
       if (!decrypted.claimSecret) {
         notify('error', 'Claim secret not found in decrypted data')

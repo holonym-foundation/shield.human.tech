@@ -37,8 +37,8 @@ export const TX_HASH_REGEX = /^0x[a-fA-F0-9]{64}$/
 /** Hex string (with 0x prefix, variable length). Used for Aztec addresses and message hashes. */
 export const HEX_STRING_REGEX = /^0x[a-fA-F0-9]+$/
 
-/** Numeric string (integer, possibly negative). Used for amounts and block numbers. */
-export const NUMERIC_STRING_REGEX = /^-?\d+$/
+/** Numeric string (non-negative integer). Used for amounts, block numbers, and leaf indices. */
+export const NUMERIC_STRING_REGEX = /^\d+$/
 
 // ─── Sanitization helpers ───────────────────────────────────────────────
 
@@ -116,6 +116,21 @@ export function sanitizeBoolean(value: unknown): boolean | undefined {
 }
 
 /**
+ * Sanitize ciphertext: reject (not truncate) if oversized, since truncation
+ * would silently corrupt encrypted data and make it unrecoverable.
+ */
+export function sanitizeCiphertext(
+  value: unknown,
+  maxLength: number = MAX_CIPHERTEXT_LENGTH,
+): string | undefined {
+  if (value == null || typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (!trimmed.length) return undefined
+  if (trimmed.length > maxLength) return undefined // reject, don't truncate
+  return trimmed
+}
+
+/**
  * Sanitize nodeInfo JSON object.
  * Ensures it's a plain object, strips prototype chains via JSON round-trip,
  * and enforces serialized size limits.
@@ -143,8 +158,8 @@ export function sanitizeSiblingPath(value: unknown): string[] | undefined {
   if (value.length > MAX_SIBLING_PATH_ENTRIES) return undefined
   const sanitized: string[] = []
   for (const entry of value) {
-    const s = sanitizeString(entry, MAX_SIBLING_PATH_ENTRY_LENGTH)
-    if (!s) return undefined // invalid entry → reject entire path
+    const s = sanitizeHexString(entry, MAX_SIBLING_PATH_ENTRY_LENGTH)
+    if (!s) return undefined // invalid entry (not valid hex) → reject entire path
     sanitized.push(s)
   }
   return sanitized

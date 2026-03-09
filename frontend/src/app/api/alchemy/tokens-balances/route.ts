@@ -25,6 +25,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (typeof address !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return NextResponse.json(
+        { error: 'Invalid Ethereum address format' },
+        { status: 400 }
+      )
+    }
+
     const supportedNetworks = getSupportedNetworks(chains)
 
     if (supportedNetworks.length === 0) {

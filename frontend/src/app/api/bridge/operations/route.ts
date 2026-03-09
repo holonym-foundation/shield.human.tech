@@ -11,7 +11,7 @@ import {
   sanitizeInt,
   sanitizeBoolean,
   sanitizeNodeInfo,
-  MAX_CIPHERTEXT_LENGTH,
+  sanitizeCiphertext,
   MAX_STRING_LENGTH,
 } from '@/lib/validation'
 
@@ -68,11 +68,16 @@ export async function GET(request: NextRequest) {
         messageHash: true,
         messageLeafIndex: true,
         l1BlockNumberBeforeTx: true,
+        // L1→L2 fuel recovery fields
+        fuelMessageHash: true,
+        fuelMessageLeafIndex: true,
+        fuelAmount: true,
         // L2→L1 recovery fields
         l2BlockNumber: true,
         l2BlockNumberBeforeTx: true,
         l2ToL1MessageIndex: true,
         siblingPath: true,
+        epoch: true,
         recipientL1Address: true,
         // Progress tracking
         currentStep: true,
@@ -133,10 +138,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
 
     // ── Sanitize all inputs ─────────────────────────────────────────────
-    const encryptedCiphertext = sanitizeString(
-      body.encryptedCiphertext,
-      MAX_CIPHERTEXT_LENGTH,
-    )
+    const encryptedCiphertext = sanitizeCiphertext(body.encryptedCiphertext)
     const encryptedIv = sanitizeString(body.encryptedIv, 128)
     const encryptedTag = sanitizeString(body.encryptedTag, 128)
     const keyDerivationMessage = sanitizeString(
@@ -300,6 +302,11 @@ export async function POST(request: NextRequest) {
         tokenDecimalsL1: tokenDecimalsL1 ?? undefined,
         tokenDecimalsL2: tokenDecimalsL2 ?? undefined,
         currentStep: currentStep ?? 1,
+        // Client IP for audit trail
+        clientIp:
+          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+          request.headers.get('x-real-ip') ??
+          undefined,
       },
     })
 

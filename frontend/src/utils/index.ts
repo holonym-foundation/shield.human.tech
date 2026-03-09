@@ -119,6 +119,9 @@ export const exportClaimData = (claimData: any) => {
       nodeInfo: claimData.nodeInfo ?? undefined,
       isPrivacyModeEnabled: claimData.isPrivacyModeEnabled,
       status: claimData.status,
+      fuelMessageHash: claimData.fuelMessageHash ?? undefined,
+      fuelMessageLeafIndex: claimData.fuelMessageLeafIndex ?? undefined,
+      fuelAmount: claimData.fuelAmount ?? undefined,
     },
   }
 

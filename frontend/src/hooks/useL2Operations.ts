@@ -26,6 +26,7 @@ import { useWalletAdapter } from './useWalletAdapter'
 import {
   LS_KEY_BRIDGE_WITHDRAWALS,
   patchOperationAsync,
+  patchOperationWithRetry,
   updateLocalStorageItem,
 } from './bridge/bridgeUtils'
 import {
@@ -223,12 +224,12 @@ export function useNetworkHealth() {
     const now = Math.floor(Date.now() / 1000)
     const timeSinceLastBlock = now - blockTimestamp
 
-    console.log('[NetworkHealth]', {
-      blockTimestamp,
-      now,
-      timeSinceLastBlock,
-      threshold: NETWORK_STALE_THRESHOLD_SECONDS,
-    })
+    // console.log('[NetworkHealth]', {
+    //   blockTimestamp,
+    //   now,
+    //   timeSinceLastBlock,
+    //   threshold: NETWORK_STALE_THRESHOLD_SECONDS,
+    // })
 
     return {
       isNetworkDown: timeSinceLastBlock > NETWORK_STALE_THRESHOLD_SECONDS,
@@ -432,6 +433,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       setProgressStep(4, 'active')
       patchOperationAsync(operationId, { currentStep: 4 })
 
+      let l1WithdrawTxHash: string | undefined
       try {
         const withdrawResult = await executeL1Withdraw({
           l1Address,
@@ -442,16 +444,17 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
           portalAddress: selectedToken?.l1PortalContract,
         })
 
+        l1WithdrawTxHash = withdrawResult.l1TxHash
         setTransactionUrls(withdrawResult.l1TxUrl, receiptResult.l2TxUrl)
 
-        // PATCH: mark as completed on server
-        patchOperationAsync(operationId, {
+        // PATCH: mark as completed on server (retry — critical for DB consistency)
+        await patchOperationWithRetry(operationId, {
           status: 'completed',
           l1TxHash: withdrawResult.l1TxHash,
           l1TxUrl: withdrawResult.l1TxUrl,
           completedAt: new Date().toISOString(),
           currentStep: 5,
-        })
+        }, { label: 'L2→L1 completion' })
 
         // Update localStorage
         updateLocalStorageItem(
@@ -518,7 +521,9 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         amount: amount.toString(),
         l1Address: l1Address,
         l2Address: aztecAddress,
-        txHash: l2TxHash,
+        l2TxHash: l2TxHash,
+        l1TxHash: l1WithdrawTxHash,
+        isPrivacyModeEnabled: isPrivacyModeEnabled,
         userAction: 'withdrawal_l2_to_l1_completed',
       })
 
@@ -678,14 +683,20 @@ export function useL2RecoverWithdrawal() {
       throw new Error('Rollup address not available. Cannot convert block number to epoch for L2→L1 witness.')
     }
     const amount = BigInt(w.amount)
-    const l2BridgeAddress =
-      w.l2BridgeAddress ?? L1_TOKENS[0]?.l2BridgeContract ?? ''
+    if (!w.l2BridgeAddress) {
+      throw new Error('l2BridgeAddress not stored in operation. Cannot recover witness without knowing which L2 bridge contract was used.')
+    }
+    if (!w.portalAddressL1) {
+      throw new Error('portalAddressL1 not stored in operation. Cannot recover witness without knowing which token portal was used.')
+    }
+    const l2BridgeAddress = w.l2BridgeAddress
+    const portalAddress = w.portalAddressL1
 
     const msgLeaf = computeL2ToL1MessageLeaf({
       l1Recipient: w.l1Address,
       amount,
       l2BridgeAddress,
-      portalAddress: L1_TOKENS[0]?.l1PortalContract ?? '',
+      portalAddress,
       rollupVersion,
       chainId: L1_CHAIN_ID,
     })
@@ -693,6 +704,7 @@ export function useL2RecoverWithdrawal() {
     const witnessResult = await computeWitness(Number(blockNumber), msgLeaf, rollupAddress)
     const leafIndexStr = witnessResult.leafIndex
     const siblingPathArr = witnessResult.siblingPath
+    const recoveredEpoch = witnessResult.epoch
     const updatedWithdrawals = list.map((x: any) =>
       x.l2TxHash === l2TxHash && x.l1Address === l1Address
         ? {
@@ -707,6 +719,17 @@ export function useL2RecoverWithdrawal() {
       LS_KEY_BRIDGE_WITHDRAWALS,
       JSON.stringify(updatedWithdrawals),
     )
+
+    // Sync recovered witness data back to server
+    if (w.operationId) {
+      patchOperationAsync(w.operationId, {
+        l2ToL1MessageIndex: leafIndexStr,
+        siblingPath: siblingPathArr,
+        epoch: recoveredEpoch != null ? Number(recoveredEpoch) : undefined,
+        status: 'ready',
+      })
+    }
+
     notify('success', 'Withdrawal data recovered successfully!')
     return {
       success: true,
@@ -785,6 +808,14 @@ export function useExportWithdrawalData() {
       const decrypted = JSON.parse(
         await decryptData(w.encryptedCiphertext, w.encryptedIv, w.encryptedTag, encryptionKey)
       )
+
+      logInfo('bridge.decrypt_nonce', {
+        l1Address: w.l1Address,
+        operationId: w.id,
+        tokenSymbol: w.tokenSymbol,
+        amount: w.amount?.toString(),
+        userAction: 'copy_nonce',
+      })
 
       if (!decrypted.nonce) {
         notify('error', 'Nonce not found in decrypted data')

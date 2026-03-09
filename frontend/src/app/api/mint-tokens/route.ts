@@ -4,6 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { sepolia } from 'viem/chains'
 import { L1_TOKENS } from '@/config'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
+import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 
 // Configure Vercel function timeout (300 seconds for Pro plan)
 export const maxDuration = 300
@@ -11,28 +12,20 @@ export const maxDuration = 300
 // Amount of tokens to mint (1000)
 const TOKEN_AMOUNT = 1000
 
-// Get environment variables
-let privateKey = process.env.FAUCET_PRIVATE_KEY
-const rpcUrl = process.env.ETHEREUM_RPC_URL
-
-if (!privateKey) {
-  throw new Error('FAUCET_PRIVATE_KEY is not set')
-}
-
-if (!rpcUrl) {
-  throw new Error('ETHEREUM_RPC_URL is not set')
-}
-
-// Make sure it has 0x prefix
-if (!privateKey.startsWith('0x')) {
-  privateKey = `0x${privateKey}`
+function getPrivateKeyAndRpc() {
+  let privateKey = process.env.FAUCET_PRIVATE_KEY
+  const rpcUrl = process.env.ETHEREUM_RPC_URL
+  if (!privateKey) throw new Error('FAUCET_PRIVATE_KEY is not set')
+  if (!rpcUrl) throw new Error('ETHEREUM_RPC_URL is not set')
+  if (!privateKey.startsWith('0x')) privateKey = `0x${privateKey}`
+  return { privateKey: privateKey as `0x${string}`, rpcUrl }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // Only accept POST requests
-    if (request.method !== 'POST') {
-      return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+    const authResult = await authenticateRequest(request)
+    if (!authResult.success || !authResult.user) {
+      return createAuthErrorResponse(authResult.error ?? 'Unauthorized', 401)
     }
 
     // Get the recipient address and token address from the request body
@@ -68,9 +61,10 @@ export async function POST(request: NextRequest) {
     const tokenContractAddress = tokenAddress
 
     try {
+      const { privateKey, rpcUrl } = getPrivateKeyAndRpc()
       console.log('Creating account from private key...')
       // Create the account
-      const account = privateKeyToAccount(privateKey as `0x${string}`)
+      const account = privateKeyToAccount(privateKey)
 
       // Create public client for reading
       const publicClient = createPublicClient({

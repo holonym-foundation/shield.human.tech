@@ -664,12 +664,7 @@ export async function sendL1DepositTransaction(params: {
   console.log('L1 tx hash stored immediately in localStorage')
 
   console.log('[L1→L2] PATCH l1TxHash →', { operationId, l1TxHash })
-  try {
-    await api.patch(`/api/bridge/operations/${operationId}`, { l1TxHash, l1TxUrl })
-    console.log('[L1→L2] l1TxHash stored on backend')
-  } catch (err) {
-    console.warn('[L1→L2] PATCH l1TxHash failed (will retry after receipt):', err)
-  }
+  await patchOperationWithRetry(operationId, { l1TxHash, l1TxUrl }, { label: 'l1TxHash' })
 
   return { txHash, l1TxHash, l1TxUrl }
 }
@@ -858,11 +853,15 @@ export function finalizeLocalStorageAfterDeposit(params: {
   l1BlockNumberBeforeTx: string
   nodeInfo: any
   isPrivacyModeEnabled: boolean
+  fuelMessageHash?: string
+  fuelMessageLeafIndex?: string
+  fuelAmount?: string
 }): { updatedClaim: any; wasExisting: boolean } {
   const {
     claimSecret, claimSecretHash, claimAmount, l1Address, aztecAddress,
     messageHashStr, messageLeafIndexStr, l1TxHash, l1TxUrl,
     l1BlockNumberBeforeTx, nodeInfo, isPrivacyModeEnabled,
+    fuelMessageHash, fuelMessageLeafIndex, fuelAmount,
   } = params
 
   const existingClaims = localStorage.getItem(LS_KEY_BRIDGE_DEPOSITS)
@@ -908,6 +907,9 @@ export function finalizeLocalStorageAfterDeposit(params: {
     nodeInfo: serializeNodeInfo(nodeInfo),
     isPrivacyModeEnabled,
     status: BridgeOperationStatus.deposited,
+    ...(fuelMessageHash ? { fuelMessageHash } : {}),
+    ...(fuelMessageLeafIndex ? { fuelMessageLeafIndex } : {}),
+    ...(fuelAmount ? { fuelAmount } : {}),
   }
   claims.push(updatedClaim)
   localStorage.setItem(LS_KEY_BRIDGE_DEPOSITS, JSON.stringify(claims))
