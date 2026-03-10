@@ -104,7 +104,7 @@ contract TokenPortalTest is Test {
     bytes32 public constant L2_BRIDGE = bytes32(uint256(0x123));
     uint256 public constant ROLLUP_VERSION = 1;
 
-    event Initialized(address registry, address underlying, bytes32 l2Bridge);
+    event Initialized(address indexed registry, address indexed underlying, bytes32 l2Bridge);
     event DepositToAztecPublic(
         bytes32 indexed to, uint256 amount, uint256 fee, bytes32 secretHash, bytes32 key, uint256 index
     );
@@ -113,7 +113,7 @@ contract TokenPortalTest is Test {
     event FeeRecipientUpdated(address indexed newFeeRecipient);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
     event TokensRescued(address indexed token, address indexed to, uint256 amount);
-    event AttestationConfigUpdated(address attester, uint256 circuitId, address signer);
+    event AttestationConfigUpdated(address indexed attester, uint256 circuitId, address indexed signer);
     event OwnershipTransferProposed(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferCancelled(address indexed currentOwner);
 
@@ -235,6 +235,15 @@ contract TokenPortalTest is Test {
 
         vm.expectRevert(InvalidAddress.selector);
         newPortal.initialize(address(registry), address(0), L2_BRIDGE);
+    }
+
+    function test_Initialize_RevertWhen_InvalidL2Bridge() public {
+        TokenPortal newPortal = new TokenPortal(
+            owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
+        );
+
+        vm.expectRevert(InvalidAddress.selector);
+        newPortal.initialize(address(registry), address(token), bytes32(0));
     }
 
     // =============================================================

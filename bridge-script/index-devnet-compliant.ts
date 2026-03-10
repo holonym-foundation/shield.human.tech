@@ -61,8 +61,18 @@ import TestERC20Json from './constants/TestERC20.json'
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
 
+// @ts-ignore
+import BridgeAndFuelJson from '../l1-contracts/out/BridgeAndFuel.sol/BridgeAndFuel.json'
+// @ts-ignore
+import MockFuelSwapJson from '../l1-contracts/out/MockFuelSwap.sol/MockFuelSwap.json'
+const BridgeAndFuelAbi = BridgeAndFuelJson.abi
+const BridgeAndFuelBytecode = BridgeAndFuelJson.bytecode.object as `0x${string}`
+const MockFuelSwapAbi = MockFuelSwapJson.abi
+const MockFuelSwapBytecode = MockFuelSwapJson.bytecode.object as `0x${string}`
+
 import {
   createPublicClient,
+  encodeFunctionData,
   getContract,
   http,
   toFunctionSelector,
@@ -118,6 +128,7 @@ import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
   createDeployment,
   saveTokenToDeployment,
+  saveFuelInfraToDeployment,
   loadExistingTokens,
   copyToFrontend,
   type DeployedToken,
@@ -614,19 +625,28 @@ async function deployCompliantTokenSetup(
   const { tokenSalt, bridgeSalt, proxySalt } = generateTokenSalts(tokenConfig.symbol)
   await initL2Keys()
 
-  // ── Step 1: Deploy L1 TestERC20 ──
-  logger.info(`[L1] Deploying ${tokenConfig.symbol} ERC20`)
-  const l1TokenContract = await deployTestERC20(l1Client, tokenConfig.l1Name, tokenConfig.l1Symbol, tokenConfig.decimals)
-  logger.info(`[L1] ${tokenConfig.symbol} ERC20 at ${l1TokenContract}`)
+  // ── Step 1: Deploy or resolve L1 token ──
+  let l1TokenContract: EthAddress
 
-  // Mint tokens
-  const mintAmount = BigInt(1000000000000000000)
-  await mintL1Tokens(l1Client, ownerEthAddress, l1TokenContract, mintAmount, logger, tokenConfig.symbol)
+  if (tokenConfig.l1TokenAddress) {
+    l1TokenContract = EthAddress.fromString(tokenConfig.l1TokenAddress)
+    logger.info(`[L1] Using pre-existing ${tokenConfig.symbol} at ${l1TokenContract}`)
+  } else {
+    logger.info(`[L1] Deploying ${tokenConfig.symbol} ERC20`)
+    l1TokenContract = await deployTestERC20(l1Client, tokenConfig.l1Name, tokenConfig.l1Symbol, tokenConfig.decimals)
+    logger.info(`[L1] ${tokenConfig.symbol} ERC20 at ${l1TokenContract}`)
+
+    // Mint tokens (only for TestERC20)
+    const mintAmount = BigInt(1000000000000000000)
+    await mintL1Tokens(l1Client, ownerEthAddress, l1TokenContract, mintAmount, logger, tokenConfig.symbol)
+  }
 
   // ── Step 2: Deploy FeeAssetHandler ──
   logger.info(`[L1] Deploying fee asset handler for ${tokenConfig.symbol}`)
   const feeAssetHandler = await deployFeeAssetHandler(l1Client, l1TokenContract)
-  await addMinter(l1Client, l1TokenContract, feeAssetHandler)
+  if (!tokenConfig.l1TokenAddress) {
+    await addMinter(l1Client, l1TokenContract, feeAssetHandler)
+  }
   logger.info(`[L1] Fee asset handler at ${feeAssetHandler}`)
 
   // ── Step 3: Deploy Custom TokenPortal (with attestation config) ──
@@ -1807,7 +1827,7 @@ async function main() {
     l1RpcUrl: L1_URL,
     l1ChainId: nodeInfo.l1ChainId,
     l2ChainId,
-    aztecVersion: configManager.getConfig().settings.version,
+    aztecVersion: (nodeInfo as any).nodeVersion ?? configManager.getConfig().settings.version,
     rollupVersion,
     networkName: configManager.getConfig().name,
     l1ContractAddresses: {
@@ -1894,6 +1914,55 @@ async function main() {
         logger.error(`❌ Failed to deploy ${tokenConfig.symbol}: ${error}`)
         // Continue with other tokens even if one fails
       }
+    }
+
+    // Deploy BridgeAndFuel + MockFuelSwap (fuel infrastructure)
+    try {
+      logger.info('\n=== Deploying Fuel Infrastructure ===')
+
+      logger.info('Deploying BridgeAndFuel contract...')
+      const bridgeAndFuelAddress = await deployL1Contract(
+        l1Client,
+        BridgeAndFuelAbi,
+        BridgeAndFuelBytecode,
+        [l1Client.account.address]
+      ).then(({ address }) => address)
+      logger.info(`BridgeAndFuel deployed at ${bridgeAndFuelAddress.toString()}`)
+
+      const feeJuiceAddress = (l1ContractAddresses as any).feeJuiceAddress?.toString()
+      const feeAssetHandlerAddress = (l1ContractAddresses as any).feeAssetHandlerAddress?.toString()
+      if (!feeJuiceAddress || !feeAssetHandlerAddress) {
+        throw new Error('Missing feeJuiceAddress or feeAssetHandlerAddress from node info')
+      }
+
+      logger.info('Deploying MockFuelSwap contract...')
+      const mockFuelSwapAddress = await deployL1Contract(
+        l1Client,
+        MockFuelSwapAbi,
+        MockFuelSwapBytecode,
+        [feeJuiceAddress, feeAssetHandlerAddress, BigInt(1e18)]
+      ).then(({ address }) => address)
+      logger.info(`MockFuelSwap deployed at ${mockFuelSwapAddress.toString()}`)
+
+      // Whitelist MockFuelSwap as an allowed swap target
+      logger.info('Whitelisting MockFuelSwap as allowed swap target...')
+      const setSwapTargetHash = await l1Client.sendTransaction({
+        to: bridgeAndFuelAddress.toString() as `0x${string}`,
+        data: encodeFunctionData({
+          abi: BridgeAndFuelAbi,
+          functionName: 'setSwapTarget',
+          args: [mockFuelSwapAddress.toString(), true],
+        }),
+      })
+      await l1Client.waitForTransactionReceipt({ hash: setSwapTargetHash })
+      logger.info(`MockFuelSwap whitelisted on BridgeAndFuel`)
+
+      saveFuelInfraToDeployment({
+        bridgeAndFuelAddress: bridgeAndFuelAddress.toString(),
+        mockFuelSwapAddress: mockFuelSwapAddress.toString(),
+      })
+    } catch (error) {
+      logger.error(`Failed to deploy fuel infrastructure: ${error}`)
     }
 
     // Sync active deployment to frontend

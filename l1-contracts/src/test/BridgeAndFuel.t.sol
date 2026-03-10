@@ -119,7 +119,8 @@ contract BridgeAndFuelTest is Test {
         tokenPortal = new MockTokenPortal(address(usdc));
 
         // Deploy orchestrator
-        bridge = new BridgeAndFuel();
+        bridge = new BridgeAndFuel(address(this));
+        bridge.setSwapTarget(address(swap), true);
 
         // Fund user
         usdc.mint(user, 1000e6);

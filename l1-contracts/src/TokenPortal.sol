@@ -129,7 +129,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     function initialize(address _registry, address _underlying, bytes32 _l2Bridge) external {
         if (_msgSender() != DEPLOYER) revert Unauthorized();
         if (address(registry) != address(0)) revert AlreadyInitialized();
-        if (_registry == address(0) || _underlying == address(0)) {
+        if (_registry == address(0) || _underlying == address(0) || _l2Bridge == bytes32(0)) {
             revert InvalidAddress();
         }
 
