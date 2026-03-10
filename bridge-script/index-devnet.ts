@@ -16,7 +16,11 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { Logger, createLogger } from '@aztec/aztec.js/log'
-import { L1TokenManager, L1TokenPortalManager } from '@aztec/aztec.js/ethereum'
+import {
+  generateClaimSecret,
+  L1TokenManager,
+  L1TokenPortalManager,
+} from '@aztec/aztec.js/ethereum'
 import {
   getContractInstanceFromInstantiationParams,
   type ContractInstanceWithAddress,
@@ -49,16 +53,27 @@ import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
 import 'dotenv/config'
 // @ts-ignore
 import TestERC20Json from './constants/TestERC20.json'
+// @ts-ignore
+import BridgeAndFuelJson from '../l1-contracts/out/BridgeAndFuel.sol/BridgeAndFuel.json'
+// @ts-ignore
+import MockFuelSwapJson from '../l1-contracts/out/MockFuelSwap.sol/MockFuelSwap.json'
 
 // Fix the bytecode format
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
+const BridgeAndFuelAbi = BridgeAndFuelJson.abi
+const BridgeAndFuelBytecode = BridgeAndFuelJson.bytecode.object as `0x${string}`
+const MockFuelSwapAbi = MockFuelSwapJson.abi
+const MockFuelSwapBytecode = MockFuelSwapJson.bytecode.object as `0x${string}`
 
 import { createPublicClient, getContract, http, toFunctionSelector } from 'viem'
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-import { SponsoredFPCContract, SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC'
+import {
+  SponsoredFPCContract,
+  SponsoredFPCContractArtifact,
+} from '@aztec/noir-contracts.js/SponsoredFPC'
 import { setupWallet } from './utils/setup_wallet.js'
 import { deploySchnorrAccount } from './utils/deploy_account.js'
 import { getSponsoredFPCInstance } from './utils/sponsored_fpc.js'
@@ -66,6 +81,7 @@ import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
   createDeployment,
   saveTokenToDeployment,
+  saveFuelInfraToDeployment,
   loadExistingTokens,
   copyToFrontend,
   type DeployedToken,
@@ -80,7 +96,9 @@ import {
 import configManager from './config/config.js'
 
 // Get environment configuration
-const MNEMONIC = process.env.MNEMONIC || 'test test test test test test test test test test test junk'
+const MNEMONIC =
+  process.env.MNEMONIC ||
+  'test test test test test test test test test test test junk'
 const L1_URL = process.env.L1_URL || getL1RpcUrl()
 
 const MINT_AMOUNT = BigInt(1e15)
@@ -89,7 +107,7 @@ async function deployTestERC20(
   l1Client: ExtendedViemWalletClient,
   name: string,
   symbol: string,
-  decimals: number
+  decimals: number,
 ): Promise<EthAddress> {
   const constructorArgs = [name, symbol, decimals, l1Client.account.address]
 
@@ -97,13 +115,13 @@ async function deployTestERC20(
     l1Client,
     TestERC20Abi,
     TestERC20Bytecode,
-    constructorArgs
+    constructorArgs,
   ).then(({ address }) => address)
 }
 
 async function deployFeeAssetHandler(
   l1Client: ExtendedViemWalletClient,
-  l1TokenContract: EthAddress
+  l1TokenContract: EthAddress,
 ): Promise<EthAddress> {
   const constructorArgs = [
     l1Client.account.address,
@@ -114,31 +132,36 @@ async function deployFeeAssetHandler(
     l1Client,
     FeeAssetHandlerAbi,
     FeeAssetHandlerBytecode,
-    constructorArgs
+    constructorArgs,
   ).then(({ address }) => address)
 }
 
-async function deployTokenPortal(l1Client: ExtendedViemWalletClient): Promise<EthAddress> {
+async function deployTokenPortal(
+  l1Client: ExtendedViemWalletClient,
+): Promise<EthAddress> {
   return await deployL1Contract(
     l1Client,
     TokenPortalAbi,
     TokenPortalBytecode,
-    []
+    [],
   ).then(({ address }) => address)
 }
 
 async function addMinter(
   l1Client: ExtendedViemWalletClient,
   l1TokenContract: EthAddress,
-  l1TokenHandler: EthAddress
+  l1TokenHandler: EthAddress,
 ) {
-    const contract = getContract({
-      address: l1TokenContract.toString(),
-      abi: TestERC20Abi,
-      client: l1Client as any,
-    }) as any
+  const contract = getContract({
+    address: l1TokenContract.toString(),
+    abi: TestERC20Abi,
+    client: l1Client as any,
+  }) as any
   const tx = await contract.write.addMinter([l1TokenHandler.toString()])
-  await l1Client.waitForTransactionReceipt({ hash: tx, timeout: getTimeouts().txTimeout })
+  await l1Client.waitForTransactionReceipt({
+    hash: tx,
+    timeout: getTimeouts().txTimeout,
+  })
 }
 
 // *************************************
@@ -162,7 +185,7 @@ export async function getL2TokenContractInstance(
   tokenName: string,
   tokenSymbol: string,
   decimals: number,
-  salt: Fr
+  salt: Fr,
 ): Promise<ContractInstanceWithAddress> {
   return await getContractInstanceFromInstantiationParams(
     TokenContract.artifact,
@@ -170,7 +193,7 @@ export async function getL2TokenContractInstance(
       salt: salt,
       deployer: deployerAddress,
       constructorArgs: [ownerAztecAddress, tokenName, tokenSymbol, decimals],
-    }
+    },
   )
 }
 export async function getL2BridgeContractInstance(
@@ -178,7 +201,7 @@ export async function getL2BridgeContractInstance(
   ownerAztecAddress: AztecAddress,
   l2TokenContract: AztecAddress,
   l1PortalContractAddress: EthAddress,
-  salt: Fr
+  salt: Fr,
 ): Promise<ContractInstanceWithAddress> {
   return await getContractInstanceFromInstantiationParams(
     TokenBridgeContract.artifact,
@@ -190,7 +213,7 @@ export async function getL2BridgeContractInstance(
         l2TokenContract,
         l1PortalContractAddress,
       ],
-    }
+    },
   )
 }
 
@@ -200,7 +223,7 @@ async function mintL1Tokens(
   l1TokenContract: EthAddress,
   amount: bigint,
   logger: Logger,
-  symbol: string
+  symbol: string,
 ) {
   try {
     logger.info(`🪙 Minting ${amount.toString()} ${symbol} tokens to owner`)
@@ -212,7 +235,10 @@ async function mintL1Tokens(
 
     const tx = await contract.write.mint([ownerEthAddress, amount])
     logger.info(`📤 Mint transaction sent: ${tx}`)
-    await l1Client.waitForTransactionReceipt({ hash: tx, timeout: getTimeouts().txTimeout })
+    await l1Client.waitForTransactionReceipt({
+      hash: tx,
+      timeout: getTimeouts().txTimeout,
+    })
     logger.info(`✅ Successfully minted ${amount.toString()} ${symbol} tokens`)
   } catch (error) {
     logger.error(`❌ Failed to mint ${symbol} tokens: ${error}`)
@@ -229,32 +255,48 @@ async function deployCompleteTokenSetup(
   ownerEthAddress: string,
   l1ContractAddresses: any,
   sponsoredPaymentMethod: any,
-  logger: Logger
+  logger: Logger,
 ): Promise<DeployedToken> {
   logger.info(`\n=== Deploying ${tokenConfig.symbol} Token Setup ===`)
 
   // Generate unique salts for this token
   const { tokenSalt, bridgeSalt } = generateTokenSalts(tokenConfig.symbol)
 
-  // Deploy L1 token contract
-  logger.info(
-    `🏗️  Deploying L1 ${tokenConfig.symbol} with decimals ${tokenConfig.decimals} token contract`
-  )
-  const l1TokenContract = await deployTestERC20(
-    l1Client,
-    tokenConfig.l1Name,
-    tokenConfig.l1Symbol,
-    tokenConfig.decimals
-  )
-  logger.info(
-    `✅ L1 ${
-      tokenConfig.symbol
-    } token contract deployed at ${l1TokenContract.toString()}`
-  )
+  // Deploy or resolve L1 token contract
+  let l1TokenContract: EthAddress
 
-  // Mint tokens to owner
-  const mintAmount = BigInt(1000000000000000000)
-  await mintL1Tokens(l1Client, ownerEthAddress, l1TokenContract, mintAmount, logger, tokenConfig.symbol)
+  if (tokenConfig.l1TokenAddress) {
+    // Pre-existing L1 token (e.g. real WETH on Sepolia)
+    l1TokenContract = EthAddress.fromString(tokenConfig.l1TokenAddress)
+    logger.info(
+      `Using pre-existing L1 ${tokenConfig.symbol} at ${l1TokenContract.toString()}`,
+    )
+  } else {
+    // Deploy mock TestERC20
+    logger.info(
+      `🏗️  Deploying L1 ${tokenConfig.symbol} with decimals ${tokenConfig.decimals} token contract`,
+    )
+    l1TokenContract = await deployTestERC20(
+      l1Client,
+      tokenConfig.l1Name,
+      tokenConfig.l1Symbol,
+      tokenConfig.decimals,
+    )
+    logger.info(
+      `✅ L1 ${tokenConfig.symbol} token contract deployed at ${l1TokenContract.toString()}`,
+    )
+
+    // Mint tokens to owner (only for TestERC20)
+    const mintAmount = BigInt(1000000000000000000)
+    await mintL1Tokens(
+      l1Client,
+      ownerEthAddress,
+      l1TokenContract,
+      mintAmount,
+      logger,
+      tokenConfig.symbol,
+    )
+  }
 
   // Deploy fee asset handler
   logger.info(`🔧 Deploying fee asset handler for ${tokenConfig.symbol}`)
@@ -262,12 +304,14 @@ async function deployCompleteTokenSetup(
   logger.info(
     `✅ Fee asset handler for ${
       tokenConfig.symbol
-    } deployed at ${feeAssetHandler.toString()}`
+    } deployed at ${feeAssetHandler.toString()}`,
   )
 
-  // Add minter
-  logger.info(`🔑 Adding minter for ${tokenConfig.symbol}`)
-  await addMinter(l1Client, l1TokenContract, feeAssetHandler)
+  // Add minter — only for TestERC20 tokens (real tokens don't support addMinter)
+  if (!tokenConfig.l1TokenAddress) {
+    logger.info(`🔑 Adding minter for ${tokenConfig.symbol}`)
+    await addMinter(l1Client, l1TokenContract, feeAssetHandler)
+  }
 
   // Deploy L1 portal contract
   logger.info(`🌉 Deploying L1 portal contract for ${tokenConfig.symbol}`)
@@ -275,7 +319,7 @@ async function deployCompleteTokenSetup(
   logger.info(
     `✅ L1 portal contract for ${
       tokenConfig.symbol
-    } deployed at ${l1PortalContractAddress.toString()}`
+    } deployed at ${l1PortalContractAddress.toString()}`,
   )
 
   // Deploy L2 token contract
@@ -285,7 +329,7 @@ async function deployCompleteTokenSetup(
     ownerAztecAddress,
     tokenConfig.l2Name,
     tokenConfig.l2Symbol,
-    tokenConfig.decimals
+    tokenConfig.decimals,
   ).send({
     from: ownerAztecAddress,
     contractAddressSalt: tokenSalt,
@@ -294,7 +338,7 @@ async function deployCompleteTokenSetup(
   })
 
   logger.info(
-    `✅ L2 ${tokenConfig.symbol} token contract deployed at ${l2TokenContract.address}`
+    `✅ L2 ${tokenConfig.symbol} token contract deployed at ${l2TokenContract.address}`,
   )
 
   // Deploy L2 bridge contract
@@ -302,7 +346,7 @@ async function deployCompleteTokenSetup(
   const l2BridgeContract = await TokenBridgeContract.deploy(
     ownerWallet,
     l2TokenContract.address,
-    l1PortalContractAddress
+    l1PortalContractAddress,
   ).send({
     from: ownerAztecAddress,
     contractAddressSalt: bridgeSalt,
@@ -311,7 +355,7 @@ async function deployCompleteTokenSetup(
   })
 
   logger.info(
-    `✅ L2 ${tokenConfig.symbol} bridge contract deployed at ${l2BridgeContract.address}`
+    `✅ L2 ${tokenConfig.symbol} bridge contract deployed at ${l2BridgeContract.address}`,
   )
 
   // Set Bridge as a minter
@@ -338,7 +382,7 @@ async function deployCompleteTokenSetup(
       l1TokenContract.toString(),
       l2BridgeContract.address.toString(),
     ],
-    {}
+    {},
   )
   // Wait for the transaction to be confirmed
   logger.info(`⏳ Waiting for L1 portal initialization transaction: ${initTx}`)
@@ -371,7 +415,7 @@ async function main() {
   let logger: Logger
 
   logger = createLogger('aztec:bridge')
-  
+
   // Setup wallet
   wallet = await setupWallet()
 
@@ -380,7 +424,11 @@ async function main() {
   const node = createAztecNodeClient(nodeUrl)
   const nodeInfo = await node.getNodeInfo()
   const chain = createEthereumChain([L1_URL], nodeInfo.l1ChainId)
-  const l1Client = createExtendedL1Client(chain.rpcUrls, MNEMONIC, chain.chainInfo)
+  const l1Client = createExtendedL1Client(
+    chain.rpcUrls,
+    MNEMONIC,
+    chain.chainInfo,
+  )
   const ownerEthAddress = l1Client.account.address
 
   const l1ContractAddresses = nodeInfo.l1ContractAddresses
@@ -395,11 +443,9 @@ async function main() {
   logger.info(
     `⛓️  L1 Chain: ${chain.chainInfo.name || 'Unknown'} (ID: ${
       chain.chainInfo.id || 'Unknown'
-    })`
+    })`,
   )
-  logger.info(
-    `🌐 Using ${isDevnet() ? 'devnet' : 'local sandbox'} environment`
-  )
+  logger.info(`🌐 Using ${isDevnet() ? 'devnet' : 'local sandbox'} environment`)
   logger.info(`🔗 L1 RPC URL: ${L1_URL}`)
   logger.info(`🌐 Node URL: ${nodeUrl}`)
 
@@ -413,7 +459,7 @@ async function main() {
 
     if (balanceInEth < 0.01) {
       logger.warn(
-        '⚠️  Low L1 wallet balance! You may need more ETH for gas fees.'
+        '⚠️  Low L1 wallet balance! You may need more ETH for gas fees.',
       )
     }
   } catch (error) {
@@ -426,10 +472,10 @@ async function main() {
   const sponsoredFPC = await getSponsoredFPCInstance()
   await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact)
   const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(
-    sponsoredFPC.address
+    sponsoredFPC.address,
   )
   logger.info('✅ Sponsored fee payment method configured')
-  
+
   logger.info('👤 Deploying Schnorr account...')
   let accountManager = await deploySchnorrAccount(wallet)
   const ownerAztecAddress = accountManager.address
@@ -437,7 +483,8 @@ async function main() {
   logger.info(`📍 Owner Aztec Address: ${ownerAztecAddress}`)
 
   // Create versioned deployment file with network + L1 infra info
-  const rollupVersion = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
+  const rollupVersion =
+    (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
   const l2ChainId = nodeInfo.l1ChainId ^ rollupVersion
   logger.info('\n🔧 Creating versioned deployment...')
   // Serialize nodeInfo for storage (convert EthAddress/AztecAddress objects to strings)
@@ -447,15 +494,25 @@ async function main() {
       // Nested object (e.g. l1ContractAddresses, protocolContractAddresses)
       const nested: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        nested[k] = v != null && typeof (v as any).toString === 'function' && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean'
-          ? (v as any).toString()
-          : v
+        nested[k] =
+          v != null &&
+          typeof (v as any).toString === 'function' &&
+          typeof v !== 'string' &&
+          typeof v !== 'number' &&
+          typeof v !== 'boolean'
+            ? (v as any).toString()
+            : v
       }
       serializedNodeInfo[key] = nested
     } else {
-      serializedNodeInfo[key] = value != null && typeof (value as any).toString === 'function' && typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean'
-        ? (value as any).toString()
-        : value
+      serializedNodeInfo[key] =
+        value != null &&
+        typeof (value as any).toString === 'function' &&
+        typeof value !== 'string' &&
+        typeof value !== 'number' &&
+        typeof value !== 'boolean'
+          ? (value as any).toString()
+          : value
     }
   }
 
@@ -464,7 +521,7 @@ async function main() {
     l1RpcUrl: L1_URL,
     l1ChainId: nodeInfo.l1ChainId,
     l2ChainId,
-    aztecVersion: configManager.getConfig().settings.version,
+    aztecVersion: nodeInfo.nodeVersion ?? configManager.getConfig().settings.version,
     rollupVersion,
     networkName: configManager.getConfig().name,
     l1ContractAddresses: {
@@ -481,13 +538,9 @@ async function main() {
   logger.info('\n📋 Checking for existing token deployments...')
   const existingTokens = loadExistingTokens()
   if (existingTokens.length > 0) {
+    logger.info(`✅ Found ${existingTokens.length} existing tokens`)
     logger.info(
-      `✅ Found ${existingTokens.length} existing tokens`
-    )
-    logger.info(
-      `🪙 Deployed tokens: ${existingTokens
-        .map((t) => t.symbol)
-        .join(', ')}`
+      `🪙 Deployed tokens: ${existingTokens.map((t) => t.symbol).join(', ')}`,
     )
   }
 
@@ -498,7 +551,7 @@ async function main() {
   for (const tokenConfig of TOKEN_CONFIGS) {
     // Check if token is already deployed
     const existingToken = existingTokens.find(
-      (t) => t.symbol === tokenConfig.symbol
+      (t) => t.symbol === tokenConfig.symbol,
     )
     if (existingToken && !tokenConfig.forceDeploy) {
       logger.info(`⏭️  ${tokenConfig.symbol} already deployed, skipping...`)
@@ -506,7 +559,9 @@ async function main() {
       continue
     }
     if (existingToken && tokenConfig.forceDeploy) {
-      logger.info(`🔄 ${tokenConfig.symbol} already deployed but forceDeploy is set, redeploying...`)
+      logger.info(
+        `🔄 ${tokenConfig.symbol} already deployed but forceDeploy is set, redeploying...`,
+      )
     }
 
     try {
@@ -520,7 +575,7 @@ async function main() {
         ownerEthAddress,
         l1ContractAddresses,
         sponsoredPaymentMethod,
-        logger
+        logger,
       )
       deployedContract.sponsoredFee = sponsoredFPC.address.toString()
 
@@ -528,12 +583,55 @@ async function main() {
       saveTokenToDeployment(deployedContract)
       deployedContracts.push(deployedContract)
       logger.info(
-        `✅ Successfully deployed and saved ${tokenConfig.symbol} token setup`
+        `✅ Successfully deployed and saved ${tokenConfig.symbol} token setup`,
       )
     } catch (error) {
       logger.error(`❌ Failed to deploy ${tokenConfig.symbol}: ${error}`)
       // Continue with other tokens even if one fails
     }
+  }
+
+  // Deploy BridgeAndFuel + MockFuelSwap (fuel infrastructure)
+  try {
+    logger.info('\n=== Deploying Fuel Infrastructure ===')
+
+    logger.info('Deploying BridgeAndFuel contract...')
+    const bridgeAndFuelAddress = await deployL1Contract(
+      l1Client,
+      BridgeAndFuelAbi,
+      BridgeAndFuelBytecode,
+      [],
+    ).then(({ address }) => address)
+    logger.info(`BridgeAndFuel deployed at ${bridgeAndFuelAddress.toString()}`)
+
+    // MockFuelSwap needs: feeJuiceAddress, feeAssetHandlerAddress, rate (1:1 = 1e18)
+    const feeJuiceAddress = (
+      l1ContractAddresses as any
+    ).feeJuiceAddress?.toString()
+    const feeAssetHandlerAddress = (
+      l1ContractAddresses as any
+    ).feeAssetHandlerAddress?.toString()
+    if (!feeJuiceAddress || !feeAssetHandlerAddress) {
+      throw new Error(
+        'Missing feeJuiceAddress or feeAssetHandlerAddress from node info',
+      )
+    }
+
+    logger.info('Deploying MockFuelSwap contract...')
+    const mockFuelSwapAddress = await deployL1Contract(
+      l1Client,
+      MockFuelSwapAbi,
+      MockFuelSwapBytecode,
+      [feeJuiceAddress, feeAssetHandlerAddress, BigInt(1e18)], // 1:1 rate
+    ).then(({ address }) => address)
+    logger.info(`MockFuelSwap deployed at ${mockFuelSwapAddress.toString()}`)
+
+    saveFuelInfraToDeployment({
+      bridgeAndFuelAddress: bridgeAndFuelAddress.toString(),
+      mockFuelSwapAddress: mockFuelSwapAddress.toString(),
+    })
+  } catch (error) {
+    logger.error(`Failed to deploy fuel infrastructure: ${error}`)
   }
 
   // Sync active deployment to frontend
@@ -544,20 +642,20 @@ async function main() {
   if (deployedContracts.length > 0) {
     const firstToken = deployedContracts[0]
     logger.info(
-      `\n🧪 Testing bridge functionality with ${firstToken.symbol}...`
+      `\n🧪 Testing bridge functionality with ${firstToken.symbol}...`,
     )
 
     const l1TokenContract = EthAddress.fromString(firstToken.l1TokenContract)
     const feeAssetHandler = EthAddress.fromString(firstToken.feeAssetHandler)
     const l1PortalContractAddress = EthAddress.fromString(
-      firstToken.l1PortalContract
+      firstToken.l1PortalContract,
     )
 
     const l1TokenManager = new L1TokenManager(
       l1TokenContract,
       feeAssetHandler,
       l1Client,
-      logger
+      logger,
     )
 
     const l1PortalManager = new L1TokenPortalManager(
@@ -566,17 +664,18 @@ async function main() {
       feeAssetHandler,
       l1ContractAddresses.outboxAddress,
       l1Client,
-      logger
+      logger,
     )
 
+    logger.info('getting l1 contracts...')
     // Get the deployed L2 contracts for testing
     const l2TokenContract = await TokenContract.at(
       AztecAddress.fromString(firstToken.l2TokenContract),
-      wallet
+      wallet,
     )
     const l2BridgeContract = await TokenBridgeContract.at(
       AztecAddress.fromString(firstToken.l2BridgeContract),
-      wallet
+      wallet,
     )
 
     // Registering here is optional; contract instances already carry artifacts.
@@ -590,15 +689,19 @@ async function main() {
     try {
       const l1Public = createPublicClient({ transport: http(L1_URL) })
       l1BlockNumberBeforeTx = await l1Public.getBlockNumber()
-      logger.info(`[L1→L2] Current L1 block before tx: ${l1BlockNumberBeforeTx}`)
+      logger.info(
+        `[L1→L2] Current L1 block before tx: ${l1BlockNumberBeforeTx}`,
+      )
     } catch (e) {
-      logger.warn(`[L1→L2] Could not get current L1 block number before tx: ${e}`)
+      logger.warn(
+        `[L1→L2] Could not get current L1 block number before tx: ${e}`,
+      )
     }
 
     const claim = await l1PortalManager.bridgeTokensPublic(
       ownerAztecAddress,
       MINT_AMOUNT,
-      true
+      true,
     )
 
     // Poll for L1→L2 message sync (same pattern as frontend), then final wait before claim
@@ -612,7 +715,7 @@ async function main() {
       let messageSynced = false
       const messageHashFr = Fr.fromString(messageHash)
       logger.info(
-        `⏳ Polling for L1→L2 message sync (messageHash=${messageHash.slice(0, 18)}...)...`
+        `⏳ Polling for L1→L2 message sync (messageHash=${messageHash.slice(0, 18)}...)...`,
       )
       while (Date.now() - startWait < maxWaitMs) {
         try {
@@ -620,12 +723,12 @@ async function main() {
           messageSynced = messageBlock !== undefined
           if (messageSynced) {
             logger.info(
-              `✅ L1→L2 message ready (block=${messageBlock}), proceeding to claim.`
+              `✅ L1→L2 message ready (block=${messageBlock}), proceeding to claim.`,
             )
             break
           }
           logger.info(
-            `   L1→L2 message not yet synced. Waiting ${pollIntervalMs / 1000}s...`
+            `   L1→L2 message not yet synced. Waiting ${pollIntervalMs / 1000}s...`,
           )
         } catch (e) {
           logger.warn(`   Poll check failed, retrying: ${e}`)
@@ -635,17 +738,15 @@ async function main() {
       if (!messageSynced) {
         const elapsedMin = (Date.now() - startWait) / 1000 / 60
         logger.warn(
-          `⚠️ L1→L2 message sync timeout after ${elapsedMin.toFixed(1)} min; attempting claim anyway.`
+          `⚠️ L1→L2 message sync timeout after ${elapsedMin.toFixed(1)} min; attempting claim anyway.`,
         )
       }
-      const finalWaitMs = 120_000 // 2 minutes 
-      logger.info(
-        `⏳ Final wait before claiming (${finalWaitMs / 1000}s)...`
-      )
+      const finalWaitMs = 120_000 // 2 minutes
+      logger.info(`⏳ Final wait before claiming (${finalWaitMs / 1000}s)...`)
       await wait(finalWaitMs)
     } else {
       logger.info(
-        `⚠️ No messageHash on claim; claiming immediately (polling skipped).`
+        `⚠️ No messageHash on claim; claiming immediately (polling skipped).`,
       )
     }
 
@@ -662,7 +763,7 @@ async function main() {
         ownerAztecAddress,
         MINT_AMOUNT,
         claim.claimSecret,
-        claim.messageLeafIndex
+        claim.messageLeafIndex,
       )
       .send({
         from: ownerAztecAddress,
@@ -687,20 +788,19 @@ async function main() {
         action: l2TokenContract.methods.burn_public(
           ownerAztecAddress,
           withdrawAmount,
-          nonce
+          nonce,
         ),
       },
-      true
+      true,
     )
-    await authwit
-      .send({
-        fee: { paymentMethod: sponsoredPaymentMethod as any },
-        wait: { timeout: getTimeouts().txTimeout },
-      })
+    await authwit.send({
+      fee: { paymentMethod: sponsoredPaymentMethod as any },
+      wait: { timeout: getTimeouts().txTimeout },
+    })
 
     const selectorBuf = Buffer.from(
       toFunctionSelector('withdraw(address,uint256,address)').slice(2),
-      'hex'
+      'hex',
     )
     const recipient = EthAddress.fromString(ownerEthAddress)
     const callerOnL1 = EthAddress.ZERO
@@ -722,9 +822,13 @@ async function main() {
     let l2BlockNumberBeforeTx: number | undefined
     try {
       l2BlockNumberBeforeTx = await node.getBlockNumber()
-      logger.info(`[L2→L1] Current L2 block before tx: ${l2BlockNumberBeforeTx}`)
+      logger.info(
+        `[L2→L1] Current L2 block before tx: ${l2BlockNumberBeforeTx}`,
+      )
     } catch (e) {
-      logger.warn(`[L2→L1] Could not get current L2 block number before tx: ${e}`)
+      logger.warn(
+        `[L2→L1] Could not get current L2 block number before tx: ${e}`,
+      )
     }
 
     const l2TxReceipt = await l2BridgeContract.methods
@@ -732,7 +836,7 @@ async function main() {
         EthAddress.fromString(ownerEthAddress),
         withdrawAmount,
         EthAddress.ZERO,
-        nonce
+        nonce,
       )
       .send({
         from: ownerAztecAddress,
@@ -745,7 +849,7 @@ async function main() {
       .simulate({ from: ownerAztecAddress })
     logger.info(`💰 New L2 balance of ${ownerAztecAddress} is ${newL2Balance}`)
 
-    const finalWaitMs = 120_000 // 2 minutes 
+    const finalWaitMs = 120_000 // 2 minutes
     logger.info(`⏳ Final wait before proof (${finalWaitMs / 1000}s)...`)
     await wait(finalWaitMs)
 
@@ -764,7 +868,7 @@ async function main() {
     if (rollupAddress) {
       try {
         logger.info(
-          `⏳ Polling L1 Rollup for proven block (blockNumber=${blockNumber})...`
+          `⏳ Polling L1 Rollup for proven block (blockNumber=${blockNumber})...`,
         )
         usedPoll = true
         while (Date.now() - startWait < maxWaitMs) {
@@ -773,22 +877,23 @@ async function main() {
             abi: RollupAbi,
             functionName: 'getProvenCheckpointNumber',
           })
-          const provenBlock = typeof proven === 'bigint' ? Number(proven) : proven
+          const provenBlock =
+            typeof proven === 'bigint' ? Number(proven) : proven
           if (provenBlock >= blockNumber) {
             logger.info(
-              `✅ L2 block ${blockNumber} is proven on L1 (proven=${provenBlock}), proceeding.`
+              `✅ L2 block ${blockNumber} is proven on L1 (proven=${provenBlock}), proceeding.`,
             )
             blockProven = true
             break
           }
           logger.info(
-            `   L2 block not yet proven (proven=${provenBlock}, need ${blockNumber}). Waiting ${pollIntervalMs / 1000}s...`
+            `   L2 block not yet proven (proven=${provenBlock}, need ${blockNumber}). Waiting ${pollIntervalMs / 1000}s...`,
           )
           await wait(pollIntervalMs)
         }
         if (!blockProven) {
           logger.warn(
-            `⚠️ Max wait reached; proceeding with L1 withdraw (may revert if block not proven).`
+            `⚠️ Max wait reached; proceeding with L1 withdraw (may revert if block not proven).`,
           )
         }
       } catch (e) {
@@ -798,20 +903,22 @@ async function main() {
     }
     if (!blockProven && !usedPoll) {
       logger.info(
-        '⏳ Waiting 40 minutes for L2→L1 message to be processable on L1...'
+        '⏳ Waiting 40 minutes for L2→L1 message to be processable on L1...',
       )
       await wait(40 * 60 * 1000)
     }
-    // Convert block number → checkpoint → epoch 
+    // Convert block number → checkpoint → epoch
     const rollup = new RollupContract(l1Client, rollupAddress as any)
     const epoch = await rollup.getEpochNumberForCheckpoint(
-      CheckpointNumber.fromBlockNumber(blockNumber)
+      CheckpointNumber.fromBlockNumber(blockNumber),
     )
     logger.info(`📦 Block ${blockNumber} → Epoch ${epoch}`)
 
     const witness = await computeL2ToL1MembershipWitness(node, epoch, msgLeaf)
     if (!witness) {
-      throw new Error(`L2→L1 message not found in epoch ${epoch} (block ${blockNumber})`)
+      throw new Error(
+        `L2→L1 message not found in epoch ${epoch} (block ${blockNumber})`,
+      )
     }
     const siblingPathHex = witness!.siblingPath
       .toBufferArray()
@@ -837,7 +944,9 @@ async function main() {
     const newL1Balance = await l1TokenManager.getL1TokenBalance(ownerEthAddress)
     logger.info(`💰 New L1 balance of ${ownerEthAddress} is ${newL1Balance}`)
   } else {
-    logger.warn('⚠️  No tokens were deployed successfully. Skipping bridge test.')
+    logger.warn(
+      '⚠️  No tokens were deployed successfully. Skipping bridge test.',
+    )
   }
 }
 

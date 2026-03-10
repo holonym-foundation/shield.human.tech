@@ -75,6 +75,10 @@ export async function PATCH(
     const siblingPath = sanitizeSiblingPath(body.siblingPath)
     const recipientL1Address = sanitizeEthAddress(body.recipientL1Address)
     const currentStep = sanitizeInt(body.currentStep, 0, 10)
+    // Fuel fields (L1→L2 BridgeAndFuel path)
+    const fuelMessageHash = sanitizeHexString(body.fuelMessageHash, 130)
+    const fuelMessageLeafIndex = sanitizeNumericString(body.fuelMessageLeafIndex)
+    const fuelAmount = sanitizeNumericString(body.fuelAmount)
 
 
     // ── Immutable field guard ───────────────────────────────────────────
@@ -84,8 +88,6 @@ export async function PATCH(
       'encryptedCiphertext',
       'encryptedIv',
       'encryptedTag',
-      'l1Address',
-      'l2Address',
       'amountL1',
       'amountL2',
       'direction',
@@ -181,6 +183,10 @@ export async function PATCH(
     if (siblingPath) updateData.siblingPath = siblingPath
     if (recipientL1Address) updateData.recipientL1Address = recipientL1Address
     if (currentStep != null) updateData.currentStep = currentStep
+    // Fuel fields
+    if (fuelMessageHash) updateData.fuelMessageHash = fuelMessageHash
+    if (fuelMessageLeafIndex) updateData.fuelMessageLeafIndex = fuelMessageLeafIndex
+    if (fuelAmount) updateData.fuelAmount = fuelAmount
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json(

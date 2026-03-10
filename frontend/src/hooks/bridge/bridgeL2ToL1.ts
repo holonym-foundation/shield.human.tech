@@ -560,7 +560,7 @@ export async function encryptAndBackupWithdrawalNonce(params: {
   }
   console.log('[L2→L1] Encrypted nonce backed up (operationId:', operationId, ')')
 
-  // Secondary: localStorage backup
+  // Secondary: localStorage backup (secrets stored encrypted only — never plaintext)
   pushToLocalStorageArray(LS_KEY_BRIDGE_WITHDRAWALS, {
     id: operationId,
     operationId,
@@ -569,7 +569,10 @@ export async function encryptAndBackupWithdrawalNonce(params: {
     amount: amountL2,
     l1Address,
     l2Address: aztecAddress,
-    nonce: nonce.toString(),
+    encryptedCiphertext: encrypted.ciphertext,
+    encryptedIv: encrypted.iv,
+    encryptedTag: encrypted.tag,
+    keyDerivationDomain,
     success: false,
     status: BridgeOperationStatus.pending,
     l2TxHash: null as string | null,
@@ -639,7 +642,7 @@ export async function persistBurnReceiptAndPollBlock(params: {
     currentStep: 2,
   }, { label: 'l2TxHash' })
 
-  // Poll for block number if Azguard adapter didn't return it
+  // Poll for block number if adapter didn't return it
   if (l2BlockNumber == null) {
     console.log('[L2→L1] Polling for L2 block number (required for L1 withdraw leaf index)...')
     for (let i = 0; i < 60; i++) {
@@ -655,7 +658,7 @@ export async function persistBurnReceiptAndPollBlock(params: {
     }
   }
 
-  // Final wait so the L2 block is visible on the node Azguard uses
+  // Final wait so the L2 block is visible on the wallet's node
   const finalWaitMs = 120_000
   console.log('[L2→L1] Final wait before continuing (', finalWaitMs / 1000, 's)...')
   await wait(finalWaitMs)

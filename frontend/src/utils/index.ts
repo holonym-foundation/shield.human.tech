@@ -100,10 +100,14 @@ export const exportClaimData = (claimData: any) => {
   const exportData = {
     type: BridgeDirection.L1_TO_L2,
     timestamp: new Date().toISOString(),
-    warning: '⚠️ CRITICAL: Keep this file safe! If you lose the claimSecret, your funds will be permanently locked.',
+    warning: '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
     data: {
-      claimSecret: claimData.claimSecret,
+      id: claimData.id,
       claimSecretHash: claimData.claimSecretHash,
+      encryptedCiphertext: claimData.encryptedCiphertext,
+      encryptedIv: claimData.encryptedIv,
+      encryptedTag: claimData.encryptedTag,
+      keyDerivationDomain: claimData.keyDerivationDomain,
       messageHash: claimData.messageHash,
       messageLeafIndex: claimData.messageLeafIndex,
       claimAmount: claimData.claimAmount,
@@ -117,7 +121,7 @@ export const exportClaimData = (claimData: any) => {
       status: claimData.status,
     },
   }
-  
+
   const filename = `aztec-bridge-claim-${claimData.id}-${Date.now()}.json`
   exportToJsonFile(exportData, filename)
 }
@@ -130,9 +134,12 @@ export const exportWithdrawalData = (withdrawalData: any) => {
   const exportData = {
     type: BridgeDirection.L2_TO_L1,
     timestamp: new Date().toISOString(),
-    warning: '⚠️ CRITICAL: Keep this file safe! If you lose the nonce, your funds will be permanently locked.',
+    warning: '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
     data: {
-      nonce: withdrawalData.nonce,
+      encryptedCiphertext: withdrawalData.encryptedCiphertext,
+      encryptedIv: withdrawalData.encryptedIv,
+      encryptedTag: withdrawalData.encryptedTag,
+      keyDerivationDomain: withdrawalData.keyDerivationDomain,
       l2TxHash: withdrawalData.l2TxHash,
       l2BlockNumber:
         withdrawalData.l2BlockNumber ??
