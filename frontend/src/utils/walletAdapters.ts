@@ -23,10 +23,14 @@ export interface ExecuteCallResult {
 
 async function getContractArtifact(type: 'token' | 'bridge') {
   if (type === 'bridge') {
-    const { TokenBridgeContract } = await import('@aztec/noir-contracts.js/TokenBridge')
-    return TokenBridgeContract.artifact
+    // Custom compliant bridge — artifact from local build output
+    const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
+    const bridgeJson = await import('../../../aztec-contracts/token_bridge/target/token_bridge_contract-TokenBridge.json')
+    // @ts-ignore — JSON import from local build output (custom compliant bridge)
+    return loadContractArtifact(bridgeJson.default ?? bridgeJson)
   }
-  const { TokenContract } = await import('@aztec/noir-contracts.js/Token')
+  // Wonderland Token (constructor_with_minter) — matches deployed token
+  const { TokenContract } = await import('@defi-wonderland/aztec-standards/dist/src/artifacts/Token')
   return TokenContract.artifact
 }
 
