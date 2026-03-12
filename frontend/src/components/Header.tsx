@@ -3,7 +3,6 @@
 import { Icon } from '@iconify/react'
 import { useWalletStore } from '@/stores/walletStore'
 import { useL1TokenBalances } from '@/hooks/useL1Operations'
-import { wait } from '@/utils'
 import { LOGIN_METHODS, WalletType } from '@/types/wallet'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -22,7 +21,6 @@ type WalletDisplayProps = {
   walletIcon: string
   networkIcon?: string
   balance?: string
-  onClick?: () => void
   onDisconnect?: () => void
   availableAccounts?: Array<{ alias: string; address: string }>
   onSelectAccount?: (account: { alias: string; address: string }) => void
@@ -42,7 +40,6 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
   walletIcon,
   networkIcon,
   balance,
-  onClick,
   onDisconnect,
   availableAccounts,
   onSelectAccount,
@@ -75,16 +72,10 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
 
   const handleCopyAddress = () => {
     if (address) {
-      // Copy the address to clipboard
       navigator.clipboard.writeText(address)
-
-      // Show the "Copied!" tooltip
       setCopied(true)
-
-      // Hide the tooltip after 2 seconds
       setTimeout(() => {
         setCopied(false)
-        // Only close dropdown after tooltip is hidden
         setShowDropdown(false)
       }, 2000)
     }
@@ -108,8 +99,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
     <div className='relative' ref={dropdownRef}>
       <div
         className='flex pr-[8px] justify-center items-center gap-[12px] rounded-[8px] border border-[#D4D4D4] bg-white cursor-pointer hover:shadow-md transition-shadow duration-200'
-        onClick={handleClick}
-        data-tooltip-id={`tooltip-${walletType}`}>
+        onClick={handleClick}>
         <div className='flex w-8 h-8 p-1 justify-center items-center rounded-[8px] bg-[#E5EFFF]'>
           <Image src={walletIcon} alt='Wallet' width={32} height={32} />
         </div>
@@ -118,11 +108,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
         )}
         <div className='flex items-center gap-2'>
           <span className='text-sm font-medium' title={address || ''}>
-            {displayName || (address
-              ? `${address.substring(0, 6)}...${address.substring(
-                  address.length - 4
-                )}`
-              : '')}
+            {displayName || (address ? truncateAddr(address) : '')}
           </span>
           {balance && walletType === WalletType.WAAP && (
             <span className='text-xs text-gray-500'>
@@ -139,9 +125,9 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
       </div>
 
       {showDropdown && (
-        <div className='absolute right-0 mt-2 shadow-lg z-10 min-w-[180px] py-2  rounded-[12px] border border-[#D4D4D4] bg-white '>
+        <div className='absolute right-0 mt-2 shadow-lg z-10 min-w-[180px] py-2 rounded-[12px] border border-[#D4D4D4] bg-white '>
           <div
-            className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer relative transition-colors duration-150 hover:bg-latest-grey-300'
+            className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer relative transition-colors duration-150'
             onClick={handleCopyAddress}>
             <Icon icon='ph:copy' width={20} height={20} />
             <span>{copied ? 'Copied!' : 'Copy Address'}</span>
@@ -149,7 +135,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
 
           {loginMethod === LOGIN_METHODS.WAAP && (
             <div
-              className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer relative transition-colors duration-150 hover:bg-latest-grey-300'
+              className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer relative transition-colors duration-150'
               onClick={handleOpenWallet}>
               <Icon icon='majesticons:open' width={20} height={20} />
               <span>Open Human Wallet</span>
@@ -167,7 +153,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
                 .map((acc) => (
                   <div
                     key={acc.address}
-                    className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer transition-colors duration-150 hover:bg-latest-grey-300'
+                    className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer transition-colors duration-150'
                     onClick={() => {
                       onSelectAccount(acc)
                       setShowDropdown(false)
@@ -186,7 +172,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
           )}
 
           <div
-            className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer text-red-500 transition-colors duration-150 hover:bg-latest-grey-300'
+            className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer text-red-500 transition-colors duration-150'
             onClick={handleDisconnect}>
             <Icon icon='ph:sign-out' width={20} height={20} />
             <span>Disconnect</span>
@@ -247,11 +233,9 @@ const ConnectWalletButton: React.FC<ConnectWalletButtonProps> = ({
 
 interface HeaderProps {
   credentials?: React.ReactNode
-  privacyMode?: React.ReactNode
 }
 
-const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
-  // Get wallet state from useWalletStore
+const Header: React.FC<HeaderProps> = ({ credentials }) => {
   const {
     waapAddress,
     isWaapConnected,
@@ -263,33 +247,21 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     connectAztecWallet,
     walletConnectionPhase,
     waapLoginMethod: loginMethod,
-    waapWalletProvider: walletProvider,
     waapWalletIcon: walletIcon,
-    setShowWalletModal,
     aztecAlias,
     availableAccounts,
     switchAztecAccount,
   } = useWalletStore()
 
-
-
-  // Get L1 token balances for native balance display
   const { data: l1TokenBalances = [] } = useL1TokenBalances()
 
-  // Extract native token balance for Sepolia
   const sepoliaNativeTokens = l1TokenBalances.find(
     (token) => token.type === 'native' && token.network?.chainId === L1_CHAIN_ID
   )
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted?.toString()
 
-
-  // Mobile menu state
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-
-  // Track if connect wallet button was pressed
   const [walletButtonPressed, setWalletButtonPressed] = useState(false)
-
-  // Client-side rendering check
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     setMounted(true)
@@ -313,7 +285,6 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     connectAztecWallet,
   ])
 
-  // Handle connect wallet click
   const handleConnectWallet = async () => {
     // Set the button pressed flag
     setWalletButtonPressed(true)
@@ -328,10 +299,8 @@ const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
     setMobileMenuOpen(false)
   }
 
-  // Check if any wallet is connected
   const isAnyWalletConnected = isWaapConnected || isAztecConnected
 
-  // Toggle mobile menu
   const toggleMobileMenu = () => {
     setMobileMenuOpen(!mobileMenuOpen)
   }

@@ -206,7 +206,7 @@ export default function Home() {
   const l2PublicBalance = l2Balance?.publicBalance
   const { data: feeJuiceBalance, refetch: refetchFeeJuiceBalance } =
     useL2FeeJuiceBalance()
-  const { data: privateFeeJuiceBalance } = useL2PrivateFeeJuiceBalance()
+  const { data: privateFeeJuiceBalance, refetch: refetchPrivateFeeJuiceBalance } = useL2PrivateFeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
     useL2MintSoulboundToken(mintL2SBTOnSuccess)
@@ -215,9 +215,9 @@ export default function Home() {
   const handleBridgeSuccess = useCallback(
     (_data: any) => {
       notify.promise(
-        Promise.all([refetchL1Balance(), refetchL2Balance(), refetchFeeJuiceBalance()]),
+        Promise.all([refetchL1Balance(), refetchL2Balance(), refetchFeeJuiceBalance(), refetchPrivateFeeJuiceBalance()]),
         {
-          pending: 'Refreshing L1 and L2 balances...',
+          pending: 'Refreshing balances...',
           success: 'Balances updated',
           error: 'Failed to refresh balances',
         }
@@ -232,7 +232,7 @@ export default function Home() {
         setBridgeCompleted(false)
       }, 3000)
     },
-    [refetchL1Balance, refetchL2Balance, refetchFeeJuiceBalance, setBridgeConfig, bridgeConfig, notify]
+    [refetchL1Balance, refetchL2Balance, refetchFeeJuiceBalance, refetchPrivateFeeJuiceBalance, setBridgeConfig, bridgeConfig, notify]
   )
 
   const { mutate: bridgeTokensToL2, isPending: bridgeTokensToL2Pending } =
