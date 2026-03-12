@@ -24,11 +24,16 @@ import type { Wallet } from '@aztec/aztec.js/wallet'
 import type { DiscoverySession } from '@/utils/walletSdkConnection'
 import { initWaaP } from '@human.tech/waap-sdk'
 import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
 
 // Module-level state (not in Zustand — DiscoverySession is not serializable)
 let activeDiscoverySession: DiscoverySession | null = null
 let isDiscoveryInProgress = false
 let isConfirmInProgress = false
+
+// ============================================================================
+// TYPE DECLARATIONS
+// ============================================================================
 
 declare global {
   interface Window {
@@ -37,11 +42,20 @@ declare global {
   }
 }
 
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
 const AZTEC_WALLET_KEY = 'aztecLoginMethod'
 
+/** How long to wait for wallet-sdk providers to respond during discovery (SDK default: 60s). */
 const DISCOVERY_TIMEOUT_MS = 60000
+/** Grace period before treating a disconnect event as real (absorbs HMR false positives). */
 const DISCONNECT_GRACE_MS = 1000
 
+// ============================================================================
+// WALLET CONNECTION PHASE
+// ============================================================================
 
 export type WalletConnectionPhase =
   | 'idle'
@@ -52,14 +66,26 @@ export type WalletConnectionPhase =
   | 'account-select'   // user picks which account
   | 'connected'
 
+// ============================================================================
+// INTERFACES
+// ============================================================================
 
 interface WalletState {
+  // ============================================================================
+  // UI STATE
+  // ============================================================================
   showWalletModal: boolean
   showWalletInstallPrompt: boolean
 
+  // ============================================================================
+  // UI ACTIONS
+  // ============================================================================
   setShowWalletModal: (show: boolean) => void
   setShowWalletInstallPrompt: (show: boolean) => void
 
+  // ============================================================================
+  // AZTEC WALLET STATE
+  // ============================================================================
   // Connection state
   aztecLoginMethod: AztecLoginMethod | null
   aztecAddress: string | null
@@ -87,6 +113,9 @@ interface WalletState {
   // is created for each connection (prevents stale adapter reuse after disconnect).
   connectionGeneration: number
 
+  // ============================================================================
+  // AZTEC WALLET ACTIONS
+  // ============================================================================
   // State management
   setAztecLoginMethod: (type: AztecLoginMethod | null) => void
   setAztecState: (state: {
@@ -111,6 +140,9 @@ interface WalletState {
   selectAccount: (account: { alias: string; address: string }) => Promise<void>
   switchAztecAccount: (account: { alias: string; address: string }) => void
 
+  // ============================================================================
+  // WAAP WALLET STATE
+  // ============================================================================
   // Connection state
   waapAddress: `0x${string}` | null
   waapChainId: number | null
@@ -125,6 +157,9 @@ interface WalletState {
   // Initialization state
   isWaapInitialized: boolean
 
+  // ============================================================================
+  // WAAP WALLET ACTIONS
+  // ============================================================================
   // Initialization
   initializeWaapWallet: () => Promise<void>
 
@@ -149,10 +184,17 @@ interface WalletState {
   // Utility functions
   refreshWaapWalletInfo: () => Promise<void>
 
+  // ============================================================================
+  // UTILITY ACTIONS
+  // ============================================================================
   reset: () => void
 }
 
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
+// Helper function to get initial wallet type from localStorage
 const getInitialWalletType = (): AztecLoginMethod | null => {
   if (typeof window === 'undefined') return null
   const stored = localStorage.getItem(AZTEC_WALLET_KEY)
@@ -172,6 +214,7 @@ export const WAAP_METHOD = {
   eth_getTransactionReceipt: 'eth_getTransactionReceipt',
 } as const
 
+// WaaP wallet request function
 export const requestWaapWallet = async (
   method: string,
   params?: any[]
@@ -179,6 +222,9 @@ export const requestWaapWallet = async (
   return window.waap.request({ method, params })
 }
 
+// ============================================================================
+// INITIAL STATE
+// ============================================================================
 
 const initialState = {
   // UI State
@@ -219,13 +265,22 @@ const initialState = {
   isWaapInitialized: false,
 }
 
+// ============================================================================
+// WALLET STORE IMPLEMENTATION
+// ============================================================================
 
 const walletStore = create<WalletState>((set, get) => ({
   ...initialState,
 
+  // ============================================================================
+  // UI ACTIONS
+  // ============================================================================
   setShowWalletModal: (show) => set({ showWalletModal: show }),
   setShowWalletInstallPrompt: (show) => set({ showWalletInstallPrompt: show }),
 
+  // ============================================================================
+  // AZTEC WALLET ACTIONS
+  // ============================================================================
 
   // State management
   setAztecLoginMethod: (type) => {
@@ -639,7 +694,11 @@ const walletStore = create<WalletState>((set, get) => ({
     }
   },
 
-  initializeAztecWallet: async () => {},
+  initializeAztecWallet: async () => {
+    // No-op on load: discovery is deferred until the user explicitly
+    // clicks "Connect L2 Wallet". We only store the login method so
+    // the UI can remember the user's preference.
+  },
 
   disconnectAztecWallet: async () => {
     try {
@@ -715,6 +774,9 @@ const walletStore = create<WalletState>((set, get) => ({
     }
   },
 
+  // ============================================================================
+  // WAAP WALLET ACTIONS
+  // ============================================================================
 
   // Initialization
   initializeWaapWallet: async () => {
@@ -988,8 +1050,19 @@ const walletStore = create<WalletState>((set, get) => ({
 
       set({ waapAddress: address as `0x${string}`, isWaapConnected: !!address })
       return address
-    } catch (err) {
+    } catch (err: any) {
       console.error('getWaapAccount: Error getting account:', err)
+
+      if (err?.code === -32001) {
+        set({ waapAddress: null, isWaapConnected: false, waapError: null })
+        return null
+      }
+
+      if (err?.code === 4001) {
+        set({ waapAddress: null, isWaapConnected: false, waapError: null })
+        return null
+      }
+
       set({ waapAddress: null, isWaapConnected: false, waapError: null })
       return null
     }
@@ -1023,7 +1096,10 @@ const walletStore = create<WalletState>((set, get) => ({
         const loginMethod =
           (await window.waap.getLoginMethod()) as WaapLoginMethod
 
-        set({ waapLoginMethod: loginMethod })
+        set((state) => ({
+          ...state,
+          waapLoginMethod: loginMethod,
+        }))
 
         return loginMethod
       }
@@ -1120,12 +1196,127 @@ const walletStore = create<WalletState>((set, get) => ({
     }
   },
 
+  // ============================================================================
+  // UTILITY ACTIONS
+  // ============================================================================
   reset: () => {
     localStorage.removeItem(AZTEC_WALLET_KEY)
     set(initialState)
   },
 }))
 
+// ============================================================================
+// EXPORTS
+// ============================================================================
 
-export const useWalletStore = walletStore
+// Export main store with all state and actions
+export const useWalletStore = () =>
+  walletStore(
+    useShallow((state) => ({
+      // ============================================================================
+      // UI STATE
+      // ============================================================================
+      showWalletModal: state.showWalletModal,
+      showWalletInstallPrompt: state.showWalletInstallPrompt,
+
+      // ============================================================================
+      // AZTEC WALLET STATE
+      // ============================================================================
+      // Connection state
+      aztecLoginMethod: state.aztecLoginMethod,
+      aztecAddress: state.aztecAddress,
+      aztecAccount: state.aztecAccount,
+      isAztecConnected: state.isAztecConnected,
+      isAztecConnecting: state.isAztecConnecting,
+      aztecError: state.aztecError,
+
+      // Wallet SDK instances
+      sdkWallet: state.sdkWallet,
+
+      // Wallet connection flow state
+      walletConnectionPhase: state.walletConnectionPhase,
+      verificationEmojis: state.verificationEmojis,
+      discoveredWallets: state.discoveredWallets,
+
+      // ============================================================================
+      // WAAP WALLET STATE
+      // ============================================================================
+      // Connection state
+      waapAddress: state.waapAddress,
+      waapChainId: state.waapChainId,
+      isWaapConnected: state.isWaapConnected,
+      waapError: state.waapError,
+
+      // Wallet identification
+      waapLoginMethod: state.waapLoginMethod,
+      waapWalletProvider: state.waapWalletProvider,
+      waapWalletIcon: state.waapWalletIcon,
+
+      // ============================================================================
+      // UI ACTIONS
+      // ============================================================================
+      setShowWalletModal: state.setShowWalletModal,
+      setShowWalletInstallPrompt: state.setShowWalletInstallPrompt,
+
+      // ============================================================================
+      // AZTEC WALLET ACTIONS
+      // ============================================================================
+      // State management
+      setAztecLoginMethod: state.setAztecLoginMethod,
+      setAztecState: state.setAztecState,
+
+      // Connection management
+      connectAztecWallet: state.connectAztecWallet,
+      disconnectAztecWallet: state.disconnectAztecWallet,
+      initializeAztecWallet: state.initializeAztecWallet,
+
+      // Wallet SDK flow actions
+      selectWallet: state.selectWallet,
+      confirmWalletConnection: state.confirmWalletConnection,
+      cancelWalletConnection: state.cancelWalletConnection,
+
+      // Account selection
+      aztecAlias: state.aztecAlias,
+      availableAccounts: state.availableAccounts,
+      selectAccount: state.selectAccount,
+      switchAztecAccount: state.switchAztecAccount,
+
+      // Connection generation (for cache busting)
+      connectionGeneration: state.connectionGeneration,
+
+      // ============================================================================
+      // WAAP WALLET ACTIONS
+      // ============================================================================
+      // Initialization
+      initializeWaapWallet: state.initializeWaapWallet,
+
+      // Connection management
+      connectWaapWallet: state.connectWaapWallet,
+      disconnectWaapWallet: state.disconnectWaapWallet,
+
+      // Network management
+      switchWaapChain: state.switchWaapChain,
+      getWaapChainId: state.getWaapChainId,
+
+      // Account management
+      getWaapAccount: state.getWaapAccount,
+      signWaapMessage: state.signWaapMessage,
+
+      // Wallet identification
+      getWaapLoginMethod: state.getWaapLoginMethod,
+      getWaapWalletProvider: state.getWaapWalletProvider,
+      getWaapWalletIcon: state.getWaapWalletIcon,
+      getAllAvailableWallets: state.getAllAvailableWallets,
+
+      // Utility functions
+      refreshWaapWalletInfo: state.refreshWaapWalletInfo,
+
+      // ============================================================================
+      // UTILITY ACTIONS
+      // ============================================================================
+      reset: state.reset,
+    }))
+  )
+
+// Export the store directly for use with getState
 export { walletStore }

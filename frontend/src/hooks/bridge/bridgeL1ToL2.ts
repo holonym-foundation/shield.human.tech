@@ -16,7 +16,6 @@
  */
 
 import { Fr } from '@aztec/aztec.js/fields'
-import { computeSecretHash } from '@aztec/aztec.js/crypto'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { TestERC20Abi, TokenPortalAbi } from '@aztec/l1-artifacts'
 import { extractEvent } from '@aztec/ethereum/utils'
@@ -83,6 +82,12 @@ export interface FuelParams {
   fuelQuote: FuelQuote
 }
 
+/** Parameters for private fuel (BridgedFPC) flow. */
+export interface PrivateFuelParams {
+  fuelAmount: bigint
+  fpcAddress: string
+}
+
 // ─── Deposit Step Result Types ───────────────────────────────────────
 
 export interface CaptureBlocksResult {
@@ -99,6 +104,12 @@ export interface BackupResult {
   nodeInfoSnapshot: any
   fuelSecret?: Fr
   fuelSecretHash?: Fr
+  /** For private fuel (BridgedFPC): the random salt used in secret derivation */
+  privateFuelSalt?: Fr
+  /** For private fuel (BridgedFPC): the derived secret */
+  privateFuelSecret?: Fr
+  /** For private fuel (BridgedFPC): hash of the derived secret */
+  privateFuelSecretHash?: Fr
 }
 
 export interface DepositTxResult {
@@ -195,6 +206,8 @@ export async function executeL2Claim(
     maxAttempts?: number
     retryDelayMs?: number
     bruteForceMaxIndex?: number
+    /** Max time (ms) to wait for the wallet to respond before timing out. Default: 5 min. */
+    walletTimeoutMs?: number
     /** Called before each claim attempt. */
     onAttempt?: (attempt: number, maxAttempts: number) => void
     /** Called when a retryable "nonexistent message" error occurs before waiting. */
@@ -208,8 +221,23 @@ export async function executeL2Claim(
   const maxAttempts = options?.maxAttempts ?? 5
   const retryDelayMs = options?.retryDelayMs ?? 120_000
   const bruteForceMaxIndex = options?.bruteForceMaxIndex ?? 64
+  const walletTimeoutMs = options?.walletTimeoutMs ?? 5 * 60_000 // 5 min default
 
   const method = isPrivacyModeEnabled ? 'claim_private' : 'claim_public'
+
+  /** Race the wallet call against a timeout so we never hang forever. */
+  const callWithTimeout = <T>(promise: Promise<T>): Promise<T> =>
+    Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(
+            'Wallet did not respond in time. Check for a hidden wallet popup behind your browser window.',
+          )),
+          walletTimeoutMs,
+        ),
+      ),
+    ])
 
   if (messageLeafIndex != null) {
     // ── Normal path: known leaf index, retry on "nonexistent message" ──
@@ -218,30 +246,37 @@ export async function executeL2Claim(
       try {
         options?.onAttempt?.(attempt, maxAttempts)
         console.log(`[L1→L2] Claim attempt ${attempt}/${maxAttempts}...`)
-        result = await walletAdapter.executeCall(
-          walletAdapter.bridgeAddress,
-          method,
-          [
-            AztecAddress.fromString(aztecAddress),
-            amount,
-            claimSecret,
-            messageLeafIndex,
-          ],
-          { contractType: 'bridge', ...options?.feeOption },
+
+        result = await callWithTimeout(
+          walletAdapter.executeCall(
+            walletAdapter.bridgeAddress,
+            method,
+            [
+              AztecAddress.fromString(aztecAddress),
+              amount,
+              claimSecret,
+              messageLeafIndex,
+            ],
+            { contractType: 'bridge', ...options?.feeOption },
+          ),
         )
+
         console.log(`[L1→L2] Claim succeeded on attempt ${attempt}`)
         break
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         const isNonexistentMsg =
           errMsg.includes('nonexistent L1-to-L2 message') ||
-          errMsg.includes('l1_to_l2_msg_exists')
-        if (isNonexistentMsg && attempt < maxAttempts) {
-          options?.onRetry?.(attempt, maxAttempts, retryDelayMs)
+          errMsg.includes('l1_to_l2_msg_exists') ||
+          errMsg.includes('No L1 to L2 message found')
+        const isWalletTimeout = errMsg.includes('Wallet did not respond in time')
+        if ((isNonexistentMsg || isWalletTimeout) && attempt < maxAttempts) {
+          const delay = isWalletTimeout ? 5_000 : retryDelayMs
+          options?.onRetry?.(attempt, maxAttempts, delay)
           console.warn(
-            `[L1→L2] Claim attempt ${attempt} failed (message not synced to wallet node), retrying in ${retryDelayMs / 1000}s...`,
+            `[L1→L2] Claim attempt ${attempt} failed (${isWalletTimeout ? 'wallet timeout' : 'message not synced'}), retrying in ${delay / 1000}s...`,
           )
-          await wait(retryDelayMs)
+          await wait(delay)
           continue
         }
         throw err
@@ -254,20 +289,22 @@ export async function executeL2Claim(
     for (let idx = 0; idx < bruteForceMaxIndex; idx++) {
       try {
         console.log('[L1→L2] Trying leafIndex=', idx)
-        const result = await walletAdapter.executeCall(
-          walletAdapter.bridgeAddress,
-          method,
-          [
-            AztecAddress.fromString(aztecAddress),
-            amount,
-            claimSecret,
-            BigInt(idx),
-          ],
-          { contractType: 'bridge' },
-        )
+        const res = await callWithTimeout(
+          walletAdapter.executeCall(
+            walletAdapter.bridgeAddress,
+            method,
+            [
+              AztecAddress.fromString(aztecAddress),
+              amount,
+              claimSecret,
+              BigInt(idx),
+            ],
+            { contractType: 'bridge' },
+          ),
+        ) as { txHash: string }
         console.log('[L1→L2] Claim succeeded with leafIndex=', idx)
         return {
-          l2TxHash: result.txHash,
+          l2TxHash: res.txHash,
           usedBruteForce: true,
           bruteForceLeafIndex: idx,
         }
@@ -374,6 +411,7 @@ export async function generateAndBackupClaimSecret(params: {
   signWaapMessage: (msg: string) => Promise<string | null>
   selectedToken?: Token
   fuel?: FuelParams
+  privateFuel?: PrivateFuelParams
 }): Promise<BackupResult> {
   const {
     l1Address, aztecAddress, amountL1, amountL2, amountDisplayL1, amountDisplayL2,
@@ -382,7 +420,18 @@ export async function generateAndBackupClaimSecret(params: {
   } = params
 
   const claimSecret = Fr.random()
-  const claimSecretHash = await computeSecretHash(claimSecret)
+  // Compute poseidon2 hash server-side to avoid needing SharedArrayBuffer
+  // (cross-origin isolation headers block wallet iframe/popup communication)
+  const hashRes = await fetch('/api/compute-secret-hash', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ secret: claimSecret.toString() }),
+  })
+  if (!hashRes.ok) {
+    throw new Error('Failed to compute claim secret hash')
+  }
+  const { secretHash } = await hashRes.json()
+  const claimSecretHash = Fr.fromString(secretHash)
   const nodeInfoSnapshot = serializeNodeInfo(nodeInfo)
   console.log('[L1→L2] Claim secret generated, backing up to backend')
 
@@ -395,15 +444,6 @@ export async function generateAndBackupClaimSecret(params: {
   }
   const encryptionKey = await deriveEncryptionKey(l1Address, signature, keyDerivationDomain)
 
-  // Generate fuel secrets before backup so they're included in the encrypted payload
-  let fuelSecret: Fr | undefined
-  let fuelSecretHash: Fr | undefined
-  if (params.fuel) {
-    fuelSecret = Fr.random()
-    fuelSecretHash = await computeSecretHash(fuelSecret)
-    console.log('[L1→L2] Fuel secret generated')
-  }
-
   const payloadToEncrypt = {
     claimSecret: claimSecret.toString(),
     claimSecretHash: claimSecretHash.toString(),
@@ -413,10 +453,6 @@ export async function generateAndBackupClaimSecret(params: {
     isPrivacyModeEnabled,
     l1BlockNumberBeforeTx,
     nodeInfo: nodeInfoSnapshot,
-    ...(fuelSecret && fuelSecretHash ? {
-      fuelSecret: fuelSecret.toString(),
-      fuelSecretHash: fuelSecretHash.toString(),
-    } : {}),
   }
   console.log('[L1→L2] Payload to encrypt:', {
     amount: payloadToEncrypt.amount,
@@ -522,13 +558,66 @@ export async function generateAndBackupClaimSecret(params: {
     nodeInfo: nodeInfoSnapshot,
     isPrivacyModeEnabled,
     status: BridgeOperationStatus.pending,
-    ...(fuelSecret ? {
-      fuelAmount: params.fuel?.fuelAmount.toString(),
+    ...(params.fuel ? {
+      fuelAmount: params.fuel.fuelAmount.toString(),
     } : {}),
   })
   console.log('Encrypted claim data stored in localStorage')
 
-  return { operationId, claimSecret, claimSecretHash, nodeInfoSnapshot, fuelSecret, fuelSecretHash }
+  // Generate fuel secrets.
+  // Public fuel: random secret + hash → used with FeeJuicePaymentMethodWithClaim on L2.
+  // Private fuel: derived secret (poseidon2([salt, userAddress], DOM_SEP)) + hash → FJ
+  //   deposited to FPC on L1, then BridgedMintAndPayFeePaymentMethod on L2
+  //   (FeeJuice.claim + BridgedFPC.mint_and_pay_fee, all private, in one tx).
+  // When private fuel is active, fuel is also set (for the swap quote), but we skip
+  // the public fuel secret since it would be unused — private fuel has its own secret.
+  let fuelSecret: Fr | undefined
+  let fuelSecretHash: Fr | undefined
+  if (params.fuel && !params.privateFuel) {
+    fuelSecret = Fr.random()
+    const fuelHashRes = await fetch('/api/compute-secret-hash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret: fuelSecret.toString() }),
+    })
+    if (!fuelHashRes.ok) {
+      throw new Error('Failed to compute fuel secret hash')
+    }
+    const { secretHash: fuelHashStr } = await fuelHashRes.json()
+    fuelSecretHash = Fr.fromString(fuelHashStr)
+    console.log('[L1→L2] Public fuel secret generated')
+  }
+
+  let privateFuelSalt: Fr | undefined
+  let privateFuelSecret: Fr | undefined
+  let privateFuelSecretHash: Fr | undefined
+  if (params.privateFuel) {
+    privateFuelSalt = Fr.random()
+    // Derive BridgedFPC secret: poseidon2([salt, claimer], DOM_SEP)
+    // claimer = user's Aztec address (the contract uses msg_sender() as claimer)
+    const pfHashRes = await fetch('/api/compute-secret-hash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'fpc-bridge',
+        salt: privateFuelSalt.toString(),
+        claimer: params.aztecAddress,
+      }),
+    })
+    if (!pfHashRes.ok) {
+      throw new Error('Failed to compute private fuel secret hash')
+    }
+    const { secret: pfSecret, secretHash: pfSecretHash } = await pfHashRes.json()
+    privateFuelSecret = Fr.fromString(pfSecret)
+    privateFuelSecretHash = Fr.fromString(pfSecretHash)
+    console.log('[L1→L2] Private fuel (BridgedFPC) secret generated')
+  }
+
+  return {
+    operationId, claimSecret, claimSecretHash, nodeInfoSnapshot,
+    fuelSecret, fuelSecretHash,
+    privateFuelSalt, privateFuelSecret, privateFuelSecretHash,
+  }
 }
 
 // ─── Step 3: Check and approve token allowance ───────────────────────
@@ -587,10 +676,11 @@ export async function sendL1DepositTransaction(params: {
   operationId: string
   selectedToken?: Token
   fuel?: FuelParams & { fuelSecretHash: Fr }
+  privateFuel?: PrivateFuelParams & { secretHash: Fr }
 }): Promise<DepositTxResult> {
   const {
     l1Address, aztecAddress, amount, claimSecretHash, claimSecret,
-    isPrivacyModeEnabled, operationId, selectedToken, fuel,
+    isPrivacyModeEnabled, operationId, selectedToken, fuel, privateFuel,
   } = params
 
   let txHash: any
@@ -610,8 +700,9 @@ export async function sendL1DepositTransaction(params: {
           totalAmount: amount,
           fuelAmount: fuel.fuelAmount,
           aztecRecipient: aztecAddress as `0x${string}`,
+          fuelRecipient: (privateFuel?.fpcAddress ?? aztecAddress) as `0x${string}`,
           tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
-          fuelSecretHash: fuel.fuelSecretHash.toString() as `0x${string}`,
+          fuelSecretHash: (privateFuel ? privateFuel.secretHash : fuel.fuelSecretHash).toString() as `0x${string}`,
           feeJuicePortal: FEE_JUICE_PORTAL_ADDRESS,
           swapTarget: fuel.fuelQuote.swapTarget,
           swapAllowanceTarget: fuel.fuelQuote.swapAllowanceTarget,
@@ -742,14 +833,7 @@ export async function waitForReceiptAndExtractEvent(params: {
     updateLocalStorageItem(
       LS_KEY_BRIDGE_DEPOSITS,
       (c: any) => c.l1Address === l1Address && c.status === BridgeOperationStatus.pending,
-      (c: any) => ({
-        ...c,
-        messageHash: messageHashStr,
-        messageLeafIndex: messageLeafIndexStr,
-        fuelMessageHash: fuelMessageHashStr,
-        fuelMessageLeafIndex: fuelMessageLeafIndexStr,
-        fuelAmount: fuelAmountReceived.toString(),
-      }),
+      (c: any) => ({ ...c, messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr }),
     )
 
     return {
@@ -810,13 +894,9 @@ export async function persistReceiptToBackend(
     messageLeafIndexStr: string
     l1TxHash: string
     l1TxUrl: string
-    // Fuel fields (present when BridgeAndFuel path used)
-    fuelMessageHashStr?: string
-    fuelMessageLeafIndexStr?: string
-    fuelAmount?: bigint
   },
 ): Promise<boolean> {
-  const patchData: Record<string, unknown> = {
+  const patchData = {
     status: 'deposited',
     messageHash: receiptData.messageHashStr,
     messageLeafIndex: receiptData.messageLeafIndexStr,
@@ -824,10 +904,6 @@ export async function persistReceiptToBackend(
     l1TxUrl: receiptData.l1TxUrl,
     currentStep: 2,
   }
-  // Include fuel fields if present (BridgeAndFuel path)
-  if (receiptData.fuelMessageHashStr) patchData.fuelMessageHash = receiptData.fuelMessageHashStr
-  if (receiptData.fuelMessageLeafIndexStr) patchData.fuelMessageLeafIndex = receiptData.fuelMessageLeafIndexStr
-  if (receiptData.fuelAmount != null) patchData.fuelAmount = receiptData.fuelAmount.toString()
   console.log('[L1→L2] PATCH receipt data →', { operationId, ...patchData })
 
   const succeeded = operationId
@@ -913,3 +989,4 @@ export function finalizeLocalStorageAfterDeposit(params: {
   localStorage.setItem(LS_KEY_BRIDGE_DEPOSITS, JSON.stringify(claims))
   return { updatedClaim, wasExisting: false }
 }
+

@@ -73,6 +73,8 @@ export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuicePortalAddress ?? '') as `0x${string}`
 export const FEE_JUICE_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
+export const BRIDGED_FPC_ADDRESS: string =
+  ((activeDeployment as any).bridgedFpcAddress ?? '') as string
 
 // Non-token protocol addresses (SBT, sponsored fee)
 export const ADDRESS = {

@@ -1,9 +1,9 @@
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
-import { Contract } from '@aztec/aztec.js/contracts'
+import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
 import type { Wallet } from '@aztec/aztec.js/wallet'
-import { L1_TOKENS } from '@/config'
+import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
 import { aztecNode } from '@/aztec'
 
 export interface WalletContext {
@@ -21,22 +21,35 @@ export interface ExecuteCallResult {
   blockNumber?: number
 }
 
-async function getContractArtifact(type: 'token' | 'bridge') {
+type ContractType = 'token' | 'bridge' | 'bridged_fpc' | 'fee_juice'
+
+async function getContractArtifact(type: ContractType) {
   if (type === 'bridge') {
     const { TokenBridgeContract } = await import('@aztec/noir-contracts.js/TokenBridge')
     return TokenBridgeContract.artifact
+  }
+  if (type === 'bridged_fpc') {
+    const { BridgedFPCContractArtifact } = await import('@defi-wonderland/aztec-fee-payment')
+    return BridgedFPCContractArtifact
+  }
+  if (type === 'fee_juice') {
+    const { FeeJuiceContractArtifact } = await import('@aztec/noir-contracts.js/FeeJuice')
+    return FeeJuiceContractArtifact
   }
   const { TokenContract } = await import('@aztec/noir-contracts.js/Token')
   return TokenContract.artifact
 }
 
+const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
+
 function resolveArtifactType(
   contractAddress: string,
   bridgeAddress: string
-): 'token' | 'bridge' {
-  return contractAddress.toLowerCase() === bridgeAddress.toLowerCase()
-    ? 'bridge'
-    : 'token'
+): ContractType {
+  if (contractAddress.toLowerCase() === bridgeAddress.toLowerCase()) return 'bridge'
+  if (BRIDGED_FPC_ADDRESS && contractAddress.toLowerCase() === BRIDGED_FPC_ADDRESS.toLowerCase()) return 'bridged_fpc'
+  if (contractAddress.toLowerCase() === FEE_JUICE_L2_ADDRESS.toLowerCase()) return 'fee_juice'
+  return 'token'
 }
 
 class WalletAdapter {
@@ -54,13 +67,14 @@ class WalletAdapter {
   }
 
   async initializeContracts(): Promise<void> {
-    const addresses = [
+    const deployedContracts: { addr: string; type: 'token' | 'bridge' }[] = [
       { addr: this.tokenAddress, type: 'token' as const },
       { addr: this.bridgeAddress, type: 'bridge' as const },
     ].filter(({ addr }) => !!addr)
 
+    // Register deployed contracts (token, bridge) via node lookup
     await Promise.all(
-      addresses.map(async ({ addr, type }) => {
+      deployedContracts.map(async ({ addr, type }) => {
         try {
           const address = AztecAddress.fromString(addr)
           const [instance, artifact] = await Promise.all([
@@ -75,6 +89,18 @@ class WalletAdapter {
         }
       })
     )
+
+    // Register BridgedFPC separately — it's a registered-not-deployed contract,
+    // so the node doesn't know about it. We compute the deterministic instance
+    // locally and register it with the wallet's PXE.
+    if (BRIDGED_FPC_ADDRESS) {
+      try {
+        const { registerBridgedContract } = await import('@defi-wonderland/aztec-fee-payment')
+        await registerBridgedContract(this.wallet)
+      } catch {
+        // May already be registered
+      }
+    }
   }
 
   async simulateView(
@@ -103,7 +129,7 @@ class WalletAdapter {
     contract: AztecAddress | string,
     method: string,
     args: any[],
-    options?: { contractType?: 'token' | 'bridge'; fee?: { paymentMethod: any } }
+    options?: { contractType?: ContractType; fee?: { paymentMethod: any } }
   ): Promise<ExecuteCallResult> {
     const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
     const type = options?.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
@@ -113,6 +139,34 @@ class WalletAdapter {
     if (options?.fee) sendOpts.fee = options.fee
     const receipt = await instance.methods[method](...args)
       .send(sendOpts)
+    return {
+      txHash: receipt.txHash.toString(),
+      blockNumber: receipt.blockNumber,
+    }
+  }
+
+  /**
+   * Execute multiple contract calls as a single L2 transaction.
+   * Each call is built into an interaction, then batched and sent atomically.
+   */
+  async executeBatch(
+    calls: { contract: AztecAddress | string; method: string; args: any[]; contractType?: ContractType }[],
+    options?: { fee?: { paymentMethod: any } }
+  ): Promise<ExecuteCallResult> {
+    const interactions = await Promise.all(
+      calls.map(async (call) => {
+        const addr = typeof call.contract === 'string' ? AztecAddress.fromString(call.contract) : call.contract
+        const type = call.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
+        const artifact = await getContractArtifact(type)
+        const instance = await Contract.at(addr, artifact, this.wallet)
+        return instance.methods[call.method](...call.args)
+      })
+    )
+
+    const batch = new BatchCall(this.wallet, interactions)
+    const sendOpts: any = { from: this.account }
+    if (options?.fee) sendOpts.fee = options.fee
+    const receipt = await batch.send(sendOpts)
     return {
       txHash: receipt.txHash.toString(),
       blockNumber: receipt.blockNumber,

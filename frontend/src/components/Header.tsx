@@ -1,15 +1,13 @@
 'use client'
 
 import { Icon } from '@iconify/react'
-import { useToast } from '@/hooks/useToast'
 import { useWalletStore } from '@/stores/walletStore'
-import { useBridgeStore } from '@/stores/bridgeStore'
 import { useL1TokenBalances } from '@/hooks/useL1Operations'
+import { wait } from '@/utils'
 import { LOGIN_METHODS, WalletType } from '@/types/wallet'
 import Image from 'next/image'
 import Link from 'next/link'
 import React, { useEffect, useRef, useState } from 'react'
-import { Tooltip as ReactTooltip } from 'react-tooltip'
 import { silkUrl } from '@/config/l1.config'
 import { L1_CHAIN_ID } from '@/config'
 import DeploymentSelector from '@/components/DeploymentSelector'
@@ -24,6 +22,7 @@ type WalletDisplayProps = {
   walletIcon: string
   networkIcon?: string
   balance?: string
+  onClick?: () => void
   onDisconnect?: () => void
   availableAccounts?: Array<{ alias: string; address: string }>
   onSelectAccount?: (account: { alias: string; address: string }) => void
@@ -43,6 +42,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
   walletIcon,
   networkIcon,
   balance,
+  onClick,
   onDisconnect,
   availableAccounts,
   onSelectAccount,
@@ -75,10 +75,16 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
 
   const handleCopyAddress = () => {
     if (address) {
+      // Copy the address to clipboard
       navigator.clipboard.writeText(address)
+
+      // Show the "Copied!" tooltip
       setCopied(true)
+
+      // Hide the tooltip after 2 seconds
       setTimeout(() => {
         setCopied(false)
+        // Only close dropdown after tooltip is hidden
         setShowDropdown(false)
       }, 2000)
     }
@@ -102,7 +108,8 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
     <div className='relative' ref={dropdownRef}>
       <div
         className='flex pr-[8px] justify-center items-center gap-[12px] rounded-[8px] border border-[#D4D4D4] bg-white cursor-pointer hover:shadow-md transition-shadow duration-200'
-        onClick={handleClick}>
+        onClick={handleClick}
+        data-tooltip-id={`tooltip-${walletType}`}>
         <div className='flex w-8 h-8 p-1 justify-center items-center rounded-[8px] bg-[#E5EFFF]'>
           <Image src={walletIcon} alt='Wallet' width={32} height={32} />
         </div>
@@ -111,7 +118,11 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
         )}
         <div className='flex items-center gap-2'>
           <span className='text-sm font-medium' title={address || ''}>
-            {displayName || (address ? truncateAddr(address) : '')}
+            {displayName || (address
+              ? `${address.substring(0, 6)}...${address.substring(
+                  address.length - 4
+                )}`
+              : '')}
           </span>
           {balance && walletType === WalletType.WAAP && (
             <span className='text-xs text-gray-500'>
@@ -128,9 +139,9 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
       </div>
 
       {showDropdown && (
-        <div className='absolute right-0 mt-2 shadow-lg z-10 min-w-[180px] py-2 rounded-[12px] border border-[#D4D4D4] bg-white '>
+        <div className='absolute right-0 mt-2 shadow-lg z-10 min-w-[180px] py-2  rounded-[12px] border border-[#D4D4D4] bg-white '>
           <div
-            className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer relative transition-colors duration-150'
+            className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer relative transition-colors duration-150 hover:bg-latest-grey-300'
             onClick={handleCopyAddress}>
             <Icon icon='ph:copy' width={20} height={20} />
             <span>{copied ? 'Copied!' : 'Copy Address'}</span>
@@ -138,7 +149,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
 
           {loginMethod === LOGIN_METHODS.WAAP && (
             <div
-              className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer relative transition-colors duration-150'
+              className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer relative transition-colors duration-150 hover:bg-latest-grey-300'
               onClick={handleOpenWallet}>
               <Icon icon='majesticons:open' width={20} height={20} />
               <span>Open Human Wallet</span>
@@ -156,7 +167,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
                 .map((acc) => (
                   <div
                     key={acc.address}
-                    className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer transition-colors duration-150'
+                    className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer transition-colors duration-150 hover:bg-latest-grey-300'
                     onClick={() => {
                       onSelectAccount(acc)
                       setShowDropdown(false)
@@ -175,7 +186,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
           )}
 
           <div
-            className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer text-red-500 transition-colors duration-150'
+            className='flex items-center gap-2 px-4 py-2 hover:bg-gray-100 cursor-pointer text-red-500 transition-colors duration-150 hover:bg-latest-grey-300'
             onClick={handleDisconnect}>
             <Icon icon='ph:sign-out' width={20} height={20} />
             <span>Disconnect</span>
@@ -236,9 +247,11 @@ const ConnectWalletButton: React.FC<ConnectWalletButtonProps> = ({
 
 interface HeaderProps {
   credentials?: React.ReactNode
+  privacyMode?: React.ReactNode
 }
 
-const Header: React.FC<HeaderProps> = ({ credentials }) => {
+const Header: React.FC<HeaderProps> = ({ credentials, privacyMode }) => {
+  // Get wallet state from useWalletStore
   const {
     waapAddress,
     isWaapConnected,
@@ -250,24 +263,33 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
     connectAztecWallet,
     walletConnectionPhase,
     waapLoginMethod: loginMethod,
+    waapWalletProvider: walletProvider,
     waapWalletIcon: walletIcon,
+    setShowWalletModal,
     aztecAlias,
     availableAccounts,
     switchAztecAccount,
   } = useWalletStore()
 
-  const { isPrivacyModeEnabled, setPrivacyModeEnabled } = useBridgeStore()
-  const notify = useToast()
 
+
+  // Get L1 token balances for native balance display
   const { data: l1TokenBalances = [] } = useL1TokenBalances()
 
+  // Extract native token balance for Sepolia
   const sepoliaNativeTokens = l1TokenBalances.find(
     (token) => token.type === 'native' && token.network?.chainId === L1_CHAIN_ID
   )
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted?.toString()
 
+
+  // Mobile menu state
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  // Track if connect wallet button was pressed
   const [walletButtonPressed, setWalletButtonPressed] = useState(false)
+
+  // Client-side rendering check
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     setMounted(true)
@@ -291,6 +313,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
     connectAztecWallet,
   ])
 
+  // Handle connect wallet click
   const handleConnectWallet = async () => {
     // Set the button pressed flag
     setWalletButtonPressed(true)
@@ -305,8 +328,10 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
     setMobileMenuOpen(false)
   }
 
+  // Check if any wallet is connected
   const isAnyWalletConnected = isWaapConnected || isAztecConnected
 
+  // Toggle mobile menu
   const toggleMobileMenu = () => {
     setMobileMenuOpen(!mobileMenuOpen)
   }
@@ -355,54 +380,6 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
 
         <div className='flex items-center gap-4'>
           <DeploymentSelector />
-
-          {/* Privacy Mode Toggle */}
-          {/* <div
-            className='flex px-[3px] py-[3px] pl-[8px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200'
-            data-tooltip-id='privacy-mode-tooltip'
-            data-tooltip-content={isPrivacyModeEnabled ? 'Private transactions enabled' : 'Enable private transactions'}>
-            <Image
-              src='/assets/svg/human.aztec.svg'
-              alt='Aztec'
-              width={28}
-              height={28}
-            />
-            <span className='text-[#0A0A0A] text-[14px] font-[450] leading-[20px] font-sans'>
-              Privacy Mode
-            </span>
-            <button
-              className={`flex w-[40px] h-[24px] py-[3px] px-1 items-center rounded-[8px] transition-all duration-200 border-0 focus:outline-none relative z-10 ${
-                isPrivacyModeEnabled
-                  ? 'bg-[#3B3B3B] justify-end pl-[19px]'
-                  : 'bg-[#D4D4D4] justify-start pr-[19px]'
-              }`}
-              onClick={() => {
-                setPrivacyModeEnabled(!isPrivacyModeEnabled)
-                if (!isPrivacyModeEnabled) {
-                  setTimeout(() => {
-                    notify('privacy-mode', {
-                      message: 'Transactions are masked and untraceable, unlike public mode',
-                      heading: 'Private mode activated',
-                    })
-                  }, 1500)
-                } else {
-                  notify.dismiss('privacy-mode-toastId')
-                }
-              }}
-              aria-pressed={isPrivacyModeEnabled}
-              tabIndex={0}
-              style={{ border: 'none' }}>
-              <span className='flex w-[18px] h-[18px] p-[1px] justify-center items-center flex-shrink-0 rounded-[6px] bg-white shadow-[0px_1px_3px_0px_rgba(0,0,0,0.25)] transition-transform duration-200'>
-                <Image
-                  src='/assets/svg/shield.svg'
-                  alt='Shield'
-                  width={14}
-                  height={14}
-                />
-              </span>
-            </button>
-          </div> */}
-
           {/* Wallet Controls */}
           {!isAnyWalletConnected ? (
             <ConnectWalletButton onClick={handleConnectWallet} />
@@ -506,50 +483,6 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
 
           <DeploymentSelector />
 
-          {/* Mobile Privacy Mode Toggle */}
-          {/* <div className='flex px-[3px] py-[3px] pl-[8px] w-[240px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative hover:shadow-md transition-shadow duration-200 max-w-[190px]'>
-            <Image
-              src='/assets/svg/human.aztec.svg'
-              alt='Aztec'
-              width={28}
-              height={28}
-            />
-            <span className='text-[#0A0A0A] text-[14px] font-[450] leading-[20px] font-sans'>
-              Privacy Mode
-            </span>
-            <button
-              className={`flex w-[40px] h-[24px] py-[3px] px-1 items-center rounded-[8px] transition-all duration-200 border-0 focus:outline-none relative z-10 ${
-                isPrivacyModeEnabled
-                  ? 'bg-[#3B3B3B] justify-end pl-[19px]'
-                  : 'bg-[#D4D4D4] justify-start pr-[19px]'
-              }`}
-              onClick={() => {
-                setPrivacyModeEnabled(!isPrivacyModeEnabled)
-                if (!isPrivacyModeEnabled) {
-                  setTimeout(() => {
-                    notify('privacy-mode', {
-                      message: 'Transactions are masked and untraceable, unlike public mode',
-                      heading: 'Private mode activated',
-                    })
-                  }, 1500)
-                } else {
-                  notify.dismiss('privacy-mode-toastId')
-                }
-              }}
-              aria-pressed={isPrivacyModeEnabled}
-              tabIndex={0}
-              style={{ border: 'none' }}>
-              <span className='flex w-[18px] h-[18px] p-[1px] justify-center items-center flex-shrink-0 rounded-[6px] bg-white shadow-[0px_1px_3px_0px_rgba(0,0,0,0.25)] transition-transform duration-200'>
-                <Image
-                  src='/assets/svg/shield.svg'
-                  alt='Shield'
-                  width={14}
-                  height={14}
-                />
-              </span>
-            </button>
-          </div> */}
-
           <div className='flex flex-col items-start gap-3'>
             {!isAnyWalletConnected ? (
               <ConnectWalletButton onClick={handleConnectWallet} />
@@ -581,15 +514,6 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
         </div>
       )}
 
-      <ReactTooltip
-        id='privacy-mode-tooltip'
-        place='bottom'
-        className='z-[100]'
-        style={{
-          fontSize: '12px',
-          padding: '4px 8px',
-        }}
-      />
     </header>
   )
 }

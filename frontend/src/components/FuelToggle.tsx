@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { computeFuelOutput, formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
+import { BRIDGED_FPC_ADDRESS } from '@/config'
 
 interface FuelToggleProps {
   fuelEnabled: boolean
@@ -12,6 +13,9 @@ interface FuelToggleProps {
   onToggle: (enabled: boolean) => void
   onAmountChange: (amount: string) => void
   feeJuiceBalance?: string
+  privateFeeJuiceBalance?: string
+  fuelType: 'public' | 'private'
+  onFuelTypeChange: (type: 'public' | 'private') => void
 }
 
 const USD_PRESETS = [1, 5, 10]
@@ -39,11 +43,15 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   onToggle,
   onAmountChange,
   feeJuiceBalance,
+  privateFeeJuiceBalance,
+  fuelType,
+  onFuelTypeChange,
 }) => {
   const bridgeNum = Number(bridgeAmount) || 0
   const fuelNum = Number(fuelAmount) || 0
   const isValid = fuelNum > 0 && fuelNum < bridgeNum
   const netBridge = bridgeNum - fuelNum
+  const hasBridgedFpc = !!BRIDGED_FPC_ADDRESS
 
   // Check which USD preset is currently selected (if any)
   const activePreset = USD_PRESETS.find(
@@ -70,23 +78,57 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
           />
         </div>
       </div>
-      <p className='text-xs text-latest-grey-500 mt-1'>
-        Current balance: {feeJuiceBalance ?? '--'} FJ
-      </p>
+      <div className='text-xs text-latest-grey-500 mt-1 space-y-0.5'>
+        <div className='flex justify-between'>
+          <span>Public Fee Juice:</span>
+          <span className='font-semibold'>{feeJuiceBalance ?? '--'}</span>
+        </div>
+        {hasBridgedFpc && (
+          <div className='flex justify-between'>
+            <span>Private Fee Juice:</span>
+            <span className='font-semibold'>{privateFeeJuiceBalance ?? '--'}</span>
+          </div>
+        )}
+      </div>
 
       {fuelEnabled && (
         <div className='mt-3 space-y-2'>
-          <div className='flex items-center gap-1.5'>
+          {hasBridgedFpc && (
+            <div className='flex rounded-md overflow-hidden border border-gray-200 text-xs'>
+              <button
+                onClick={() => onFuelTypeChange('public')}
+                className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
+                  fuelType === 'public'
+                    ? 'bg-black text-white'
+                    : 'bg-white text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                Public
+              </button>
+              <button
+                onClick={() => onFuelTypeChange('private')}
+                className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
+                  fuelType === 'private'
+                    ? 'bg-black text-white'
+                    : 'bg-white text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                Private
+              </button>
+            </div>
+          )}
+
+          <div className='flex items-center gap-2'>
             <input
               type='text'
               inputMode='decimal'
-              placeholder={`${tokenSymbol} amount`}
+              placeholder={`Amount in ${tokenSymbol}`}
               value={fuelAmount}
               onChange={(e) => {
                 const v = e.target.value
                 if (v === '' || !isNaN(Number(v))) onAmountChange(v)
               }}
-              className='min-w-0 flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500'
+              className='flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500'
             />
             {USD_PRESETS.map((usd) => {
               const tokenEquiv = usdToTokenAmount(usd, tokenSymbol)
@@ -95,7 +137,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                   key={usd}
                   onClick={() => onAmountChange(tokenEquiv)}
                   title={`${tokenEquiv} ${tokenSymbol}`}
-                  className={`flex-shrink-0 px-2 py-1 text-xs rounded border ${
+                  className={`px-2 py-1 text-xs rounded border ${
                     activePreset === usd
                       ? 'border-blue-500 bg-blue-50 text-blue-600'
                       : 'border-gray-300 text-gray-600 hover:border-gray-400'

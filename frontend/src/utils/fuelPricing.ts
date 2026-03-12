@@ -5,8 +5,6 @@
  * TODO: Replace mock price feeds with CoinGecko / DEX oracle for mainnet.
  */
 
-import { parseUnits } from 'viem'
-
 export const FEE_JUICE_DECIMALS = 18
 export const MOCK_FUEL_SWAP_RATE = 10n ** 18n // 1e18 = "1 token buys 1 FJ"
 
@@ -48,7 +46,7 @@ export function computeFuelOutput(
   inputDecimals: number,
   _tokenSymbol: string,
 ): bigint {
-  const raw = parseUnits(humanAmount, inputDecimals)
+  const raw = BigInt(Math.floor(Number(humanAmount) * 10 ** inputDecimals))
   return computeSwapOutput(raw, inputDecimals)
 }
 

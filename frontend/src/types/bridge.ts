@@ -17,7 +17,7 @@ export interface Token {
   symbol: string;
   decimals: number;
   address: string;
-  // Bridge contract info (populated from deployments.json)
+  // Bridge contract info (populated from deployed-tokens.json)
   l1TokenContract?: string;
   l2TokenContract?: string;
   l1PortalContract?: string;

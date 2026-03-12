@@ -20,6 +20,7 @@ import {
   useL2MintSoulboundToken,
   useL2TokenBalance,
   useL2FeeJuiceBalance,
+  useL2PrivateFeeJuiceBalance,
   useL2WithdrawTokensToL1,
   useL1ContractAddresses,
   useL2NodeIsReady,
@@ -35,20 +36,12 @@ import {
   Token as TokenType,
 } from '@/types/bridge'
 import BridgeSection from '@/components/BridgeSection'
-// import TransactionBreakdown from '@/components/TransactionBreakdown'
+import TransactionBreakdown from '@/components/TransactionBreakdown'
 import BridgeFooter from '@/components/BridgeFooter'
 import BridgeHeader from '@/components/BridgeHeader'
-// import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import BridgeActionButton from '@/components/BridgeActionButton'
-import {
-  L1_CHAIN_ID,
-  L1_NETWORKS,
-  L2_NETWORKS,
-  L1_TOKENS,
-  L2_TOKENS,
-  getL2PairedToken,
-  getL1PairedToken,
-} from '@/config'
+import { L1_CHAIN_ID, L1_NETWORKS, L2_NETWORKS, L1_TOKENS, L2_TOKENS, getL2PairedToken, getL1PairedToken } from '@/config'
 import MetaMaskPrompt from '@/components/model/MetaMaskPrompt'
 import BalanceCard from '@/components/BalanceCard'
 import { logInfo, logError } from '@/utils/datadog'
@@ -69,11 +62,11 @@ import {
   BRIDGE_AND_FUEL_ADDRESS,
 } from '@/config'
 
-// const variants = {
-//   hidden: { opacity: 0, y: 100 },
-//   enter: { opacity: 1, y: 0 },
-//   exit: { opacity: 0, y: -100 },
-// }
+const variants = {
+  hidden: { opacity: 0, y: 100 },
+  enter: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -100 },
+}
 
 export default function Home() {
   const router = useRouter()
@@ -81,9 +74,8 @@ export default function Home() {
   // UI state
   const [selectNetwork, setSelectNetwork] = useState<boolean>(false)
   const [selectToken, setSelectToken] = useState<boolean>(false)
- console.log("selectToken ", selectToken);
   const [isFromSection, setIsFromSection] = useState<boolean>(true)
-  // const [showBreakdown, setShowBreakdown] = useState(false)
+  const [showBreakdown, setShowBreakdown] = useState(false)
   const [mounted, setMounted] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const [inputAmount, setInputAmount] = useState('')
@@ -92,7 +84,7 @@ export default function Home() {
   // Operational state
   const [showSBTModal, setShowSBTModal] = useState(false)
   const [currentSBTChain, setCurrentSBTChain] = useState<'Ethereum' | 'Aztec'>(
-    'Ethereum',
+    'Ethereum'
   )
   const [bridgeCompleted, setBridgeCompleted] = useState(false)
 
@@ -112,8 +104,10 @@ export default function Home() {
     reset: resetBridgeStore,
     fuelEnabled,
     fuelAmount,
+    fuelType,
     setFuelEnabled,
     setFuelAmount,
+    setFuelType,
   } = useBridgeStore()
 
   // Get wallet state from useWalletStore
@@ -139,6 +133,7 @@ export default function Home() {
     availableAccounts,
     selectAccount,
   } = useWalletStore()
+
 
   // Get UI state from walletStore
   const {
@@ -176,18 +171,13 @@ export default function Home() {
 
   // native token
   const sepoliaNativeTokens = l1TokenBalances.find(
-    (token) =>
-      token.type === 'native' && token.network?.chainId === L1_CHAIN_ID,
+    (token) => token.type === 'native' && token.network?.chainId === L1_CHAIN_ID
   )
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted
 
   const selectedFromToken = bridgeConfig.from.token
   const l1Balance = l1TokenBalances.find(
-    (token) =>
-      token.type === 'erc20' &&
-      token.network?.chainId === L1_CHAIN_ID &&
-      token.address ===
-        (selectedFromToken?.l1TokenContract ?? L1_TOKENS[0]?.l1TokenContract),
+    (token) => token.type === 'erc20' && token.network?.chainId === L1_CHAIN_ID && token.address === (selectedFromToken?.l1TokenContract ?? L1_TOKENS[0]?.l1TokenContract)
   )?.balance_formatted
 
   // const { data: l1NativeBalance } = useL1NativeBalance()
@@ -216,6 +206,7 @@ export default function Home() {
   const l2PublicBalance = l2Balance?.publicBalance
   const { data: feeJuiceBalance, refetch: refetchFeeJuiceBalance } =
     useL2FeeJuiceBalance()
+  const { data: privateFeeJuiceBalance } = useL2PrivateFeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
     useL2MintSoulboundToken(mintL2SBTOnSuccess)
@@ -224,16 +215,12 @@ export default function Home() {
   const handleBridgeSuccess = useCallback(
     (_data: any) => {
       notify.promise(
-        Promise.all([
-          refetchL1Balance(),
-          refetchL2Balance(),
-          refetchFeeJuiceBalance(),
-        ]),
+        Promise.all([refetchL1Balance(), refetchL2Balance(), refetchFeeJuiceBalance()]),
         {
-          pending: 'Refreshing balances...',
+          pending: 'Refreshing L1 and L2 balances...',
           success: 'Balances updated',
           error: 'Failed to refresh balances',
-        },
+        }
       )
       setBridgeConfig({
         ...bridgeConfig,
@@ -245,14 +232,7 @@ export default function Home() {
         setBridgeCompleted(false)
       }, 3000)
     },
-    [
-      refetchL1Balance,
-      refetchL2Balance,
-      refetchFeeJuiceBalance,
-      setBridgeConfig,
-      bridgeConfig,
-      notify,
-    ],
+    [refetchL1Balance, refetchL2Balance, refetchFeeJuiceBalance, setBridgeConfig, bridgeConfig, notify]
   )
 
   const { mutate: bridgeTokensToL2, isPending: bridgeTokensToL2Pending } =
@@ -276,9 +256,8 @@ export default function Home() {
 
   // External faucet handler
   const handleExternalFaucet = () => {
-    const googleFaucetUrl =
-      'https://cloud.google.com/application/web3/faucet/ethereum/sepolia'
-
+    const googleFaucetUrl = 'https://cloud.google.com/application/web3/faucet/ethereum/sepolia'
+    
     // Log faucet redirect to Google
     logInfo('Faucet redirect to Google initiated', {
       walletType: WalletType.WAAP,
@@ -292,7 +271,7 @@ export default function Home() {
       userAction: 'faucet_redirect',
       network: 'Ethereum Sepolia',
     })
-
+    
     window.open(googleFaucetUrl, '_blank')
   }
 
@@ -312,14 +291,9 @@ export default function Home() {
     updateToken(section, token)
     // Auto-pair: set the counterpart on the other side
     const oppositeSection = getOppositeSection()
-    const paired =
-      section === 'from'
-        ? bridgeConfig.direction === BridgeDirection.L1_TO_L2
-          ? getL2PairedToken(token)
-          : getL1PairedToken(token)
-        : bridgeConfig.direction === BridgeDirection.L1_TO_L2
-          ? getL1PairedToken(token)
-          : getL2PairedToken(token)
+    const paired = section === 'from'
+      ? (bridgeConfig.direction === BridgeDirection.L1_TO_L2 ? getL2PairedToken(token) : getL1PairedToken(token))
+      : (bridgeConfig.direction === BridgeDirection.L1_TO_L2 ? getL1PairedToken(token) : getL2PairedToken(token))
     if (paired) {
       updateToken(oppositeSection, paired)
     }
@@ -348,7 +322,7 @@ export default function Home() {
         'error',
         `Error minting SBT: ${
           error instanceof Error ? error.message : 'Unknown error'
-        }`,
+        }`
       )
     }
   }
@@ -382,10 +356,11 @@ export default function Home() {
         'error',
         `Failed to connect wallet: ${
           error instanceof Error ? error.message : 'Unknown error'
-        }`,
+        }`
       )
     }
   }
+
 
   // Prefetch routes this page navigates to
   useEffect(() => {
@@ -456,8 +431,7 @@ export default function Home() {
             onClose={() => setShowWalletInstallPrompt(false)}
           />
         )}
-        {(walletConnectionPhase === 'discovering' ||
-          walletConnectionPhase === 'selecting') && (
+        {(walletConnectionPhase === 'discovering' || walletConnectionPhase === 'selecting') && (
           <WalletDiscoveryModal
             isOpen={true}
             wallets={discoveredWallets}
@@ -548,36 +522,68 @@ export default function Home() {
           </div>
 
           <div className='px-5'>
-            <BridgeSection
-              bridgeConfig={bridgeConfig}
-              setIsFromSection={setIsFromSection}
-              setSelectNetwork={setSelectNetwork}
-              setSelectToken={setSelectToken}
-              inputAmount={bridgeConfig.amount}
-              setInputAmount={handleAmountChange}
-              l1NativeBalance={l1NativeBalance}
-              l1Balance={l1Balance}
-              l2Balance={l2Balance}
-              direction={bridgeConfig.direction}
-              inputRef={inputRef as React.RefObject<HTMLInputElement>}
-              onSwap={swapDirection}
-              isPrivacyModeEnabled={isPrivacyModeEnabled}
-              feeJuiceBalance={feeJuiceBalance}
-            />
-            {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
-              !isPrivacyModeEnabled &&
-              !!BRIDGE_AND_FUEL_ADDRESS && (
-                <FuelToggle
-                  fuelEnabled={fuelEnabled}
-                  fuelAmount={fuelAmount}
-                  bridgeAmount={bridgeConfig.amount}
-                  tokenSymbol={bridgeConfig.from.token?.symbol ?? 'USDC'}
-                  tokenDecimals={bridgeConfig.from.token?.decimals ?? 6}
-                  onToggle={setFuelEnabled}
-                  onAmountChange={setFuelAmount}
-                  feeJuiceBalance={feeJuiceBalance}
-                />
+            <AnimatePresence mode='popLayout'>
+              {!showBreakdown ? (
+                <motion.div
+                  key='bridge'
+                  initial='hidden'
+                  animate='enter'
+                  exit='exit'
+                  variants={variants}
+                  transition={{ ease: 'easeInOut', duration: 0.5 }}>
+                  <BridgeSection
+                    bridgeConfig={bridgeConfig}
+                    setIsFromSection={setIsFromSection}
+                    setSelectNetwork={setSelectNetwork}
+                    setSelectToken={setSelectToken}
+                    inputAmount={bridgeConfig.amount}
+                    setInputAmount={handleAmountChange}
+                    l1NativeBalance={l1NativeBalance}
+                    l1Balance={l1Balance}
+                    l2Balance={l2Balance }
+                    direction={bridgeConfig.direction}
+                    inputRef={inputRef as React.RefObject<HTMLInputElement>}
+                    onSwap={swapDirection}
+                    isPrivacyModeEnabled={isPrivacyModeEnabled}
+                    feeJuiceBalance={feeJuiceBalance}
+                  />
+                  {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
+                    !isPrivacyModeEnabled &&
+                    !!BRIDGE_AND_FUEL_ADDRESS && (
+                    <FuelToggle
+                      fuelEnabled={fuelEnabled}
+                      fuelAmount={fuelAmount}
+                      bridgeAmount={bridgeConfig.amount}
+                      tokenSymbol={bridgeConfig.from.token?.symbol ?? 'USDC'}
+                      tokenDecimals={bridgeConfig.from.token?.decimals ?? 6}
+                      onToggle={setFuelEnabled}
+                      onAmountChange={setFuelAmount}
+                      feeJuiceBalance={feeJuiceBalance}
+                      privateFeeJuiceBalance={privateFeeJuiceBalance}
+                      fuelType={fuelType}
+                      onFuelTypeChange={setFuelType}
+                    />
+                  )}
+                  <TransactionBreakdown
+                    isOpen={false}
+                    onToggle={() => setShowBreakdown(true)}
+                  />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key='breakdown'
+                  initial='hidden'
+                  animate='enter'
+                  exit='exit'
+                  variants={variants}
+                  transition={{ ease: 'easeInOut', duration: 0.5 }}>
+                  <TransactionBreakdown
+                    isOpen={true}
+                    onToggle={() => setShowBreakdown(false)}
+                  />
+                </motion.div>
               )}
+            </AnimatePresence>
           </div>
 
           <div className='self-end'>
