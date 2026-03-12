@@ -2,6 +2,8 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
 import type { ContractFunctionPattern } from '@aztec/aztec.js/wallet'
 
+const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
+
 function pattern(
   contract: AztecAddress,
   fn: string,
@@ -38,6 +40,14 @@ const BRIDGE_TRANSACTION_METHODS = [
   'exit_to_l1_private',
 ] as const
 
+const FEE_JUICE_SIMULATION_METHODS = [
+  'balance_of_public',
+] as const
+
+const FEE_JUICE_TRANSACTION_METHODS = [
+  'claim',
+] as const
+
 const BRIDGED_FPC_SIMULATION_METHODS = [
   'balance_of',
 ] as const
@@ -59,6 +69,8 @@ export function buildCapabilityManifest() {
     .filter((addr): addr is string => !!addr)
     .map((addr) => AztecAddress.fromString(addr))
 
+  const feeJuiceAddress = AztecAddress.fromString(FEE_JUICE_L2_ADDRESS)
+
   const fpcAddress = BRIDGED_FPC_ADDRESS
     ? AztecAddress.fromString(BRIDGED_FPC_ADDRESS)
     : null
@@ -66,6 +78,7 @@ export function buildCapabilityManifest() {
   const allContracts = [
     ...tokenAddresses,
     ...bridgeAddresses,
+    feeJuiceAddress,
     ...(fpcAddress ? [fpcAddress] : []),
   ]
 
@@ -77,9 +90,12 @@ export function buildCapabilityManifest() {
       ? patternsFor(fpcAddress, [...BRIDGED_FPC_SIMULATION_METHODS])
       : []),
   ]
-  const simulationTransactions: ContractFunctionPattern[] = tokenAddresses.flatMap(
-    (addr) => patternsFor(addr, [...TOKEN_TRANSACTION_SIMULATION_METHODS]),
-  )
+  const simulationTransactions: ContractFunctionPattern[] = [
+    ...tokenAddresses.flatMap(
+      (addr) => patternsFor(addr, [...TOKEN_TRANSACTION_SIMULATION_METHODS]),
+    ),
+    ...patternsFor(feeJuiceAddress, [...FEE_JUICE_SIMULATION_METHODS]),
+  ]
 
   const transactionScope: ContractFunctionPattern[] = [
     ...tokenAddresses.flatMap((addr) =>
@@ -88,6 +104,7 @@ export function buildCapabilityManifest() {
     ...bridgeAddresses.flatMap((addr) =>
       patternsFor(addr, [...BRIDGE_TRANSACTION_METHODS]),
     ),
+    ...patternsFor(feeJuiceAddress, [...FEE_JUICE_TRANSACTION_METHODS]),
     ...(fpcAddress
       ? patternsFor(fpcAddress, [...BRIDGED_FPC_TRANSACTION_METHODS])
       : []),

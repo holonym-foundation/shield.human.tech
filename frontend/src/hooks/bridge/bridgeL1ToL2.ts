@@ -206,6 +206,8 @@ export async function executeL2Claim(
     maxAttempts?: number
     retryDelayMs?: number
     bruteForceMaxIndex?: number
+    /** Max time (ms) to wait for the wallet to respond before timing out. Default: 5 min. */
+    walletTimeoutMs?: number
     /** Called before each claim attempt. */
     onAttempt?: (attempt: number, maxAttempts: number) => void
     /** Called when a retryable "nonexistent message" error occurs before waiting. */
@@ -219,8 +221,23 @@ export async function executeL2Claim(
   const maxAttempts = options?.maxAttempts ?? 5
   const retryDelayMs = options?.retryDelayMs ?? 120_000
   const bruteForceMaxIndex = options?.bruteForceMaxIndex ?? 64
+  const walletTimeoutMs = options?.walletTimeoutMs ?? 5 * 60_000 // 5 min default
 
   const method = isPrivacyModeEnabled ? 'claim_private' : 'claim_public'
+
+  /** Race the wallet call against a timeout so we never hang forever. */
+  const callWithTimeout = <T>(promise: Promise<T>): Promise<T> =>
+    Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(
+            'Wallet did not respond in time. Check for a hidden wallet popup behind your browser window.',
+          )),
+          walletTimeoutMs,
+        ),
+      ),
+    ])
 
   if (messageLeafIndex != null) {
     // ── Normal path: known leaf index, retry on "nonexistent message" ──
@@ -230,16 +247,18 @@ export async function executeL2Claim(
         options?.onAttempt?.(attempt, maxAttempts)
         console.log(`[L1→L2] Claim attempt ${attempt}/${maxAttempts}...`)
 
-        result = await walletAdapter.executeCall(
-          walletAdapter.bridgeAddress,
-          method,
-          [
-            AztecAddress.fromString(aztecAddress),
-            amount,
-            claimSecret,
-            messageLeafIndex,
-          ],
-          { contractType: 'bridge', ...options?.feeOption },
+        result = await callWithTimeout(
+          walletAdapter.executeCall(
+            walletAdapter.bridgeAddress,
+            method,
+            [
+              AztecAddress.fromString(aztecAddress),
+              amount,
+              claimSecret,
+              messageLeafIndex,
+            ],
+            { contractType: 'bridge', ...options?.feeOption },
+          ),
         )
 
         console.log(`[L1→L2] Claim succeeded on attempt ${attempt}`)
@@ -248,13 +267,16 @@ export async function executeL2Claim(
         const errMsg = err instanceof Error ? err.message : String(err)
         const isNonexistentMsg =
           errMsg.includes('nonexistent L1-to-L2 message') ||
-          errMsg.includes('l1_to_l2_msg_exists')
-        if (isNonexistentMsg && attempt < maxAttempts) {
-          options?.onRetry?.(attempt, maxAttempts, retryDelayMs)
+          errMsg.includes('l1_to_l2_msg_exists') ||
+          errMsg.includes('No L1 to L2 message found')
+        const isWalletTimeout = errMsg.includes('Wallet did not respond in time')
+        if ((isNonexistentMsg || isWalletTimeout) && attempt < maxAttempts) {
+          const delay = isWalletTimeout ? 5_000 : retryDelayMs
+          options?.onRetry?.(attempt, maxAttempts, delay)
           console.warn(
-            `[L1→L2] Claim attempt ${attempt} failed (message not synced to wallet node), retrying in ${retryDelayMs / 1000}s...`,
+            `[L1→L2] Claim attempt ${attempt} failed (${isWalletTimeout ? 'wallet timeout' : 'message not synced'}), retrying in ${delay / 1000}s...`,
           )
-          await wait(retryDelayMs)
+          await wait(delay)
           continue
         }
         throw err
@@ -267,16 +289,18 @@ export async function executeL2Claim(
     for (let idx = 0; idx < bruteForceMaxIndex; idx++) {
       try {
         console.log('[L1→L2] Trying leafIndex=', idx)
-        const result = await walletAdapter.executeCall(
-          walletAdapter.bridgeAddress,
-          method,
-          [
-            AztecAddress.fromString(aztecAddress),
-            amount,
-            claimSecret,
-            BigInt(idx),
-          ],
-          { contractType: 'bridge' },
+        const result = await callWithTimeout(
+          walletAdapter.executeCall(
+            walletAdapter.bridgeAddress,
+            method,
+            [
+              AztecAddress.fromString(aztecAddress),
+              amount,
+              claimSecret,
+              BigInt(idx),
+            ],
+            { contractType: 'bridge' },
+          ),
         )
         console.log('[L1→L2] Claim succeeded with leafIndex=', idx)
         return {
