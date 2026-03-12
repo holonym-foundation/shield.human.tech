@@ -1,13 +1,17 @@
 /**
  * Attestation signing utilities for POCH (clean hands) and Passport flows.
  *
- * These mirror the signing logic in bridge-script/index-devnet-compliant.ts
- * and produce signatures that are verified on-chain by TokenPortal.sol (L1)
- * and token_bridge/main.nr (L2).
+ * L1 signatures use ECDSA/secp256k1 (verified by TokenPortal.sol).
+ * L2 signatures use Schnorr/Grumpkin (verified by token_bridge/main.nr).
  */
 
 import { keccak256, encodePacked, type Hex } from 'viem'
 import { privateKeyToAccount, signMessage } from 'viem/accounts'
+import { Schnorr } from '@aztec/foundation/crypto/schnorr'
+import { deriveSigningKey } from '@aztec/stdlib/keys'
+import { computeInnerAuthWitHash } from '@aztec/stdlib/auth-witness'
+import { Fr } from '@aztec/aztec.js/fields'
+import type { GrumpkinScalar } from '@aztec/foundation/curves/grumpkin'
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -21,6 +25,18 @@ function getPassportSignerPrivateKey(): Hex {
   const key = process.env.PASSPORT_SIGNER_PRIVATE_KEY
   if (!key) throw new Error('PASSPORT_SIGNER_PRIVATE_KEY not set')
   return (key.startsWith('0x') ? key : `0x${key}`) as Hex
+}
+
+function getL2PochAttesterPrivateKey(): string {
+  const key = process.env.L2_POCH_ATTESTER_PRIVATE_KEY
+  if (!key) throw new Error('L2_POCH_ATTESTER_PRIVATE_KEY not set')
+  return key.startsWith('0x') ? key : `0x${key}`
+}
+
+function getL2PassportSignerPrivateKey(): string {
+  const key = process.env.L2_PASSPORT_SIGNER_PRIVATE_KEY
+  if (!key) throw new Error('L2_PASSPORT_SIGNER_PRIVATE_KEY not set')
+  return key.startsWith('0x') ? key : `0x${key}`
 }
 
 export function getCircuitId(): bigint {
@@ -47,7 +63,30 @@ export function getPassportSignerAddress(): string {
   return privateKeyToAccount(getPassportSignerPrivateKey()).address
 }
 
-// ─── POCH (Clean Hands) attestation ──────────────────────────────────────────
+// ─── L2 Schnorr key management ──────────────────────────────────────────────
+
+const schnorrInstance = new Schnorr()
+
+let l2PochSigningKey: GrumpkinScalar | null = null
+let l2PassportSigningKey: GrumpkinScalar | null = null
+
+async function getL2PochSigningKey(): Promise<GrumpkinScalar> {
+  if (!l2PochSigningKey) {
+    const secretKey = Fr.fromString(getL2PochAttesterPrivateKey())
+    l2PochSigningKey = deriveSigningKey(secretKey)
+  }
+  return l2PochSigningKey
+}
+
+async function getL2PassportSigningKey(): Promise<GrumpkinScalar> {
+  if (!l2PassportSigningKey) {
+    const secretKey = Fr.fromString(getL2PassportSignerPrivateKey())
+    l2PassportSigningKey = deriveSigningKey(secretKey)
+  }
+  return l2PassportSigningKey
+}
+
+// ─── L1 POCH (Clean Hands) attestation (ECDSA) ─────────────────────────────
 
 /**
  * Sign a clean hands attestation for the L1 TokenPortal.
@@ -74,7 +113,7 @@ export async function signCleanHandsAttestation(params: {
   return signature
 }
 
-// ─── Passport attestation ────────────────────────────────────────────────────
+// ─── L1 Passport attestation (ECDSA) ────────────────────────────────────────
 
 /**
  * Sign a passport attestation for the L1 TokenPortal.
@@ -106,6 +145,58 @@ export async function signPassportAttestation(params: {
     message: { raw: digest },
   })
   return signature
+}
+
+// ─── L2 POCH attestation (Schnorr/Grumpkin) ─────────────────────────────────
+
+/**
+ * Sign a clean hands attestation for the L2 token bridge using Schnorr/Grumpkin.
+ *
+ * L2 verifies: compute_inner_authwit_hash([circuitId, actionId, nonce, userAddress])
+ * then schnorr::verify_signature against stored Grumpkin pubkey.
+ */
+export async function signL2CleanHandsAttestation(params: {
+  circuitId: bigint
+  actionId: bigint
+  nonce: bigint
+  userAztecAddress: string // hex string of the Aztec address
+}): Promise<number[]> {
+  const signingKey = await getL2PochSigningKey()
+  const hash = await computeInnerAuthWitHash([
+    new Fr(params.circuitId),
+    new Fr(params.actionId),
+    new Fr(params.nonce),
+    new Fr(BigInt(params.userAztecAddress)),
+  ])
+  const sig = await schnorrInstance.constructSignature(hash.toBuffer(), signingKey)
+  return [...sig.toBuffer()]
+}
+
+// ─── L2 Passport attestation (Schnorr/Grumpkin) ─────────────────────────────
+
+/**
+ * Sign a passport attestation for the L2 token bridge using Schnorr/Grumpkin.
+ *
+ * L2 verifies: compute_inner_authwit_hash([userAddress, maxAmount, nonce, deadline, bridgeAddress])
+ * then schnorr::verify_signature against stored Grumpkin pubkey.
+ */
+export async function signL2PassportAttestation(params: {
+  userAztecAddress: string // hex string of the Aztec address
+  maxAmount: bigint
+  nonce: bigint
+  deadline: bigint
+  bridgeAddress: string // hex string of the bridge contract address
+}): Promise<number[]> {
+  const signingKey = await getL2PassportSigningKey()
+  const hash = await computeInnerAuthWitHash([
+    new Fr(BigInt(params.userAztecAddress)),
+    new Fr(params.maxAmount),
+    new Fr(params.nonce),
+    new Fr(params.deadline),
+    new Fr(BigInt(params.bridgeAddress)),
+  ])
+  const sig = await schnorrInstance.constructSignature(hash.toBuffer(), signingKey)
+  return [...sig.toBuffer()]
 }
 
 // ─── Holonym API ─────────────────────────────────────────────────────────────

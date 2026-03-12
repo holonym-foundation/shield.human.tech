@@ -5,6 +5,7 @@ import { enforceAddressBinding, getNextNonce } from '@/lib/address-binding'
 import {
   fetchPassportScore,
   signPassportAttestation,
+  signL2PassportAttestation,
   getPassportMaxAmount,
   getPassportScoreThreshold,
 } from '@/lib/attestation'
@@ -15,10 +16,10 @@ import {
  * 1. Authenticate user (JWT)
  * 2. Enforce 1:1 address binding
  * 3. Fetch passport score from Gitcoin Passport API
- * 4. If score >= threshold, issue signed max-amount attestation
+ * 4. If score >= threshold, issue signed max-amount attestation (L1 ECDSA + L2 Schnorr)
  *
- * Body: { portalAddress: string, deadline?: number }
- * Returns: { signature, nonce, maxAmount, deadline, score, threshold }
+ * Body: { portalAddress: string, bridgeAddress?: string, deadline?: number }
+ * Returns: { l1Signature, l2Signature, nonce, maxAmount, deadline, score, threshold }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -38,6 +39,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // bridgeAddress is needed for L2 Schnorr signing (message binding)
+    const bridgeAddress = body.bridgeAddress as string | undefined
 
     // 2. Enforce 1:1 address binding
     const bindingError = await enforceAddressBinding(l1Address, l2Address)
@@ -60,7 +64,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 4. Issue signed attestation
+    // 4. Issue signed attestation (L1 ECDSA + L2 Schnorr)
     const maxAmount = getPassportMaxAmount()
     const nonce = await getNextNonce(l1Address, 'passport')
 
@@ -69,7 +73,7 @@ export async function POST(request: NextRequest) {
       ? BigInt(body.deadline)
       : BigInt(Math.floor(Date.now() / 1000) + 3600)
 
-    const signature = await signPassportAttestation({
+    const l1Signature = await signPassportAttestation({
       userAddress: l1Address,
       maxAmount,
       nonce: BigInt(nonce),
@@ -77,8 +81,21 @@ export async function POST(request: NextRequest) {
       portalAddress,
     })
 
+    // L2 Schnorr signature (only if bridgeAddress provided)
+    let l2Signature: number[] | null = null
+    if (bridgeAddress) {
+      l2Signature = await signL2PassportAttestation({
+        userAztecAddress: l2Address,
+        maxAmount,
+        nonce: BigInt(nonce),
+        deadline: deadlineSeconds,
+        bridgeAddress,
+      })
+    }
+
     return NextResponse.json({
-      signature,
+      l1Signature,
+      l2Signature,
       nonce,
       maxAmount: maxAmount.toString(),
       deadline: deadlineSeconds.toString(),

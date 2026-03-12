@@ -52,7 +52,9 @@ import {
   waitForReceiptAndExtractEvent,
   persistReceiptToBackend,
   finalizeLocalStorageAfterDeposit,
+  fetchPochAttestation,
   type FuelParams,
+  type PochAttestationData,
 } from './bridge/bridgeL1ToL2'
 import {
   BRIDGE_AND_FUEL_ADDRESS,
@@ -651,6 +653,15 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       // ─── Step 3: Check allowance and approve ────────────────────────
       await checkAndApproveAllowance(l1Address, amount, selectedToken, fuel)
 
+      // ─── Step 3b: Fetch POCH attestation for private deposits ────────
+      let attestation: PochAttestationData | undefined
+      if (isPrivacyModeEnabled) {
+        const portalAddress = selectedToken?.l1PortalContract ?? ''
+        console.log('[L1→L2] Fetching POCH attestation for private deposit...')
+        attestation = await fetchPochAttestation(portalAddress)
+        console.log('[L1→L2] POCH attestation received, nonce:', attestation.nonce)
+      }
+
       // ─── Step 4: Send L1 deposit transaction ────────────────────────
       // ═══ DANGER ZONE: tokens are locked on L1 after this ═══
       notify('warn', {
@@ -668,6 +679,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         operationId: backup.operationId,
         selectedToken,
         fuel: fuel && backup.fuelSecretHash ? { ...fuel, fuelSecretHash: backup.fuelSecretHash } : undefined,
+        attestation,
       })
       // 🔒 Funds are now POTENTIALLY locked on L1 — from this point, the outer catch must
       // NEVER mark the operation as 'failed'.

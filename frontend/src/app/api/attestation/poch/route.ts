@@ -5,6 +5,7 @@ import { enforceAddressBinding, getNextNonce } from '@/lib/address-binding'
 import {
   checkCleanHands,
   signCleanHandsAttestation,
+  signL2CleanHandsAttestation,
   getCircuitId,
   getDefaultActionId,
 } from '@/lib/attestation'
@@ -15,10 +16,10 @@ import {
  * 1. Authenticate user (JWT)
  * 2. Enforce 1:1 address binding (l1Address <-> l2Address)
  * 3. Verify clean hands via Holonym sandbox API
- * 4. Issue signed attestation from our POCH attester
+ * 4. Issue signed attestation from our POCH attester (L1 ECDSA + L2 Schnorr)
  *
  * Body: { portalAddress: string }
- * Returns: { signature, nonce, circuitId, actionId }
+ * Returns: { l1Signature, l2Signature, nonce, circuitId, actionId }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -56,19 +57,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 4. Get next nonce and sign attestation
+    // 4. Get next nonce and sign attestations (L1 ECDSA + L2 Schnorr)
     const circuitId = getCircuitId()
     const nonce = await getNextNonce(l1Address, 'poch')
 
-    const signature = await signCleanHandsAttestation({
+    const l1Signature = await signCleanHandsAttestation({
       nonce: BigInt(nonce),
       circuitId,
       actionId,
       userAddress: l1Address,
     })
 
+    const l2Signature = await signL2CleanHandsAttestation({
+      circuitId,
+      actionId,
+      nonce: BigInt(nonce),
+      userAztecAddress: l2Address,
+    })
+
     return NextResponse.json({
-      signature,
+      l1Signature,
+      l2Signature,
       nonce,
       circuitId: circuitId.toString(),
       actionId: actionId.toString(),

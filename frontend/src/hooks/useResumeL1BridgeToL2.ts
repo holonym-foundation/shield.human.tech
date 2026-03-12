@@ -7,9 +7,10 @@ import { useToast } from './useToast'
 import { wait } from '@/utils'
 import { getAztecscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
 import { BridgeOperationStatus } from '@prisma/client'
-import { TokenPortalAbi } from '@aztec/l1-artifacts'
-import { extractEvent } from '@aztec/ethereum/utils'
-import { decodeEventLog } from 'viem'
+// @ts-ignore — JSON import from forge build output (custom compliant portal w/ attestation structs)
+import CustomTokenPortalJson from '../../../l1-contracts/out/TokenPortal.sol/TokenPortal.json'
+const CustomTokenPortalAbi = CustomTokenPortalJson.abi
+import { decodeEventLog, parseEventLogs } from 'viem'
 import {
   LS_KEY_BRIDGE_DEPOSITS,
   patchOperationWithRetry,
@@ -44,25 +45,15 @@ async function recoverFromReceipt(
     ? 'DepositToAztecPrivate'
     : 'DepositToAztecPublic'
 
-  const privateFilter = (log: any) =>
-    log.args.amount === amount &&
-    log.args.secretHashForL2MessageConsumption === claimSecretHash
+  const parsedLogs = parseEventLogs({ abi: CustomTokenPortalAbi, logs: receipt.logs })
+  const depositEvent: any = parsedLogs.find((l: any) => l.eventName === eventName)
 
-  const publicFilter = (log: any) =>
-    log.args.secretHash === claimSecretHash &&
-    log.args.amount === amount &&
-    log.args.to === aztecAddress
+  if (!depositEvent) {
+    throw new Error(`${eventName} event not found in receipt ${l1TxHash}`)
+  }
 
-  const log = extractEvent(
-    receipt.logs,
-    portalAddress as `0x${string}`,
-    TokenPortalAbi,
-    eventName,
-    isPrivacyModeEnabled ? privateFilter : publicFilter,
-  )
-
-  const messageHash = log.args.key.toString()
-  const messageLeafIndex = log.args.index.toString()
+  const messageHash = depositEvent.args.key.toString()
+  const messageLeafIndex = depositEvent.args.index.toString()
   console.log('[Resume L1→L2] Recovered from receipt: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
   return { messageHash, messageLeafIndex }
 }
@@ -99,16 +90,17 @@ async function recoverFromBlockScan(
   for (const rawLog of logs) {
     try {
       const decoded = decodeEventLog({
-        abi: TokenPortalAbi,
+        abi: CustomTokenPortalAbi,
         data: rawLog.data,
         topics: rawLog.topics,
       })
       if (decoded.eventName !== targetEventName) continue
 
       const args = decoded.args as any
+      // Custom portal event uses `secretHash` for both public and private events
       const matches = isPrivacyModeEnabled
-        ? args.amount === amount && args.secretHashForL2MessageConsumption === claimSecretHash
-        : args.secretHash === claimSecretHash && args.amount === amount && args.to === aztecAddress
+        ? args.secretHash === claimSecretHash
+        : args.secretHash === claimSecretHash && args.to === aztecAddress
 
       if (matches) {
         const messageHash = args.key.toString()
