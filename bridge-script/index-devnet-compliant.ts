@@ -130,6 +130,7 @@ import {
   saveTokenToDeployment,
   saveFuelInfraToDeployment,
   loadExistingTokens,
+  loadActiveDeployment,
   copyToFrontend,
   type DeployedToken,
   type L1ContractAddresses,
@@ -871,6 +872,175 @@ async function testPublicBridgeFlow(
     .simulate({ from: ownerAztecAddress })
   logger.info(`[L2] Public balance: ${balance}`)
   logger.info(`Public bridge flow (deposit + claim) successful!`)
+}
+
+/**
+ * Test: BridgeAndFuel — atomic swap-for-gas + public deposit in one L1 tx.
+ * Only works for public deposits (BridgeAndFuel calls depositToAztecPublic).
+ * NOT compatible with private deposits — BridgeAndFuel would be msg.sender to the
+ * portal, so attestation signatures (signed over user address) would fail ECDSA recovery,
+ * and the ITokenPortal interface doesn't expose depositToAztecPrivate.
+ */
+async function testBridgeWithFuelFlow(
+  deployed: DeployedCompliantToken,
+  wallet: EmbeddedWallet,
+  ownerAztecAddress: AztecAddress,
+  l1Client: ExtendedViemWalletClient,
+  ownerEthAddress: string,
+  l1ContractAddresses: any,
+  sponsoredPaymentMethod: any,
+  node: any,
+  logger: Logger
+) {
+  logger.info(`\n=== Testing BridgeWithFuel flow (atomic swap + public deposit) ===`)
+
+  // Load fuel infra addresses from active deployment
+  const activeDeployment = loadActiveDeployment()
+  const bridgeAndFuelAddr = activeDeployment?.bridgeAndFuelAddress
+  const mockFuelSwapAddr = activeDeployment?.mockFuelSwapAddress
+  const feeJuicePortalAddr = (l1ContractAddresses as any).feeJuicePortalAddress?.toString()
+
+  if (!bridgeAndFuelAddr || !mockFuelSwapAddr) {
+    logger.warn('[BridgeWithFuel] Fuel infra not deployed — skipping test')
+    return
+  }
+  if (!feeJuicePortalAddr) {
+    logger.warn('[BridgeWithFuel] feeJuicePortalAddress not in l1ContractAddresses — skipping test')
+    return
+  }
+
+  logger.info(`[BridgeWithFuel] BridgeAndFuel: ${bridgeAndFuelAddr}`)
+  logger.info(`[BridgeWithFuel] MockFuelSwap:  ${mockFuelSwapAddr}`)
+  logger.info(`[BridgeWithFuel] FeeJuicePortal: ${feeJuicePortalAddr}`)
+
+  const l1Token = getContract({
+    address: deployed.l1TokenContract as `0x${string}`,
+    abi: TestERC20Abi,
+    client: l1Client as any,
+  }) as any
+
+  // Mint tokens for this test (only for TestERC20 — skip if pre-existing token)
+  const totalAmount = BigInt(100_000) // 100k units
+  const fuelAmount = BigInt(10_000)   // 10% for gas
+
+  const tokenConfig = TOKEN_CONFIGS.find(tc => tc.symbol === deployed.symbol)
+  if (!tokenConfig?.l1TokenAddress) {
+    logger.info(`[L1] Minting ${totalAmount} tokens for BridgeWithFuel test`)
+    const mintTx = await l1Token.write.mint([ownerEthAddress, totalAmount])
+    await l1Client.waitForTransactionReceipt({ hash: mintTx, timeout: getTimeouts().txTimeout })
+  }
+
+  // Approve BridgeAndFuel to pull totalAmount
+  logger.info(`[L1] Approving BridgeAndFuel to spend ${totalAmount} tokens`)
+  const approveTx = await l1Token.write.approve([bridgeAndFuelAddr as `0x${string}`, totalAmount])
+  await l1Client.waitForTransactionReceipt({ hash: approveTx, timeout: getTimeouts().txTimeout })
+
+  // Build secrets for both the token deposit and the fuel deposit
+  const tokenSecret = Fr.random()
+  const tokenSecretHash = await computeSecretHash(tokenSecret)
+  const fuelSecret = Fr.random()
+  const fuelSecretHash = await computeSecretHash(fuelSecret)
+
+  // Build swap calldata: MockFuelSwap.swap(inputToken, inputAmount, minOutput)
+  // For 1:1 rate with decimal normalization: minOutput = fuelAmount * 10^(18 - tokenDecimals)
+  const tokenDecimals = deployed.decimals
+  const minFuelOutput = fuelAmount * BigInt(10 ** (18 - tokenDecimals))
+
+  const swapData = encodeFunctionData({
+    abi: MockFuelSwapAbi,
+    functionName: 'swap',
+    args: [deployed.l1TokenContract as `0x${string}`, fuelAmount, minFuelOutput],
+  })
+
+  // Build BridgeAndFuel.bridgeWithFuel calldata
+  const bridgeWithFuelData = encodeFunctionData({
+    abi: BridgeAndFuelAbi,
+    functionName: 'bridgeWithFuel',
+    args: [
+      {
+        tokenPortal: deployed.l1PortalContract as `0x${string}`,
+        bridgeToken: deployed.l1TokenContract as `0x${string}`,
+        totalAmount,
+        fuelAmount,
+        aztecRecipient: ownerAztecAddress.toString() as `0x${string}`,
+        tokenSecretHash: tokenSecretHash.toString() as `0x${string}`,
+        fuelSecretHash: fuelSecretHash.toString() as `0x${string}`,
+        feeJuicePortal: feeJuicePortalAddr as `0x${string}`,
+        swapTarget: mockFuelSwapAddr as `0x${string}`,
+        swapAllowanceTarget: mockFuelSwapAddr as `0x${string}`,
+        minFuelOutput,
+      },
+      swapData,
+    ],
+  })
+
+  logger.info(`[L1] Sending bridgeWithFuel tx (total=${totalAmount}, fuel=${fuelAmount})`)
+  const txHash = await l1Client.sendTransaction({
+    to: bridgeAndFuelAddr as `0x${string}`,
+    data: bridgeWithFuelData,
+  })
+  const receipt = await l1Client.waitForTransactionReceipt({ hash: txHash, timeout: getTimeouts().txTimeout })
+  logger.info(`[L1] BridgeWithFuel tx confirmed: ${txHash}`)
+
+  // Parse BridgeWithFuel event to get token messageHash + leafIndex
+  const { parseEventLogs } = await import('viem')
+  const bridgeEvents = parseEventLogs({ abi: BridgeAndFuelAbi, logs: receipt.logs })
+  const bwfEvent: any = bridgeEvents.find((l: any) => l.eventName === 'BridgeWithFuel')
+  if (!bwfEvent) throw new Error('BridgeWithFuel event not found')
+
+  const { tokenKey, tokenIndex, tokenAmount, fuelKey, fuelIndex, fuelAmount: fuelReceived } = bwfEvent.args
+  logger.info(`[L1] BridgeWithFuel event: tokenAmount=${tokenAmount}, tokenKey=${tokenKey}, fuelReceived=${fuelReceived}`)
+
+  // Parse the DepositToAztecPublic event from the portal for the actual amountAfterFee
+  const portalLogs = parseEventLogs({ abi: CustomTokenPortalAbi, logs: receipt.logs })
+  const depositEvent: any = portalLogs.find((l: any) => l.eventName === 'DepositToAztecPublic')
+  if (!depositEvent) throw new Error('DepositToAztecPublic event not found in BridgeWithFuel tx')
+
+  const { amount: amountAfterFee, fee } = depositEvent.args
+  logger.info(`[L1] Portal event: amountAfterFee=${amountAfterFee}, fee=${fee}`)
+
+  // Poll for L1→L2 message sync (token deposit message)
+  const messageHashFr = Fr.fromString(tokenKey)
+  logger.info(`[L1→L2] Polling for token message sync...`)
+  const maxWaitMs = 20 * 60 * 1000
+  const startWait = Date.now()
+  while (Date.now() - startWait < maxWaitMs) {
+    try {
+      const messageBlock = await node.getL1ToL2MessageBlock(messageHashFr)
+      if (messageBlock !== undefined) {
+        logger.info(`[L1→L2] Token message synced at block ${messageBlock}`)
+        break
+      }
+    } catch (e) { /* retry */ }
+    logger.info(`[L1→L2] Waiting 2 min...`)
+    await wait(120_000)
+  }
+  await wait(120_000) // Final buffer
+
+  // Claim token deposit on L2
+  logger.info(`[L2] Claiming tokens publicly (from BridgeWithFuel deposit)`)
+  const l2BridgeContract = TokenBridgeContract.at(
+    AztecAddress.fromString(deployed.l2BridgeContract),
+    wallet
+  )
+
+  await l2BridgeContract.methods
+    .claim_public(ownerAztecAddress, amountAfterFee, tokenSecret, tokenIndex)
+    .send({
+      from: ownerAztecAddress,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: getTimeouts().txTimeout },
+    })
+
+  const l2TokenContract = TokenContract.at(
+    AztecAddress.fromString(deployed.l2TokenContract),
+    wallet
+  )
+  const newBalance = await l2TokenContract.methods
+    .balance_of_public(ownerAztecAddress)
+    .simulate({ from: ownerAztecAddress })
+  logger.info(`[L2] Public balance after BridgeWithFuel claim: ${newBalance}`)
+  logger.info(`BridgeWithFuel flow successful!`)
 }
 
 /**
@@ -1806,39 +1976,42 @@ async function main() {
 
   const rollupVersion = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
   const l2ChainId = nodeInfo.l1ChainId ^ rollupVersion
-  // Create deployment record (once, before the token loop)
-  const serializedNodeInfo: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(nodeInfo)) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const nested: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        nested[k] = v != null && typeof (v as any).toString === 'function' && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean'
-          ? (v as any).toString() : v
+  // Create deployment record (once, before the token loop) — skip in RUN_TESTS_ONLY
+  // to avoid creating a new empty deployment that shadows the existing one with tokens.
+  if (!RUN_TESTS_ONLY) {
+    const serializedNodeInfo: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(nodeInfo)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const nested: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          nested[k] = v != null && typeof (v as any).toString === 'function' && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean'
+            ? (v as any).toString() : v
+        }
+        serializedNodeInfo[key] = nested
+      } else {
+        serializedNodeInfo[key] = value != null && typeof (value as any).toString === 'function' && typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean'
+          ? (value as any).toString() : value
       }
-      serializedNodeInfo[key] = nested
-    } else {
-      serializedNodeInfo[key] = value != null && typeof (value as any).toString === 'function' && typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean'
-        ? (value as any).toString() : value
     }
-  }
 
-  createDeployment({
-    nodeUrl,
-    l1RpcUrl: L1_URL,
-    l1ChainId: nodeInfo.l1ChainId,
-    l2ChainId,
-    aztecVersion: (nodeInfo as any).nodeVersion ?? configManager.getConfig().settings.version,
-    rollupVersion,
-    networkName: configManager.getConfig().name,
-    l1ContractAddresses: {
-      rollupAddress: l1ContractAddresses.rollupAddress.toString(),
-      registryAddress: l1ContractAddresses.registryAddress.toString(),
-      inboxAddress: l1ContractAddresses.inboxAddress.toString(),
-      outboxAddress: l1ContractAddresses.outboxAddress.toString(),
-    },
-    nodeInfo: serializedNodeInfo,
-    sponsoredFeeAddress: sponsoredFPC.address.toString(),
-  })
+    createDeployment({
+      nodeUrl,
+      l1RpcUrl: L1_URL,
+      l1ChainId: nodeInfo.l1ChainId,
+      l2ChainId,
+      aztecVersion: (nodeInfo as any).nodeVersion ?? configManager.getConfig().settings.version,
+      rollupVersion,
+      networkName: configManager.getConfig().name,
+      l1ContractAddresses: {
+        rollupAddress: l1ContractAddresses.rollupAddress.toString(),
+        registryAddress: l1ContractAddresses.registryAddress.toString(),
+        inboxAddress: l1ContractAddresses.inboxAddress.toString(),
+        outboxAddress: l1ContractAddresses.outboxAddress.toString(),
+      },
+      nodeInfo: serializedNodeInfo,
+      sponsoredFeeAddress: sponsoredFPC.address.toString(),
+    })
+  }
 
   // Check for existing token deployments (for skip-if-deployed checks)
   logger.info('\n📋 Checking for existing token deployments...')
@@ -2018,6 +2191,15 @@ async function main() {
     )
 
     // ════════════════════════════════════════════════════════════════════════════
+    // Test 1b: BridgeWithFuel — atomic swap-for-gas + public deposit
+    // (Only public — private deposits need attestation which can't flow through BridgeAndFuel)
+    // ════════════════════════════════════════════════════════════════════════════
+    await testBridgeWithFuelFlow(
+      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, logger
+    )
+
+    // ════════════════════════════════════════════════════════════════════════════
     // Test 2: L1 Private Deposit (POCH) → L2 Private Claim
     // ════════════════════════════════════════════════════════════════════════════
     const pochResult = await testPrivateDepositAndClaimFlow(
@@ -2102,7 +2284,7 @@ async function main() {
       sponsoredPaymentMethod, logger
     )
 
-    logger.info('\n=== ALL 11 COMPLIANT BRIDGE TESTS COMPLETE ===')
+    logger.info('\n=== ALL 12 COMPLIANT BRIDGE TESTS COMPLETE ===')
     logger.info(`Tested against: ${deployed.symbol}`)
     logger.info(`  L1 Portal:       ${deployed.l1PortalContract}`)
     logger.info(`  L2 Bridge:       ${deployed.l2BridgeContract}`)
@@ -2114,6 +2296,7 @@ async function main() {
     logger.warn('\n⚠️  No tokens were deployed — skipping tests')
   }
 
+  
   // Final summary
   logger.info('\n=== COMPLIANT DEPLOYMENT SUMMARY ===')
   logger.info(`Total tokens deployed: ${deployedContracts.length}`)
