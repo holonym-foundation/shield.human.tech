@@ -56,16 +56,16 @@ export function buildCapabilityManifest() {
 
   const allContracts = [...tokenAddresses, ...bridgeAddresses, FEE_JUICE_ADDRESS]
 
-  const simulationUtilities: ContractFunctionPattern[] = [
+  const simulationUtilities: ContractFunctionPattern[] = tokenAddresses.flatMap(
+    (addr) => patternsFor(addr, [...TOKEN_UTILITY_SIMULATION_METHODS]),
+  )
+  const simulationTransactions: ContractFunctionPattern[] = [
     ...tokenAddresses.flatMap(
-      (addr) => patternsFor(addr, [...TOKEN_UTILITY_SIMULATION_METHODS]),
+      (addr) => patternsFor(addr, [...TOKEN_TRANSACTION_SIMULATION_METHODS]),
     ),
     // Fee Juice balance check
     pattern(FEE_JUICE_ADDRESS, 'balance_of_public'),
   ]
-  const simulationTransactions: ContractFunctionPattern[] = tokenAddresses.flatMap(
-    (addr) => patternsFor(addr, [...TOKEN_TRANSACTION_SIMULATION_METHODS]),
-  )
 
   const transactionScope: ContractFunctionPattern[] = [
     ...tokenAddresses.flatMap((addr) =>
