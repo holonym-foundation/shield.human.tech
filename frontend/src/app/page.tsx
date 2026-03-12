@@ -182,7 +182,8 @@ export default function Home() {
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted
 
   const selectedFromToken = bridgeConfig.from.token
-  const l1Balance = l1TokenBalances.find(
+  // Alchemy-based ERC20 balance (may not index custom test tokens)
+  const l1BalanceAlchemy = l1TokenBalances.find(
     (token) =>
       token.type === 'erc20' &&
       token.network?.chainId === L1_CHAIN_ID &&
@@ -190,12 +191,11 @@ export default function Home() {
         (selectedFromToken?.l1TokenContract ?? L1_TOKENS[0]?.l1TokenContract),
   )?.balance_formatted
 
-  // const { data: l1NativeBalance } = useL1NativeBalance()
-  // const {
-  //   data: l1Balance,
-  //   ,
-  //   refetch: refetchL1Balance,
-  // } = useL1TokenBalance()
+  // Direct RPC balance via eth_call (works for any ERC20 including custom test tokens)
+  const { data: l1BalanceRpc } = useL1TokenBalance()
+
+  // Prefer Alchemy if available, fall back to direct RPC
+  const l1Balance = l1BalanceAlchemy ?? l1BalanceRpc
   const { data: hasL1SBT } = useL1HasSoulboundToken()
   const { mutate: mintL1SBT, isPending: mintL1SBTPending } =
     useL1MintSoulboundToken(mintL1SBTOnSuccess)
