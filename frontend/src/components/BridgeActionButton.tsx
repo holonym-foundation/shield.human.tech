@@ -72,6 +72,12 @@ function BridgeActionButton({
   setShowSBTModal,
   setCurrentSBTChain,
 
+  // Privacy mode / POCH
+  isPrivacyModeEnabled = false,
+  pochEligible,
+  pochLoading = false,
+  pochReason,
+
   // Operation completion state
   bridgeCompleted = false,
   l2NodeError = false,
@@ -121,6 +127,12 @@ function BridgeActionButton({
   hasL2SBT: boolean | undefined
   setShowSBTModal: (show: boolean) => void
   setCurrentSBTChain: (chain: 'Ethereum' | 'Aztec') => void
+
+  // Privacy mode / POCH
+  isPrivacyModeEnabled?: boolean
+  pochEligible?: boolean
+  pochLoading?: boolean
+  pochReason?: string
 
   // Operation completion state
   bridgeCompleted?: boolean
@@ -276,6 +288,21 @@ function BridgeActionButton({
       return // Let the SBT modal handle the next steps
     }
 
+    // Step 4b: In privacy mode (L1→L2), require Proof of Clean Hands before proceeding
+    if (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2) {
+      if (pochLoading) {
+        notify('info', 'Checking Proof of Clean Hands eligibility...')
+        return
+      }
+      if (!pochEligible) {
+        const msg = pochReason
+          ? `Cannot use private deposits: ${pochReason}. Get your POCH attestation or switch to public mode.`
+          : 'You need Proof of Clean Hands (POCH) to use private deposits. Get your POCH attestation or switch to public mode.'
+        notify('error', msg)
+        return
+      }
+    }
+
     // Step 5: Validate input amount before proceeding with bridge/withdraw
     if (!inputAmount || parseFloat(inputAmount) <= 0) {
       notify('error', 'Please enter a valid amount')
@@ -346,6 +373,12 @@ function BridgeActionButton({
       if (hasL1SBT !== true) return `Get SBT on ${requiredChain}`
     }
 
+    // Priority 4b: POCH requirement for private deposits
+    if (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2) {
+      if (pochLoading) return 'Checking POCH eligibility...'
+      if (!pochEligible) return 'Get Proof of Clean Hands'
+    }
+
     // Priority 5: Bridge operations
     return getOperationLabel(direction)
   }
@@ -393,13 +426,15 @@ function BridgeActionButton({
     requestFaucetPending ||
     withdrawTokensToL1Pending ||
     bridgeTokensToL2Pending ||
-    isOperationPending
+    isOperationPending ||
+    (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2 && pochLoading && isWaapConnected && isAztecConnected)
 
   // Get the loading text for the spinner
   const getLoadingText = () => {
     if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...';
     if (isConnecting) return 'Connecting...';
     if (requestFaucetPending) return 'Getting Eth & Testnet USDC...';
+    if (pochLoading && isPrivacyModeEnabled) return 'Checking POCH eligibility...';
     if (withdrawTokensToL1Pending) return 'Withdrawing Tokens...';
     if (bridgeTokensToL2Pending) return 'Bridging Tokens...';
     return 'Loading...';

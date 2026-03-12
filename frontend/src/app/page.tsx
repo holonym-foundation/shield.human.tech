@@ -15,6 +15,7 @@ import {
   useL1TokenBalance,
   useL1TokenBalances,
 } from '@/hooks/useL1Operations'
+import { usePochCheck } from '@/hooks/usePochCheck'
 import {
   useL2HasSoulboundToken,
   useL2MintSoulboundToken,
@@ -196,6 +197,7 @@ export default function Home() {
 
   // Prefer Alchemy if available, fall back to direct RPC
   const l1Balance = l1BalanceAlchemy ?? l1BalanceRpc
+  const { data: pochCheckData, isLoading: pochLoading } = usePochCheck()
   const { data: hasL1SBT } = useL1HasSoulboundToken()
   const { mutate: mintL1SBT, isPending: mintL1SBTPending } =
     useL1MintSoulboundToken(mintL1SBTOnSuccess)
@@ -624,6 +626,11 @@ export default function Home() {
                 hasL2SBT={hasL2SBT}
                 setShowSBTModal={setShowSBTModal}
                 setCurrentSBTChain={setCurrentSBTChain}
+                // Privacy mode / POCH
+                isPrivacyModeEnabled={isPrivacyModeEnabled}
+                pochEligible={pochCheckData?.eligible}
+                pochLoading={pochLoading}
+                pochReason={pochCheckData?.reason}
                 // Operation completion state
                 bridgeCompleted={bridgeCompleted}
                 // Disable if L2 node error
