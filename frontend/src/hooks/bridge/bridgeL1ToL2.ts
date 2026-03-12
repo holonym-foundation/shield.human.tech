@@ -139,6 +139,8 @@ export interface ReceiptResult {
   messageLeafIndexStr: string
   messageHash: any
   messageLeafIndex: any
+  // Amount after fee deduction by the portal (always present for standard deposits, absent for fuel path)
+  amountAfterFee?: bigint
   // Fuel-specific fields (present when fuel path used)
   fuelMessageHashStr?: string
   fuelMessageLeafIndexStr?: string
@@ -832,7 +834,12 @@ export async function waitForReceiptAndExtractEvent(params: {
   )
   console.log('messageHash and messageLeafIndex stored immediately after receipt')
 
-  return { l1TxHash, l1TxUrl, messageHashStr, messageLeafIndexStr, messageHash, messageLeafIndex }
+  // The event's `amount` field is already the amount after fee deduction
+  const amountAfterFee = depositEvent.args.amount != null
+    ? BigInt(depositEvent.args.amount.toString())
+    : undefined
+
+  return { l1TxHash, l1TxUrl, messageHashStr, messageLeafIndexStr, messageHash, messageLeafIndex, amountAfterFee }
 }
 
 // ─── Step 6: Persist receipt data to backend ─────────────────────────

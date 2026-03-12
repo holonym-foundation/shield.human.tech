@@ -816,10 +816,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           }
         }
 
+        // Portal deducts fees before creating the L1→L2 message — claim must use the post-fee amount
+        if (!receipt.amountAfterFee) {
+          throw new Error('amountAfterFee missing from deposit event — cannot determine correct claim amount')
+        }
+        const claimAmount = receipt.amountAfterFee
+        console.log('[L1→L2] Claim amount (after fee):', claimAmount.toString())
+
         const claimResult = await executeL2Claim(
           { walletAdapter, aztecAddress, isPrivacyModeEnabled: isPrivacyModeEnabled ?? false },
           {
-            amount: fuel ? amount - fuel.fuelAmount : amount,
+            amount: claimAmount,
             claimSecret: backup.claimSecret,
             messageLeafIndex: BigInt(receipt.messageLeafIndexStr),
           },
