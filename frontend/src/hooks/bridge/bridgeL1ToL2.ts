@@ -793,12 +793,21 @@ export async function waitForReceiptAndExtractEvent(params: {
       }),
     )
 
+    // Also extract amountAfterFee from the portal's DepositToAztecPublic event
+    // (BridgeAndFuel calls the portal internally, which emits this event with the post-fee amount)
+    const portalLogs = parseEventLogs({ abi: CustomTokenPortalAbi, logs: txReceipt.logs })
+    const portalDepositEvent: any = portalLogs.find((l: any) => l.eventName === 'DepositToAztecPublic')
+    const amountAfterFee = portalDepositEvent?.args?.amount != null
+      ? BigInt(portalDepositEvent.args.amount.toString())
+      : undefined
+
     return {
       l1TxHash, l1TxUrl, messageHashStr, messageLeafIndexStr,
       messageHash: args.tokenKey, messageLeafIndex: args.tokenIndex,
       fuelMessageHashStr, fuelMessageLeafIndexStr,
       fuelMessageHash: args.fuelKey, fuelMessageLeafIndex: args.fuelIndex,
       fuelAmount: fuelAmountReceived,
+      amountAfterFee,
     }
   }
 
