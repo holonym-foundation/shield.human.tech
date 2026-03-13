@@ -260,10 +260,11 @@ export async function executeL2Claim(
         break
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
-        const isNonexistentMsg =
+        const isRetryable =
           errMsg.includes('nonexistent L1-to-L2 message') ||
-          errMsg.includes('l1_to_l2_msg_exists')
-        if (isNonexistentMsg && attempt < maxAttempts) {
+          errMsg.includes('l1_to_l2_msg_exists') ||
+          errMsg.includes('Block hash') && errMsg.includes('not found')
+        if (isRetryable && attempt < maxAttempts) {
           options?.onRetry?.(attempt, maxAttempts, retryDelayMs)
           console.warn(
             `[L1→L2] Claim attempt ${attempt} failed (message not synced to wallet node), retrying in ${retryDelayMs / 1000}s...`,
