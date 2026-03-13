@@ -220,8 +220,6 @@ class WalletAdapter {
       },
       true,
     )
-    // TODO(debug): remove logging after authwit issue is resolved
-    console.log('[L2→L1 Public] Sending set_authorized tx to AuthRegistry...')
     // The wallet-sdk's sendTx returns immediately with status:'pending' (it doesn't
     // poll for mining like BaseWallet.sendTx does with a direct PXE). We must wait
     // for the tx to be mined so the AuthRegistry state is visible to the exit tx.
@@ -229,17 +227,10 @@ class WalletAdapter {
     const authTxHash = authReceipt?.txHash ?? (authReceipt as any)?.txHash
     if (authTxHash) {
       const txHash = typeof authTxHash === 'string' ? TxHash.fromString(authTxHash) : authTxHash
-      console.log('[L2→L1 Public] set_authorized submitted, waiting for mining...', txHash.toString())
-      const minedReceipt = await waitForTx(aztecNode, txHash)
-      console.log('[L2→L1 Public] set_authorized mined:', {
-        blockNumber: minedReceipt?.blockNumber,
-        status: minedReceipt?.status,
-      })
+      await waitForTx(aztecNode, txHash)
     }
 
     // Send exit transaction
-    // TODO(debug): remove logging after authwit issue is resolved
-    console.log('[L2→L1 Public] Sending exit_to_l1_public tx...')
     const receipt = await bridge.methods
       .exit_to_l1_public(EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
       .send({ from: this.account })
