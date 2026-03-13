@@ -24,7 +24,6 @@ export interface Token {
   l2BridgeContract?: string;
   l2ProxyContract?: string;
   feeAssetHandler?: string;
-  sponsoredFee?: string;
   pairedSymbol?: string;
 }
 

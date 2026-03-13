@@ -74,7 +74,7 @@ export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
 export const FEE_JUICE_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
 
-// Non-token protocol addresses (SBT, sponsored fee)
+// Non-token protocol addresses (SBT)
 export const ADDRESS = {
   [L1_CHAIN_ID]: {
     CHAIN_ID: L1_CHAIN_ID,
@@ -86,9 +86,7 @@ export const ADDRESS = {
   [L2_CHAIN_ID]: {
     CHAIN_ID: L2_CHAIN_ID,
     CHAIN_NAME: 'Aztec Devnet',
-    L2: {
-      SPONSORED_FEE_PAYMENT_CONTRACT: activeDeployment.sponsoredFeeAddress,
-    },
+    L2: {},
   },
 } as Record<number, any>
 
@@ -131,7 +129,6 @@ export const L1_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
   l2BridgeContract: t.l2BridgeContract,
   l2ProxyContract: t.l2ProxyContract,
   feeAssetHandler: t.feeAssetHandler,
-  sponsoredFee: t.sponsoredFee,
   pairedSymbol: `c${t.symbol}`,
 }))
 
@@ -148,7 +145,6 @@ export const L2_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
   l2BridgeContract: t.l2BridgeContract,
   l2ProxyContract: t.l2ProxyContract,
   feeAssetHandler: t.feeAssetHandler,
-  sponsoredFee: t.sponsoredFee,
   pairedSymbol: t.symbol,
 }))
 
@@ -174,7 +170,6 @@ export function getTokenContracts(symbol: string) {
     l1PortalContract: deployed.l1PortalContract,
     l2BridgeContract: deployed.l2BridgeContract,
     feeAssetHandler: deployed.feeAssetHandler,
-    sponsoredFee: deployed.sponsoredFee,
   }
 }
 
