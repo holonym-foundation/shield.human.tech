@@ -172,6 +172,7 @@ export default function Home() {
   const {
     data: l1TokenBalances = [],
     isLoading: l1BalanceLoading,
+    isPending: l1BalancePending,
     refetch: refetchL1Balance,
   } = useL1TokenBalances()
 
@@ -209,6 +210,7 @@ export default function Home() {
   const {
     data: l2Balance = { privateBalance: null, publicBalance: null },
     isLoading: l2BalanceLoading,
+    isPending: l2BalancePending,
     refetch: refetchL2Balance,
     error: l2BalanceError,
     isError: isL2BalanceError,
@@ -216,7 +218,7 @@ export default function Home() {
 
   const l2PrivateBalance = l2Balance?.privateBalance
   const l2PublicBalance = l2Balance?.publicBalance
-  const { data: feeJuiceBalance, isLoading: feeJuiceLoading, refetch: refetchFeeJuiceBalance } =
+  const { data: feeJuiceBalance, isLoading: feeJuiceLoading, isPending: feeJuicePending, refetch: refetchFeeJuiceBalance } =
     useL2FeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
@@ -603,9 +605,9 @@ export default function Home() {
                 inputAmount={bridgeConfig.amount}
                 l1Balance={l1Balance?.toString() || '0'}
                 l2Balance={l2PublicBalance || '0'}
-                l1BalanceLoading={l1BalanceLoading}
-                l2BalanceLoading={l2BalanceLoading}
-                feeJuiceLoading={feeJuiceLoading}
+                l1BalanceLoading={l1BalancePending}
+                l2BalanceLoading={l2BalancePending}
+                feeJuiceLoading={feeJuicePending}
                 // Bridge direction
                 direction={bridgeConfig.direction}
                 // Core operations
