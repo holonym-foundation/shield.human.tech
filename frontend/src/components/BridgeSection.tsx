@@ -161,6 +161,16 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
                   {bridge.from.token?.title}
                 </p>
               </div>
+              {direction === BridgeDirection.L2_TO_L1 && (
+                <div className='flex gap-1 ml-auto'>
+                  <p className='text-latest-grey-500 text-12 font-medium break-all'>
+                    {feeJuiceBalance ?? '--'}
+                  </p>
+                  <p className='text-latest-grey-500 text-12 font-medium'>
+                    Fee Juice
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -258,6 +268,16 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
             {bridge.to.token?.title}
           </p>
         </div>
+        {direction === BridgeDirection.L1_TO_L2 && (
+          <div className='flex justify-between mt-1'>
+            <p className='text-latest-grey-500 text-12 font-medium'>
+              Fee Juice:
+            </p>
+            <p className='text-latest-grey-500 text-12 font-medium break-all'>
+              {feeJuiceBalance ?? '--'} FJ
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )

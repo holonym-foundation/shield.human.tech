@@ -21,21 +21,27 @@ export interface ExecuteCallResult {
   blockNumber?: number
 }
 
-async function getContractArtifact(type: 'token' | 'bridge' | 'proxy') {
+const FEE_JUICE_ADDRESS_STR =
+  '0x0000000000000000000000000000000000000000000000000000000000000005'
+
+type ArtifactType = 'token' | 'bridge' | 'proxy' | 'feeJuice'
+
+async function getContractArtifact(type: ArtifactType) {
   const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
   if (type === 'bridge') {
-    // Custom compliant bridge — artifact from local build output
     const bridgeJson = await import('../../../aztec-contracts/token_bridge/target/token_bridge_contract-TokenBridge.json')
     // @ts-ignore — JSON import from local build output
     return loadContractArtifact(bridgeJson.default ?? bridgeJson)
   }
   if (type === 'proxy') {
-    // TokenMinterProxy — needed for private claim simulation (bridge → proxy → token)
     const proxyJson = await import('../../../aztec-contracts/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json')
     // @ts-ignore — JSON import from local build output
     return loadContractArtifact(proxyJson.default ?? proxyJson)
   }
-  // Wonderland Token (constructor_with_minter) — matches deployed token
+  if (type === 'feeJuice') {
+    const { FeeJuiceContractArtifact } = await import('@aztec/noir-contracts.js/FeeJuice')
+    return FeeJuiceContractArtifact
+  }
   // @ts-ignore — JSON import from package target directory
   const tokenJson = await import('@defi-wonderland/aztec-standards/target/token_contract-Token.json')
   // @ts-ignore
@@ -45,7 +51,8 @@ async function getContractArtifact(type: 'token' | 'bridge' | 'proxy') {
 function resolveArtifactType(
   contractAddress: string,
   bridgeAddress: string
-): 'token' | 'bridge' {
+): ArtifactType {
+  if (contractAddress.toLowerCase() === FEE_JUICE_ADDRESS_STR.toLowerCase()) return 'feeJuice'
   return contractAddress.toLowerCase() === bridgeAddress.toLowerCase()
     ? 'bridge'
     : 'token'
