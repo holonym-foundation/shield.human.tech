@@ -3,8 +3,6 @@ import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
 import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
-import { waitForTx } from '@aztec/aztec.js/node'
-import { TxHash } from '@aztec/aztec.js/tx'
 import type { Wallet } from '@aztec/aztec.js/wallet'
 import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
 import { aztecNode } from '@/aztec'
@@ -182,12 +180,12 @@ class WalletAdapter {
   }
 
   /**
-   * Public withdrawal to L1:
-   * 1. Set public authwit in AuthRegistry for bridge to call token.burn_public
-   * 2. Send bridge.exit_to_l1_public
+   * Public withdrawal to L1 — batched into a single transaction:
+   * 1. Set public authwit in AuthRegistry (set_authorized)
+   * 2. Bridge exit_to_l1_public (which calls token.burn_public)
    *
-   * Public burns check the on-chain AuthRegistry (not private auth witnesses),
-   * so we must call AuthRegistry.set_authorized() before the burn can execute.
+   * Both are public calls batched via BatchCall, so they execute in enqueue
+   * order within one tx — the authwit is visible when burn_public checks it.
    */
   async executeWithdrawToL1Public(
     l1Address: string,
@@ -220,20 +218,14 @@ class WalletAdapter {
       },
       true,
     )
-    // The wallet-sdk's sendTx returns immediately with status:'pending' (it doesn't
-    // poll for mining like BaseWallet.sendTx does with a direct PXE). We must wait
-    // for the tx to be mined so the AuthRegistry state is visible to the exit tx.
-    const authReceipt = await authwit.send()
-    const authTxHash = authReceipt?.txHash ?? (authReceipt as any)?.txHash
-    if (authTxHash) {
-      const txHash = typeof authTxHash === 'string' ? TxHash.fromString(authTxHash) : authTxHash
-      await waitForTx(aztecNode, txHash)
-    }
 
-    // Send exit transaction
-    const receipt = await bridge.methods
-      .exit_to_l1_public(EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
-      .send({ from: this.account })
+    // Batch authwit + exit into a single tx — public calls execute in enqueue order,
+    // so set_authorized runs before burn_public, making the auth visible.
+    const exitCall = bridge.methods.exit_to_l1_public(
+      EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce,
+    )
+    const batch = new BatchCall(this.wallet, [authwit, exitCall])
+    const receipt = await batch.send({ from: this.account })
 
     return {
       txHash: receipt.txHash.toString(),
