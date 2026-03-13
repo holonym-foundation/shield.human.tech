@@ -3,6 +3,10 @@ import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { Contract } from '@aztec/aztec.js/contracts'
 import type { Wallet } from '@aztec/aztec.js/wallet'
+import {
+  SetPublicAuthwitContractInteraction,
+  computeInnerAuthWitHashFromAction,
+} from '@aztec/aztec.js/authorization'
 import { L1_TOKENS } from '@/config'
 import { aztecNode } from '@/aztec'
 
@@ -173,15 +177,17 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Create auth witness: allow bridge to burn_public on behalf of user
-    const burnCall = await token.methods.burn_public(user, amount, nonce).getFunctionCall()
-    await this.wallet.createAuthWit(
+    // Set public authwit: allow bridge to burn_public on behalf of user
+    const authwit = await SetPublicAuthwitContractInteraction.create(
+      this.wallet,
       this.account,
       {
         caller: bridgeAddr,
-        call: burnCall,
-      }
+        action: token.methods.burn_public(user, amount, nonce),
+      },
+      true,
     )
+    await authwit.send()
 
     // Send exit transaction
     const receipt = await bridge.methods
@@ -220,13 +226,15 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Create auth witness: allow bridge to burn_private on behalf of user
+    // Create private auth witness: allow bridge to burn_private on behalf of user
+    // Pre-compute the inner hash locally to avoid FunctionCall serialization issues over RPC
     const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
+    const innerHash = await computeInnerAuthWitHashFromAction(bridgeAddr, burnCall)
     await this.wallet.createAuthWit(
       this.account,
       {
-        caller: bridgeAddr,
-        call: burnCall,
+        consumer: tokenAddr,
+        innerHash,
       }
     )
 
