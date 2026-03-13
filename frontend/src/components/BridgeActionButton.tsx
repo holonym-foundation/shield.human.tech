@@ -26,64 +26,9 @@ function LoadingContent({ label }: { label: string }) {
   )
 }
 
-function BridgeActionButton({
-  isDisabled = false,
-  // Connection states
-  isWaapConnected,
-  connectWaapWallet,
-  getWalletProvider,
-  loginMethod,
-  walletProvider,
-  isAztecConnected,
-  connectAztec,
-  inputRef,
-
-  // Balance and amount states
-  inputAmount,
-  l1Balance,
-  l2Balance,
-  l1BalanceLoading = false,
-  l2BalanceLoading = false,
-
-  // Bridge direction
-  direction,
-
-  // Core operations
-  bridgeTokensToL2,
-  withdrawTokensToL1,
-  requestFaucet,
-  useExternalFaucet = false,
-  handleExternalFaucet,
-
-  // Loading states
-  isStateInitialized = true,
-  requestFaucetPending = false,
-  bridgeTokensToL2Pending = false,
-  withdrawTokensToL1Pending = false,
-
-  // Faucet related
-  isEligibleForFaucet,
-  needsGas = false,
-  needsTokensOnly = false,
-
-  // SBT related
-  hasL1SBT,
-  hasL2SBT,
-  setShowSBTModal,
-  setCurrentSBTChain,
-
-  // Privacy mode / POCH
-  isPrivacyModeEnabled = false,
-  pochEligible,
-  pochLoading = false,
-  pochReason,
-
-  // Operation completion state
-  bridgeCompleted = false,
-  l2NodeError = false,
-  l2NodeIsReadyLoading = false,
-}: {
+interface BridgeActionButtonProps {
   isDisabled?: boolean
+
   // Connection states
   isWaapConnected: boolean
   connectWaapWallet: () => void
@@ -100,6 +45,7 @@ function BridgeActionButton({
   l2Balance: string
   l1BalanceLoading?: boolean
   l2BalanceLoading?: boolean
+  feeJuiceLoading?: boolean
 
   // Bridge direction
   direction: BridgeDirection
@@ -138,7 +84,49 @@ function BridgeActionButton({
   bridgeCompleted?: boolean
   l2NodeError?: boolean
   l2NodeIsReadyLoading?: boolean
-}) {
+}
+
+function BridgeActionButton({
+  isDisabled = false,
+  isWaapConnected,
+  connectWaapWallet,
+  getWalletProvider,
+  loginMethod,
+  walletProvider,
+  isAztecConnected,
+  connectAztec,
+  inputRef,
+  inputAmount,
+  l1Balance,
+  l2Balance,
+  l1BalanceLoading = false,
+  l2BalanceLoading = false,
+  feeJuiceLoading = false,
+  direction,
+  bridgeTokensToL2,
+  withdrawTokensToL1,
+  requestFaucet,
+  useExternalFaucet = false,
+  handleExternalFaucet,
+  isStateInitialized = true,
+  requestFaucetPending = false,
+  bridgeTokensToL2Pending = false,
+  withdrawTokensToL1Pending = false,
+  isEligibleForFaucet,
+  needsGas = false,
+  needsTokensOnly = false,
+  hasL1SBT,
+  hasL2SBT,
+  setShowSBTModal,
+  setCurrentSBTChain,
+  isPrivacyModeEnabled = false,
+  pochEligible,
+  pochLoading = false,
+  pochReason,
+  bridgeCompleted = false,
+  l2NodeError = false,
+  l2NodeIsReadyLoading = false,
+}: BridgeActionButtonProps) {
   const [isConnecting, setIsConnecting] = useState(false)
   const [isOperationPending, setIsOperationPending] = useState(false)
   const notify = useToast()
@@ -148,23 +136,18 @@ function BridgeActionButton({
   const { data: networkHealth } = useNetworkHealth()
   const isNetworkDown = networkHealth?.isNetworkDown ?? false
 
-  // Helper functions for bridge operations
-  const getOperationType = (direction: BridgeDirection) =>
-    direction === BridgeDirection.L2_TO_L1 ? 'withdrawal' : 'bridge'
+  const bothWalletsConnected = isWaapConnected && isAztecConnected
+  const balancesLoading = bothWalletsConnected && (!isStateInitialized || l1BalanceLoading || l2BalanceLoading || feeJuiceLoading)
 
-  const getOperationLabel = (direction: BridgeDirection) =>
-    direction === BridgeDirection.L2_TO_L1 ? 'Withdraw Tokens' : 'Bridge Tokens'
-    // direction === BridgeDirection.L2_TO_L1 ? 'Withdraw Tokens coming soon' : 'Bridge Tokens'
-  // isDisabled = direction === BridgeDirection.L2_TO_L1
+  // Helper functions
+  const getOperationType = (dir: BridgeDirection) =>
+    dir === BridgeDirection.L2_TO_L1 ? 'withdrawal' : 'bridge'
 
-  const getBalanceForDirection = (
-    direction: BridgeDirection,
-    l1Balance: string,
-    l2Balance: string
-  ) => (direction === BridgeDirection.L1_TO_L2 ? l1Balance : l2Balance)
+  const getOperationLabel = (dir: BridgeDirection) =>
+    dir === BridgeDirection.L2_TO_L1 ? 'Withdraw Tokens' : 'Bridge Tokens'
 
-  const getSBTChainForDirection = (direction: BridgeDirection) =>
-    direction === BridgeDirection.L2_TO_L1 ? 'Aztec' : 'Ethereum'
+  const getSBTChainForDirection = (dir: BridgeDirection) =>
+    dir === BridgeDirection.L2_TO_L1 ? 'Aztec' : 'Ethereum'
 
   // Process operations for bridging or withdrawing
   const processBridgeOperation = async () => {
@@ -176,12 +159,7 @@ function BridgeActionButton({
 
     setIsOperationPending(true)
     try {
-      // const amount = BigInt(inputAmount)
-      // this should come from token
-      // const amount = parseUnits(inputAmount, 6)
-      const amount = inputAmount // we parse it in progress page before calling function
-      const operationType = getOperationType(direction)
-
+      const amount = inputAmount
       if (direction === BridgeDirection.L2_TO_L1) {
         await withdrawTokensToL1(amount)
       } else {
@@ -191,7 +169,6 @@ function BridgeActionButton({
       const operationType = getOperationType(direction)
       const errorMsg = error instanceof Error ? error.message : 'Unknown error'
 
-      // Check for common error patterns
       if (errorMsg.includes('insufficient')) {
         notify('error', `Insufficient funds for ${operationType} operation`)
       } else if (errorMsg.includes('rejected') || errorMsg.includes('denied')) {
@@ -199,9 +176,7 @@ function BridgeActionButton({
       } else {
         notify(
           'error',
-          `${
-            operationType.charAt(0).toUpperCase() + operationType.slice(1)
-          } failed: ${errorMsg}`
+          `${operationType.charAt(0).toUpperCase() + operationType.slice(1)} failed: ${errorMsg}`
         )
       }
     } finally {
@@ -209,10 +184,8 @@ function BridgeActionButton({
     }
   }
 
-  // Check if user has all needed SBTs for the current operation
   const checkSBTRequirements = () => {
     const requiredChain = getSBTChainForDirection(direction)
-
     if (direction === BridgeDirection.L2_TO_L1) {
       if (!hasL2SBT) {
         setCurrentSBTChain(requiredChain)
@@ -229,9 +202,9 @@ function BridgeActionButton({
     return true
   }
 
-  // Main action handler for the button click
+  // Main action handler
   const handleButtonClick = async () => {
-    // Step 1: Connect WaaP wallet if not connected
+    // Step 1: Connect WaaP wallet
     if (!isWaapConnected) {
       setIsConnecting(true)
       setIsOperationPending(true)
@@ -246,7 +219,7 @@ function BridgeActionButton({
       return
     }
 
-    // Step 2: Connect Aztec if not connected
+    // Step 2: Connect Aztec wallet
     if (!isAztecConnected) {
       setIsConnecting(true)
       setIsOperationPending(true)
@@ -261,21 +234,17 @@ function BridgeActionButton({
       return
     }
 
-    // Step 3: If faucet is needed (no gas or tokens), request it
+    // Step 3: Faucet if needed
     if (isStateInitialized && isEligibleForFaucet) {
       if (useExternalFaucet && handleExternalFaucet && needsGas && !needsTokensOnly) {
-        // Redirect to external faucet (Google Cloud) for ETH only (when user needs gas but not tokens)
         handleExternalFaucet()
         return
       } else {
-        // Use internal faucet API for tokens (and ETH if not using external)
         setIsOperationPending(true)
         try {
           await requestFaucet()
         } catch (error) {
-          // const errorMsg =
-          //   error instanceof Error ? error.message : 'Unknown error'
-          // notify('error', `Faucet request failed: ${errorMsg}`)
+          // handled elsewhere
         } finally {
           setIsOperationPending(false)
         }
@@ -283,12 +252,12 @@ function BridgeActionButton({
       }
     }
 
-    // Step 4: Check if user has the required SBTs
+    // Step 4: SBT check
     if (!checkSBTRequirements()) {
-      return // Let the SBT modal handle the next steps
+      return
     }
 
-    // Step 4b: In privacy mode (L1→L2), require Proof of Clean Hands before proceeding
+    // Step 5: POCH check (privacy mode, L1→L2 only)
     if (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2) {
       if (pochLoading) {
         notify('info', 'Checking Proof of Clean Hands eligibility...')
@@ -303,20 +272,20 @@ function BridgeActionButton({
       }
     }
 
-    // Step 5: Validate input amount before proceeding with bridge/withdraw
+    // Step 6: Validate amount
     if (!inputAmount || parseFloat(inputAmount) <= 0) {
       notify('error', 'Please enter a valid amount')
       inputRef.current?.focus()
       return
     }
 
-    // Check for congestion before proceeding
+    // Step 7: Congestion check
     if (isCongested) {
       setShowCongestionWarning(true)
       return
     }
 
-    // Step 6: Process the bridge/withdraw operation
+    // Step 8: Execute
     processBridgeOperation()
   }
 
@@ -325,47 +294,61 @@ function BridgeActionButton({
     processBridgeOperation()
   }
 
-  // Determine button label based on current state
+  // --- Derived UI state ---
+
+  const isButtonDisabled =
+    l2NodeIsReadyLoading ||
+    l2NodeError ||
+    isNetworkDown ||
+    balancesLoading ||
+    isConnecting ||
+    requestFaucetPending ||
+    withdrawTokensToL1Pending ||
+    bridgeTokensToL2Pending ||
+    isOperationPending ||
+    bridgeCompleted
+
+  const isOperationInFlight =
+    isConnecting ||
+    requestFaucetPending ||
+    withdrawTokensToL1Pending ||
+    bridgeTokensToL2Pending ||
+    isOperationPending
+
+  const showLoadingSpinner =
+    l2NodeIsReadyLoading ||
+    balancesLoading ||
+    isOperationInFlight ||
+    (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2 && pochLoading && bothWalletsConnected)
+
+  const getLoadingText = () => {
+    if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...'
+    if (balancesLoading) return 'Loading balances...'
+    if (isConnecting) return 'Connecting...'
+    if (requestFaucetPending) return 'Getting Eth & Testnet USDC...'
+    if (pochLoading && isPrivacyModeEnabled) return 'Checking POCH eligibility...'
+    if (withdrawTokensToL1Pending) return 'Withdrawing Tokens...'
+    if (bridgeTokensToL2Pending) return 'Bridging Tokens...'
+    return 'Loading...'
+  }
+
   const getButtonLabel = () => {
-    // Show loading if checking node
-    if (l2NodeIsReadyLoading) {
-      return 'Checking Aztec Network Status...';
-    }
-    // Show error if node is down
-    if (l2NodeError) {
-      return 'Aztec Network Unavailable';
-    }
-    // Show message if chain is stalled
-    if (isNetworkDown) {
-      return 'Aztec Network is Down';
-    }
-    // Show success message when bridge operation completes
-    if (bridgeCompleted) {
-      return 'Bridge Complete!'
-    }
+    if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...'
+    if (l2NodeError) return 'Aztec Network Unavailable'
+    if (isNetworkDown) return 'Aztec Network is Down'
+    if (bridgeCompleted) return 'Bridge Complete!'
+    if (balancesLoading) return 'Loading balances...'
 
-    // Priority 1: Show loading states for balance fetching
-    if (
-      isWaapConnected &&
-      isAztecConnected &&
-      (!isStateInitialized || l1BalanceLoading)
-    ) {
-      return 'Loading balances...'
-    }
-
-    // Priority 2: Connection states
+    // Connection states
     if (!isWaapConnected) return 'Connect Ethereum Wallet'
     if (!isAztecConnected) return 'Connect Aztec Wallet'
 
-    // Priority 3: Faucet (gas and tokens)
+    // Faucet
     if (needsGas || needsTokensOnly) {
-      // if (useExternalFaucet) {
-      //   return needsTokensOnly ? 'Get Tokens (External)' : 'Get Testnet ETH (External)'
-      // }
       return needsTokensOnly ? 'Click to Get Tokens' : 'Click to Get Testnet ETH'
     }
 
-    // Priority 4: SBT requirements
+    // SBT requirements
     const requiredChain = getSBTChainForDirection(direction)
     if (direction === BridgeDirection.L2_TO_L1) {
       if (!hasL2SBT) return `Get SBT on ${requiredChain}`
@@ -373,71 +356,13 @@ function BridgeActionButton({
       if (hasL1SBT !== true) return `Get SBT on ${requiredChain}`
     }
 
-    // Priority 4b: POCH requirement for private deposits
+    // POCH requirement (privacy mode, L1→L2)
     if (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2) {
       if (pochLoading) return 'Checking POCH eligibility...'
       if (!pochEligible) return 'Get Proof of Clean Hands'
     }
 
-    // Priority 5: Bridge operations
     return getOperationLabel(direction)
-  }
-
-  // Determine if the button should be disabled
-  const isButtonDisabled =
-    l2NodeIsReadyLoading ||
-    l2NodeError ||
-    isNetworkDown ||
-    // Disable during loading states
-    (isWaapConnected &&
-      isAztecConnected &&
-      (!isStateInitialized || l1BalanceLoading)) ||
-    isConnecting ||
-    requestFaucetPending ||
-    withdrawTokensToL1Pending ||
-    bridgeTokensToL2Pending ||
-    isOperationPending ||
-    bridgeCompleted
-    //  ||
-    // // Disable bridge/withdraw when amount is invalid and user has all SBTs
-    // (parseFloat(inputAmount) <= 0 
-    // &&
-    //   ((direction === BridgeDirection.L2_TO_L1 && hasL2SBT === true) ||
-    //     (direction === BridgeDirection.L1_TO_L2 && hasL1SBT === true)))
-
-
-  // console.log({
-  //   l2NodeIsReadyLoading,
-  //   l2NodeError,
-  //   third:(isWaapConnected &&
-  //     isAztecConnected &&
-  //     (!isStateInitialized || l1BalanceLoading)),
-  //     isConnecting,
-  //   requestFaucetPending,
-  //   withdrawTokensToL1Pending,
-  //   bridgeTokensToL2Pending,
-  //   isOperationPending,
-  //   isButtonDisabled,
-  // })
-  // Show loading spinner during operation loading states
-  const showLoadingSpinner =
-    l2NodeIsReadyLoading ||
-    isConnecting ||
-    requestFaucetPending ||
-    withdrawTokensToL1Pending ||
-    bridgeTokensToL2Pending ||
-    isOperationPending ||
-    (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2 && pochLoading && isWaapConnected && isAztecConnected)
-
-  // Get the loading text for the spinner
-  const getLoadingText = () => {
-    if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...';
-    if (isConnecting) return 'Connecting...';
-    if (requestFaucetPending) return 'Getting Eth & Testnet USDC...';
-    if (pochLoading && isPrivacyModeEnabled) return 'Checking POCH eligibility...';
-    if (withdrawTokensToL1Pending) return 'Withdrawing Tokens...';
-    if (bridgeTokensToL2Pending) return 'Bridging Tokens...';
-    return 'Loading...';
   }
 
   return (
@@ -474,4 +399,3 @@ function BridgeActionButton({
 }
 
 export default BridgeActionButton
-

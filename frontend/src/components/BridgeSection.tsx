@@ -27,6 +27,7 @@ interface BridgeSectionProps {
   onSwap?: () => void
   isPrivacyModeEnabled: boolean
   feeJuiceBalance?: string
+  feeJuiceLoading?: boolean
 }
 
 const BridgeSection: React.FC<BridgeSectionProps> = ({
@@ -44,6 +45,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
   onSwap,
   isPrivacyModeEnabled,
   feeJuiceBalance,
+  feeJuiceLoading = false,
 }) => {
   // Normalize balances to strings
   const l1NativeBalanceStr =
@@ -164,7 +166,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
               {direction === BridgeDirection.L2_TO_L1 && (
                 <div className='flex gap-1 ml-auto'>
                   <p className='text-latest-grey-500 text-12 font-medium break-all'>
-                    {feeJuiceBalance ?? '--'}
+                    {feeJuiceLoading ? 'Loading...' : (feeJuiceBalance ?? '--')}
                   </p>
                   <p className='text-latest-grey-500 text-12 font-medium'>
                     Fee Juice
@@ -274,7 +276,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
               Fee Juice:
             </p>
             <p className='text-latest-grey-500 text-12 font-medium break-all'>
-              {feeJuiceBalance ?? '--'} FJ
+              {feeJuiceLoading ? 'Loading...' : (feeJuiceBalance ?? '--')} FJ
             </p>
           </div>
         )}

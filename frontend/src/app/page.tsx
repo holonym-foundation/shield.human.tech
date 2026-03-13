@@ -216,7 +216,7 @@ export default function Home() {
 
   const l2PrivateBalance = l2Balance?.privateBalance
   const l2PublicBalance = l2Balance?.publicBalance
-  const { data: feeJuiceBalance, refetch: refetchFeeJuiceBalance } =
+  const { data: feeJuiceBalance, isLoading: feeJuiceLoading, refetch: refetchFeeJuiceBalance } =
     useL2FeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
@@ -565,6 +565,7 @@ export default function Home() {
               onSwap={swapDirection}
               isPrivacyModeEnabled={isPrivacyModeEnabled}
               feeJuiceBalance={feeJuiceBalance}
+              feeJuiceLoading={feeJuiceLoading}
             />
             {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
               !isPrivacyModeEnabled &&
@@ -604,6 +605,7 @@ export default function Home() {
                 l2Balance={l2PublicBalance || '0'}
                 l1BalanceLoading={l1BalanceLoading}
                 l2BalanceLoading={l2BalanceLoading}
+                feeJuiceLoading={feeJuiceLoading}
                 // Bridge direction
                 direction={bridgeConfig.direction}
                 // Core operations
