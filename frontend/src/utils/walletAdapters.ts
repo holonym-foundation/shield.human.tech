@@ -2,6 +2,9 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
+import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
+import { waitForTx } from '@aztec/aztec.js/node'
+import { TxHash } from '@aztec/aztec.js/tx'
 import type { Wallet } from '@aztec/aztec.js/wallet'
 import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
 import { aztecNode } from '@/aztec'
@@ -180,8 +183,11 @@ class WalletAdapter {
 
   /**
    * Public withdrawal to L1:
-   * 1. Create public authwit for bridge to call token.burn_public
+   * 1. Set public authwit in AuthRegistry for bridge to call token.burn_public
    * 2. Send bridge.exit_to_l1_public
+   *
+   * Public burns check the on-chain AuthRegistry (not private auth witnesses),
+   * so we must call AuthRegistry.set_authorized() before the burn can execute.
    */
   async executeWithdrawToL1Public(
     l1Address: string,
@@ -204,17 +210,36 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Create auth witness: allow bridge to burn_public on behalf of user
-    const burnCall = await token.methods.burn_public(user, amount, nonce).getFunctionCall()
-    await this.wallet.createAuthWit(
+    // Set public authwit: allow bridge to burn_public on behalf of user
+    const authwit = await SetPublicAuthwitContractInteraction.create(
+      this.wallet,
       this.account,
       {
         caller: bridgeAddr,
-        call: burnCall,
-      }
+        action: token.methods.burn_public(user, amount, nonce),
+      },
+      true,
     )
+    // TODO(debug): remove logging after authwit issue is resolved
+    console.log('[L2→L1 Public] Sending set_authorized tx to AuthRegistry...')
+    // The wallet-sdk's sendTx returns immediately with status:'pending' (it doesn't
+    // poll for mining like BaseWallet.sendTx does with a direct PXE). We must wait
+    // for the tx to be mined so the AuthRegistry state is visible to the exit tx.
+    const authReceipt = await authwit.send()
+    const authTxHash = authReceipt?.txHash ?? (authReceipt as any)?.txHash
+    if (authTxHash) {
+      const txHash = typeof authTxHash === 'string' ? TxHash.fromString(authTxHash) : authTxHash
+      console.log('[L2→L1 Public] set_authorized submitted, waiting for mining...', txHash.toString())
+      const minedReceipt = await waitForTx(aztecNode, txHash)
+      console.log('[L2→L1 Public] set_authorized mined:', {
+        blockNumber: minedReceipt?.blockNumber,
+        status: minedReceipt?.status,
+      })
+    }
 
     // Send exit transaction
+    // TODO(debug): remove logging after authwit issue is resolved
+    console.log('[L2→L1 Public] Sending exit_to_l1_public tx...')
     const receipt = await bridge.methods
       .exit_to_l1_public(EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
       .send({ from: this.account })
@@ -251,13 +276,15 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Create auth witness: allow bridge to burn_private on behalf of user
+    // Create private auth witness: allow bridge to burn_private on behalf of user
+    // Pre-compute the inner hash locally to avoid FunctionCall serialization issues over RPC
     const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
+    const innerHash = await computeInnerAuthWitHashFromAction(bridgeAddr, burnCall)
     await this.wallet.createAuthWit(
       this.account,
       {
-        caller: bridgeAddr,
-        call: burnCall,
+        consumer: tokenAddr,
+        innerHash,
       }
     )
 
