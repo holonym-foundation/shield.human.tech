@@ -54,7 +54,12 @@ export function buildCapabilityManifest() {
     .filter((addr): addr is string => !!addr)
     .map((addr) => AztecAddress.fromString(addr))
 
-  const allContracts = [...tokenAddresses, ...bridgeAddresses, FEE_JUICE_ADDRESS]
+  const proxyAddresses = L1_TOKENS
+    .map((t) => t.l2ProxyContract)
+    .filter((addr): addr is string => !!addr)
+    .map((addr) => AztecAddress.fromString(addr))
+
+  const allContracts = [...tokenAddresses, ...bridgeAddresses, ...proxyAddresses, FEE_JUICE_ADDRESS]
 
   const simulationUtilities: ContractFunctionPattern[] = tokenAddresses.flatMap(
     (addr) => patternsFor(addr, [...TOKEN_UTILITY_SIMULATION_METHODS]),

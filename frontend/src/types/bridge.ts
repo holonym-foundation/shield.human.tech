@@ -22,6 +22,7 @@ export interface Token {
   l2TokenContract?: string;
   l1PortalContract?: string;
   l2BridgeContract?: string;
+  l2ProxyContract?: string;
   feeAssetHandler?: string;
   sponsoredFee?: string;
   pairedSymbol?: string;

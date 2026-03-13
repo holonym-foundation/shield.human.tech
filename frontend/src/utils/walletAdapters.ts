@@ -21,13 +21,19 @@ export interface ExecuteCallResult {
   blockNumber?: number
 }
 
-async function getContractArtifact(type: 'token' | 'bridge') {
+async function getContractArtifact(type: 'token' | 'bridge' | 'proxy') {
   const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
   if (type === 'bridge') {
     // Custom compliant bridge — artifact from local build output
     const bridgeJson = await import('../../../aztec-contracts/token_bridge/target/token_bridge_contract-TokenBridge.json')
     // @ts-ignore — JSON import from local build output
     return loadContractArtifact(bridgeJson.default ?? bridgeJson)
+  }
+  if (type === 'proxy') {
+    // TokenMinterProxy — needed for private claim simulation (bridge → proxy → token)
+    const proxyJson = await import('../../../aztec-contracts/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json')
+    // @ts-ignore — JSON import from local build output
+    return loadContractArtifact(proxyJson.default ?? proxyJson)
   }
   // Wonderland Token (constructor_with_minter) — matches deployed token
   // @ts-ignore — JSON import from package target directory
@@ -48,21 +54,25 @@ function resolveArtifactType(
 class WalletAdapter {
   readonly tokenAddress: string
   readonly bridgeAddress: string
+  readonly proxyAddress: string
 
   constructor(
     private wallet: Wallet,
     private account: AztecAddress,
     tokenAddress?: string,
     bridgeAddress?: string,
+    proxyAddress?: string,
   ) {
     this.tokenAddress = tokenAddress ?? L1_TOKENS[0]?.l2TokenContract ?? ''
     this.bridgeAddress = bridgeAddress ?? L1_TOKENS[0]?.l2BridgeContract ?? ''
+    this.proxyAddress = proxyAddress ?? L1_TOKENS[0]?.l2ProxyContract ?? ''
   }
 
   async initializeContracts(): Promise<void> {
     const addresses = [
       { addr: this.tokenAddress, type: 'token' as const },
       { addr: this.bridgeAddress, type: 'bridge' as const },
+      { addr: this.proxyAddress, type: 'proxy' as const },
     ].filter(({ addr }) => !!addr)
 
     await Promise.all(
