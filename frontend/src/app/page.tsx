@@ -556,6 +556,7 @@ export default function Home() {
                       bridgeAmount={bridgeConfig.amount}
                       tokenSymbol={bridgeConfig.from.token?.symbol ?? 'USDC'}
                       tokenDecimals={bridgeConfig.from.token?.decimals ?? 6}
+                      tokenAddress={bridgeConfig.from.token?.l1TokenContract ?? ''}
                       onToggle={setFuelEnabled}
                       onAmountChange={setFuelAmount}
                       feeJuiceBalance={feeJuiceBalance}

@@ -68,10 +68,13 @@ class WalletAdapter {
   }
 
   async initializeContracts(): Promise<void> {
-    const deployedContracts: { addr: string; type: 'token' | 'bridge' }[] = [
-      { addr: this.tokenAddress, type: 'token' as const },
-      { addr: this.bridgeAddress, type: 'bridge' as const },
-    ].filter(({ addr }) => !!addr)
+    // Register ALL tokens and bridges from config, not just the default
+    const deployedContracts: { addr: string; type: 'token' | 'bridge' }[] = L1_TOKENS.flatMap(
+      (t) => [
+        { addr: t.l2TokenContract ?? '', type: 'token' as const },
+        { addr: t.l2BridgeContract ?? '', type: 'bridge' as const },
+      ],
+    ).filter(({ addr }) => !!addr)
 
     // Register deployed contracts (token, bridge) via node lookup
     await Promise.all(

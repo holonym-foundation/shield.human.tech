@@ -366,6 +366,7 @@
       ],
       "bridgeAndFuelAddress": "0x3Ab69FE6D166DF1DD99C72Cd97C50d861f0CCdA2",
       "mockFuelSwapAddress": "0x2936A451E509B28b8011e9D77ead711F39636dd4",
+      "uniswapFuelSwapAddress": "0x547BE2F85f371f85fFB7f5BA1a972EAd88D7dB42",
       "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
     }
   ]

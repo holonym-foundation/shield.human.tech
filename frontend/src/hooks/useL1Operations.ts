@@ -58,9 +58,10 @@ import {
 import {
   BRIDGE_AND_FUEL_ADDRESS,
   BRIDGED_FPC_ADDRESS,
-  MOCK_FUEL_SWAP_ADDRESS,
+  UNISWAP_FUEL_SWAP_ADDRESS,
 } from '@/config'
-import { getMockFuelQuote } from '@/utils/fuelQuote'
+import { getUniswapFuelQuote, type FuelQuote } from '@/utils/fuelQuote'
+import { buildSwapRoute, getV4Quote } from '@/utils/fuelPricing'
 import {
   createSigningMessage,
   deriveEncryptionKey,
@@ -69,6 +70,35 @@ import {
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
+
+/**
+ * Build a fuel swap quote via Uniswap V4.
+ */
+async function buildFuelQuote(params: {
+  bridgeTokenAddress: `0x${string}`
+  fuelAmount: bigint
+  inputDecimals: number
+}): Promise<FuelQuote> {
+  const { bridgeTokenAddress, fuelAmount } = params
+  const { poolKeys, zeroForOnes } = buildSwapRoute(bridgeTokenAddress)
+
+  const expectedOutput = await getV4Quote({
+    poolKeys,
+    zeroForOnes,
+    inputAmount: fuelAmount,
+    l1RpcUrl: process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL ?? '',
+  })
+
+  return getUniswapFuelQuote({
+    uniswapFuelSwapAddress: UNISWAP_FUEL_SWAP_ADDRESS,
+    bridgeTokenAddress,
+    fuelAmount,
+    expectedOutput,
+    slippageBps: 300, // 3% slippage for testnet
+    poolKeys,
+    zeroForOnes,
+  })
+}
 
 export function useL1NativeBalance() {
   const { waapAddress: l1Address } = useWalletStore()
@@ -593,28 +623,27 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       const fuelAmountTokenUnits = BigInt(
         Math.floor(Number(fuelAmountStr) * 10 ** (selectedToken?.decimals ?? 6))
       )
+      const hasSwapTarget = UNISWAP_FUEL_SWAP_ADDRESS
       if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amount) {
-        if (fuelType === 'private' && BRIDGED_FPC_ADDRESS && BRIDGE_AND_FUEL_ADDRESS && MOCK_FUEL_SWAP_ADDRESS) {
+        if (fuelType === 'private' && BRIDGED_FPC_ADDRESS && BRIDGE_AND_FUEL_ADDRESS && hasSwapTarget) {
           // Private fuel (BridgedFPC): swap via BridgeAndFuel, FJ deposited to FPC, then claim+mint on L2
-          const fuelQuote = getMockFuelQuote({
-            mockFuelSwapAddress: MOCK_FUEL_SWAP_ADDRESS,
+          const fuelQuote = await buildFuelQuote({
             bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
             fuelAmount: fuelAmountTokenUnits,
             inputDecimals: selectedToken?.decimals ?? 6,
           })
           fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
           privateFuel = { fuelAmount: fuelAmountTokenUnits, fpcAddress: BRIDGED_FPC_ADDRESS }
-          console.log('[L1→L2] Private fuel (BridgedFPC) enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), fpcAddress: BRIDGED_FPC_ADDRESS, expectedOutput: fuelQuote.expectedOutput.toString() })
-        } else if (fuelType === 'public' && BRIDGE_AND_FUEL_ADDRESS && MOCK_FUEL_SWAP_ADDRESS) {
+          console.log('[L1→L2] Private fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), fpcAddress: BRIDGED_FPC_ADDRESS, expectedOutput: fuelQuote.expectedOutput.toString(), swapTarget: fuelQuote.swapTarget })
+        } else if (fuelType === 'public' && BRIDGE_AND_FUEL_ADDRESS && hasSwapTarget) {
           // Public fuel: swap tokens → FJ via BridgeAndFuel
-          const fuelQuote = getMockFuelQuote({
-            mockFuelSwapAddress: MOCK_FUEL_SWAP_ADDRESS,
+          const fuelQuote = await buildFuelQuote({
             bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
             fuelAmount: fuelAmountTokenUnits,
             inputDecimals: selectedToken?.decimals ?? 6,
           })
           fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
-          console.log('[L1→L2] Public fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), expectedOutput: fuelQuote.expectedOutput.toString() })
+          console.log('[L1→L2] Public fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), expectedOutput: fuelQuote.expectedOutput.toString(), swapTarget: fuelQuote.swapTarget })
         }
       }
     }

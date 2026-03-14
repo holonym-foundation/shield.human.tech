@@ -29,10 +29,9 @@ import {
   L2_CHAIN_ID,
   BRIDGE_AND_FUEL_ADDRESS,
   FEE_JUICE_PORTAL_ADDRESS,
-  MOCK_FUEL_SWAP_ADDRESS,
 } from '@/config'
 import { BridgeAndFuelAbi } from '@/constants/abis/BridgeAndFuelAbi'
-import { getMockFuelQuote, type FuelQuote } from '@/utils/fuelQuote'
+import { type FuelQuote } from '@/utils/fuelQuote'
 import type { Token } from '@/types/bridge'
 import { serializeNodeInfo, wait } from '@/utils'
 import { logInfo } from '@/utils/datadog'
