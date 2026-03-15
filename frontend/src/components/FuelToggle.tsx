@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
 import { buildSwapRoute, getV4Quote } from '@/utils/fuelPricing'
 import { BRIDGED_FPC_ADDRESS } from '@/config'
+import { useTokenPrices } from '@/utils/coinGeckoPrice'
 
 interface FuelToggleProps {
   fuelEnabled: boolean
@@ -65,7 +66,9 @@ function useV4FuelQuote(
       } catch (err) {
         console.error('[FuelToggle] V4 quote failed:', err)
         setFjOutput(null)
-        setError('Quote failed')
+        const errMsg = err instanceof Error ? err.message : String(err)
+        const isRevert = errMsg.includes('reverted') || errMsg.includes('execution reverted')
+        setError(isRevert ? 'Swap amount exceeds pool liquidity — try a smaller amount' : 'Quote failed')
       } finally {
         setLoading(false)
       }
@@ -77,9 +80,10 @@ function useV4FuelQuote(
   return { fjOutput, loading, error }
 }
 
-function FuelBreakdown({ fuelNum, netBridge, tokenSymbol, fjOutput, loading, error }: {
+function FuelBreakdown({ fuelNum, netBridge, tokenSymbol, fjOutput, loading, error, prices }: {
   fuelNum: number; netBridge: number; tokenSymbol: string
   fjOutput: bigint | null; loading: boolean; error: string | null
+  prices: Record<string, number> | null
 }) {
   if (loading) {
     return <p>Fetching quote...</p>
@@ -92,7 +96,7 @@ function FuelBreakdown({ fuelNum, netBridge, tokenSymbol, fjOutput, loading, err
   }
 
   const fjDisplay = formatFjAmount(fjOutput)
-  const usdValue = (Number(fjOutput) / 1e18) * getFeeJuicePriceUsd()
+  const usdValue = (Number(fjOutput) / 1e18) * getFeeJuicePriceUsd(prices)
   return (
     <>
       <p>Swapping {fuelNum} {tokenSymbol} → ~{fjDisplay} FJ (~${usdValue.toFixed(2)})</p>
@@ -121,6 +125,8 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   const netBridge = bridgeNum - fuelNum
   const hasBridgedFpc = !!BRIDGED_FPC_ADDRESS
 
+  const { prices, isLoading: pricesLoading, error: pricesError } = useTokenPrices()
+
   const { fjOutput, loading, error } = useV4FuelQuote(
     isValid ? fuelAmount : '',
     tokenAddress,
@@ -129,7 +135,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
 
   // Check which USD preset is currently selected (if any)
   const activePreset = USD_PRESETS.find(
-    (usd) => fuelAmount === usdToTokenAmount(usd, tokenSymbol)
+    (usd) => fuelAmount === usdToTokenAmount(usd, tokenSymbol, prices)
   )
 
   return (
@@ -167,6 +173,11 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
 
       {fuelEnabled && (
         <div className='mt-3 space-y-2'>
+          {pricesError && (
+            <p className='text-xs text-amber-600'>
+              Live prices unavailable — using fallback prices
+            </p>
+          )}
           {hasBridgedFpc && (
             <div className='flex rounded-md overflow-hidden border border-gray-200 text-xs'>
               <button
@@ -205,7 +216,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
               className='flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500'
             />
             {USD_PRESETS.map((usd) => {
-              const tokenEquiv = usdToTokenAmount(usd, tokenSymbol)
+              const tokenEquiv = usdToTokenAmount(usd, tokenSymbol, prices)
               return (
                 <button
                   key={usd}
@@ -226,7 +237,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
           {fuelAmount && (
             <div className='text-xs text-latest-grey-700 space-y-0.5'>
               {isValid ? (
-                <FuelBreakdown fuelNum={fuelNum} netBridge={netBridge} tokenSymbol={tokenSymbol} fjOutput={fjOutput} loading={loading} error={error} />
+                <FuelBreakdown fuelNum={fuelNum} netBridge={netBridge} tokenSymbol={tokenSymbol} fjOutput={fjOutput} loading={loading} error={error} prices={prices} />
               ) : fuelNum >= bridgeNum ? (
                 <p className='text-red-500'>
                   Gas amount must be less than bridge amount

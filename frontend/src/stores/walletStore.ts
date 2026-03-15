@@ -170,6 +170,7 @@ export const WAAP_METHOD = {
   eth_call: 'eth_call',
   eth_getBalance: 'eth_getBalance',
   eth_getTransactionReceipt: 'eth_getTransactionReceipt',
+  eth_signTypedData_v4: 'eth_signTypedData_v4',
 } as const
 
 export const requestWaapWallet = async (

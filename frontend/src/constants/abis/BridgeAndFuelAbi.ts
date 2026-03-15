@@ -50,16 +50,3 @@ export const BridgeAndFuelAbi = [
   },
 ] as const
 
-export const MockFuelSwapAbi = [
-  {
-    type: 'function',
-    name: 'swap',
-    inputs: [
-      { name: 'inputToken', type: 'address' },
-      { name: 'inputAmount', type: 'uint256' },
-      { name: 'minOutput', type: 'uint256' },
-    ],
-    outputs: [{ name: 'output', type: 'uint256' }],
-    stateMutability: 'nonpayable',
-  },
-] as const

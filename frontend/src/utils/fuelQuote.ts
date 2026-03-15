@@ -1,17 +1,13 @@
 /**
  * Fuel swap quote utility.
  *
- * - Mock mode (devnet): uses MockFuelSwap (1:1 rate, mint-based).
- * - V4 mode: real on-chain Uniswap V4 swap via UniswapFuelSwap contract.
- *
- * Both return a FuelQuote with swapTarget, swapData, and expected output —
- * compatible with BridgeAndFuel's generic `.call(swapData)` pattern.
+ * Builds a FuelQuote for real on-chain Uniswap V4 swaps via UniswapFuelSwap.
+ * Includes typed pool keys for SwapBridgeRouter's Permit2 path.
  */
 
 import { encodeFunctionData } from 'viem'
-import { MockFuelSwapAbi } from '@/constants/abis/BridgeAndFuelAbi'
 import { UniswapFuelSwapAbi } from '@/constants/abis/UniswapFuelSwapAbi'
-import { computeSwapOutput, MOCK_FUEL_SWAP_RATE, type PoolKeyParam } from './fuelPricing'
+import { type PoolKeyParam } from './fuelPricing'
 
 export interface FuelQuote {
   swapTarget: `0x${string}`
@@ -19,43 +15,13 @@ export interface FuelQuote {
   swapData: `0x${string}`
   expectedOutput: bigint
   minOutput: bigint
+  /** Typed pool keys for SwapBridgeRouter (replaces opaque swapData blob). */
+  poolKeys?: PoolKeyParam[]
+  /** Swap direction per hop for SwapBridgeRouter. */
+  zeroForOnes?: boolean[]
 }
 
-// ─── Mock Quote (devnet) ────────────────────────────────────────────
-
-/**
- * Build a mock fuel quote for devnet.
- * MockFuelSwap mints FeeJuice at 1:1 rate.
- */
-export function getMockFuelQuote(params: {
-  mockFuelSwapAddress: `0x${string}`
-  bridgeTokenAddress: `0x${string}`
-  fuelAmount: bigint
-  inputDecimals: number
-  slippageBps?: number // basis points, default 0 for devnet mock
-}): FuelQuote {
-  const { mockFuelSwapAddress, bridgeTokenAddress, fuelAmount, inputDecimals, slippageBps = 0 } = params
-
-  // Compute expected FJ output (18-dec) from token input amount using contract math
-  const expectedOutput = computeSwapOutput(fuelAmount, inputDecimals, MOCK_FUEL_SWAP_RATE)
-  const minOutput = expectedOutput - (expectedOutput * BigInt(slippageBps)) / 10000n
-
-  const swapData = encodeFunctionData({
-    abi: MockFuelSwapAbi,
-    functionName: 'swap',
-    args: [bridgeTokenAddress, fuelAmount, minOutput],
-  })
-
-  return {
-    swapTarget: mockFuelSwapAddress,
-    swapAllowanceTarget: mockFuelSwapAddress,
-    swapData: swapData as `0x${string}`,
-    expectedOutput,
-    minOutput,
-  }
-}
-
-// ─── Uniswap V4 Quote (production) ─────────────────────────────────
+// ─── Uniswap V4 Quote ───────────────────────────────────────────────
 
 /**
  * Build a real Uniswap V4 fuel quote.
@@ -99,5 +65,7 @@ export function getUniswapFuelQuote(params: {
     swapData: swapData as `0x${string}`,
     expectedOutput,
     minOutput,
+    poolKeys,
+    zeroForOnes,
   }
 }

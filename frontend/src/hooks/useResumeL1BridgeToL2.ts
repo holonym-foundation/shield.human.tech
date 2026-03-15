@@ -10,6 +10,8 @@ import { BridgeOperationStatus } from '@prisma/client'
 import { TokenPortalAbi } from '@aztec/l1-artifacts'
 import { extractEvent } from '@aztec/ethereum/utils'
 import { decodeEventLog } from 'viem'
+import { SWAP_BRIDGE_ROUTER_ADDRESS } from '@/config'
+import { SwapBridgeRouterAbi } from '@/constants/abis/SwapBridgeRouterAbi'
 import {
   LS_KEY_BRIDGE_DEPOSITS,
   patchOperationWithRetry,
@@ -40,6 +42,30 @@ async function recoverFromReceipt(
     hash: l1TxHash as `0x${string}`,
   })
 
+  // Try SwapBridgeRouter Bridge event first (our custom portal has different event signatures)
+  if (SWAP_BRIDGE_ROUTER_ADDRESS) {
+    for (const txLog of receipt.logs) {
+      if (txLog.address.toLowerCase() !== SWAP_BRIDGE_ROUTER_ADDRESS.toLowerCase()) continue
+      try {
+        const decoded = decodeEventLog({
+          abi: SwapBridgeRouterAbi,
+          data: txLog.data,
+          topics: txLog.topics,
+        })
+        if (decoded.eventName === 'Bridge' || decoded.eventName === 'BridgeWithFuel') {
+          const args = decoded.args as any
+          const messageHash = (args.key ?? args.tokenKey).toString()
+          const messageLeafIndex = (args.index ?? args.tokenIndex).toString()
+          console.log('[Resume L1→L2] Recovered from router event:', { messageHash, messageLeafIndex })
+          return { messageHash, messageLeafIndex }
+        }
+      } catch {
+        // Not our event, skip
+      }
+    }
+  }
+
+  // Fallback: try DepositToAztecPublic/Private from TokenPortal (legacy path)
   const eventName = isPrivacyModeEnabled
     ? 'DepositToAztecPrivate'
     : 'DepositToAztecPublic'
@@ -86,8 +112,12 @@ async function recoverFromBlockScan(
 
   console.log('[Resume L1→L2] Scanning L1 blocks', fromBlock.toString(), '→', toBlock.toString(), 'for portal events...')
 
+  const addresses = [portalAddress as `0x${string}`]
+  if (SWAP_BRIDGE_ROUTER_ADDRESS) {
+    addresses.push(SWAP_BRIDGE_ROUTER_ADDRESS as `0x${string}`)
+  }
   const logs = await publicClient.getLogs({
-    address: portalAddress as `0x${string}`,
+    address: addresses,
     fromBlock,
     toBlock,
   })
@@ -97,6 +127,27 @@ async function recoverFromBlockScan(
     : 'DepositToAztecPublic'
 
   for (const rawLog of logs) {
+    // Try SwapBridgeRouter events first
+    if (SWAP_BRIDGE_ROUTER_ADDRESS && rawLog.address.toLowerCase() === SWAP_BRIDGE_ROUTER_ADDRESS.toLowerCase()) {
+      try {
+        const decoded = decodeEventLog({
+          abi: SwapBridgeRouterAbi,
+          data: rawLog.data,
+          topics: rawLog.topics,
+        })
+        if (decoded.eventName === 'Bridge' || decoded.eventName === 'BridgeWithFuel') {
+          const args = decoded.args as any
+          const messageHash = (args.key ?? args.tokenKey).toString()
+          const messageLeafIndex = (args.index ?? args.tokenIndex).toString()
+          console.log('[Resume L1→L2] Found router event in block scan:', { messageHash, messageLeafIndex })
+          return { messageHash, messageLeafIndex }
+        }
+      } catch {
+        // Not our event, skip
+      }
+    }
+
+    // Fallback: try TokenPortal events (legacy path)
     try {
       const decoded = decodeEventLog({
         abi: TokenPortalAbi,

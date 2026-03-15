@@ -291,7 +291,7 @@
           "decimals": 6,
           "logo": "/assets/svg/USDC.svg",
           "l1TokenContract": "0x47e16bd8702bcef388085c0371ba0b87fa883f5e",
-          "l1PortalContract": "0x1372b1df4d1e8f71d72bbb104b2826575316ecb7",
+          "l1PortalContract": "0x5bE5D8f70f591F9de1400e6F86e7D689eB6A2574",
           "l2TokenContract": "0x07a7e52f28e5f218693454cba3c6fcb0c0f2b504381fbe5bf68701f2f735acc8",
           "l2BridgeContract": "0x2db8efe71b161f228b170346f0a6d6fbfb6810e62787950e522043e86a9279b3",
           "feeAssetHandler": "0x16f99ff0022dafe3a332ac6fcd1ee25862a19af4",
@@ -367,6 +367,7 @@
       "bridgeAndFuelAddress": "0x3Ab69FE6D166DF1DD99C72Cd97C50d861f0CCdA2",
       "mockFuelSwapAddress": "0x2936A451E509B28b8011e9D77ead711F39636dd4",
       "uniswapFuelSwapAddress": "0x547BE2F85f371f85fFB7f5BA1a972EAd88D7dB42",
+      "swapBridgeRouterAddress": "0xedfb9419A44e49Ed33D901e7E6B35FF063a9EFa2",
       "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
     }
   ]

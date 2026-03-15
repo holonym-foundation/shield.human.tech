@@ -54,6 +54,7 @@ import {
   finalizeLocalStorageAfterDeposit,
   type FuelParams,
   type PrivateFuelParams,
+  type Permit2Params,
 } from './bridge/bridgeL1ToL2'
 import {
   BRIDGE_AND_FUEL_ADDRESS,
@@ -697,8 +698,8 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       })
       operationId = backup.operationId
 
-      // ─── Step 3: Check allowance and approve ────────────────────────
-      await checkAndApproveAllowance(l1Address, amount, selectedToken, fuel)
+      // ─── Step 3: Check allowance and approve (+ Permit2 sign) ────────
+      const permit2 = await checkAndApproveAllowance(l1Address, amount, selectedToken, fuel)
 
       // ─── Step 4: Send L1 deposit transaction ────────────────────────
       // ═══ DANGER ZONE: tokens are locked on L1 after this ═══
@@ -727,6 +728,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           ...privateFuel,
           secretHash: backup.privateFuelSecretHash,
         } : undefined,
+        permit2: permit2 || undefined,
       })
       // 🔒 Funds are now POTENTIALLY locked on L1 — from this point, the outer catch must
       // NEVER mark the operation as 'failed'.

@@ -1,10 +1,8 @@
 /**
  * Fuel pricing module.
  *
- * - Mock mode (devnet): 1:1 rate via MockFuelSwap, all tokens priced at $1.
- * - V4 mode: real on-chain quotes via Uniswap V4 Quoter, hardcoded USD prices for display.
- *
- * TODO: Replace hardcoded USD price feeds with CoinGecko API for mainnet.
+ * Real on-chain quotes via Uniswap V4 Quoter.
+ * USD price feeds via CoinGecko (with Sepolia fallback).
  */
 
 import { createPublicClient, http, encodeFunctionData, decodeFunctionResult } from 'viem'
@@ -23,76 +21,32 @@ import {
 } from '@/config'
 
 export const FEE_JUICE_DECIMALS = 18
-export const MOCK_FUEL_SWAP_RATE = 10n ** 18n // 1e18 = "1 token buys 1 FJ"
 
-// ─── Price Feeds (hardcoded for Sepolia) ────────────────────────────
-
-const SEPOLIA_PRICES_USD: Record<string, number> = {
-  WETH: 2100,
-  USDC: 1,
-  USDT: 1,
-  DAI: 1,
-  WBTC: 60000,
-  AZTEC: 0.02,
-  FEE_JUICE: 0.02,
-}
+// ─── Price Feeds ─────────────────────────────────────────────────────
 
 /**
  * Get the USD price of a token by symbol.
- * Sepolia: hardcoded prices. Mainnet: TODO replace with CoinGecko API.
+ * When `prices` is provided (from CoinGecko), uses live data.
+ * Falls back to hardcoded Sepolia prices if no live prices available.
  */
-export function getTokenPriceUsd(symbol: string): number {
-  return SEPOLIA_PRICES_USD[symbol.toUpperCase()] ?? 1.0
+export function getTokenPriceUsd(symbol: string, prices?: Record<string, number> | null): number {
+  if (prices) {
+    const price = prices[symbol.toUpperCase()]
+    if (price != null) return price
+  }
+  // Fallback for Sepolia testnet (tokens have no real market price)
+  const SEPOLIA_FALLBACK: Record<string, number> = {
+    WETH: 2100, USDC: 1, USDT: 1, DAI: 1, WBTC: 60000, AZTEC: 0.02, FEE_JUICE: 0.02,
+  }
+  return SEPOLIA_FALLBACK[symbol.toUpperCase()] ?? 1.0
 }
 
 /** Get the USD price of one FeeJuice token. */
-export function getFeeJuicePriceUsd(): number {
-  return SEPOLIA_PRICES_USD.AZTEC
-}
-
-// ─── Swap Output (mirrors MockFuelSwap contract math) ───────────────
-
-/**
- * Compute FeeJuice output from a raw token input amount using mock 1:1 rate.
- * Formula: (inputAmountRaw * 10^(18 - inputDecimals) * rate) / 1e18
- */
-export function computeSwapOutput(
-  inputAmountRaw: bigint,
-  inputDecimals: number,
-  swapRate: bigint = MOCK_FUEL_SWAP_RATE,
-): bigint {
-  const normalized = inputAmountRaw * 10n ** BigInt(18 - inputDecimals)
-  return (normalized * swapRate) / 10n ** 18n
+export function getFeeJuicePriceUsd(prices?: Record<string, number> | null): number {
+  return getTokenPriceUsd('AZTEC', prices)
 }
 
 // ─── Convenience Helpers ────────────────────────────────────────────
-
-/**
- * Estimate FeeJuice output from a human-readable token amount string.
- * Uses USD price feeds to compute a realistic estimate for display:
- *   output_FJ = (inputAmount * tokenPriceUsd) / aztecPriceUsd
- *
- * e.g. computeFuelOutput("5", 6, "USDC") → 250e18n  (at $1/USDC, $0.02/AZTEC)
- *      computeFuelOutput("0.01", 18, "WETH") → 1050000e18n  (at $2100/WETH)
- */
-export function computeFuelOutput(
-  humanAmount: string,
-  inputDecimals: number,
-  tokenSymbol: string,
-): bigint {
-  const tokenPrice = getTokenPriceUsd(tokenSymbol)
-  const aztecPrice = getFeeJuicePriceUsd()
-  if (aztecPrice <= 0) {
-    // Fallback to mock 1:1 rate
-    const raw = BigInt(Math.floor(Number(humanAmount) * 10 ** inputDecimals))
-    return computeSwapOutput(raw, inputDecimals)
-  }
-  // USD value of input → number of AZTEC/FJ tokens
-  const usdValue = Number(humanAmount) * tokenPrice
-  const fjTokens = usdValue / aztecPrice
-  // Convert to 18-decimal raw bigint
-  return BigInt(Math.floor(fjTokens * 1e18))
-}
 
 /** Format raw FJ (18-dec bigint) to a human-readable string, e.g. "5.00" */
 export function formatFjAmount(rawFj: bigint, precision = 2): string {
@@ -114,8 +68,8 @@ export function formatFuelDisplay(rawFj: bigint): string {
  * e.g. usdToTokenAmount(5, "USDC") → "5" (at $1/USDC)
  *      usdToTokenAmount(5, "WETH") → "0.0024" (at $2100/WETH)
  */
-export function usdToTokenAmount(usdAmount: number, tokenSymbol: string): string {
-  const pricePerToken = getTokenPriceUsd(tokenSymbol)
+export function usdToTokenAmount(usdAmount: number, tokenSymbol: string, prices?: Record<string, number> | null): string {
+  const pricePerToken = getTokenPriceUsd(tokenSymbol, prices)
   if (pricePerToken <= 0) return '0'
   const tokenAmount = usdAmount / pricePerToken
   if (tokenAmount >= 1) return tokenAmount.toFixed(2)

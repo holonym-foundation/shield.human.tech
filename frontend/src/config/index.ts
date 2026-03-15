@@ -67,14 +67,17 @@ export const getAztecscanUrl = (chainId: number): string => {
 
 export const BRIDGE_AND_FUEL_ADDRESS: `0x${string}` =
   ((activeDeployment as any).bridgeAndFuelAddress ?? '') as `0x${string}`
-export const MOCK_FUEL_SWAP_ADDRESS: `0x${string}` =
-  ((activeDeployment as any).mockFuelSwapAddress ?? '') as `0x${string}`
 export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuicePortalAddress ?? '') as `0x${string}`
 export const FEE_JUICE_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
 export const BRIDGED_FPC_ADDRESS: string =
   ((activeDeployment as any).bridgedFpcAddress ?? '') as string
+
+// ─── Permit2 + SwapBridgeRouter ──────────────────────────────────────
+export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
+export const SWAP_BRIDGE_ROUTER_ADDRESS: `0x${string}` =
+  ((activeDeployment as any).swapBridgeRouterAddress ?? '') as `0x${string}`
 
 // ─── Uniswap V4 Sepolia Constants ───────────────────────────────────
 export const V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as const

@@ -29,8 +29,11 @@ import {
   L2_CHAIN_ID,
   BRIDGE_AND_FUEL_ADDRESS,
   FEE_JUICE_PORTAL_ADDRESS,
+  PERMIT2_ADDRESS,
+  SWAP_BRIDGE_ROUTER_ADDRESS,
 } from '@/config'
 import { BridgeAndFuelAbi } from '@/constants/abis/BridgeAndFuelAbi'
+import { SwapBridgeRouterAbi } from '@/constants/abis/SwapBridgeRouterAbi'
 import { type FuelQuote } from '@/utils/fuelQuote'
 import type { Token } from '@/types/bridge'
 import { serializeNodeInfo, wait } from '@/utils'
@@ -85,6 +88,13 @@ export interface FuelParams {
 export interface PrivateFuelParams {
   fuelAmount: bigint
   fpcAddress: string
+}
+
+/** Permit2 SignatureTransfer params returned from signing step. */
+export interface Permit2Params {
+  nonce: bigint
+  deadline: bigint
+  signature: `0x${string}`
 }
 
 // ─── Deposit Step Result Types ───────────────────────────────────────
@@ -619,17 +629,68 @@ export async function generateAndBackupClaimSecret(params: {
   }
 }
 
-// ─── Step 3: Check and approve token allowance ───────────────────────
+// ─── Step 3: Check and approve allowance + sign Permit2 ──────────────
 
+/**
+ * Approve Permit2 (one-time) and sign a Permit2 SignatureTransfer.
+ *
+ * When SWAP_BRIDGE_ROUTER_ADDRESS is set, ALL deposits go through SwapBridgeRouter
+ * with Permit2. The flow:
+ *   1. Check ERC20 allowance for Permit2 canonical contract
+ *   2. If insufficient, send approve(Permit2, type(uint256).max) — one-time per token
+ *   3. Sign Permit2 transfer via eth_signTypedData_v4 (gasless)
+ *   4. Return { nonce, deadline, signature } for use in Step 4
+ *
+ * Falls back to legacy direct approve when SWAP_BRIDGE_ROUTER_ADDRESS is not set.
+ */
 export async function checkAndApproveAllowance(
   l1Address: string,
   amount: bigint,
   selectedToken?: Token,
   fuel?: FuelParams,
-): Promise<void> {
+): Promise<Permit2Params | void> {
   const l1TokenAddress = selectedToken?.l1TokenContract ?? ''
-  // When fuel is enabled, user approves BridgeAndFuel (which pulls totalAmount).
-  // Otherwise, user approves TokenPortal directly.
+
+  // ── Permit2 path (SwapBridgeRouter is deployed) ──
+  if (SWAP_BRIDGE_ROUTER_ADDRESS) {
+    const spender = PERMIT2_ADDRESS
+
+    const allowanceData = encodeFunctionData({
+      abi: TestERC20Abi,
+      functionName: 'allowance',
+      args: [l1Address as `0x${string}`, spender as `0x${string}`],
+    })
+
+    const allowance = await requestWaapWallet(WAAP_METHOD.eth_call, [
+      { to: l1TokenAddress, data: allowanceData },
+    ])
+
+    console.log('[L1→L2] Permit2 allowance:', allowance, 'needed:', amount.toString())
+    if (BigInt(allowance as string) < amount) {
+      // One-time max approval for Permit2
+      const approveData = encodeFunctionData({
+        abi: TestERC20Abi,
+        functionName: 'approve',
+        args: [spender as `0x${string}`, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')],
+      })
+
+      const approveTxHash = await requestWaapWallet(
+        WAAP_METHOD.eth_sendTransaction,
+        [{ from: l1Address as `0x${string}`, to: l1TokenAddress, data: approveData }],
+      )
+
+      console.log('[L1→L2] Permit2 approve tx sent:', approveTxHash, '— waiting for confirmation...')
+      await publicClient.waitForTransactionReceipt({ hash: approveTxHash })
+      console.log('[L1→L2] Permit2 approve tx confirmed')
+    } else {
+      console.log('[L1→L2] Permit2 allowance sufficient, skipping approve')
+    }
+
+    // Sign Permit2 transfer
+    return signPermit2Transfer(l1Address, l1TokenAddress as `0x${string}`, amount)
+  }
+
+  // ── Legacy path (direct approve to BridgeAndFuel or TokenPortal) ──
   const spender = fuel ? BRIDGE_AND_FUEL_ADDRESS : (selectedToken?.l1PortalContract ?? '')
 
   const allowanceData = encodeFunctionData({
@@ -663,6 +724,76 @@ export async function checkAndApproveAllowance(
   }
 }
 
+/**
+ * Sign a Permit2 SignatureTransfer via eth_signTypedData_v4.
+ * Uses an unordered nonce (random uint256) and 30-minute deadline.
+ */
+async function signPermit2Transfer(
+  l1Address: string,
+  tokenAddress: `0x${string}`,
+  amount: bigint,
+): Promise<Permit2Params> {
+  // Random unordered nonce — any unused uint256 works with Permit2
+  const nonceBytes = new Uint8Array(32)
+  crypto.getRandomValues(nonceBytes)
+  const nonce = BigInt('0x' + Array.from(nonceBytes).map(b => b.toString(16).padStart(2, '0')).join(''))
+
+  // 30-minute deadline
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 30 * 60)
+
+  const domain = {
+    name: 'Permit2',
+    chainId: L1_CHAIN_ID,
+    verifyingContract: PERMIT2_ADDRESS,
+  }
+
+  const types = {
+    PermitTransferFrom: [
+      { name: 'permitted', type: 'TokenPermissions' },
+      { name: 'spender', type: 'address' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+    TokenPermissions: [
+      { name: 'token', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+  }
+
+  const message = {
+    permitted: {
+      token: tokenAddress,
+      amount: amount.toString(),
+    },
+    spender: SWAP_BRIDGE_ROUTER_ADDRESS,
+    nonce: nonce.toString(),
+    deadline: deadline.toString(),
+  }
+
+  const typedData = JSON.stringify({
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      ...types,
+    },
+    primaryType: 'PermitTransferFrom',
+    domain,
+    message,
+  })
+
+  console.log('[L1→L2] Requesting Permit2 signature...')
+  const signature = await requestWaapWallet(WAAP_METHOD.eth_signTypedData_v4, [
+    l1Address,
+    typedData,
+  ]) as `0x${string}`
+
+  console.log('[L1→L2] Permit2 signature obtained')
+  return { nonce, deadline, signature }
+}
+
 // ─── Step 4: Send L1 deposit transaction ─────────────────────────────
 
 export async function sendL1DepositTransaction(params: {
@@ -676,16 +807,87 @@ export async function sendL1DepositTransaction(params: {
   selectedToken?: Token
   fuel?: FuelParams & { fuelSecretHash: Fr }
   privateFuel?: PrivateFuelParams & { secretHash: Fr }
+  permit2?: Permit2Params
 }): Promise<DepositTxResult> {
   const {
     l1Address, aztecAddress, amount, claimSecretHash, claimSecret,
-    isPrivacyModeEnabled, operationId, selectedToken, fuel, privateFuel,
+    isPrivacyModeEnabled, operationId, selectedToken, fuel, privateFuel, permit2,
   } = params
 
   let txHash: any
 
-  if (fuel) {
-    // ── Fuel path: call BridgeAndFuel.bridgeWithFuel ──
+  if (permit2 && SWAP_BRIDGE_ROUTER_ADDRESS) {
+    // ── SwapBridgeRouter path (Permit2) ──
+    const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
+    const l1TokenAddress = selectedToken?.l1TokenContract ?? ''
+    const permitArgs = {
+      nonce: permit2.nonce,
+      deadline: permit2.deadline,
+      signature: permit2.signature,
+    }
+
+    // Empty attestation data — private deposits with real attestation TBD
+    const emptyCleanHands = { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` }
+    const emptyPassport = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
+
+    if (fuel) {
+      // Fuel path: SwapBridgeRouter.bridgeWithFuel with typed params
+      const bridgeData = encodeFunctionData({
+        abi: SwapBridgeRouterAbi,
+        functionName: 'bridgeWithFuel',
+        args: [
+          {
+            tokenPortal: l1PortalAddress as `0x${string}`,
+            bridgeToken: l1TokenAddress as `0x${string}`,
+            totalAmount: amount,
+            fuelAmount: fuel.fuelAmount,
+            aztecRecipient: aztecAddress as `0x${string}`,
+            tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
+            fuelSecretHash: (privateFuel ? privateFuel.secretHash : fuel.fuelSecretHash).toString() as `0x${string}`,
+            minFuelOutput: fuel.fuelQuote.minOutput,
+            path: fuel.fuelQuote.poolKeys!,
+            zeroForOnes: fuel.fuelQuote.zeroForOnes!,
+            isPrivate: isPrivacyModeEnabled,
+            cleanHands: emptyCleanHands,
+            passport: emptyPassport,
+          },
+          permitArgs,
+        ],
+      })
+
+      console.log('[L1→L2] Sending SwapBridgeRouter.bridgeWithFuel tx, totalAmount:', amount.toString(), 'fuelAmount:', fuel.fuelAmount.toString())
+      txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
+        { from: l1Address as `0x${string}`, to: SWAP_BRIDGE_ROUTER_ADDRESS, data: bridgeData },
+      ])
+    } else {
+      // Non-fuel path: SwapBridgeRouter.bridge (public or private)
+      const bridgeData = encodeFunctionData({
+        abi: SwapBridgeRouterAbi,
+        functionName: 'bridge',
+        args: [
+          {
+            tokenPortal: l1PortalAddress as `0x${string}`,
+            bridgeToken: l1TokenAddress as `0x${string}`,
+            amount,
+            aztecRecipient: aztecAddress as `0x${string}`,
+            secretHash: claimSecretHash.toString() as `0x${string}`,
+            isPrivate: isPrivacyModeEnabled,
+            cleanHands: emptyCleanHands,
+            passport: emptyPassport,
+          },
+          permitArgs,
+        ],
+      })
+
+      console.log('[L1→L2] Sending SwapBridgeRouter.bridge tx, amount:', amount.toString(), 'private:', isPrivacyModeEnabled)
+      txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
+        { from: l1Address as `0x${string}`, to: SWAP_BRIDGE_ROUTER_ADDRESS, data: bridgeData },
+      ])
+    }
+  }
+
+  if (!txHash && fuel) {
+    // ── Legacy fuel path: call BridgeAndFuel.bridgeWithFuel ──
     const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
     const l1TokenAddress = selectedToken?.l1TokenContract ?? ''
 
@@ -715,8 +917,11 @@ export async function sendL1DepositTransaction(params: {
     txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
       { from: l1Address as `0x${string}`, to: BRIDGE_AND_FUEL_ADDRESS, data: bridgeData },
     ])
-  } else {
-    // ── Standard path: call TokenPortal directly ──
+  }
+
+  if (!txHash) {
+    // ── Legacy standard path: call TokenPortal directly ──
+    // Fallback when SwapBridgeRouter is not deployed
     const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
 
     const functionName = isPrivacyModeEnabled
@@ -792,24 +997,30 @@ export async function waitForReceiptAndExtractEvent(params: {
   console.log('[L1→L2] Deposit tx confirmed:', l1TxHash, 'status:', txReceipt.status, 'logs:', txReceipt.logs.length)
 
   if (fuel) {
-    // ── Fuel path: extract BridgeWithFuel event from BridgeAndFuel contract ──
+    // ── Fuel path: extract BridgeWithFuel event from BridgeAndFuel or SwapBridgeRouter ──
     // Find the BridgeWithFuel event log by decoding
     let bridgeWithFuelLog: any = null
+    const fuelContractAddresses = [BRIDGE_AND_FUEL_ADDRESS, SWAP_BRIDGE_ROUTER_ADDRESS].filter(Boolean)
+    const fuelAbis = [BridgeAndFuelAbi, SwapBridgeRouterAbi]
     for (const log of txReceipt.logs) {
-      if (log.address.toLowerCase() !== BRIDGE_AND_FUEL_ADDRESS.toLowerCase()) continue
-      try {
-        const decoded = decodeEventLog({
-          abi: BridgeAndFuelAbi,
-          data: log.data,
-          topics: log.topics,
-        })
-        if (decoded.eventName === 'BridgeWithFuel') {
-          bridgeWithFuelLog = decoded
-          break
+      const logAddr = log.address.toLowerCase()
+      if (!fuelContractAddresses.some(a => a.toLowerCase() === logAddr)) continue
+      for (const abi of fuelAbis) {
+        try {
+          const decoded = decodeEventLog({
+            abi,
+            data: log.data,
+            topics: log.topics,
+          })
+          if (decoded.eventName === 'BridgeWithFuel') {
+            bridgeWithFuelLog = decoded
+            break
+          }
+        } catch {
+          // Not our event, skip
         }
-      } catch {
-        // Not our event, skip
       }
+      if (bridgeWithFuelLog) break
     }
 
     if (!bridgeWithFuelLog) {
@@ -844,35 +1055,66 @@ export async function waitForReceiptAndExtractEvent(params: {
     }
   }
 
-  // ── Standard path: extract DepositToAztecPublic/Private from TokenPortal ──
-  const eventName = isPrivacyModeEnabled
-    ? 'DepositToAztecPrivate'
-    : 'DepositToAztecPublic'
+  // ── Standard path: extract deposit event ──
+  // Try SwapBridgeRouter Bridge event first (our custom portal has different event signatures)
+  let messageHash: any
+  let messageLeafIndex: any
 
-  const privateEventFilter = (log: any) =>
-    log.args.amount === amount &&
-    log.args.secretHashForL2MessageConsumption === claimSecretHash.toString()
+  if (SWAP_BRIDGE_ROUTER_ADDRESS) {
+    let bridgeLog: any = null
+    for (const txLog of txReceipt.logs) {
+      if (txLog.address.toLowerCase() !== SWAP_BRIDGE_ROUTER_ADDRESS.toLowerCase()) continue
+      try {
+        const decoded = decodeEventLog({
+          abi: SwapBridgeRouterAbi,
+          data: txLog.data,
+          topics: txLog.topics,
+        })
+        if (decoded.eventName === 'Bridge') {
+          bridgeLog = decoded
+          break
+        }
+      } catch {
+        // Not our event, skip
+      }
+    }
+    if (bridgeLog) {
+      messageHash = (bridgeLog.args as any).key
+      messageLeafIndex = (bridgeLog.args as any).index
+    }
+  }
 
-  const publicEventFilter = (log: any) =>
-    log.args.secretHash === claimSecretHash.toString() &&
-    log.args.amount === amount &&
-    log.args.to === aztecAddress
+  // Fallback: try DepositToAztecPublic/Private from TokenPortal (legacy direct path)
+  if (!messageHash) {
+    const eventName = isPrivacyModeEnabled
+      ? 'DepositToAztecPrivate'
+      : 'DepositToAztecPublic'
 
-  const eventFilter = isPrivacyModeEnabled ? privateEventFilter : publicEventFilter
+    const privateEventFilter = (log: any) =>
+      log.args.amount === amount &&
+      log.args.secretHashForL2MessageConsumption === claimSecretHash.toString()
 
-  const log = extractEvent(
-    txReceipt.logs,
-    l1PortalAddress as `0x${string}`,
-    TokenPortalAbi,
-    eventName,
-    eventFilter,
-  )
+    const publicEventFilter = (log: any) =>
+      log.args.secretHash === claimSecretHash.toString() &&
+      log.args.amount === amount &&
+      log.args.to === aztecAddress
 
-  const messageHash = log.args.key
-  const messageLeafIndex = log.args.index
+    const eventFilter = isPrivacyModeEnabled ? privateEventFilter : publicEventFilter
+
+    const log = extractEvent(
+      txReceipt.logs,
+      l1PortalAddress as `0x${string}`,
+      TokenPortalAbi,
+      eventName,
+      eventFilter,
+    )
+
+    messageHash = log.args.key
+    messageLeafIndex = log.args.index
+  }
   const messageHashStr = messageHash.toString()
   const messageLeafIndexStr = messageLeafIndex.toString()
-  console.log('[L1→L2] Event extracted:', { eventName, messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr })
+  console.log('[L1→L2] Event extracted:', { messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr })
 
   updateLocalStorageItem(
     LS_KEY_BRIDGE_DEPOSITS,
