@@ -31,26 +31,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json([])
     }
 
-    const response = await axios.post<AlchemyTokenResponse>(
-      `https://api.g.alchemy.com/data/v1/${apiKey}/assets/tokens/by-address`,
-      {
-        addresses: [
-          {
-            address,
-            networks: supportedNetworks
-          }
-        ],
-        includeNativeTokens: true,
-        withPrices: true,
-        withMetadata: true
-      },
-      {
-        headers: {
-          accept: 'application/json',
-          'content-type': 'application/json'
-        }
-      }
-    )
+    const url = `https://api.g.alchemy.com/data/v1/${apiKey}/assets/tokens/by-address`
+    const payload = {
+      addresses: [{ address, networks: supportedNetworks }],
+      includeNativeTokens: true,
+      withPrices: true,
+      withMetadata: true,
+    }
+    const axiosOpts = {
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      timeout: 15_000,
+    }
+
+    let response: Awaited<ReturnType<typeof axios.post<AlchemyTokenResponse>>>
+    try {
+      response = await axios.post<AlchemyTokenResponse>(url, payload, axiosOpts)
+    } catch {
+      // Retry once on timeout / network error
+      response = await axios.post<AlchemyTokenResponse>(url, payload, axiosOpts)
+    }
 
     // Transform the response to include chain IDs
     const balances = response.data.data.tokens.map((token: any) => ({
