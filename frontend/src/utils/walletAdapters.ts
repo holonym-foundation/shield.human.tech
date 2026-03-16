@@ -129,6 +129,42 @@ class WalletAdapter {
     return results
   }
 
+  /**
+   * Pre-simulate a contract call via the wallet's PXE without triggering a popup.
+   * Returns true if simulation passes, throws if it fails.
+   * Useful for polling until the wallet's node has synced L1→L2 messages.
+   */
+  async preSimulateCall(
+    contract: AztecAddress | string,
+    method: string,
+    args: any[],
+    options?: { contractType?: ContractType; fee?: { paymentMethod: any } }
+  ): Promise<void> {
+    const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
+    const type = options?.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
+    const artifact = await getContractArtifact(type)
+    const instance = await Contract.at(addr, artifact, this.wallet)
+    const interaction = instance.methods[method](...args)
+    const executionPayload = await interaction.request()
+    await this.wallet.simulateTx(executionPayload, {
+      from: this.account,
+      skipTxValidation: true,
+      skipFeeEnforcement: true,
+    } as any)
+  }
+
+  /**
+   * Get chain info from the wallet (chainId + rollup version).
+   * Useful for verifying the wallet is on the same network.
+   */
+  async getWalletChainInfo(): Promise<{ chainId: string; version: string }> {
+    const info = await this.wallet.getChainInfo()
+    return {
+      chainId: info.chainId.toString(),
+      version: info.version.toString(),
+    }
+  }
+
   async executeCall(
     contract: AztecAddress | string,
     method: string,

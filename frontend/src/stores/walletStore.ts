@@ -256,6 +256,7 @@ const walletStore = create<WalletState>((set, get) => ({
   // ─── Wallet SDK connection flow ────────────────────────────────────
 
   startWalletDiscovery: async () => {
+    console.log('[DEBUG-WALLET] TODO remove after debugging — startWalletDiscovery called, isDiscoveryInProgress:', isDiscoveryInProgress) // TODO remove after debugging
     if (isDiscoveryInProgress) return
 
     // Cancel any stale session
@@ -271,6 +272,7 @@ const walletStore = create<WalletState>((set, get) => ({
       discoveredWallets: [],
       isAztecConnecting: true,
     })
+    console.log('[DEBUG-WALLET] TODO remove after debugging — phase set to discovering') // TODO remove after debugging
 
     logInfo('Aztec wallet discovery started', {
       walletType: WalletType.AZTEC,
@@ -333,9 +335,12 @@ const walletStore = create<WalletState>((set, get) => ({
         isDiscoveryInProgress = false
       }
 
+      console.log('[DEBUG-WALLET] TODO remove after debugging — selectWallet: setting phase to verifying') // TODO remove after debugging
       set({ walletConnectionPhase: 'verifying', isAztecConnecting: false })
 
+      console.log('[DEBUG-WALLET] TODO remove after debugging — selectWallet: calling connectToProvider...') // TODO remove after debugging
       const pending = await connectToProvider(provider)
+      console.log('[DEBUG-WALLET] TODO remove after debugging — selectWallet: connectToProvider returned, computing emojis') // TODO remove after debugging
 
       const emojis = hashToEmoji(pending.verificationHash)
 
@@ -344,6 +349,7 @@ const walletStore = create<WalletState>((set, get) => ({
         verificationEmojis: emojis,
         sdkProvider: provider,
       })
+      console.log('[DEBUG-WALLET] TODO remove after debugging — selectWallet: pendingConnection set, waiting for user confirm') // TODO remove after debugging
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       logError('Failed to establish secure channel', {
@@ -388,11 +394,19 @@ const walletStore = create<WalletState>((set, get) => ({
 
     // Show loading state while confirming
     set({ isAztecConnecting: true })
+    console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: calling pendingConnection.confirm()...') // TODO remove after debugging
 
     try {
-      // Await confirm() directly — no timeout. The timeout interferes with
-      // the SDK's internal channel state. User can cancel manually if needed.
-      const wallet = await pendingConnection.confirm()
+      // Generous timeout — only fires when the connection is truly stuck.
+      // Short timeouts interfere with the SDK's internal channel state,
+      // but 60s is well above normal connection time.
+      const wallet = await Promise.race([
+        pendingConnection.confirm(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Wallet connection timed out after 60 seconds. Please try again.')), 60_000)
+        ),
+      ])
+      console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: confirm() resolved, wallet:', !!wallet) // TODO remove after debugging
 
       // Transition to 'requesting' phase while we request capabilities
       set({
@@ -406,20 +420,30 @@ const walletStore = create<WalletState>((set, get) => ({
       // accounts AND grants permissions for simulations/transactions.
       // Fall back to getAccounts if requestCapabilities is not supported.
       let rawAccounts: Array<{ item?: unknown; address?: unknown; alias?: string } | unknown> = []
+      console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: requesting capabilities...') // TODO remove after debugging
       try {
-        const capabilities = await wallet.requestCapabilities(buildCapabilityManifest())
+        const capabilities = await Promise.race([
+          wallet.requestCapabilities(buildCapabilityManifest()),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('requestCapabilities timed out')), 15_000)
+          ),
+        ])
+        console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: capabilities received, granted:', capabilities?.granted?.length) // TODO remove after debugging
         const accountsCap = capabilities.granted.find(
           (c: { type: string }) => c.type === 'accounts'
         ) as { type: 'accounts'; accounts: Array<{ item?: unknown; address?: unknown; alias?: string }> } | undefined
         rawAccounts = accountsCap?.accounts ?? []
+        console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: accounts from capabilities:', rawAccounts.length) // TODO remove after debugging
       } catch (capErr) {
-        console.warn('[walletStore] requestCapabilities failed, falling back to getAccounts:', capErr)
+        console.warn('[walletStore] requestCapabilities failed/timed out, falling back to getAccounts:', capErr)
       }
 
       // Fall back to getAccounts if requestCapabilities didn't yield accounts
       if (rawAccounts.length === 0) {
+        console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: falling back to getAccounts...') // TODO remove after debugging
         const fallbackAccounts = await wallet.getAccounts()
         rawAccounts = fallbackAccounts ?? []
+        console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: getAccounts returned:', rawAccounts.length) // TODO remove after debugging
       }
 
       if (!rawAccounts || rawAccounts.length === 0) {
@@ -456,6 +480,7 @@ const walletStore = create<WalletState>((set, get) => ({
       })
 
       // Store wallet and available accounts
+      console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: parsed', parsedAccounts.length, 'accounts, storing wallet') // TODO remove after debugging
       set({
         sdkWallet: wallet,
         availableAccounts: parsedAccounts,
@@ -464,9 +489,11 @@ const walletStore = create<WalletState>((set, get) => ({
 
       if (parsedAccounts.length === 1) {
         // Single account — auto-select, no extra modal
+        console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: single account, auto-selecting:', parsedAccounts[0].address.slice(0, 10) + '...') // TODO remove after debugging
         await get().selectAccount(parsedAccounts[0])
       } else {
         // Multiple accounts — show account selector modal
+        console.log('[DEBUG-WALLET] TODO remove after debugging — confirmWalletConnection: multiple accounts, showing selector') // TODO remove after debugging
         set({ walletConnectionPhase: 'account-select' })
       }
     } catch (error) {
@@ -529,6 +556,7 @@ const walletStore = create<WalletState>((set, get) => ({
   // ─── Account selection ───────────────────────────────────────────────
 
   selectAccount: async (account: { alias: string; address: string }) => {
+    console.log('[DEBUG-WALLET] TODO remove after debugging — selectAccount called for:', account.address.slice(0, 10) + '...') // TODO remove after debugging
     const { sdkWallet } = get()
     if (!sdkWallet) {
       console.error('[walletStore] selectAccount: sdkWallet is null')
@@ -537,7 +565,9 @@ const walletStore = create<WalletState>((set, get) => ({
 
     try {
       // Import aztecNode for L1 contract addresses
+      console.log('[DEBUG-WALLET] TODO remove after debugging — selectAccount: importing aztecNode...') // TODO remove after debugging
       const { aztecNode } = await import('../aztec')
+      console.log('[DEBUG-WALLET] TODO remove after debugging — selectAccount: aztecNode imported successfully') // TODO remove after debugging
 
       // Create an account-like object for compatibility with existing code
       const connectedAccount = {
@@ -562,6 +592,7 @@ const walletStore = create<WalletState>((set, get) => ({
         isConnected: true,
       })
       set({ showWalletModal: false })
+      console.log('[DEBUG-WALLET] TODO remove after debugging — selectAccount: DONE — phase is now connected') // TODO remove after debugging
 
       logInfo('Aztec wallet connected successfully via wallet-sdk', {
         walletType: WalletType.AZTEC,

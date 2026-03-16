@@ -22,6 +22,8 @@ import {
 import {
   pollL1ToL2MessageSync,
   executeL2Claim,
+  getPostFeeClaimAmount,
+  CustomTokenPortalEventAbi,
 } from './bridge/bridgeL1ToL2'
 
 /**
@@ -66,31 +68,40 @@ async function recoverFromReceipt(
   }
 
   // Fallback: try DepositToAztecPublic/Private from TokenPortal (legacy path)
+  // Try our custom ABI first (has fee field), then upstream as fallback
   const eventName = isPrivacyModeEnabled
     ? 'DepositToAztecPrivate'
     : 'DepositToAztecPublic'
 
+  // Match by secretHash only — event amount is post-fee (amountAfterFee),
+  // so we can't filter by the pre-fee amount the recovery data stores.
   const privateFilter = (log: any) =>
-    log.args.amount === amount &&
-    log.args.secretHashForL2MessageConsumption === claimSecretHash
+    log.args.secretHash === claimSecretHash
 
   const publicFilter = (log: any) =>
     log.args.secretHash === claimSecretHash &&
-    log.args.amount === amount &&
     log.args.to === aztecAddress
 
-  const log = extractEvent(
-    receipt.logs,
-    portalAddress as `0x${string}`,
-    TokenPortalAbi,
-    eventName,
-    isPrivacyModeEnabled ? privateFilter : publicFilter,
-  )
+  const filter = isPrivacyModeEnabled ? privateFilter : publicFilter
 
-  const messageHash = log.args.key.toString()
-  const messageLeafIndex = log.args.index.toString()
-  console.log('[Resume L1→L2] Recovered from receipt: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
-  return { messageHash, messageLeafIndex }
+  for (const abi of [CustomTokenPortalEventAbi, TokenPortalAbi]) {
+    try {
+      const log = extractEvent(
+        receipt.logs,
+        portalAddress as `0x${string}`,
+        abi,
+        eventName,
+        filter,
+      )
+      const messageHash = log.args.key.toString()
+      const messageLeafIndex = log.args.index.toString()
+      console.log('[Resume L1→L2] Recovered from receipt: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
+      return { messageHash, messageLeafIndex }
+    } catch {
+      // This ABI didn't match, try next
+    }
+  }
+  throw new Error('Could not extract deposit event from receipt (tried custom + upstream ABIs)')
 }
 
 /**
@@ -147,28 +158,32 @@ async function recoverFromBlockScan(
       }
     }
 
-    // Fallback: try TokenPortal events (legacy path)
-    try {
-      const decoded = decodeEventLog({
-        abi: TokenPortalAbi,
-        data: rawLog.data,
-        topics: rawLog.topics,
-      })
-      if (decoded.eventName !== targetEventName) continue
+    // Fallback: try TokenPortal events (custom ABI first, then upstream)
+    for (const abi of [CustomTokenPortalEventAbi, TokenPortalAbi]) {
+      try {
+        const decoded = decodeEventLog({
+          abi,
+          data: rawLog.data,
+          topics: rawLog.topics,
+        })
+        if (decoded.eventName !== targetEventName) continue
 
-      const args = decoded.args as any
-      const matches = isPrivacyModeEnabled
-        ? args.amount === amount && args.secretHashForL2MessageConsumption === claimSecretHash
-        : args.secretHash === claimSecretHash && args.amount === amount && args.to === aztecAddress
+        const args = decoded.args as any
+        // Match by secretHash only — event amount is post-fee (amountAfterFee),
+        // so we can't filter by the pre-fee amount the recovery data stores.
+        const matches = isPrivacyModeEnabled
+          ? args.secretHash === claimSecretHash
+          : args.secretHash === claimSecretHash && args.to === aztecAddress
 
-      if (matches) {
-        const messageHash = args.key.toString()
-        const messageLeafIndex = args.index.toString()
-        console.log('[Resume L1→L2] Found event in block scan: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
-        return { messageHash, messageLeafIndex }
+        if (matches) {
+          const messageHash = args.key.toString()
+          const messageLeafIndex = args.index.toString()
+          console.log('[Resume L1→L2] Found event in block scan: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
+          return { messageHash, messageLeafIndex }
+        }
+      } catch {
+        // Skip logs that can't be decoded with this ABI
       }
-    } catch {
-      // Skip logs that can't be decoded with our ABI
     }
   }
 
@@ -338,10 +353,14 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     patchOperationAsync(operationId, { currentStep: 3 })
 
     const claimSecretFr = Fr.fromString(claimSecret)
+    // TokenPortal deducts fees before computing the L1→L2 content hash.
+    // The L2 claim must use the post-fee amount to match the content hash.
+    const preFeeBridgeAmount = BigInt(amount)
+    const claimAmountPostFee = await getPostFeeClaimAmount(portalAddress, preFeeBridgeAmount)
     const claimResult = await executeL2Claim(
       { walletAdapter, aztecAddress, isPrivacyModeEnabled },
       {
-        amount: BigInt(amount),
+        amount: claimAmountPostFee,
         claimSecret: claimSecretFr,
         messageLeafIndex: messageLeafIndex ? BigInt(messageLeafIndex) : null,
       },

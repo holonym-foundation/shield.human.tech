@@ -43,6 +43,7 @@ import {
 import {
   pollL1ToL2MessageSync,
   executeL2Claim,
+  debugVerifyL1ToL2Message,
 } from './bridge/bridgeL1ToL2'
 import {
   validateAndCaptureBlocks,
@@ -767,7 +768,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       const { updatedClaim, wasExisting } = finalizeLocalStorageAfterDeposit({
         claimSecret: backup.claimSecret,
         claimSecretHash: backup.claimSecretHash,
-        claimAmount: amount,
+        claimAmount: receipt.claimAmount,
         l1Address,
         aztecAddress,
         messageHashStr: receipt.messageHashStr,
@@ -833,7 +834,20 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       }
 
       // Extra buffer so the message is visible on the wallet's node
-      console.log('[L1→L2] Final wait before claiming (2 min)...')
+      console.log('[DEBUG-CLAIM] TODO remove after debugging — message sync succeeded! syncResults:', JSON.stringify(syncResults.map(r => ({ synced: r.synced, elapsedMinutes: r.elapsedMinutes?.toFixed(1) })))) // TODO remove after debugging
+      console.log('[DEBUG-CLAIM] TODO remove after debugging — receipt summary:', { // TODO remove after debugging
+        messageHash: receipt.messageHashStr,
+        messageLeafIndex: receipt.messageLeafIndexStr,
+        claimAmount: receipt.claimAmount.toString(),
+        fuelMessageHash: receipt.fuelMessageHashStr ?? 'none',
+        fuelMessageLeafIndex: receipt.fuelMessageLeafIndexStr ?? 'none',
+        fuelAmount: receipt.fuelAmount?.toString() ?? 'none',
+      })
+      // Buffer wait: give the sequencer time to include the message in a block.
+      // The wallet's sendTx → proveTx path skips local public simulation,
+      // but the sequencer still needs the message in the L2 tree.
+      console.log('[L1→L2] Waiting 2 min for message propagation before claiming...')
+      notify('info', 'Message synced! Waiting 2 minutes for L2 propagation...')
       await wait(120_000)
 
       // ─── Step 9: Claim on L2 ───────────────────────────────────────
@@ -905,10 +919,31 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           }
         }
 
+        // ── DEBUG: Verify message hash before claiming (TODO remove after debugging) ──
+        await debugVerifyL1ToL2Message({
+          portalAddress: selectedToken?.l1PortalContract ?? '',
+          l2BridgeAddress: walletAdapter.bridgeAddress,
+          aztecRecipient: aztecAddress,
+          amountAfterFee: receipt.claimAmount,
+          claimSecretHash: backup.claimSecretHash,
+          leafIndex: BigInt(receipt.messageLeafIndexStr),
+          l1EventKey: receipt.messageHashStr,
+          isPrivate: isPrivacyModeEnabled ?? false,
+        })
+
+        console.log('[DEBUG-CLAIM] TODO remove after debugging — about to call executeL2Claim:', { // TODO remove after debugging
+          claimAmount: receipt.claimAmount.toString(),
+          messageHash: receipt.messageHashStr,
+          messageLeafIndex: receipt.messageLeafIndexStr,
+          hasFuel: !!fuel,
+          hasFeeOption: !!feeOption,
+          isPrivacyModeEnabled,
+          bridgeAddress: walletAdapter.bridgeAddress,
+        })
         const claimResult = await executeL2Claim(
           { walletAdapter, aztecAddress, isPrivacyModeEnabled: isPrivacyModeEnabled ?? false },
           {
-            amount: fuel ? amount - fuel.fuelAmount : amount,
+            amount: receipt.claimAmount,
             claimSecret: backup.claimSecret,
             messageLeafIndex: BigInt(receipt.messageLeafIndexStr),
           },

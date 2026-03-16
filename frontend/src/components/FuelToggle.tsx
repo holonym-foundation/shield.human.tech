@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
 import { buildSwapRoute, getV4Quote } from '@/utils/fuelPricing'
 import { BRIDGED_FPC_ADDRESS } from '@/config'
@@ -86,12 +87,17 @@ function FuelBreakdown({ fuelNum, netBridge, tokenSymbol, fjOutput, loading, err
   prices: Record<string, number> | null
 }) {
   if (loading) {
-    return <p>Fetching quote...</p>
+    return (
+      <div className='space-y-2 animate-pulse'>
+        <div className='h-3.5 bg-neutral-400/70 rounded w-3/4' />
+        <div className='h-3.5 bg-neutral-400/70 rounded w-full' />
+      </div>
+    )
   }
   if (error) {
-    return <p className='text-red-500'>Failed to get V4 quote</p>
+    return <p className='text-red-500'>{error}</p>
   }
-  if (!fjOutput) {
+  if (fjOutput === null) {
     return null
   }
 
@@ -171,82 +177,91 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
         )}
       </div>
 
-      {fuelEnabled && (
-        <div className='mt-3 space-y-2'>
-          {pricesError && (
-            <p className='text-xs text-amber-600'>
-              Live prices unavailable — using fallback prices
-            </p>
-          )}
-          {hasBridgedFpc && (
-            <div className='flex rounded-md overflow-hidden border border-gray-200 text-xs'>
-              <button
-                onClick={() => onFuelTypeChange('public')}
-                className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
-                  fuelType === 'public'
-                    ? 'bg-black text-white'
-                    : 'bg-white text-gray-500 hover:bg-gray-50'
-                }`}
-              >
-                Public
-              </button>
-              <button
-                onClick={() => onFuelTypeChange('private')}
-                className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
-                  fuelType === 'private'
-                    ? 'bg-black text-white'
-                    : 'bg-white text-gray-500 hover:bg-gray-50'
-                }`}
-              >
-                Private
-              </button>
-            </div>
-          )}
-
-          <div className='flex items-center gap-2'>
-            <input
-              type='text'
-              inputMode='decimal'
-              placeholder={`Amount in ${tokenSymbol}`}
-              value={fuelAmount}
-              onChange={(e) => {
-                const v = e.target.value
-                if (v === '' || !isNaN(Number(v))) onAmountChange(v)
-              }}
-              className='flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500'
-            />
-            {USD_PRESETS.map((usd) => {
-              const tokenEquiv = usdToTokenAmount(usd, tokenSymbol, prices)
-              return (
-                <button
-                  key={usd}
-                  onClick={() => onAmountChange(tokenEquiv)}
-                  title={`${tokenEquiv} ${tokenSymbol}`}
-                  className={`px-2 py-1 text-xs rounded border ${
-                    activePreset === usd
-                      ? 'border-blue-500 bg-blue-50 text-blue-600'
-                      : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                  }`}
-                >
-                  ${usd}
-                </button>
-              )
-            })}
-          </div>
-
-          {fuelAmount && (
-            <div className='text-xs text-latest-grey-700 space-y-0.5'>
-              {isValid ? (
-                <FuelBreakdown fuelNum={fuelNum} netBridge={netBridge} tokenSymbol={tokenSymbol} fjOutput={fjOutput} loading={loading} error={error} prices={prices} />
-              ) : fuelNum >= bridgeNum ? (
-                <p className='text-red-500'>
-                  Gas amount must be less than bridge amount
+      <AnimatePresence initial={false}>
+        {fuelEnabled && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+          >
+            <div className='mt-3 space-y-2'>
+              {pricesError && (
+                <p className='text-xs text-amber-600'>
+                  Live prices unavailable — using fallback prices
                 </p>
-              ) : null}
+              )}
+              {hasBridgedFpc && (
+                <div className='flex rounded-md overflow-hidden border border-gray-200 text-xs'>
+                  <button
+                    onClick={() => onFuelTypeChange('public')}
+                    className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
+                      fuelType === 'public'
+                        ? 'bg-black text-white'
+                        : 'bg-white text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    Public
+                  </button>
+                  <button
+                    onClick={() => onFuelTypeChange('private')}
+                    className={`flex-1 py-1.5 px-3 font-medium transition-colors ${
+                      fuelType === 'private'
+                        ? 'bg-black text-white'
+                        : 'bg-white text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    Private
+                  </button>
+                </div>
+              )}
+
+              <div className='flex items-center gap-2'>
+                <input
+                  type='text'
+                  inputMode='decimal'
+                  placeholder={`Amount in ${tokenSymbol}`}
+                  value={fuelAmount}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    if (v === '' || !isNaN(Number(v))) onAmountChange(v)
+                  }}
+                  className='flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500'
+                />
+                {USD_PRESETS.map((usd) => {
+                  const tokenEquiv = usdToTokenAmount(usd, tokenSymbol, prices)
+                  return (
+                    <button
+                      key={usd}
+                      onClick={() => onAmountChange(tokenEquiv)}
+                      title={`${tokenEquiv} ${tokenSymbol}`}
+                      className={`px-2 py-1 text-xs rounded border ${
+                        activePreset === usd
+                          ? 'border-blue-500 bg-blue-50 text-blue-600'
+                          : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                      }`}
+                    >
+                      ${usd}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {fuelAmount && (
+                <div className='text-xs text-latest-grey-700 space-y-0.5'>
+                  {isValid ? (
+                    <FuelBreakdown fuelNum={fuelNum} netBridge={netBridge} tokenSymbol={tokenSymbol} fjOutput={fjOutput} loading={loading} error={error} prices={prices} />
+                  ) : fuelNum >= bridgeNum ? (
+                    <p className='text-red-500'>
+                      Gas amount must be less than bridge amount
+                    </p>
+                  ) : null}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

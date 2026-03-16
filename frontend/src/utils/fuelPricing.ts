@@ -191,16 +191,21 @@ async function quoteExactInputSingleCall(
  *
  * @returns Expected output in FeeJuice (18 decimals).
  */
+let _quoteClient: ReturnType<typeof createPublicClient> | null = null
+function getQuoteClient(l1RpcUrl: string) {
+  if (!_quoteClient) {
+    _quoteClient = createPublicClient({ chain: sepolia, transport: http(l1RpcUrl) })
+  }
+  return _quoteClient
+}
+
 export async function getV4Quote(params: {
   poolKeys: PoolKeyParam[]
   zeroForOnes: boolean[]
   inputAmount: bigint
   l1RpcUrl: string
 }): Promise<bigint> {
-  const client = createPublicClient({
-    chain: sepolia,
-    transport: http(params.l1RpcUrl),
-  })
+  const client = getQuoteClient(params.l1RpcUrl)
 
   let currentAmount = params.inputAmount
   for (let i = 0; i < params.poolKeys.length; i++) {
