@@ -1,7 +1,7 @@
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
-import { Contract } from '@aztec/aztec.js/contracts'
+import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
 import type { Wallet } from '@aztec/aztec.js/wallet'
 import {
   SetPublicAuthwitContractInteraction,
@@ -168,7 +168,6 @@ class WalletAdapter {
 
     const bridgeAddr = AztecAddress.fromString(this.bridgeAddress)
     const tokenAddr = AztecAddress.fromString(this.tokenAddress)
-    const proxyAddr = AztecAddress.fromString(this.proxyAddress)
 
     const [tokenArtifact, bridgeArtifact] = await Promise.all([
       getContractArtifact('token'),
@@ -178,23 +177,24 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Set public authwit: allow proxy to burn_public on behalf of user
-    // Bridge calls proxy, proxy calls token.burn_public — so msg_sender at the token is the proxy
+    // Set public authwit: allow bridge to burn_public on behalf of user
     const authwit = await SetPublicAuthwitContractInteraction.create(
       this.wallet,
       this.account,
       {
-        caller: proxyAddr,
+        caller: bridgeAddr,
         action: token.methods.burn_public(user, amount, nonce),
       },
       true,
     )
-    await authwit.send()
 
-    // Send exit transaction
-    const receipt = await bridge.methods
-      .exit_to_l1_public(EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
-      .send({ from: this.account })
+    // Batch authwit + exit into a single tx — public calls execute in enqueue order,
+    // so set_authorized runs before burn_public, making the auth visible.
+    const exitCall = bridge.methods.exit_to_l1_public(
+      EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce,
+    )
+    const batch = new BatchCall(this.wallet, [authwit, exitCall])
+    const receipt = await batch.send({ from: this.account })
 
     return {
       txHash: receipt.txHash.toString(),
