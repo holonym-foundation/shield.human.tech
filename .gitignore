@@ -33,7 +33,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
-.env*
+.env
 
 # vercel
 .vercel
@@ -43,3 +43,7 @@ yarn-error.log*
 next-env.d.ts
 
 aztec-contracts/token_bridge/target
+aztec-contracts/token_minter_proxy/target
+
+# profiling
+bridge-script/profiling-results/

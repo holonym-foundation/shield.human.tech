@@ -66,7 +66,7 @@ const BridgeAndFuelBytecode = BridgeAndFuelJson.bytecode.object as `0x${string}`
 const MockFuelSwapAbi = MockFuelSwapJson.abi
 const MockFuelSwapBytecode = MockFuelSwapJson.bytecode.object as `0x${string}`
 
-import { createPublicClient, getContract, http, toFunctionSelector } from 'viem'
+import { createPublicClient, encodeFunctionData, getContract, http, toFunctionSelector } from 'viem'
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -600,7 +600,7 @@ async function main() {
       l1Client,
       BridgeAndFuelAbi,
       BridgeAndFuelBytecode,
-      [],
+      [l1Client.account.address],
     ).then(({ address }) => address)
     logger.info(`BridgeAndFuel deployed at ${bridgeAndFuelAddress.toString()}`)
 
@@ -625,6 +625,19 @@ async function main() {
       [feeJuiceAddress, feeAssetHandlerAddress, BigInt(1e18)], // 1:1 rate
     ).then(({ address }) => address)
     logger.info(`MockFuelSwap deployed at ${mockFuelSwapAddress.toString()}`)
+
+    // Whitelist MockFuelSwap as an allowed swap target
+    logger.info('Whitelisting MockFuelSwap as allowed swap target...')
+    const setSwapTargetHash = await l1Client.sendTransaction({
+      to: bridgeAndFuelAddress.toString() as `0x${string}`,
+      data: encodeFunctionData({
+        abi: BridgeAndFuelAbi,
+        functionName: 'setSwapTarget',
+        args: [mockFuelSwapAddress.toString(), true],
+      }),
+    })
+    await l1Client.waitForTransactionReceipt({ hash: setSwapTargetHash })
+    logger.info(`MockFuelSwap whitelisted on BridgeAndFuel`)
 
     saveFuelInfraToDeployment({
       bridgeAndFuelAddress: bridgeAndFuelAddress.toString(),

@@ -45,7 +45,7 @@ import ErrorToast from '@/components/toast/ErrorToast'
 
 type ToastType = 'default' | 'success' | 'info' | 'warn' | 'error' | 'privacy-mode'
 
-type ToastMessageInput = string | { message: string; heading?: string }
+type ToastMessageInput = string | { message: string; heading?: string } | { message: React.ReactNode; heading?: string }
 
 type CustomToastOptions = ToastOptions & {
   animatePromise?: boolean
@@ -133,7 +133,7 @@ const createMergedOptions = (baseOptions: ToastOptions, customOptions: ToastOpti
  */
 const createToast = (
   type: ToastType,
-  message: string,
+  message: string | React.ReactNode,
   heading?: string,
   options: ToastOptions = {}
 ) => {
@@ -146,7 +146,7 @@ const createToast = (
   return toast(
     React.createElement(Component, {
       heading,
-      message,
+      message: message as any,
     }),
     {
       className: `${type}-toast`,
@@ -267,8 +267,13 @@ export const useToast = () => {
     input: ToastMessageInput,
     options?: CustomToastOptions
   ) => {
-    const { message, heading } = normalizeMessage(input)
-    createToast(type, message, heading, options)
+    if (typeof input === 'object' && input !== null && 'message' in input && typeof input.message !== 'string') {
+      // ReactNode message — pass directly to createToast
+      createToast(type, input.message as React.ReactNode, input.heading, options)
+    } else {
+      const { message, heading } = normalizeMessage(input as string | { message: string; heading?: string })
+      createToast(type, message, heading, options)
+    }
   }
 
   showToast.promise = handlePromiseToast
@@ -420,8 +425,12 @@ export const showToast = (
   input: ToastMessageInput,
   options?: ToastOptions
 ) => {
-  const { message, heading } = normalizeMessage(input)
-  createToast(type, message, heading, options)
+  if (typeof input === 'object' && input !== null && 'message' in input && typeof input.message !== 'string') {
+    createToast(type, input.message as React.ReactNode, input.heading, options)
+  } else {
+    const { message, heading } = normalizeMessage(input as string | { message: string; heading?: string })
+    createToast(type, message, heading, options)
+  }
 }
 
 showToast.promise = handlePromiseToast

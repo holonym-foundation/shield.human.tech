@@ -20,7 +20,6 @@
     "db:reset": "prisma migrate reset --force --skip-seed && prisma db push"
   },
   "dependencies": {
-    "@aztec/wallet-sdk": "4.0.0-devnet.2-patch.3",
     "@aztec/accounts": "4.0.0-devnet.2-patch.3",
     "@aztec/aztec.js": "4.0.0-devnet.2-patch.3",
     "@aztec/ethereum": "4.0.0-devnet.2-patch.3",
@@ -29,8 +28,10 @@
     "@aztec/noir-contracts.js": "4.0.0-devnet.2-patch.3",
     "@aztec/pxe": "4.0.0-devnet.2-patch.3",
     "@aztec/stdlib": "4.0.0-devnet.2-patch.3",
+    "@aztec/wallet-sdk": "4.0.0-devnet.2-patch.3",
     "@datadog/browser-logs": "^4.45.0",
     "@datadog/browser-rum": "^4.45.0",
+    "@defi-wonderland/aztec-standards": "4.0.0-devnet.2-patch.1",
     "@human.tech/waap-sdk": "^1.0.3",
     "@iconify/react": "^6.0.0",
     "@noble/ciphers": "^2.1.1",

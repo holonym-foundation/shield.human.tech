@@ -4,7 +4,7 @@ import { ToastContentProps } from 'react-toastify'
 
 interface ErrorToastProps extends Partial<ToastContentProps> {
   heading?: string
-  message?: string
+  message?: React.ReactNode
 }
 
 const ErrorToast = ({

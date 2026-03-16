@@ -2,6 +2,11 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { L1_TOKENS } from '@/config'
 import type { ContractFunctionPattern } from '@aztec/aztec.js/wallet'
 
+/** Well-known Fee Juice contract on L2 */
+const FEE_JUICE_ADDRESS = AztecAddress.fromString(
+  '0x0000000000000000000000000000000000000000000000000000000000000005',
+)
+
 function pattern(
   contract: AztecAddress,
   fn: string,
@@ -49,14 +54,23 @@ export function buildCapabilityManifest() {
     .filter((addr): addr is string => !!addr)
     .map((addr) => AztecAddress.fromString(addr))
 
-  const allContracts = [...tokenAddresses, ...bridgeAddresses]
+  const proxyAddresses = L1_TOKENS
+    .map((t) => t.l2ProxyContract)
+    .filter((addr): addr is string => !!addr)
+    .map((addr) => AztecAddress.fromString(addr))
+
+  const allContracts = [...tokenAddresses, ...bridgeAddresses, ...proxyAddresses, FEE_JUICE_ADDRESS]
 
   const simulationUtilities: ContractFunctionPattern[] = tokenAddresses.flatMap(
     (addr) => patternsFor(addr, [...TOKEN_UTILITY_SIMULATION_METHODS]),
   )
-  const simulationTransactions: ContractFunctionPattern[] = tokenAddresses.flatMap(
-    (addr) => patternsFor(addr, [...TOKEN_TRANSACTION_SIMULATION_METHODS]),
-  )
+  const simulationTransactions: ContractFunctionPattern[] = [
+    ...tokenAddresses.flatMap(
+      (addr) => patternsFor(addr, [...TOKEN_TRANSACTION_SIMULATION_METHODS]),
+    ),
+    // Fee Juice balance check
+    pattern(FEE_JUICE_ADDRESS, 'balance_of_public'),
+  ]
 
   const transactionScope: ContractFunctionPattern[] = [
     ...tokenAddresses.flatMap((addr) =>

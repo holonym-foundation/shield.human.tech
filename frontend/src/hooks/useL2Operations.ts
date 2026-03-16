@@ -38,6 +38,7 @@ import {
   executeBurnAndExit,
   persistBurnReceiptAndPollBlock,
   fetchNodeInfoAndComputeWitness,
+  fetchL2PochAttestation,
 } from './bridge/bridgeL2ToL1'
 
 // Define types for balance queries
@@ -332,6 +333,18 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       })
       operationId = backup.operationId
 
+      // ─── Step 2b: Fetch POCH attestation for private withdrawal ─────
+      let attestation: { l2Signature: number[]; nonce: number; actionId: string } | undefined
+      if (isPrivacyModeEnabled) {
+        const portalAddress = selectedToken?.l1PortalContract
+        if (!portalAddress) {
+          throw new Error('Portal address not configured — cannot fetch POCH attestation for private withdrawal')
+        }
+        console.log('[L2→L1] Fetching POCH attestation for private exit...')
+        attestation = await fetchL2PochAttestation(portalAddress)
+        console.log('[L2→L1] POCH attestation received:', { nonce: attestation.nonce, actionId: attestation.actionId })
+      }
+
       // ─── Step 3: Burn + exit on L2 (DANGER ZONE) ───────────────────
       notify(
         'warn',
@@ -350,6 +363,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         amount,
         nonce: backup.nonce,
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
+        attestation,
       })
       burnConfirmed = true // 🔒 Funds are now burned — never mark as 'failed'
 

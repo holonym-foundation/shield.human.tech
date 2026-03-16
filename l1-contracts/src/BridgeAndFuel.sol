@@ -3,6 +3,7 @@ pragma solidity >=0.8.27;
 
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@oz/token/ERC20/utils/SafeERC20.sol";
+import {Ownable} from "@oz/access/Ownable.sol";
 import {ReentrancyGuard} from "@oz/utils/ReentrancyGuard.sol";
 import {IFeeJuicePortal} from "@aztec/core/interfaces/IFeeJuicePortal.sol";
 import {ITokenPortal} from "./interfaces/ITokenPortal.sol";
@@ -13,8 +14,12 @@ import {ITokenPortal} from "./interfaces/ITokenPortal.sol";
  *         deposits Fee Juice via FeeJuicePortal, and deposits the remainder via TokenPortal —
  *         all in one atomic L1 transaction.
  */
-contract BridgeAndFuel is ReentrancyGuard {
+contract BridgeAndFuel is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    mapping(address => bool) public allowedSwapTargets;
+
+    event SwapTargetUpdated(address indexed target, bool allowed);
 
     struct BridgeParams {
         address tokenPortal;
@@ -42,6 +47,14 @@ contract BridgeAndFuel is ReentrancyGuard {
         bytes32 fuelSecretHash
     );
 
+    constructor(address _owner) Ownable(_owner) {}
+
+    function setSwapTarget(address _target, bool _allowed) external onlyOwner {
+        require(_target != address(0), "BridgeAndFuel: zero address");
+        allowedSwapTargets[_target] = _allowed;
+        emit SwapTargetUpdated(_target, _allowed);
+    }
+
     /**
      * @notice Bridge tokens to Aztec L2, swapping a portion for Fee Juice gas.
      */
@@ -58,6 +71,9 @@ contract BridgeAndFuel is ReentrancyGuard {
         // 2. Snapshot Fee Juice balance before swap, then execute swap
         IERC20 feeJuiceToken = IFeeJuicePortal(p.feeJuicePortal).UNDERLYING();
         uint256 fjBalBefore = feeJuiceToken.balanceOf(address(this));
+
+        require(allowedSwapTargets[p.swapTarget], "BridgeAndFuel: swap target not allowed");
+        require(allowedSwapTargets[p.swapAllowanceTarget], "BridgeAndFuel: allowance target not allowed");
 
         token.forceApprove(p.swapAllowanceTarget, p.fuelAmount);
         (bool swapOk,) = p.swapTarget.call(swapData);
