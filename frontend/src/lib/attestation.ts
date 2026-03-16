@@ -40,7 +40,7 @@ function getL2PassportSignerPrivateKey(): string {
 }
 
 export function getCircuitId(): bigint {
-  return BigInt(process.env.CLEAN_HANDS_CIRCUIT_ID || '1')
+  return BigInt(process.env.CLEAN_HANDS_CIRCUIT_ID || '0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19')
 }
 
 export function getDefaultActionId(): bigint {

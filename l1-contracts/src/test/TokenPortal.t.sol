@@ -100,7 +100,7 @@ contract TokenPortalTest is Test {
     uint256 public attesterPrivateKey;
     uint256 public passportSignerPrivateKey;
     uint256 public constant FEE_BASIS_POINTS = 100; // 1%
-    uint256 public constant CLEAN_HANDS_CIRCUIT_ID = 1;
+    uint256 public constant CLEAN_HANDS_CIRCUIT_ID = 0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19;
     bytes32 public constant L2_BRIDGE = bytes32(uint256(0x123));
     uint256 public constant ROLLUP_VERSION = 1;
 

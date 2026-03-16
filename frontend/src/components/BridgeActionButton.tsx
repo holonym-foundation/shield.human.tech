@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import TextButton from './TextButton'
 import StyledImage from './StyledImage'
 import { Oval } from 'react-loader-spinner'
@@ -265,10 +265,19 @@ function BridgeActionButton({
       }
       if (!pochEligible) {
         const actionLabel = direction === BridgeDirection.L1_TO_L2 ? 'private deposits' : 'private withdrawals'
-        const msg = pochReason
-          ? `Cannot use ${actionLabel}: ${pochReason}. Get your POCH attestation or switch to public mode.`
-          : `You need Proof of Clean Hands (POCH) to use ${actionLabel}. Get your POCH attestation or switch to public mode.`
-        notify('error', msg)
+        notify('error', {
+          heading: 'Proof of Clean Hands Required',
+          message: React.createElement('span', null,
+            `Cannot use ${actionLabel}. `,
+            React.createElement('a', {
+              href: 'https://id.human.tech/sandbox/clean-hands',
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              style: { color: '#2563eb', textDecoration: 'underline' },
+            }, 'Mint your POCH SBT here'),
+            ' or switch to public mode.',
+          ),
+        })
         return
       }
     }

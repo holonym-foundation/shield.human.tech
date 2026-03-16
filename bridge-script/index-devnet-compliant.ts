@@ -150,29 +150,27 @@ const L1_URL = process.env.L1_URL || getL1RpcUrl()
 
 const MINT_AMOUNT = BigInt(process.env.MINT_AMOUNT || '1000000000000000') // 1e15
 const FEE_BASIS_POINTS = BigInt(process.env.FEE_BASIS_POINTS || '500') // 5% fee
-const CLEAN_HANDS_CIRCUIT_ID = BigInt(process.env.CLEAN_HANDS_CIRCUIT_ID || '1')
+const CLEAN_HANDS_CIRCUIT_ID = BigInt(process.env.CLEAN_HANDS_CIRCUIT_ID || '0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19')
 
-// Attestation/signer keys — MUST be set in .env for production
-const POCH_ATTESTER_PRIVATE_KEY = (process.env.POCH_ATTESTER_PRIVATE_KEY
-  ? (process.env.POCH_ATTESTER_PRIVATE_KEY.startsWith('0x')
-    ? process.env.POCH_ATTESTER_PRIVATE_KEY
-    : `0x${process.env.POCH_ATTESTER_PRIVATE_KEY}`)
-  : '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80') as Hex
-const PASSPORT_SIGNER_PRIVATE_KEY = (process.env.PASSPORT_SIGNER_PRIVATE_KEY
-  ? (process.env.PASSPORT_SIGNER_PRIVATE_KEY.startsWith('0x')
-    ? process.env.PASSPORT_SIGNER_PRIVATE_KEY
-    : `0x${process.env.PASSPORT_SIGNER_PRIVATE_KEY}`)
-  : '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d') as Hex
+// Attestation/signer keys — all required via .env
+if (!process.env.POCH_ATTESTER_PRIVATE_KEY) throw new Error('POCH_ATTESTER_PRIVATE_KEY is required in .env')
+if (!process.env.PASSPORT_SIGNER_PRIVATE_KEY) throw new Error('PASSPORT_SIGNER_PRIVATE_KEY is required in .env')
+if (!process.env.L2_POCH_ATTESTER_PRIVATE_KEY) throw new Error('L2_POCH_ATTESTER_PRIVATE_KEY is required in .env')
+if (!process.env.L2_PASSPORT_SIGNER_PRIVATE_KEY) throw new Error('L2_PASSPORT_SIGNER_PRIVATE_KEY is required in .env')
+
+const POCH_ATTESTER_PRIVATE_KEY = (process.env.POCH_ATTESTER_PRIVATE_KEY.startsWith('0x')
+  ? process.env.POCH_ATTESTER_PRIVATE_KEY
+  : `0x${process.env.POCH_ATTESTER_PRIVATE_KEY}`) as Hex
+const PASSPORT_SIGNER_PRIVATE_KEY = (process.env.PASSPORT_SIGNER_PRIVATE_KEY.startsWith('0x')
+  ? process.env.PASSPORT_SIGNER_PRIVATE_KEY
+  : `0x${process.env.PASSPORT_SIGNER_PRIVATE_KEY}`) as Hex
 
 const pochAttesterAccount = privateKeyToAccount(POCH_ATTESTER_PRIVATE_KEY)
 const passportSignerAccount = privateKeyToAccount(PASSPORT_SIGNER_PRIVATE_KEY)
 
 // L2 Grumpkin keys for Schnorr attestation signing (separate from L1 ECDSA keys)
-// Default test values must fit within the BN254 field modulus (~2^254)
 const L2_POCH_ATTESTER_PRIVATE_KEY = process.env.L2_POCH_ATTESTER_PRIVATE_KEY
-  || '0000000000000000000000000000000000000000000000000000000000001234'
 const L2_PASSPORT_SIGNER_PRIVATE_KEY = process.env.L2_PASSPORT_SIGNER_PRIVATE_KEY
-  || '0000000000000000000000000000000000000000000000000000000000005678'
 
 // ─── Run mode ────────────────────────────────────────────────────────────────
 // RUN_TESTS_ONLY=true  — skip deployment, only run tests against existing tokens
@@ -1187,7 +1185,7 @@ async function testPrivateDepositAndClaimFlow(
 
   if (attestationType === 'poch') {
     const pochNonce = BigInt(Date.now())
-    const actionId = 100n
+    const actionId = 123456789n
     logger.info(`[L1] Signing POCH attestation (nonce=${pochNonce}, actionId=${actionId})`)
     const pochSig = await signCleanHandsAttestation({
       nonce: pochNonce,
@@ -1339,7 +1337,7 @@ async function testPrivateExitFlow(
 
   if (attestationType === 'poch') {
     const pochNonce = BigInt(Date.now())
-    const actionId = 200n
+    const actionId = 123456789n
     logger.info(`[L2] Signing L2 POCH attestation (nonce=${pochNonce}, actionId=${actionId})`)
     const sig = await signL2CleanHandsAttestation({
       circuitId: CLEAN_HANDS_CIRCUIT_ID,
@@ -1493,14 +1491,14 @@ async function testNegativeCrossClaim(
     const pochSig = await signCleanHandsAttestation({
       nonce: pochNonce,
       circuitId: CLEAN_HANDS_CIRCUIT_ID,
-      actionId: 300n,
+      actionId: 123456789n,
       userAddress: ownerEthAddress,
     })
     logger.info(`[L1] depositToAztecPrivate (amount=${depositAmount})`)
     const depositTx = await l1Portal.write.depositToAztecPrivate([
       depositAmount,
       secretHash.toString() as Hex,
-      { nonce: pochNonce, actionId: 300n, signature: pochSig },
+      { nonce: pochNonce, actionId: 123456789n, signature: pochSig },
       { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as Hex },
     ])
     const receipt = await l1Client.waitForTransactionReceipt({ hash: depositTx, timeout: getTimeouts().txTimeout })
@@ -1716,7 +1714,7 @@ async function testWrongSecretCantClaimPrivate(
   const pochSig = await signCleanHandsAttestation({
     nonce: pochNonce,
     circuitId: CLEAN_HANDS_CIRCUIT_ID,
-    actionId: 400n,
+    actionId: 123456789n,
     userAddress: ownerEthAddress,
   })
 
@@ -1724,7 +1722,7 @@ async function testWrongSecretCantClaimPrivate(
   const depositTx = await l1Portal.write.depositToAztecPrivate([
     depositAmount,
     secretHash.toString() as Hex,
-    { nonce: pochNonce, actionId: 400n, signature: pochSig },
+    { nonce: pochNonce, actionId: 123456789n, signature: pochSig },
     { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as Hex },
   ])
   const receipt = await l1Client.waitForTransactionReceipt({ hash: depositTx, timeout: getTimeouts().txTimeout })
