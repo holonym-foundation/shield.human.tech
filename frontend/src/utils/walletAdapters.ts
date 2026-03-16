@@ -237,7 +237,7 @@ class WalletAdapter {
     // Bridge calls proxy, proxy calls token.burn_private — msg_sender at token is the proxy
     const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
     const innerHash = await computeInnerAuthWitHashFromAction(proxyAddr, burnCall)
-    const witness = await this.wallet.createAuthWit(
+    await this.wallet.createAuthWit(
       this.account,
       {
         consumer: tokenAddr,
@@ -245,7 +245,8 @@ class WalletAdapter {
       }
     )
 
-    // Send exit transaction with attestation data and auth witness
+    // Send exit transaction with attestation data
+    // Auth witness is already stored in the wallet's PXE from createAuthWit above
     const receipt = await bridge.methods
       .exit_to_l1_private(
         EthAddress.fromString(l1Address),
@@ -255,7 +256,7 @@ class WalletAdapter {
         cleanHandsData,
         passportData,
       )
-      .send({ from: this.account, authWitnesses: [witness] })
+      .send({ from: this.account })
 
     return {
       txHash: receipt.txHash.toString(),
