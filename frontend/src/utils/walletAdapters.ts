@@ -168,6 +168,7 @@ class WalletAdapter {
 
     const bridgeAddr = AztecAddress.fromString(this.bridgeAddress)
     const tokenAddr = AztecAddress.fromString(this.tokenAddress)
+    const proxyAddr = AztecAddress.fromString(this.proxyAddress)
 
     const [tokenArtifact, bridgeArtifact] = await Promise.all([
       getContractArtifact('token'),
@@ -177,12 +178,13 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Set public authwit: allow bridge to burn_public on behalf of user
+    // Set public authwit: allow proxy to burn_public on behalf of user
+    // Bridge calls proxy, proxy calls token.burn_public — so msg_sender at the token is the proxy
     const authwit = await SetPublicAuthwitContractInteraction.create(
       this.wallet,
       this.account,
       {
-        caller: bridgeAddr,
+        caller: proxyAddr,
         action: token.methods.burn_public(user, amount, nonce),
       },
       true,
@@ -217,6 +219,7 @@ class WalletAdapter {
 
     const bridgeAddr = AztecAddress.fromString(this.bridgeAddress)
     const tokenAddr = AztecAddress.fromString(this.tokenAddress)
+    const proxyAddr = AztecAddress.fromString(this.proxyAddress)
 
     const [tokenArtifact, bridgeArtifact] = await Promise.all([
       getContractArtifact('token'),
@@ -226,10 +229,10 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Create private auth witness: allow bridge to burn_private on behalf of user
-    // Pre-compute the inner hash locally to avoid FunctionCall serialization issues over RPC
+    // Create private auth witness: allow proxy to burn_private on behalf of user
+    // Bridge calls proxy, proxy calls token.burn_private — so msg_sender at the token is the proxy
     const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
-    const innerHash = await computeInnerAuthWitHashFromAction(bridgeAddr, burnCall)
+    const innerHash = await computeInnerAuthWitHashFromAction(proxyAddr, burnCall)
     await this.wallet.createAuthWit(
       this.account,
       {
