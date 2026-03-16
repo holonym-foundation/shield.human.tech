@@ -206,13 +206,15 @@ class WalletAdapter {
 
   /**
    * Private withdrawal to L1:
-   * 1. Create private authwit for bridge to call token.burn_private
-   * 2. Send bridge.exit_to_l1_private
+   * 1. Create private authwit for proxy to call token.burn_private
+   * 2. Send bridge.exit_to_l1_private with attestation data + witness
    */
   async executeWithdrawToL1Private(
     l1Address: string,
     amount: bigint,
     nonce: Fr,
+    cleanHandsData: { nonce: bigint; action_id: bigint; signature: number[] },
+    passportData: { max_amount: bigint; nonce: bigint; deadline: bigint; signature: number[] },
     userAddress?: AztecAddress | string
   ): Promise<ExecuteCallResult> {
     const user = userAddress
@@ -232,10 +234,10 @@ class WalletAdapter {
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
     // Create private auth witness: allow proxy to burn_private on behalf of user
-    // Bridge calls proxy, proxy calls token.burn_private — so msg_sender at the token is the proxy
+    // Bridge calls proxy, proxy calls token.burn_private — msg_sender at token is the proxy
     const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
     const innerHash = await computeInnerAuthWitHashFromAction(proxyAddr, burnCall)
-    await this.wallet.createAuthWit(
+    const witness = await this.wallet.createAuthWit(
       this.account,
       {
         consumer: tokenAddr,
@@ -243,10 +245,17 @@ class WalletAdapter {
       }
     )
 
-    // Send exit transaction
+    // Send exit transaction with attestation data and auth witness
     const receipt = await bridge.methods
-      .exit_to_l1_private(tokenAddr, EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
-      .send({ from: this.account })
+      .exit_to_l1_private(
+        EthAddress.fromString(l1Address),
+        amount,
+        EthAddress.ZERO,
+        nonce,
+        cleanHandsData,
+        passportData,
+      )
+      .send({ from: this.account, authWitnesses: [witness] })
 
     return {
       txHash: receipt.txHash.toString(),

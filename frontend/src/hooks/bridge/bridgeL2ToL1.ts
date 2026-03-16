@@ -65,6 +65,27 @@ export interface L1WithdrawResult {
   l1TxUrl: string
 }
 
+// ─── Attestation for Private Withdrawals ─────────────────────────────
+
+/** Attestation data for L2 private exit (Schnorr signature). */
+export interface L2PochAttestation {
+  l2Signature: number[]
+  nonce: number
+  actionId: string
+}
+
+/**
+ * Fetch a POCH attestation from the backend for use in exit_to_l1_private.
+ * The API returns both L1 (ECDSA) and L2 (Schnorr) signatures — we only need the L2 one here.
+ */
+export async function fetchL2PochAttestation(
+  portalAddress: string,
+): Promise<L2PochAttestation> {
+  const res = await api.post('/api/attestation/poch', { portalAddress })
+  const data = res.data as { l2Signature: number[]; nonce: number; actionId: string }
+  return { l2Signature: data.l2Signature, nonce: data.nonce, actionId: data.actionId }
+}
+
 // ═════════════════════════════════════════════════════════════════════
 // SHARED: Message Leaf Computation
 // ═════════════════════════════════════════════════════════════════════
@@ -600,14 +621,26 @@ export async function executeBurnAndExit(params: {
   amount: bigint
   nonce: Fr
   isPrivacyModeEnabled: boolean
+  /** POCH attestation for private withdrawals (l2Signature + nonce/actionId) */
+  attestation?: { l2Signature: number[]; nonce: number; actionId: string }
 }): Promise<BurnExitResult> {
-  const { walletAdapter, l1Address, aztecAddress, amount, nonce, isPrivacyModeEnabled } = params
+  const { walletAdapter, l1Address, aztecAddress, amount, nonce, isPrivacyModeEnabled, attestation } = params
   const userAddress = AztecAddress.fromString(aztecAddress)
 
   console.log('[L2→L1] Sending burn+exit tx:', isPrivacyModeEnabled ? 'PRIVATE' : 'PUBLIC', 'amount:', amount.toString(), 'recipient:', l1Address)
-  const result = isPrivacyModeEnabled
-    ? await walletAdapter.executeWithdrawToL1Private(l1Address, amount, nonce, userAddress)
-    : await walletAdapter.executeWithdrawToL1Public(l1Address, amount, nonce, userAddress)
+
+  let result: { txHash: string; blockNumber?: number }
+  if (isPrivacyModeEnabled) {
+    // Build CleanHandsData from POCH attestation (or empty if none)
+    const cleanHandsData = attestation
+      ? { nonce: BigInt(attestation.nonce), action_id: BigInt(attestation.actionId), signature: attestation.l2Signature }
+      : { nonce: 0n, action_id: 0n, signature: new Array(64).fill(0) }
+    // PassportData empty — POCH path only for now
+    const passportData = { max_amount: 0n, nonce: 0n, deadline: 0n, signature: new Array(64).fill(0) }
+    result = await walletAdapter.executeWithdrawToL1Private(l1Address, amount, nonce, cleanHandsData, passportData, userAddress)
+  } else {
+    result = await walletAdapter.executeWithdrawToL1Public(l1Address, amount, nonce, userAddress)
+  }
 
   const l2TxHash = result.txHash
   const l2BlockNumber: number | undefined = result.blockNumber

@@ -257,16 +257,17 @@ function BridgeActionButton({
       return
     }
 
-    // Step 5: POCH check (privacy mode, L1→L2 only)
-    if (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2) {
+    // Step 5: POCH check (privacy mode, both directions)
+    if (isPrivacyModeEnabled) {
       if (pochLoading) {
         notify('info', 'Checking Proof of Clean Hands eligibility...')
         return
       }
       if (!pochEligible) {
+        const actionLabel = direction === BridgeDirection.L1_TO_L2 ? 'private deposits' : 'private withdrawals'
         const msg = pochReason
-          ? `Cannot use private deposits: ${pochReason}. Get your POCH attestation or switch to public mode.`
-          : 'You need Proof of Clean Hands (POCH) to use private deposits. Get your POCH attestation or switch to public mode.'
+          ? `Cannot use ${actionLabel}: ${pochReason}. Get your POCH attestation or switch to public mode.`
+          : `You need Proof of Clean Hands (POCH) to use ${actionLabel}. Get your POCH attestation or switch to public mode.`
         notify('error', msg)
         return
       }
@@ -319,7 +320,7 @@ function BridgeActionButton({
     l2NodeIsReadyLoading ||
     balancesLoading ||
     isOperationInFlight ||
-    (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2 && pochLoading && bothWalletsConnected)
+    (isPrivacyModeEnabled && pochLoading && bothWalletsConnected)
 
   const getLoadingText = () => {
     if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...'
@@ -356,8 +357,8 @@ function BridgeActionButton({
       if (hasL1SBT !== true) return `Get SBT on ${requiredChain}`
     }
 
-    // POCH requirement (privacy mode, L1→L2)
-    if (isPrivacyModeEnabled && direction === BridgeDirection.L1_TO_L2) {
+    // POCH requirement (privacy mode, both directions)
+    if (isPrivacyModeEnabled) {
       if (pochLoading) return 'Checking POCH eligibility...'
       if (!pochEligible) return 'Get Proof of Clean Hands'
     }
