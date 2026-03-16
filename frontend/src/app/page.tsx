@@ -15,7 +15,7 @@ import {
   useL1TokenBalance,
   useL1TokenBalances,
 } from '@/hooks/useL1Operations'
-import { usePochCheck } from '@/hooks/usePochCheck'
+import { useAttestationCheck } from '@/hooks/useAttestationCheck'
 import {
   useL2HasSoulboundToken,
   useL2MintSoulboundToken,
@@ -198,7 +198,7 @@ export default function Home() {
 
   // Prefer Alchemy if available, fall back to direct RPC
   const l1Balance = l1BalanceAlchemy ?? l1BalanceRpc
-  const { data: pochCheckData, isLoading: pochLoading } = usePochCheck()
+  const { data: attestationData, isLoading: attestationLoading } = useAttestationCheck()
   const { data: hasL1SBT } = useL1HasSoulboundToken()
   const { mutate: mintL1SBT, isPending: mintL1SBTPending } =
     useL1MintSoulboundToken(mintL1SBTOnSuccess)
@@ -568,6 +568,8 @@ export default function Home() {
               isPrivacyModeEnabled={isPrivacyModeEnabled}
               feeJuiceBalance={feeJuiceBalance}
               feeJuiceLoading={feeJuiceLoading}
+              attestationMethod={attestationData?.method ?? null}
+              passportMaxAmount={attestationData?.passportMaxAmount}
             />
             {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
               !isPrivacyModeEnabled &&
@@ -630,11 +632,15 @@ export default function Home() {
                 hasL2SBT={hasL2SBT}
                 setShowSBTModal={setShowSBTModal}
                 setCurrentSBTChain={setCurrentSBTChain}
-                // Privacy mode / POCH
+                // Privacy mode / attestation
                 isPrivacyModeEnabled={isPrivacyModeEnabled}
-                pochEligible={pochCheckData?.eligible}
-                pochLoading={pochLoading}
-                pochReason={pochCheckData?.reason}
+                pochEligible={attestationData?.eligible}
+                pochLoading={attestationLoading}
+                pochReason={attestationData?.reason}
+                attestationMethod={attestationData?.method ?? null}
+                passportMaxAmount={attestationData?.passportMaxAmount}
+                passportScore={attestationData?.passportScore}
+                passportThreshold={attestationData?.passportThreshold}
                 // Operation completion state
                 bridgeCompleted={bridgeCompleted}
                 // Disable if L2 node error
