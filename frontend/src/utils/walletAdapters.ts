@@ -168,6 +168,7 @@ class WalletAdapter {
 
     const bridgeAddr = AztecAddress.fromString(this.bridgeAddress)
     const tokenAddr = AztecAddress.fromString(this.tokenAddress)
+    const proxyAddr = AztecAddress.fromString(this.proxyAddress)
 
     const [tokenArtifact, bridgeArtifact] = await Promise.all([
       getContractArtifact('token'),
@@ -177,12 +178,13 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Set public authwit: allow bridge to burn_public on behalf of user
+    // Set public authwit: allow proxy to burn_public on behalf of user
+    // Bridge calls proxy, proxy calls token.burn_public — msg_sender at token is the proxy
     const authwit = await SetPublicAuthwitContractInteraction.create(
       this.wallet,
       this.account,
       {
-        caller: bridgeAddr,
+        caller: proxyAddr,
         action: token.methods.burn_public(user, amount, nonce),
       },
       true,
