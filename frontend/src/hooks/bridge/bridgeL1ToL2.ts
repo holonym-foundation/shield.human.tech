@@ -1071,6 +1071,7 @@ export async function sendL1DepositTransaction(params: {
             totalAmount: amount,
             fuelAmount: fuel.fuelAmount,
             aztecRecipient: aztecAddress as `0x${string}`,
+            fuelRecipient: (privateFuel ? privateFuel.fpcAddress : aztecAddress) as `0x${string}`,
             tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
             fuelSecretHash: (privateFuel ? privateFuel.secretHash : fuel.fuelSecretHash).toString() as `0x${string}`,
             minFuelOutput: fuel.fuelQuote.minOutput,
@@ -1084,7 +1085,7 @@ export async function sendL1DepositTransaction(params: {
         ],
       })
 
-      console.log('[L1→L2] Sending SwapBridgeRouter.bridgeWithFuel tx, totalAmount:', amount.toString(), 'fuelAmount:', fuel.fuelAmount.toString())
+      console.log('[L1→L2] Sending SwapBridgeRouter.bridgeWithFuel tx, totalAmount:', amount.toString(), 'fuelAmount:', fuel.fuelAmount.toString(), 'fuelRecipient:', privateFuel ? privateFuel.fpcAddress : aztecAddress)
       txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
         { from: l1Address as `0x${string}`, to: SWAP_BRIDGE_ROUTER_ADDRESS, data: bridgeData },
       ])

@@ -31,19 +31,24 @@ contract MockPermit2 is ISignatureTransfer {
 }
 
 /// @notice Mock FeeJuicePortal that receives FeeJuice and returns dummy keys.
+///         Records last deposit recipient for test assertions.
 contract MockFeeJuicePortal {
     IERC20 public immutable UNDERLYING;
     uint256 private _callCount;
+    bytes32 public lastRecipient;
+    uint256 public lastAmount;
 
     constructor(address _underlying) {
         UNDERLYING = IERC20(_underlying);
     }
 
-    function depositToAztecPublic(bytes32, uint256 amount, bytes32)
+    function depositToAztecPublic(bytes32 _to, uint256 amount, bytes32)
         external
         returns (bytes32, uint256)
     {
         UNDERLYING.transferFrom(msg.sender, address(this), amount);
+        lastRecipient = _to;
+        lastAmount = amount;
         _callCount++;
         return (bytes32(_callCount), _callCount);
     }
@@ -129,6 +134,7 @@ contract SwapBridgeRouterTest is Test {
     address attacker = address(0xDEAD);
 
     bytes32 constant AZTEC_RECIPIENT = bytes32(uint256(0x1234));
+    bytes32 constant FPC_RECIPIENT = bytes32(uint256(0xFFC0));
     bytes32 constant TOKEN_SECRET = bytes32(uint256(0x5678));
     bytes32 constant FUEL_SECRET = bytes32(uint256(0x9ABC));
 
@@ -185,6 +191,32 @@ contract SwapBridgeRouterTest is Test {
             AZTEC_RECIPIENT, bytes32(0), 0, 0, bytes32(0), bytes32(0), 0, 0, bytes32(0)
         );
         router.bridgeWithFuel(p, permit);
+    }
+
+    function test_fuelRecipientDiffersFromAztecRecipient() public {
+        SwapBridgeRouter.BridgeParams memory p = _defaultBridgeParams(100e6, 10e6);
+        p.fuelRecipient = FPC_RECIPIENT; // FPC address, different from aztecRecipient
+        SwapBridgeRouter.PermitParams memory permit = _defaultPermitParams();
+
+        vm.prank(user);
+        router.bridgeWithFuel(p, permit);
+
+        // FeeJuice portal should have received the fuel with FPC as recipient
+        assertEq(feeJuicePortal.lastRecipient(), FPC_RECIPIENT, "Fuel recipient should be FPC");
+        assertEq(feeJuicePortal.lastAmount(), 10e6, "Fuel amount");
+        // Token portal still receives tokens (bridgeAmount = 90e6)
+        assertEq(usdc.balanceOf(address(tokenPortal)), 90e6, "TokenPortal balance");
+    }
+
+    function test_fuelRecipientMatchesAztecRecipientForPublicFuel() public {
+        SwapBridgeRouter.BridgeParams memory p = _defaultBridgeParams(100e6, 10e6);
+        // fuelRecipient = aztecRecipient (default from helper) — public fuel case
+        SwapBridgeRouter.PermitParams memory permit = _defaultPermitParams();
+
+        vm.prank(user);
+        router.bridgeWithFuel(p, permit);
+
+        assertEq(feeJuicePortal.lastRecipient(), AZTEC_RECIPIENT, "Fuel recipient should be user");
     }
 
     // ═════════════════════════════════════════════════════════════════
@@ -535,6 +567,7 @@ contract SwapBridgeRouterTest is Test {
             totalAmount: total,
             fuelAmount: fuel,
             aztecRecipient: AZTEC_RECIPIENT,
+            fuelRecipient: AZTEC_RECIPIENT,
             tokenSecretHash: TOKEN_SECRET,
             fuelSecretHash: FUEL_SECRET,
             minFuelOutput: 0,

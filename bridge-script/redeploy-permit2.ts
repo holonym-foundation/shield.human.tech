@@ -47,7 +47,7 @@ const CustomTokenPortalBytecode = CustomTokenPortalJson.bytecode.object as `0x${
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const L1_USDC_ADDRESS = '0x47e16bd8702bcef388085c0371ba0b87fa883f5e'
-const SWAP_BRIDGE_ROUTER = '0xedfb9419A44e49Ed33D901e7E6B35FF063a9EFa2'
+const SWAP_BRIDGE_ROUTER = '0x88e272483B12Bd5A2701EcC1Bd6Ac2a8ca5199FF'
 
 const MNEMONIC =
   process.env.MNEMONIC ||

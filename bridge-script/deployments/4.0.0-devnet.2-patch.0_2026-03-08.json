@@ -128,6 +128,6 @@
   "bridgeAndFuelAddress": "0x0340d04419de035233ca379dc05b4d8c57da238b",
   "mockFuelSwapAddress": "0xcdc3e13b130d8b5f4f380166eb2af4db23aee9a6",
   "uniswapFuelSwapAddress": "0x547BE2F85f371f85fFB7f5BA1a972EAd88D7dB42",
-  "swapBridgeRouterAddress": "0xedfb9419A44e49Ed33D901e7E6B35FF063a9EFa2",
+  "swapBridgeRouterAddress": "0x88e272483B12Bd5A2701EcC1Bd6Ac2a8ca5199FF",
   "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
 }

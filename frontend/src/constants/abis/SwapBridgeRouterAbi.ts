@@ -71,6 +71,7 @@ export const SwapBridgeRouterAbi = [
           { name: 'totalAmount', type: 'uint256' },
           { name: 'fuelAmount', type: 'uint256' },
           { name: 'aztecRecipient', type: 'bytes32' },
+          { name: 'fuelRecipient', type: 'bytes32' },
           { name: 'tokenSecretHash', type: 'bytes32' },
           { name: 'fuelSecretHash', type: 'bytes32' },
           { name: 'minFuelOutput', type: 'uint256' },

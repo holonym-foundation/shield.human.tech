@@ -147,6 +147,7 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         uint256 totalAmount;
         uint256 fuelAmount;
         bytes32 aztecRecipient;
+        bytes32 fuelRecipient;      // L2 address that receives FeeJuice (user for public fuel, FPC for private fuel)
         bytes32 tokenSecretHash;
         bytes32 fuelSecretHash;
         uint256 minFuelOutput;
@@ -267,7 +268,7 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         {
             feeJuiceToken.forceApprove(address(feeJuicePortal), fuelReceived);
             (fuelKey, fuelIndex) = feeJuicePortal.depositToAztecPublic(
-                p.aztecRecipient,
+                p.fuelRecipient,
                 fuelReceived,
                 p.fuelSecretHash
             );
