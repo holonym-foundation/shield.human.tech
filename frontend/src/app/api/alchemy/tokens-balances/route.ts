@@ -1,5 +1,9 @@
 import axios from 'axios'
+import { Agent as HttpsAgent } from 'node:https'
 import { NextRequest, NextResponse } from 'next/server'
+
+// Force IPv4 — Node 18+ tries IPv6 first which times out on some hosts
+const httpsAgent = new HttpsAgent({ family: 4 })
 
 import { AlchemyTokenResponse, T_AlchemyTokenBalanceResponse } from '@/types/token.balances.types'
 import {
@@ -41,6 +45,7 @@ export async function POST(request: NextRequest) {
     const axiosOpts = {
       headers: { accept: 'application/json', 'content-type': 'application/json' },
       timeout: 15_000,
+      httpsAgent,
     }
 
     let response: Awaited<ReturnType<typeof axios.post<AlchemyTokenResponse>>>
