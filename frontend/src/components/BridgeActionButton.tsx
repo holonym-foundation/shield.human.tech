@@ -268,7 +268,9 @@ function BridgeActionButton({
         notify('error', {
           heading: 'Proof of Clean Hands Required',
           message: React.createElement('span', null,
-            `Cannot use ${actionLabel}. `,
+            pochReason
+              ? React.createElement('span', null, `${pochReason}. `)
+              : React.createElement('span', null, `Cannot use ${actionLabel}. `),
             React.createElement('a', {
               href: 'https://id.human.tech/sandbox/clean-hands',
               target: '_blank',
