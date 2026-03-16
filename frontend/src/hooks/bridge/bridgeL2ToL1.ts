@@ -151,7 +151,7 @@ export async function computeWitness(
   console.log('[L2→L1] Computing L2→L1 membership witness (block=', blockNumber, ')...')
 
   // Convert block number → epoch via L1 Rollup contract
-  // Retry on InvalidCheckpointNumber — the checkpoint may not exist yet if the block was just proven
+  // Retry on any error — checkpoint may not exist yet if the block was just proven
   let epoch!: bigint
   const maxRetries = 5
   const retryDelayMs = 30_000
@@ -167,9 +167,9 @@ export async function computeWitness(
       console.log('[L2→L1] Block', blockNumber, '→ Epoch', epoch.toString())
       break
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('InvalidCheckpointNumber') && attempt < maxRetries) {
-        console.warn(`[L2→L1] Checkpoint ${blockNumber} not available yet (attempt ${attempt}/${maxRetries}), retrying in ${retryDelayMs / 1000}s...`)
+      if (attempt < maxRetries) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.warn(`[L2→L1] getEpochForCheckpoint failed (attempt ${attempt}/${maxRetries}), retrying in ${retryDelayMs / 1000}s...`, msg)
         await wait(retryDelayMs)
         continue
       }
