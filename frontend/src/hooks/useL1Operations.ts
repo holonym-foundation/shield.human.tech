@@ -53,8 +53,10 @@ import {
   persistReceiptToBackend,
   finalizeLocalStorageAfterDeposit,
   fetchPochAttestation,
+  fetchPassportAttestation,
   type FuelParams,
   type PochAttestationData,
+  type PassportAttestationData,
 } from './bridge/bridgeL1ToL2'
 import {
   BRIDGE_AND_FUEL_ADDRESS,
@@ -653,13 +655,25 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       // ─── Step 3: Check allowance and approve ────────────────────────
       await checkAndApproveAllowance(l1Address, amount, selectedToken, fuel)
 
-      // ─── Step 3b: Fetch POCH attestation for private deposits ────────
+      // ─── Step 3b: Fetch attestation for private deposits (POCH → Passport fallback) ──
       let attestation: PochAttestationData | undefined
+      let passportAttestation: PassportAttestationData | undefined
       if (isPrivacyModeEnabled) {
         const portalAddress = selectedToken?.l1PortalContract ?? ''
-        console.log('[L1→L2] Fetching POCH attestation for private deposit...')
-        attestation = await fetchPochAttestation(portalAddress)
-        console.log('[L1→L2] POCH attestation received, nonce:', attestation.nonce)
+        try {
+          console.log('[L1→L2] Fetching POCH attestation for private deposit...')
+          attestation = await fetchPochAttestation(portalAddress)
+          console.log('[L1→L2] POCH attestation received, nonce:', attestation.nonce)
+        } catch (pochErr) {
+          console.warn('[L1→L2] POCH attestation failed, trying Passport fallback...', pochErr)
+          passportAttestation = await fetchPassportAttestation(portalAddress)
+          console.log('[L1→L2] Passport attestation received, nonce:', passportAttestation.nonce, 'maxAmount:', passportAttestation.maxAmount)
+          // Enforce amount limit for Passport path
+          if (amount > BigInt(passportAttestation.maxAmount)) {
+            const maxFormatted = (Number(passportAttestation.maxAmount) / 1e6).toFixed(2)
+            throw new Error(`Passport allows up to ${maxFormatted} USDC per transaction. Mint a POCH SBT to remove this limit.`)
+          }
+        }
       }
 
       // ─── Step 4: Send L1 deposit transaction ────────────────────────
@@ -680,6 +694,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         selectedToken,
         fuel: fuel && backup.fuelSecretHash ? { ...fuel, fuelSecretHash: backup.fuelSecretHash } : undefined,
         attestation,
+        passportAttestation,
       })
       // 🔒 Funds are now POTENTIALLY locked on L1 — from this point, the outer catch must
       // NEVER mark the operation as 'failed'.

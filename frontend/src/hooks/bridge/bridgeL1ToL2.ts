@@ -94,6 +94,17 @@ export interface PochAttestationData {
   actionId: string
 }
 
+/** Attestation data fetched from /api/attestation/passport for private deposits. */
+export interface PassportAttestationData {
+  l1Signature: string
+  l2Signature: number[] | null
+  nonce: number
+  maxAmount: string
+  deadline: string
+  score: number
+  threshold: number
+}
+
 // ─── Attestation Fetch ──────────────────────────────────────────────
 
 /**
@@ -106,6 +117,17 @@ export async function fetchPochAttestation(
 ): Promise<PochAttestationData> {
   const res = await api.post('/api/attestation/poch', { portalAddress })
   return res.data as PochAttestationData
+}
+
+/**
+ * Fetch a Passport attestation from the backend API.
+ * Called as fallback when POCH is unavailable for private deposits.
+ */
+export async function fetchPassportAttestation(
+  portalAddress: string,
+): Promise<PassportAttestationData> {
+  const res = await api.post('/api/attestation/passport', { portalAddress })
+  return res.data as PassportAttestationData
 }
 
 // ─── Deposit Step Result Types ───────────────────────────────────────
@@ -615,23 +637,26 @@ export async function sendL1DepositTransaction(params: {
   selectedToken?: Token
   fuel?: FuelParams & { fuelSecretHash: Fr }
   attestation?: PochAttestationData
+  passportAttestation?: PassportAttestationData
 }): Promise<DepositTxResult> {
   const {
     l1Address, aztecAddress, amount, claimSecretHash, claimSecret,
-    isPrivacyModeEnabled, operationId, selectedToken, fuel, attestation,
+    isPrivacyModeEnabled, operationId, selectedToken, fuel, attestation, passportAttestation,
   } = params
 
   let txHash: any
   const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
 
   if (isPrivacyModeEnabled) {
-    // ── Private path: depositToAztecPrivate with POCH attestation (no fuel) ──
+    // ── Private path: depositToAztecPrivate with POCH or Passport attestation (no fuel) ──
     const cleanHandsData = attestation
       ? { nonce: BigInt(attestation.nonce), actionId: BigInt(attestation.actionId), signature: attestation.l1Signature as `0x${string}` }
       : { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` }
-    const passportData = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
+    const passportData = passportAttestation
+      ? { maxAmount: BigInt(passportAttestation.maxAmount), nonce: BigInt(passportAttestation.nonce), deadline: BigInt(passportAttestation.deadline), signature: passportAttestation.l1Signature as `0x${string}` }
+      : { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
 
-    console.log('[L1→L2] Sending private deposit tx to portal:', l1PortalAddress, 'amount:', amount.toString(), 'hasAttestation:', !!attestation)
+    console.log('[L1→L2] Sending private deposit tx to portal:', l1PortalAddress, 'amount:', amount.toString(), 'hasAttestation:', !!attestation, 'hasPassport:', !!passportAttestation)
     const bridgeData = encodeFunctionData({
       abi: CustomTokenPortalAbi,
       functionName: 'depositToAztecPrivate',

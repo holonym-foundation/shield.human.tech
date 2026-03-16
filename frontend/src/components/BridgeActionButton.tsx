@@ -74,11 +74,15 @@ interface BridgeActionButtonProps {
   setShowSBTModal: (show: boolean) => void
   setCurrentSBTChain: (chain: 'Ethereum' | 'Aztec') => void
 
-  // Privacy mode / POCH
+  // Privacy mode / attestation
   isPrivacyModeEnabled?: boolean
   pochEligible?: boolean
   pochLoading?: boolean
   pochReason?: string
+  attestationMethod?: 'poch' | 'passport' | null
+  passportMaxAmount?: bigint
+  passportScore?: number
+  passportThreshold?: number
 
   // Operation completion state
   bridgeCompleted?: boolean
@@ -123,6 +127,10 @@ function BridgeActionButton({
   pochEligible,
   pochLoading = false,
   pochReason,
+  attestationMethod,
+  passportMaxAmount,
+  passportScore,
+  passportThreshold,
   bridgeCompleted = false,
   l2NodeError = false,
   l2NodeIsReadyLoading = false,
@@ -257,27 +265,35 @@ function BridgeActionButton({
       return
     }
 
-    // Step 5: POCH check (privacy mode, both directions)
+    // Step 5: Attestation check (privacy mode, both directions)
     if (isPrivacyModeEnabled) {
       if (pochLoading) {
-        notify('info', 'Checking Proof of Clean Hands eligibility...')
+        notify('info', 'Checking eligibility...')
         return
       }
       if (!pochEligible) {
-        const actionLabel = direction === BridgeDirection.L1_TO_L2 ? 'private deposits' : 'private withdrawals'
         notify('error', {
-          heading: 'Proof of Clean Hands Required',
+          heading: 'Attestation Required',
           message: React.createElement('span', null,
-            pochReason
-              ? React.createElement('span', null, `${pochReason}. `)
-              : React.createElement('span', null, `Cannot use ${actionLabel}. `),
+            React.createElement('span', null,
+              pochReason ? `${pochReason}. ` : 'Cannot use private mode. ',
+            ),
+            React.createElement('br'),
             React.createElement('a', {
               href: 'https://id.human.tech/sandbox/clean-hands',
               target: '_blank',
               rel: 'noopener noreferrer',
               style: { color: '#2563eb', textDecoration: 'underline' },
             }, 'Mint your POCH SBT here'),
-            ' or switch to public mode.',
+            React.createElement('br'),
+            React.createElement('a', {
+              href: 'https://app.passport.xyz/',
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              style: { color: '#2563eb', textDecoration: 'underline' },
+            }, `Build your Passport score${passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''}`),
+            React.createElement('br'),
+            'Or switch to public mode.',
           ),
         })
         return
@@ -285,6 +301,32 @@ function BridgeActionButton({
     }
 
     // Step 6: Validate amount
+    // Step 6a: Passport amount limit check
+    if (isPrivacyModeEnabled && attestationMethod === 'passport' && passportMaxAmount != null) {
+      try {
+        const decimals = 6 // USDC decimals
+        const inputBigInt = BigInt(Math.floor(parseFloat(inputAmount || '0') * 10 ** decimals))
+        if (inputBigInt > passportMaxAmount) {
+          const maxFormatted = (Number(passportMaxAmount) / 10 ** decimals).toFixed(2)
+          notify('error', {
+            heading: 'Amount Exceeds Passport Limit',
+            message: React.createElement('span', null,
+              `Passport allows up to ${maxFormatted} USDC per transaction. `,
+              React.createElement('a', {
+                href: 'https://id.human.tech/sandbox/clean-hands',
+                target: '_blank',
+                rel: 'noopener noreferrer',
+                style: { color: '#2563eb', textDecoration: 'underline' },
+              }, 'Mint a POCH SBT'),
+              ' to remove this limit.',
+            ),
+          })
+          return
+        }
+      } catch {
+        // parseFloat failed — will be caught by the next validation step
+      }
+    }
     if (!inputAmount || parseFloat(inputAmount) <= 0) {
       notify('error', 'Please enter a valid amount')
       inputRef.current?.focus()
@@ -338,7 +380,7 @@ function BridgeActionButton({
     if (balancesLoading) return 'Loading balances...'
     if (isConnecting) return 'Connecting...'
     if (requestFaucetPending) return 'Getting Eth & Testnet USDC...'
-    if (pochLoading && isPrivacyModeEnabled) return 'Checking POCH eligibility...'
+    if (pochLoading && isPrivacyModeEnabled) return 'Checking eligibility...'
     if (withdrawTokensToL1Pending) return 'Withdrawing Tokens...'
     if (bridgeTokensToL2Pending) return 'Bridging Tokens...'
     return 'Loading...'
@@ -368,10 +410,10 @@ function BridgeActionButton({
       if (hasL1SBT !== true) return `Get SBT on ${requiredChain}`
     }
 
-    // POCH requirement (privacy mode, both directions)
+    // Attestation requirement (privacy mode, both directions)
     if (isPrivacyModeEnabled) {
-      if (pochLoading) return 'Checking POCH eligibility...'
-      if (!pochEligible) return 'Get Proof of Clean Hands'
+      if (pochLoading) return 'Checking eligibility...'
+      if (!pochEligible) return 'Attestation Required'
     }
 
     return getOperationLabel(direction)
