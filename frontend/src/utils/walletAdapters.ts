@@ -236,12 +236,11 @@ class WalletAdapter {
     // Create private auth witness: allow proxy to burn_private on behalf of user
     // Bridge calls proxy, proxy calls token.burn_private — msg_sender at token is the proxy
     const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
-    const innerHash = await computeInnerAuthWitHashFromAction(proxyAddr, burnCall)
     await this.wallet.createAuthWit(
       this.account,
       {
-        consumer: tokenAddr,
-        innerHash,
+        caller: proxyAddr,
+        call: burnCall,
       }
     )
 
