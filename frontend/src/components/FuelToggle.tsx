@@ -128,7 +128,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   )
 
   return (
-    <div className='bg-[#F5F5F5] rounded-md p-3 mt-3'>
+    <div className='bg-[#F5F5F5] rounded-md p-3 mt-3 overflow-hidden'>
       <div
         className='flex items-center justify-between cursor-pointer'
         onClick={() => onToggle(!fuelEnabled)}
@@ -148,20 +148,20 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
         </div>
       </div>
       <div className='text-xs text-latest-grey-500 mt-1 space-y-0.5'>
-        <div className='flex justify-between'>
+        <div className='flex justify-between items-center h-4'>
           <span>Public Fee Juice:</span>
           <span className='font-semibold'>
             {feeJuiceBalanceLoading
-              ? <span className='inline-block h-3 w-12 bg-neutral-300 rounded animate-pulse align-middle' />
+              ? <span className='inline-block h-2.5 w-12 bg-neutral-300 rounded animate-pulse' />
               : feeJuiceBalance ?? '--'}
           </span>
         </div>
         {hasBridgedFpc && (
-          <div className='flex justify-between'>
+          <div className='flex justify-between items-center h-4'>
             <span>Private Fee Juice:</span>
             <span className='font-semibold'>
               {privateFeeJuiceBalanceLoading
-                ? <span className='inline-block h-3 w-12 bg-neutral-300 rounded animate-pulse align-middle' />
+                ? <span className='inline-block h-2.5 w-12 bg-neutral-300 rounded animate-pulse' />
                 : privateFeeJuiceBalance ?? '--'}
             </span>
           </div>
@@ -171,10 +171,10 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
       <AnimatePresence initial={false}>
         {fuelEnabled && (
           <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
           >
             <div className='mt-3 space-y-2'>
               {pricesError && (
@@ -207,7 +207,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                 </div>
               )}
 
-              <div className='flex items-center gap-2'>
+              <div className='flex items-center gap-1.5 max-w-full'>
                 <input
                   type='text'
                   inputMode='decimal'
@@ -217,7 +217,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                     const v = e.target.value
                     if (v === '' || !isNaN(Number(v))) onAmountChange(v)
                   }}
-                  className='flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500'
+                  className='flex-1 min-w-0 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500'
                 />
                 {USD_PRESETS.map((usd) => {
                   const tokenEquiv = usdToTokenAmount(usd, tokenSymbol, prices)
@@ -226,7 +226,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                       key={usd}
                       onClick={() => onAmountChange(tokenEquiv)}
                       title={`${tokenEquiv} ${tokenSymbol}`}
-                      className={`px-2 py-1 text-xs rounded border ${
+                      className={`shrink-0 px-1.5 py-1 text-xs rounded border ${
                         activePreset === usd
                           ? 'border-blue-500 bg-blue-50 text-blue-600'
                           : 'border-gray-300 text-gray-600 hover:border-gray-400'

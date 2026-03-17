@@ -638,7 +638,7 @@ export default function Home() {
                 // Disable if L2 node error
                 l2NodeError={l2NodeIsReadyIsError && !l2NodeIsReadyLoading}
                 l2NodeIsReadyLoading={l2NodeIsReadyLoading}
-                feeJuiceBalanceLoading={feeJuiceBalanceLoading || privateFeeJuiceBalanceLoading}
+                feeJuiceBalanceLoading={feeJuiceBalanceLoading || privateFeeJuiceBalanceLoading || (isAztecConnected && feeJuiceBalance == null)}
               />
               <BridgeFooter />
             </div>
