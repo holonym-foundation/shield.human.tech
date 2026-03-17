@@ -7,6 +7,7 @@ import {Ownable2Step, Ownable} from "@oz/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@oz/utils/ReentrancyGuard.sol";
 import {IFeeJuicePortal} from "@aztec/core/interfaces/IFeeJuicePortal.sol";
 import {ITokenPortal} from "./interfaces/ITokenPortal.sol";
+import {ISignatureTransfer} from "./interfaces/ISignatureTransfer.sol";
 
 // ─── TokenPortal Private Deposit Interface ───────────────────────────
 
@@ -41,36 +42,6 @@ interface ITokenPortalPrivate {
     ) external returns (bytes32, uint256);
 }
 
-// ─── Minimal Permit2 Interface ───────────────────────────────────────
-
-/// @notice Permit2 SignatureTransfer — one-time signed transfers.
-/// @dev Canonical address: 0x000000000022D473030F116dDEE9F6B43aC78BA3
-interface ISignatureTransfer {
-    struct TokenPermissions {
-        address token;
-        uint256 amount;
-    }
-
-    struct PermitTransferFrom {
-        TokenPermissions permitted;
-        uint256 nonce;
-        uint256 deadline;
-    }
-
-    struct SignatureTransferDetails {
-        address to;
-        uint256 requestedAmount;
-    }
-
-    /// @notice Transfer tokens using a signed permit. Nonce is consumed on use.
-    function permitTransferFrom(
-        PermitTransferFrom calldata permit,
-        SignatureTransferDetails calldata transferDetails,
-        address owner,
-        bytes calldata signature
-    ) external;
-}
-
 // ─── Minimal UniswapFuelSwap Interface ───────────────────────────────
 
 interface IUniswapFuelSwap {
@@ -101,15 +72,20 @@ interface IUniswapFuelSwap {
  *
  *         All in one atomic L1 transaction, requiring only one signature + one tx.
  *
- * @dev    Unlike BridgeAndFuel (which uses arbitrary `.call(swapData)`), this contract
- *         hardcodes the swap target and calls it with typed parameters — eliminating
- *         the arbitrary external call attack surface.
+ * @dev    The swap target is called only through a typed interface with route data
+ *         supplied as structured arguments, avoiding arbitrary external call payloads.
  *
  *         The swap target can be updated by the owner (governance) to support
  *         future pool migrations.
  */
 contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    bytes32 internal constant BRIDGE_WITNESS_TYPEHASH = keccak256(
+        "BridgeWitness(address tokenPortal,address bridgeToken,uint256 totalAmount,uint256 fuelAmount,bytes32 aztecRecipient,bytes32 fuelRecipient,bytes32 tokenSecretHash,bytes32 fuelSecretHash,uint256 minFuelOutput,bytes32 routeHash,bool isPrivate)"
+    );
+    string public constant BRIDGE_WITNESS_TYPE_STRING =
+        "BridgeWitness witness)BridgeWitness(address tokenPortal,address bridgeToken,uint256 totalAmount,uint256 fuelAmount,bytes32 aztecRecipient,bytes32 fuelRecipient,bytes32 tokenSecretHash,bytes32 fuelSecretHash,uint256 minFuelOutput,bytes32 routeHash,bool isPrivate)TokenPermissions(address token,uint256 amount)";
 
     // ─── State ───────────────────────────────────────────────────────
     ISignatureTransfer public immutable permit2;
@@ -175,6 +151,20 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         bytes signature;
     }
 
+    struct BridgeWitness {
+        address tokenPortal;
+        address bridgeToken;
+        uint256 totalAmount;
+        uint256 fuelAmount;
+        bytes32 aztecRecipient;
+        bytes32 fuelRecipient;
+        bytes32 tokenSecretHash;
+        bytes32 fuelSecretHash;
+        uint256 minFuelOutput;
+        bytes32 routeHash;
+        bool isPrivate;
+    }
+
     // ─── Constructor ─────────────────────────────────────────────────
 
     constructor(
@@ -225,22 +215,27 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
 
         uint256 bridgeAmount = p.totalAmount - p.fuelAmount;
 
-        // 1. Pull tokens from user via Permit2 SignatureTransfer
-        permit2.permitTransferFrom(
-            ISignatureTransfer.PermitTransferFrom({
-                permitted: ISignatureTransfer.TokenPermissions({
-                    token: p.bridgeToken,
-                    amount: p.totalAmount
-                }),
-                nonce: permit.nonce,
-                deadline: permit.deadline
-            }),
-            ISignatureTransfer.SignatureTransferDetails({
-                to: address(this),
-                requestedAmount: p.totalAmount
-            }),
+        // 1. Pull tokens from user via Permit2 SignatureTransfer with witness-bound bridge intent.
+        _pullTokensWithWitness(
             msg.sender,
-            permit.signature
+            p.bridgeToken,
+            p.totalAmount,
+            permit,
+            _hashBridgeWitness(
+                BridgeWitness({
+                    tokenPortal: p.tokenPortal,
+                    bridgeToken: p.bridgeToken,
+                    totalAmount: p.totalAmount,
+                    fuelAmount: p.fuelAmount,
+                    aztecRecipient: p.aztecRecipient,
+                    fuelRecipient: p.fuelRecipient,
+                    tokenSecretHash: p.tokenSecretHash,
+                    fuelSecretHash: p.fuelSecretHash,
+                    minFuelOutput: p.minFuelOutput,
+                    routeHash: _hashRoute(p.path, p.zeroForOnes),
+                    isPrivate: p.isPrivate
+                })
+            )
         );
 
         // 2. Swap fuel portion for FeeJuice via UniswapFuelSwap
@@ -296,7 +291,7 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         }
         token.forceApprove(p.tokenPortal, 0);
 
-        // 5. Emit composite event (same shape as BridgeAndFuel for frontend compatibility)
+        // 5. Emit composite event
         emit BridgeWithFuel(
             p.aztecRecipient,
             tokenKey,
@@ -324,22 +319,27 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         require(p.amount > 0, "SwapBridgeRouter: zero amount");
         require(p.tokenPortal != address(0), "SwapBridgeRouter: zero tokenPortal");
 
-        // 1. Pull tokens from user via Permit2 SignatureTransfer
-        permit2.permitTransferFrom(
-            ISignatureTransfer.PermitTransferFrom({
-                permitted: ISignatureTransfer.TokenPermissions({
-                    token: p.bridgeToken,
-                    amount: p.amount
-                }),
-                nonce: permit.nonce,
-                deadline: permit.deadline
-            }),
-            ISignatureTransfer.SignatureTransferDetails({
-                to: address(this),
-                requestedAmount: p.amount
-            }),
+        // 1. Pull tokens from user via Permit2 SignatureTransfer with witness-bound bridge intent.
+        _pullTokensWithWitness(
             msg.sender,
-            permit.signature
+            p.bridgeToken,
+            p.amount,
+            permit,
+            _hashBridgeWitness(
+                BridgeWitness({
+                    tokenPortal: p.tokenPortal,
+                    bridgeToken: p.bridgeToken,
+                    totalAmount: p.amount,
+                    fuelAmount: 0,
+                    aztecRecipient: p.aztecRecipient,
+                    fuelRecipient: bytes32(0),
+                    tokenSecretHash: p.secretHash,
+                    fuelSecretHash: bytes32(0),
+                    minFuelOutput: 0,
+                    routeHash: bytes32(0),
+                    isPrivate: p.isPrivate
+                })
+            )
         );
 
         // 2. Approve TokenPortal and deposit
@@ -388,5 +388,53 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
             uint256 bal = IERC20(token).balanceOf(address(this));
             if (bal > 0) IERC20(token).safeTransfer(to, bal);
         }
+    }
+
+    function _pullTokensWithWitness(
+        address owner,
+        address token,
+        uint256 amount,
+        PermitParams calldata permit,
+        bytes32 witness
+    ) internal {
+        permit2.permitWitnessTransferFrom(
+            ISignatureTransfer.PermitTransferFrom({
+                permitted: ISignatureTransfer.TokenPermissions({token: token, amount: amount}),
+                nonce: permit.nonce,
+                deadline: permit.deadline
+            }),
+            ISignatureTransfer.SignatureTransferDetails({to: address(this), requestedAmount: amount}),
+            owner,
+            witness,
+            BRIDGE_WITNESS_TYPE_STRING,
+            permit.signature
+        );
+    }
+
+    function _hashBridgeWitness(BridgeWitness memory witness) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                BRIDGE_WITNESS_TYPEHASH,
+                witness.tokenPortal,
+                witness.bridgeToken,
+                witness.totalAmount,
+                witness.fuelAmount,
+                witness.aztecRecipient,
+                witness.fuelRecipient,
+                witness.tokenSecretHash,
+                witness.fuelSecretHash,
+                witness.minFuelOutput,
+                witness.routeHash,
+                witness.isPrivate
+            )
+        );
+    }
+
+    function _hashRoute(IUniswapFuelSwap.PoolKey[] calldata path, bool[] calldata zeroForOnes)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(path, zeroForOnes));
     }
 }

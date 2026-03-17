@@ -1,6 +1,6 @@
 # Bridge Script — Token Bridge Deployment
 
-Deploys all L1 and L2 contracts for the Aztec token bridge: TestERC20, TokenPortal, TokenContract, TokenBridgeContract, BridgeAndFuel, MockFuelSwap, and FeeAssetHandler.
+Deploys all L1 and L2 contracts for the Aztec token bridge: TestERC20, TokenPortal, TokenContract, TokenBridgeContract, UniswapFuelSwap, and SwapBridgeRouter.
 
 ## Prerequisites
 
@@ -31,7 +31,7 @@ The script will:
 - Deploy TestERC20 tokens (USDC, USDT, DAI, HUMN, GOAT, WBTC) on L1
 - Use pre-existing WETH on Sepolia (`0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14`)
 - Deploy TokenPortal, TokenContract, TokenBridgeContract for each token
-- Deploy BridgeAndFuel and MockFuelSwap for fuel infrastructure
+- Deploy UniswapFuelSwap and SwapBridgeRouter for fuel infrastructure
 - Deploy FeeAssetHandler and configure minter permissions
 - Save deployment data to `deployments/` and `../frontend/src/constants/deployments.json`
 
@@ -55,4 +55,4 @@ The deployer wallet is automatically granted the minter role on all TestERC20 co
 
 **`NotMinter(address caller)`** — The faucet private key doesn't match the deployer. Either redeploy or call `addMinter()` on the token contract.
 
-**`Cannot find module .../BridgeAndFuel.json`** — Run `forge build` in `l1-contracts/` first.
+**`Cannot find module .../SwapBridgeRouter.json`** — Run `forge build` in `l1-contracts/` first.

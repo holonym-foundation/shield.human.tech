@@ -59,7 +59,7 @@ import {
   MAINTENANCE_MODE,
   MAINTENANCE_MESSAGE,
   MAINTENANCE_TITLE,
-  BRIDGE_AND_FUEL_ADDRESS,
+  SWAP_BRIDGE_ROUTER_ADDRESS,
 } from '@/config'
 
 const variants = {
@@ -549,7 +549,7 @@ export default function Home() {
                   />
                   {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
                     !isPrivacyModeEnabled &&
-                    !!BRIDGE_AND_FUEL_ADDRESS && (
+                    !!SWAP_BRIDGE_ROUTER_ADDRESS && (
                     <FuelToggle
                       fuelEnabled={fuelEnabled}
                       fuelAmount={fuelAmount}

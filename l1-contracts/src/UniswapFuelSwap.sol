@@ -19,7 +19,7 @@ interface IWETH {
 /**
  * @title UniswapFuelSwap
  * @notice Swaps ERC-20 tokens for FeeJuice (AZTEC) via Uniswap V4 PoolManager.
- *         Designed to be called by BridgeAndFuel via `swapTarget.call(swapData)`.
+ *         Designed to be called by SwapBridgeRouter via a typed interface.
  *
  *         Supported routes:
  *           - Single-hop ERC-20:  WETH → AZTEC  (WETH/AZTEC pool)
@@ -98,7 +98,7 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
         require(inputAmount <= uint256(type(int256).max), "UniswapFuelSwap: input overflow");
         _validateRoute(inputToken, path, zeroForOnes);
 
-        // Pull input tokens from caller (BridgeAndFuel approved this contract)
+        // Pull input tokens from caller (SwapBridgeRouter approved this contract)
         IERC20(inputToken).safeTransferFrom(msg.sender, address(this), inputAmount);
 
         // Encode callback context and initiate V4 unlock
@@ -108,7 +108,7 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
 
         require(output >= minOutput, "UniswapFuelSwap: insufficient output");
 
-        // Transfer FeeJuice to caller (BridgeAndFuel)
+        // Transfer FeeJuice to caller (SwapBridgeRouter)
         IERC20(feeJuice).safeTransfer(msg.sender, output);
 
         emit SwapExecuted(msg.sender, inputToken, inputAmount, output);

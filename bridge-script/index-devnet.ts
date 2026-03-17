@@ -53,18 +53,10 @@ import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
 import 'dotenv/config'
 // @ts-ignore
 import TestERC20Json from './constants/TestERC20.json'
-// @ts-ignore
-import BridgeAndFuelJson from '../l1-contracts/out/BridgeAndFuel.sol/BridgeAndFuel.json'
-// @ts-ignore
-import MockFuelSwapJson from '../l1-contracts/out/MockFuelSwap.sol/MockFuelSwap.json'
 
 // Fix the bytecode format
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
-const BridgeAndFuelAbi = BridgeAndFuelJson.abi
-const BridgeAndFuelBytecode = BridgeAndFuelJson.bytecode.object as `0x${string}`
-const MockFuelSwapAbi = MockFuelSwapJson.abi
-const MockFuelSwapBytecode = MockFuelSwapJson.bytecode.object as `0x${string}`
 
 import { createPublicClient, getContract, http, toFunctionSelector } from 'viem'
 
@@ -81,7 +73,6 @@ import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
   createDeployment,
   saveTokenToDeployment,
-  saveFuelInfraToDeployment,
   loadExistingTokens,
   copyToFrontend,
   type DeployedToken,
@@ -589,49 +580,6 @@ async function main() {
       logger.error(`❌ Failed to deploy ${tokenConfig.symbol}: ${error}`)
       // Continue with other tokens even if one fails
     }
-  }
-
-  // Deploy BridgeAndFuel + MockFuelSwap (fuel infrastructure)
-  try {
-    logger.info('\n=== Deploying Fuel Infrastructure ===')
-
-    logger.info('Deploying BridgeAndFuel contract...')
-    const bridgeAndFuelAddress = await deployL1Contract(
-      l1Client,
-      BridgeAndFuelAbi,
-      BridgeAndFuelBytecode,
-      [],
-    ).then(({ address }) => address)
-    logger.info(`BridgeAndFuel deployed at ${bridgeAndFuelAddress.toString()}`)
-
-    // MockFuelSwap needs: feeJuiceAddress, feeAssetHandlerAddress, rate (1:1 = 1e18)
-    const feeJuiceAddress = (
-      l1ContractAddresses as any
-    ).feeJuiceAddress?.toString()
-    const feeAssetHandlerAddress = (
-      l1ContractAddresses as any
-    ).feeAssetHandlerAddress?.toString()
-    if (!feeJuiceAddress || !feeAssetHandlerAddress) {
-      throw new Error(
-        'Missing feeJuiceAddress or feeAssetHandlerAddress from node info',
-      )
-    }
-
-    logger.info('Deploying MockFuelSwap contract...')
-    const mockFuelSwapAddress = await deployL1Contract(
-      l1Client,
-      MockFuelSwapAbi,
-      MockFuelSwapBytecode,
-      [feeJuiceAddress, feeAssetHandlerAddress, BigInt(1e18)], // 1:1 rate
-    ).then(({ address }) => address)
-    logger.info(`MockFuelSwap deployed at ${mockFuelSwapAddress.toString()}`)
-
-    saveFuelInfraToDeployment({
-      bridgeAndFuelAddress: bridgeAndFuelAddress.toString(),
-      mockFuelSwapAddress: mockFuelSwapAddress.toString(),
-    })
-  } catch (error) {
-    logger.error(`Failed to deploy fuel infrastructure: ${error}`)
   }
 
   // Sync active deployment to frontend

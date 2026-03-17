@@ -2,7 +2,8 @@
 pragma solidity >=0.8.27;
 
 import "forge-std/Test.sol";
-import {SwapBridgeRouter, ISignatureTransfer, IUniswapFuelSwap, CleanHandsData, PassportData} from "../SwapBridgeRouter.sol";
+import {SwapBridgeRouter, IUniswapFuelSwap, CleanHandsData, PassportData} from "../SwapBridgeRouter.sol";
+import {ISignatureTransfer} from "../interfaces/ISignatureTransfer.sol";
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {ERC20} from "@oz/token/ERC20/ERC20.sol";
 
@@ -16,17 +17,23 @@ contract MockToken is ERC20 {
 /// @notice Mock Permit2 that simply transfers tokens using a pre-set approval.
 ///         For unit testing — real Permit2 signature verification is tested on fork.
 contract MockPermit2 is ISignatureTransfer {
-    function permitTransferFrom(
+    function permitTransferFrom(PermitTransferFrom calldata, SignatureTransferDetails calldata, address, bytes calldata)
+        external
+        pure
+        override
+    {
+        revert("MockPermit2: use witness transfer");
+    }
+
+    function permitWitnessTransferFrom(
         PermitTransferFrom calldata permit,
         SignatureTransferDetails calldata transferDetails,
         address owner,
+        bytes32,
+        string calldata,
         bytes calldata /* signature */
     ) external override {
-        IERC20(permit.permitted.token).transferFrom(
-            owner,
-            transferDetails.to,
-            transferDetails.requestedAmount
-        );
+        IERC20(permit.permitted.token).transferFrom(owner, transferDetails.to, transferDetails.requestedAmount);
     }
 }
 

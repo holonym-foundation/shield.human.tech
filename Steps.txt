@@ -29,7 +29,7 @@ cd bridge-script
 MNEMONIC="your twelve word mnemonic here" pnpm start-devnet
 
 The script will deploy all L1 and L2 contracts (TestERC20 tokens, TokenPortal,
-TokenContract, TokenBridgeContract, BridgeAndFuel, MockFuelSwap, FeeAssetHandler)
+TokenContract, TokenBridgeContract, UniswapFuelSwap, SwapBridgeRouter)
 and save deployment data to deployments/ and frontend/src/constants/deployments.json.
 
 ## 5. (Optional) Run a local PXE connected to devnet

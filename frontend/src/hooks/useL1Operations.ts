@@ -54,11 +54,10 @@ import {
   finalizeLocalStorageAfterDeposit,
   type FuelParams,
   type PrivateFuelParams,
-  type Permit2Params,
 } from './bridge/bridgeL1ToL2'
 import {
-  BRIDGE_AND_FUEL_ADDRESS,
   BRIDGED_FPC_ADDRESS,
+  SWAP_BRIDGE_ROUTER_ADDRESS,
   UNISWAP_FUEL_SWAP_ADDRESS,
 } from '@/config'
 import { getUniswapFuelQuote, type FuelQuote } from '@/utils/fuelQuote'
@@ -91,9 +90,6 @@ async function buildFuelQuote(params: {
   })
 
   return getUniswapFuelQuote({
-    uniswapFuelSwapAddress: UNISWAP_FUEL_SWAP_ADDRESS,
-    bridgeTokenAddress,
-    fuelAmount,
     expectedOutput,
     slippageBps: 300, // 3% slippage for testnet
     poolKeys,
@@ -626,8 +622,8 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       )
       const hasSwapTarget = UNISWAP_FUEL_SWAP_ADDRESS
       if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amount) {
-        if (fuelType === 'private' && BRIDGED_FPC_ADDRESS && BRIDGE_AND_FUEL_ADDRESS && hasSwapTarget) {
-          // Private fuel (BridgedFPC): swap via BridgeAndFuel, FJ deposited to FPC, then claim+mint on L2
+        if (fuelType === 'private' && BRIDGED_FPC_ADDRESS && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
+          // Private fuel (BridgedFPC): swap via SwapBridgeRouter, FJ deposited to FPC, then claim+mint on L2
           const fuelQuote = await buildFuelQuote({
             bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
             fuelAmount: fuelAmountTokenUnits,
@@ -635,16 +631,16 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           })
           fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
           privateFuel = { fuelAmount: fuelAmountTokenUnits, fpcAddress: BRIDGED_FPC_ADDRESS }
-          console.log('[L1→L2] Private fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), fpcAddress: BRIDGED_FPC_ADDRESS, expectedOutput: fuelQuote.expectedOutput.toString(), swapTarget: fuelQuote.swapTarget })
-        } else if (fuelType === 'public' && BRIDGE_AND_FUEL_ADDRESS && hasSwapTarget) {
-          // Public fuel: swap tokens → FJ via BridgeAndFuel
+          console.log('[L1→L2] Private fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), fpcAddress: BRIDGED_FPC_ADDRESS, expectedOutput: fuelQuote.expectedOutput.toString() })
+        } else if (fuelType === 'public' && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
+          // Public fuel: swap tokens → FJ via SwapBridgeRouter
           const fuelQuote = await buildFuelQuote({
             bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
             fuelAmount: fuelAmountTokenUnits,
             inputDecimals: selectedToken?.decimals ?? 6,
           })
           fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
-          console.log('[L1→L2] Public fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), expectedOutput: fuelQuote.expectedOutput.toString(), swapTarget: fuelQuote.swapTarget })
+          console.log('[L1→L2] Public fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), expectedOutput: fuelQuote.expectedOutput.toString() })
         }
       }
     }
@@ -699,7 +695,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       operationId = backup.operationId
 
       // ─── Step 3: Check allowance and approve (+ Permit2 sign) ────────
-      const permit2 = await checkAndApproveAllowance(l1Address, amount, selectedToken, fuel)
+      await checkAndApproveAllowance(l1Address, amount, selectedToken)
 
       // ─── Step 4: Send L1 deposit transaction ────────────────────────
       // ═══ DANGER ZONE: tokens are locked on L1 after this ═══
@@ -728,7 +724,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           ...privateFuel,
           secretHash: backup.privateFuelSecretHash,
         } : undefined,
-        permit2: permit2 || undefined,
       })
       // 🔒 Funds are now POTENTIALLY locked on L1 — from this point, the outer catch must
       // NEVER mark the operation as 'failed'.
