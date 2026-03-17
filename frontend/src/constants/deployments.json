@@ -129,7 +129,7 @@
         }
       ],
       "uniswapFuelSwapAddress": "0x547BE2F85f371f85fFB7f5BA1a972EAd88D7dB42",
-      "swapBridgeRouterAddress": "0x88e272483B12Bd5A2701EcC1Bd6Ac2a8ca5199FF",
+      "swapBridgeRouterAddress": "0x4f32F9fdfED1d64d8cE2bdA5c559df0C915F43A3",
       "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
     }
   ]
