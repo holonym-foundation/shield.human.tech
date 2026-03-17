@@ -1,4 +1,5 @@
 mod config;
+mod test;
 
 // Minimal implementation of the token bridge that can move funds between L1 <> L2.
 // The bridge has a corresponding Portal contract on L1 that it is attached to
@@ -9,27 +10,28 @@ use aztec::macros::aztec;
 
 #[aztec]
 pub contract TokenBridge {
-    use crate::config::{Config, eth_personal_sign_hash};
+    use crate::config::Config;
 
-    use dep::aztec::{
+    use aztec::{
         macros::{functions::{external, initializer, internal, only_self, view}, storage::storage},
-        protocol_types::{
+        protocol::{
             address::{AztecAddress, EthAddress},
             traits::{Deserialize, Packable, Serialize, ToField},
         },
         state_vars::{
-            delayed_public_mutable::DelayedPublicMutable, map::Map, public_mutable::PublicMutable,
+            DelayedPublicMutable, Map, PublicMutable,
             PublicImmutable,
         },
+        authwit::auth::compute_inner_authwit_hash,
     };
 
-    use dep::token_portal_content_hash_lib::{
+    use token_portal_content_hash_lib::{
         get_mint_to_private_content_hash, get_mint_to_public_content_hash,
         get_withdraw_content_hash,
     };
 
-    use keccak256::keccak256;
-    use std::ecdsa_secp256k1::verify_signature;
+    use std::embedded_curve_ops::EmbeddedCurvePoint;
+    use schnorr::verify_signature;
     use token_minter_proxy::TokenMinterProxy;
 
     #[derive(Deserialize, Serialize)]
@@ -48,9 +50,9 @@ pub contract TokenBridge {
     }
 
     #[derive(Deserialize, Eq, Packable, Serialize)]
-    struct PubKey {
-        x: [u8; 32],
-        y: [u8; 32],
+    struct GrumpkinPubKey {
+        x: Field,
+        y: Field,
     }
 
     // Storage structure, containing all storage, and specifying what slots they use.
@@ -60,13 +62,13 @@ pub contract TokenBridge {
         pending_owner: PublicMutable<AztecAddress, Context>,
         config: PublicImmutable<Config, Context>,
         // clean hands and passport verification vars
-        human_id_attester_pubkey: DelayedPublicMutable<PubKey, 1, Context>,
-        clean_hands_circuit_id: DelayedPublicMutable<Field, 1, Context>,
-        passport_signer_pubkey: DelayedPublicMutable<PubKey, 1, Context>,
+        human_id_attester_pubkey: DelayedPublicMutable<GrumpkinPubKey, 600, Context>,
+        clean_hands_circuit_id: DelayedPublicMutable<Field, 600, Context>,
+        passport_signer_pubkey: DelayedPublicMutable<GrumpkinPubKey, 600, Context>,
         // Mapping: user address => nonce => consumed status
         clean_hands_nonces: Map<AztecAddress, Map<Field, PublicMutable<bool, Context>, Context>, Context>,
         passport_nonces: Map<AztecAddress, Map<Field, PublicMutable<bool, Context>, Context>, Context>,
-        is_paused: DelayedPublicMutable<bool, 1, Context>,
+        is_paused: PublicMutable<bool, Context>,
     }
 
     // Constructs the contract.
@@ -75,60 +77,66 @@ pub contract TokenBridge {
     fn constructor(
         token_minter_proxy: AztecAddress,
         portal: EthAddress,
-        human_id_attester_x: [u8; 32],
-        human_id_attester_y: [u8; 32],
+        human_id_attester_x: Field,
+        human_id_attester_y: Field,
         circuit_id: Field,
-        passport_signer_x: [u8; 32],
-        passport_signer_y: [u8; 32],
+        passport_signer_x: Field,
+        passport_signer_y: Field,
     ) {
-        let sender = self.context.msg_sender().unwrap();
+        let sender = self.msg_sender();
         self.storage.owner.write(sender);
         self.storage.config.initialize(Config { token_minter_proxy, portal });
+        // Basic on-curve check: y^2 = x^3 - 17 (Grumpkin)
+        assert(human_id_attester_y * human_id_attester_y == human_id_attester_x * human_id_attester_x * human_id_attester_x - 17, "attester pubkey not on Grumpkin curve");
         self.storage.human_id_attester_pubkey.schedule_value_change(
-            PubKey { x: human_id_attester_x, y: human_id_attester_y },
+            GrumpkinPubKey { x: human_id_attester_x, y: human_id_attester_y },
         );
         self.storage.clean_hands_circuit_id.schedule_value_change(circuit_id);
-        // ADDRESS MUST BE SET PRIOR TO DEPLOYMENT
+        // Basic on-curve check: y^2 = x^3 - 17 (Grumpkin)
+        assert(passport_signer_y * passport_signer_y == passport_signer_x * passport_signer_x * passport_signer_x - 17, "passport pubkey not on Grumpkin curve");
         self.storage.passport_signer_pubkey.schedule_value_change(
-            PubKey { x: passport_signer_x, y: passport_signer_y },
+            GrumpkinPubKey { x: passport_signer_x, y: passport_signer_y },
         );
-        self.storage.is_paused.schedule_value_change(false);
+        self.storage.is_paused.write(false);
     }
 
     #[external("public")]
     fn update_attestation_config(
-        attester_x: [u8; 32],
-        attester_y: [u8; 32],
+        attester_x: Field,
+        attester_y: Field,
         circuit_id: Field,
-        passport_x: [u8; 32],
-        passport_y: [u8; 32],
+        passport_x: Field,
+        passport_y: Field,
     ) {
-        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
-
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
+        // Basic on-curve check: y^2 = x^3 - 17 (Grumpkin)
+        assert(attester_y * attester_y == attester_x * attester_x * attester_x - 17, "attester pubkey not on Grumpkin curve");
         self.storage.human_id_attester_pubkey.schedule_value_change(
-            PubKey { x: attester_x, y: attester_y },
+            GrumpkinPubKey { x: attester_x, y: attester_y },
         );
         self.storage.clean_hands_circuit_id.schedule_value_change(circuit_id);
+        // Basic on-curve check: y^2 = x^3 - 17 (Grumpkin)
+        assert(passport_y * passport_y == passport_x * passport_x * passport_x - 17, "passport pubkey not on Grumpkin curve");
         self.storage.passport_signer_pubkey.schedule_value_change(
-            PubKey { x: passport_x, y: passport_y },
+            GrumpkinPubKey { x: passport_x, y: passport_y },
         );
     }
     #[external("public")]
     fn transfer_ownership(new_owner: AztecAddress) {
-        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
         assert(!new_owner.is_zero(), "New owner cannot be zero address");
 
         self.storage.pending_owner.write(new_owner);
     }
     #[external("public")]
     fn cancel_ownership_transfer() {
-        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
         assert(!self.storage.pending_owner.read().is_zero(), "No pending owner");
         self.storage.pending_owner.write(AztecAddress::zero());
     }
     #[external("public")]
     fn claim_ownership() {
-        let sender = self.context.msg_sender().unwrap();
+        let sender = self.msg_sender();
         assert(self.storage.pending_owner.read() == sender, "Only pending owner can claim");
 
         // Perform the transfer
@@ -140,8 +148,8 @@ pub contract TokenBridge {
 
     #[external("public")]
     fn set_paused(paused: bool) {
-        assert(self.storage.owner.read() == self.context.msg_sender().unwrap(), "Only owner");
-        self.storage.is_paused.schedule_value_change(paused);
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
+        self.storage.is_paused.write(paused);
     }
 
     #[external("private")]
@@ -159,7 +167,7 @@ pub contract TokenBridge {
     // Consumes a L1->L2 message and calls the token contract to mint the appropriate amount publicly
     #[external("public")]
     fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field) {
-        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        assert(self.storage.is_paused.read() == false, "Bridge is paused");
         assert(amount > 0, "Amount must be greater than zero");
         let content_hash = get_mint_to_public_content_hash(to, amount);
 
@@ -186,7 +194,7 @@ pub contract TokenBridge {
         caller_on_l1: EthAddress, // ethereum address that can call this function on the L1 portal (0x0 if anyone can call)
         authwit_nonce: Field, // nonce used in the approval message by `msg.sender` to let bridge burn their tokens on L2
     ) {
-        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        assert(self.storage.is_paused.read() == false, "Bridge is paused");
         assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
 
@@ -196,7 +204,7 @@ pub contract TokenBridge {
 
         // Burn tokens
         self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_public(
-            self.context.msg_sender().unwrap(),
+            self.msg_sender(),
             amount,
             authwit_nonce,
         ));
@@ -212,7 +220,7 @@ pub contract TokenBridge {
         secret_for_L1_to_L2_message_consumption: Field, // secret used to consume the L1 to L2 message
         message_leaf_index: Field,
     ) {
-        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        self.enqueue_self._assert_not_paused();
         assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
 
@@ -228,52 +236,25 @@ pub contract TokenBridge {
         self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_private(recipient, amount));
     }
 
-    // Verify clean hands signature using ECDSA recovery
-    #[internal("private")]
+    // Verify clean hands signature using Schnorr over Grumpkin
+    #[contract_library_method]
     fn verify_clean_hands_signature(
+        attester_pubkey: GrumpkinPubKey,
+        circuit_id: Field,
         action_id: Field,
         nonce: Field,
         user_address: AztecAddress,
         signature: [u8; 64],
     ) -> bool {
-        let mut message_bytes: [u8; 116] = [0; 116];
+        let hash = compute_inner_authwit_hash([circuit_id, action_id, nonce, user_address.to_field()]);
+        let pubkey = EmbeddedCurvePoint { x: attester_pubkey.x, y: attester_pubkey.y, is_infinite: false };
+        verify_signature(pubkey, signature, hash.to_be_bytes::<32>())
+    }
 
-        // Add circuit_id (32 bytes)
-        let circuit_id_bytes =
-            self.storage.clean_hands_circuit_id.get_current_value().to_be_bytes::<32>();
-        for i in 0..32 {
-            message_bytes[i] = circuit_id_bytes[i];
-        }
-
-        // Add action_id (32 bytes)
-        let action_id_bytes = action_id.to_be_bytes::<32>();
-        for i in 0..32 {
-            message_bytes[32 + i] = action_id_bytes[i];
-        }
-
-        // Add nonce (32 bytes)
-        let nonce_bytes = nonce.to_be_bytes::<32>();
-        for i in 0..32 {
-            message_bytes[64 + i] = nonce_bytes[i];
-        }
-
-        // Add user_address (20 bytes from the 32-byte Field)
-        let user_address_bytes = user_address.to_field().to_be_bytes::<32>();
-        for i in 0..20 {
-            message_bytes[96 + i] = user_address_bytes[12 + i];
-        }
-
-        let digest = keccak256(message_bytes, 116);
-        let personal_sign_hash = eth_personal_sign_hash(digest);
-
-        let attestor_pubkey = self.storage.human_id_attester_pubkey.get_current_value();
-
-        verify_signature(
-            attestor_pubkey.x,
-            attestor_pubkey.y,
-            signature,
-            personal_sign_hash,
-        )
+    #[external("public")]
+    #[only_self]
+    fn _assert_not_paused() {
+        assert(self.storage.is_paused.read() == false, "Bridge is paused");
     }
 
     // Public function to verify the deadline
@@ -284,60 +265,27 @@ pub contract TokenBridge {
         assert(current_timestamp <= deadline, "Passport deadline passed");
     }
 
-    // Verify passport signaturetoken
-    #[internal("private")]
+    // Verify passport signature using Schnorr over Grumpkin
+    // Note: caller must enqueue _verify_deadline separately
+    #[contract_library_method]
     fn verify_passport_signature(
+        bridge_address: AztecAddress,
+        passport_pubkey: GrumpkinPubKey,
         user_address: AztecAddress,
         max_amount: u128,
         nonce: Field,
         deadline: u64,
         signature: [u8; 64],
     ) -> bool {
-        self.enqueue_self._verify_deadline(deadline);
-        let mut message_bytes: [u8; 160] = [0; 160];
-
-        // Convert user_address to bytes (32 bytes)
-        let user_bytes = user_address.to_field().to_be_bytes::<32>();
-        for i in 0..32 {
-            message_bytes[i] = user_bytes[i];
-        }
-
-        // Convert max_amount to bytes (32 bytes)
-        let amount_bytes = (max_amount as Field).to_be_bytes::<32>();
-        for i in 0..32 {
-            message_bytes[32 + i] = amount_bytes[i];
-        }
-
-        // Convert nonce to bytes (32 bytes)
-        let nonce_bytes = nonce.to_be_bytes::<32>();
-        for i in 0..32 {
-            message_bytes[64 + i] = nonce_bytes[i];
-        }
-
-        // Convert deadline to bytes (32 bytes)
-        let deadline_bytes = (Field::from(deadline)).to_be_bytes::<32>();
-        for i in 0..32 {
-            message_bytes[96 + i] = deadline_bytes[i];
-        }
-
-        // Convert bridge_address to bytes (32 bytes)
-        let contract_address = self.address;
-        let contract_bytes = contract_address.to_field().to_be_bytes::<32>();
-        for i in 0..32 {
-            message_bytes[128 + i] = contract_bytes[i];
-        }
-
-        let digest = keccak256(message_bytes, 160);
-        let personal_sign_hash = eth_personal_sign_hash(digest);
-
-        let signer_pubkey = self.storage.passport_signer_pubkey.get_current_value();
-
-        verify_signature(
-            signer_pubkey.x,
-            signer_pubkey.y,
-            signature,
-            personal_sign_hash,
-        )
+        let hash = compute_inner_authwit_hash([
+            user_address.to_field(),
+            max_amount as Field,
+            nonce,
+            deadline as Field,
+            bridge_address.to_field(),
+        ]);
+        let pubkey = EmbeddedCurvePoint { x: passport_pubkey.x, y: passport_pubkey.y, is_infinite: false };
+        verify_signature(pubkey, signature, hash.to_be_bytes::<32>())
     }
 
     // Public function to consume passport nonce (called from private context)
@@ -356,7 +304,10 @@ pub contract TokenBridge {
     fn _consume_clean_hands_nonce_public(user: AztecAddress, nonce: Field) {
         // nonce verification is done in the public function here, cause the public fn is executed after the private fn
         // so in case the nonce is used, the entire call is reverted
-        assert(!self.storage.clean_hands_nonces.at(user).at(nonce).read(), "Clean hands nonce used");
+        assert(
+            !self.storage.clean_hands_nonces.at(user).at(nonce).read(),
+            "Clean hands nonce used",
+        );
         self.storage.clean_hands_nonces.at(user).at(nonce).write(true);
     }
 
@@ -383,10 +334,10 @@ pub contract TokenBridge {
         clean_hands: CleanHandsData,
         passport: PassportData,
     ) {
-        assert(self.storage.is_paused.get_current_value() == false, "Bridge is paused");
+        self.enqueue_self._assert_not_paused();
         assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
-        let sender = self.context.msg_sender().unwrap();
+        let sender = self.msg_sender();
 
         let mut is_clean_hands = false;
 
@@ -395,13 +346,18 @@ pub contract TokenBridge {
             (clean_hands.signature[0] != 0u8) | (clean_hands.signature[1] != 0u8);
 
         if has_clean_hands_sig {
-            is_clean_hands = self.internal.verify_clean_hands_signature(
+            let attester_pubkey = self.storage.human_id_attester_pubkey.get_current_value();
+            let circuit_id = self.storage.clean_hands_circuit_id.get_current_value();
+
+            is_clean_hands = verify_clean_hands_signature(
+                attester_pubkey,
+                circuit_id,
                 clean_hands.action_id,
                 clean_hands.nonce,
                 sender,
                 clean_hands.signature,
             );
-            
+
             self.enqueue_self._consume_clean_hands_nonce_public(sender, clean_hands.nonce);
         }
 
@@ -409,7 +365,14 @@ pub contract TokenBridge {
             let has_passport_sig = (passport.signature[0] != 0u8) | (passport.signature[1] != 0u8);
             assert(has_passport_sig, "No Valid passport verification provided");
 
-            let is_passport_valid = self.internal.verify_passport_signature(
+            let passport_pubkey = self.storage.passport_signer_pubkey.get_current_value();
+
+            // Enqueue deadline check (must happen in public context)
+            self.enqueue_self._verify_deadline(passport.deadline);
+
+            let is_passport_valid = verify_passport_signature(
+                self.address,
+                passport_pubkey,
                 sender,
                 passport.max_amount,
                 passport.nonce,
@@ -427,7 +390,7 @@ pub contract TokenBridge {
 
         // Burn tokens
         self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_private(
-            self.context.msg_sender().unwrap(),
+            self.msg_sender(),
             amount,
             authwit_nonce,
         ));

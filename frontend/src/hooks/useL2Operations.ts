@@ -39,6 +39,9 @@ import {
   executeBurnAndExit,
   persistBurnReceiptAndPollBlock,
   fetchNodeInfoAndComputeWitness,
+  fetchL2PochAttestation,
+  fetchL2PassportAttestation,
+  type L2PassportAttestation,
 } from './bridge/bridgeL2ToL1'
 
 // Define types for balance queries
@@ -333,6 +336,34 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       })
       operationId = backup.operationId
 
+      // ─── Step 2b: Fetch attestation for private withdrawal (POCH → Passport fallback) ──
+      let attestation: { l2Signature: number[]; nonce: number; actionId: string } | undefined
+      let passportAttestation: L2PassportAttestation | undefined
+      if (isPrivacyModeEnabled) {
+        const portalAddress = selectedToken?.l1PortalContract
+        if (!portalAddress) {
+          throw new Error('Portal address not configured — cannot fetch attestation for private withdrawal')
+        }
+        try {
+          console.log('[L2→L1] Fetching POCH attestation for private exit...')
+          attestation = await fetchL2PochAttestation(portalAddress)
+          console.log('[L2→L1] POCH attestation received:', { nonce: attestation.nonce, actionId: attestation.actionId })
+        } catch (pochErr) {
+          console.warn('[L2→L1] POCH attestation failed, trying Passport fallback...', pochErr)
+          const bridgeAddress = selectedToken?.l2BridgeContract
+          if (!bridgeAddress) {
+            throw new Error('Bridge address not configured — cannot fetch Passport attestation for private withdrawal')
+          }
+          passportAttestation = await fetchL2PassportAttestation(portalAddress, bridgeAddress)
+          console.log('[L2→L1] Passport attestation received:', { nonce: passportAttestation.nonce, maxAmount: passportAttestation.maxAmount })
+          // Enforce amount limit for Passport path
+          if (amount > BigInt(passportAttestation.maxAmount)) {
+            const maxFormatted = (Number(passportAttestation.maxAmount) / 1e6).toFixed(2)
+            throw new Error(`Passport allows up to ${maxFormatted} USDC per transaction. Mint a POCH SBT to remove this limit.`)
+          }
+        }
+      }
+
       // ─── Step 3: Burn + exit on L2 (DANGER ZONE) ───────────────────
       notify(
         'warn',
@@ -351,6 +382,8 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         amount,
         nonce: backup.nonce,
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
+        attestation,
+        passportAttestation,
       })
       burnConfirmed = true // 🔒 Funds are now burned — never mark as 'failed'
 

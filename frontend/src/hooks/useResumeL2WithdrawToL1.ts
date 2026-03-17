@@ -316,14 +316,29 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
     if (withdrawEpoch == null && l1RollupAddress) {
       const { publicClient } = await import('./bridge/bridgeUtils')
       const { RollupAbi } = await import('@aztec/l1-artifacts')
-      const epochRaw = await publicClient.readContract({
-        address: l1RollupAddress as `0x${string}`,
-        abi: RollupAbi,
-        functionName: 'getEpochForCheckpoint',
-        args: [BigInt(blockNumberForProof)],
-      })
-      withdrawEpoch = typeof epochRaw === 'bigint' ? epochRaw : BigInt(epochRaw as number)
-      console.log('[Resume L2→L1] Block', blockNumberForProof, '→ Epoch', withdrawEpoch.toString())
+      const maxRetries = 5
+      const retryDelayMs = 30_000
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const epochRaw = await publicClient.readContract({
+            address: l1RollupAddress as `0x${string}`,
+            abi: RollupAbi,
+            functionName: 'getEpochForCheckpoint',
+            args: [BigInt(blockNumberForProof)],
+          })
+          withdrawEpoch = typeof epochRaw === 'bigint' ? epochRaw : BigInt(epochRaw as number)
+          console.log('[Resume L2→L1] Block', blockNumberForProof, '→ Epoch', withdrawEpoch.toString())
+          break
+        } catch (err) {
+          if (attempt < maxRetries) {
+            const msg = err instanceof Error ? err.message : String(err)
+            console.warn(`[Resume L2→L1] getEpochForCheckpoint failed (attempt ${attempt}/${maxRetries}), retrying in ${retryDelayMs / 1000}s...`, msg)
+            await wait(retryDelayMs)
+            continue
+          }
+          throw err
+        }
+      }
     }
     if (withdrawEpoch == null) {
       throw new Error('Could not determine epoch for L1 withdraw. Rollup address not available.')

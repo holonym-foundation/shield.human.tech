@@ -15,6 +15,7 @@ import {
   useL1TokenBalance,
   useL1TokenBalances,
 } from '@/hooks/useL1Operations'
+import { useAttestationCheck } from '@/hooks/useAttestationCheck'
 import {
   useL2HasSoulboundToken,
   useL2MintSoulboundToken,
@@ -171,6 +172,7 @@ export default function Home() {
   const {
     data: l1TokenBalances = [],
     isLoading: l1BalanceLoading,
+    isPending: l1BalancePending,
     refetch: refetchL1Balance,
   } = useL1TokenBalances()
 
@@ -182,7 +184,8 @@ export default function Home() {
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted
 
   const selectedFromToken = bridgeConfig.from.token
-  const l1Balance = l1TokenBalances.find(
+  // Alchemy-based ERC20 balance (may not index custom test tokens)
+  const l1BalanceAlchemy = l1TokenBalances.find(
     (token) =>
       token.type === 'erc20' &&
       token.network?.chainId === L1_CHAIN_ID &&
@@ -190,12 +193,12 @@ export default function Home() {
         (selectedFromToken?.l1TokenContract ?? L1_TOKENS[0]?.l1TokenContract),
   )?.balance_formatted
 
-  // const { data: l1NativeBalance } = useL1NativeBalance()
-  // const {
-  //   data: l1Balance,
-  //   ,
-  //   refetch: refetchL1Balance,
-  // } = useL1TokenBalance()
+  // Direct RPC balance via eth_call (works for any ERC20 including custom test tokens)
+  const { data: l1BalanceRpc } = useL1TokenBalance()
+
+  // Prefer Alchemy if available, fall back to direct RPC
+  const l1Balance = l1BalanceAlchemy ?? l1BalanceRpc
+  const { data: attestationData, isLoading: attestationLoading } = useAttestationCheck()
   const { data: hasL1SBT } = useL1HasSoulboundToken()
   const { mutate: mintL1SBT, isPending: mintL1SBTPending } =
     useL1MintSoulboundToken(mintL1SBTOnSuccess)
@@ -207,6 +210,7 @@ export default function Home() {
   const {
     data: l2Balance = { privateBalance: null, publicBalance: null },
     isLoading: l2BalanceLoading,
+    isPending: l2BalancePending,
     refetch: refetchL2Balance,
     error: l2BalanceError,
     isError: isL2BalanceError,
@@ -214,7 +218,7 @@ export default function Home() {
 
   const l2PrivateBalance = l2Balance?.privateBalance
   const l2PublicBalance = l2Balance?.publicBalance
-  const { data: feeJuiceBalance, refetch: refetchFeeJuiceBalance } =
+  const { data: feeJuiceBalance, isLoading: feeJuiceLoading, isPending: feeJuicePending, refetch: refetchFeeJuiceBalance } =
     useL2FeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
@@ -563,6 +567,9 @@ export default function Home() {
               onSwap={swapDirection}
               isPrivacyModeEnabled={isPrivacyModeEnabled}
               feeJuiceBalance={feeJuiceBalance}
+              feeJuiceLoading={feeJuiceLoading}
+              attestationMethod={attestationData?.method ?? null}
+              passportMaxAmount={attestationData?.passportMaxAmount}
             />
             {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
               !isPrivacyModeEnabled &&
@@ -600,8 +607,9 @@ export default function Home() {
                 inputAmount={bridgeConfig.amount}
                 l1Balance={l1Balance?.toString() || '0'}
                 l2Balance={l2PublicBalance || '0'}
-                l1BalanceLoading={l1BalanceLoading}
-                l2BalanceLoading={l2BalanceLoading}
+                l1BalanceLoading={l1BalancePending}
+                l2BalanceLoading={l2BalancePending}
+                feeJuiceLoading={feeJuicePending}
                 // Bridge direction
                 direction={bridgeConfig.direction}
                 // Core operations
@@ -624,6 +632,15 @@ export default function Home() {
                 hasL2SBT={hasL2SBT}
                 setShowSBTModal={setShowSBTModal}
                 setCurrentSBTChain={setCurrentSBTChain}
+                // Privacy mode / attestation
+                isPrivacyModeEnabled={isPrivacyModeEnabled}
+                pochEligible={attestationData?.eligible}
+                pochLoading={attestationLoading}
+                pochReason={attestationData?.reason}
+                attestationMethod={attestationData?.method ?? null}
+                passportMaxAmount={attestationData?.passportMaxAmount}
+                passportScore={attestationData?.passportScore}
+                passportThreshold={attestationData?.passportThreshold}
                 // Operation completion state
                 bridgeCompleted={bridgeCompleted}
                 // Disable if L2 node error

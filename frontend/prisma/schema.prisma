@@ -64,6 +64,43 @@ model User {
 }
 
 // ---------------------------------------------------------------------------
+// AddressBinding: enforces 1:1 mapping between L1 eth address and L2 aztec address.
+// Once bound, the user cannot connect a different L2 address with the same L1 address
+// (or vice versa) for attestation purposes. This prevents sybil via address swapping.
+// ---------------------------------------------------------------------------
+
+model AddressBinding {
+  id         String   @id @default(cuid(2))
+  l1Address  String   @unique // one L1 address can only bind to one L2 address
+  l2Address  String   @unique // one L2 address can only bind to one L1 address
+  createdAt  DateTime @default(now())
+
+  @@map("address_bindings")
+}
+
+// ---------------------------------------------------------------------------
+// AttestationNonce: server-managed auto-incrementing nonces per user per type.
+// The on-chain contract tracks used nonces; we mirror that here to avoid
+// the frontend needing to query the contract for the next nonce.
+// ---------------------------------------------------------------------------
+
+enum AttestationType {
+  poch
+  passport
+}
+
+model AttestationNonce {
+  id         String          @id @default(cuid(2))
+  l1Address  String
+  type       AttestationType
+  nonce      Int             @default(0) // current nonce (incremented after each issuance)
+  updatedAt  DateTime        @updatedAt
+
+  @@unique([l1Address, type])
+  @@map("attestation_nonces")
+}
+
+// ---------------------------------------------------------------------------
 // BridgeActivity: one bridge activity (L1→L2 or L2→L1) with encrypted backup
 // ---------------------------------------------------------------------------
 

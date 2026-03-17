@@ -18,9 +18,11 @@
 import { Fr } from '@aztec/aztec.js/fields'
 import { computeSecretHash } from '@aztec/aztec.js/crypto'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { TestERC20Abi, TokenPortalAbi } from '@aztec/l1-artifacts'
-import { extractEvent } from '@aztec/ethereum/utils'
-import { encodeFunctionData, decodeEventLog } from 'viem'
+import { TestERC20Abi } from '@aztec/l1-artifacts'
+// @ts-ignore — JSON import from forge build output (custom compliant portal w/ attestation structs)
+import CustomTokenPortalJson from '../../../../l1-contracts/out/TokenPortal.sol/TokenPortal.json'
+const CustomTokenPortalAbi = CustomTokenPortalJson.abi
+import { encodeFunctionData, decodeEventLog, parseEventLogs } from 'viem'
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { aztecNode } from '@/aztec'
 import { api } from '@/lib/api'
@@ -83,6 +85,51 @@ export interface FuelParams {
   fuelQuote: FuelQuote
 }
 
+/** Attestation data fetched from /api/attestation/poch for private deposits. */
+export interface PochAttestationData {
+  l1Signature: string
+  l2Signature: number[]
+  nonce: number
+  circuitId: string
+  actionId: string
+}
+
+/** Attestation data fetched from /api/attestation/passport for private deposits. */
+export interface PassportAttestationData {
+  l1Signature: string
+  l2Signature: number[] | null
+  nonce: number
+  maxAmount: string
+  deadline: string
+  score: number
+  threshold: number
+}
+
+// ─── Attestation Fetch ──────────────────────────────────────────────
+
+/**
+ * Fetch a POCH (clean hands) attestation from the backend API.
+ * Called before private deposits to get the L1 ECDSA signature
+ * required by the custom TokenPortal's depositToAztecPrivate.
+ */
+export async function fetchPochAttestation(
+  portalAddress: string,
+): Promise<PochAttestationData> {
+  const res = await api.post('/api/attestation/poch', { portalAddress })
+  return res.data as PochAttestationData
+}
+
+/**
+ * Fetch a Passport attestation from the backend API.
+ * Called as fallback when POCH is unavailable for private deposits.
+ */
+export async function fetchPassportAttestation(
+  portalAddress: string,
+): Promise<PassportAttestationData> {
+  const res = await api.post('/api/attestation/passport', { portalAddress })
+  return res.data as PassportAttestationData
+}
+
 // ─── Deposit Step Result Types ───────────────────────────────────────
 
 export interface CaptureBlocksResult {
@@ -114,6 +161,8 @@ export interface ReceiptResult {
   messageLeafIndexStr: string
   messageHash: any
   messageLeafIndex: any
+  // Amount after fee deduction by the portal (always present for standard deposits, absent for fuel path)
+  amountAfterFee?: bigint
   // Fuel-specific fields (present when fuel path used)
   fuelMessageHashStr?: string
   fuelMessageLeafIndexStr?: string
@@ -232,14 +281,14 @@ export async function executeL2Claim(
         console.log(`[L1→L2] Claim succeeded on attempt ${attempt}`)
         break
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err)
-        const isNonexistentMsg =
-          errMsg.includes('nonexistent L1-to-L2 message') ||
-          errMsg.includes('l1_to_l2_msg_exists')
-        if (isNonexistentMsg && attempt < maxAttempts) {
+        // Retry on any error — the claim is idempotent and most failures are transient
+        // (reorgs, block header not found, message not synced, PXE lag, etc.)
+        if (attempt < maxAttempts) {
+          const errMsg = err instanceof Error ? err.message : String(err)
           options?.onRetry?.(attempt, maxAttempts, retryDelayMs)
           console.warn(
-            `[L1→L2] Claim attempt ${attempt} failed (message not synced to wallet node), retrying in ${retryDelayMs / 1000}s...`,
+            `[L1→L2] Claim attempt ${attempt} failed, retrying in ${retryDelayMs / 1000}s...`,
+            errMsg,
           )
           await wait(retryDelayMs)
           continue
@@ -587,17 +636,43 @@ export async function sendL1DepositTransaction(params: {
   operationId: string
   selectedToken?: Token
   fuel?: FuelParams & { fuelSecretHash: Fr }
+  attestation?: PochAttestationData
+  passportAttestation?: PassportAttestationData
 }): Promise<DepositTxResult> {
   const {
     l1Address, aztecAddress, amount, claimSecretHash, claimSecret,
-    isPrivacyModeEnabled, operationId, selectedToken, fuel,
+    isPrivacyModeEnabled, operationId, selectedToken, fuel, attestation, passportAttestation,
   } = params
 
   let txHash: any
+  const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
 
-  if (fuel) {
-    // ── Fuel path: call BridgeAndFuel.bridgeWithFuel ──
-    const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
+  if (isPrivacyModeEnabled) {
+    // ── Private path: depositToAztecPrivate with POCH or Passport attestation (no fuel) ──
+    const cleanHandsData = attestation
+      ? { nonce: BigInt(attestation.nonce), actionId: BigInt(attestation.actionId), signature: attestation.l1Signature as `0x${string}` }
+      : { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` }
+    const passportData = passportAttestation
+      ? { maxAmount: BigInt(passportAttestation.maxAmount), nonce: BigInt(passportAttestation.nonce), deadline: BigInt(passportAttestation.deadline), signature: passportAttestation.l1Signature as `0x${string}` }
+      : { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
+
+    console.log('[L1→L2] Sending private deposit tx to portal:', l1PortalAddress, 'amount:', amount.toString(), 'hasAttestation:', !!attestation, 'hasPassport:', !!passportAttestation)
+    const bridgeData = encodeFunctionData({
+      abi: CustomTokenPortalAbi,
+      functionName: 'depositToAztecPrivate',
+      args: [
+        amount,
+        claimSecretHash.toString(),
+        cleanHandsData,
+        passportData,
+      ],
+    })
+
+    txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
+      { from: l1Address as `0x${string}`, to: l1PortalAddress, data: bridgeData },
+    ])
+  } else if (fuel) {
+    // ── Public + Fuel path: BridgeAndFuel.bridgeWithFuel ──
     const l1TokenAddress = selectedToken?.l1TokenContract ?? ''
 
     const bridgeData = encodeFunctionData({
@@ -626,21 +701,12 @@ export async function sendL1DepositTransaction(params: {
       { from: l1Address as `0x${string}`, to: BRIDGE_AND_FUEL_ADDRESS, data: bridgeData },
     ])
   } else {
-    // ── Standard path: call TokenPortal directly ──
-    const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
-
-    const functionName = isPrivacyModeEnabled
-      ? 'depositToAztecPrivate'
-      : 'depositToAztecPublic'
-    const args = isPrivacyModeEnabled
-      ? ([amount, claimSecretHash.toString()] as const)
-      : ([aztecAddress as `0x${string}`, amount, claimSecretHash.toString()] as const)
-
-    console.log('[L1→L2] Sending deposit tx:', functionName, 'to portal:', l1PortalAddress, 'amount:', amount.toString())
+    // ── Public path: depositToAztecPublic ──
+    console.log('[L1→L2] Sending public deposit tx to portal:', l1PortalAddress, 'amount:', amount.toString())
     const bridgeData = encodeFunctionData({
-      abi: TokenPortalAbi,
-      functionName,
-      args,
+      abi: CustomTokenPortalAbi,
+      functionName: 'depositToAztecPublic',
+      args: [aztecAddress as `0x${string}`, amount, claimSecretHash.toString()],
     })
 
     txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
@@ -747,44 +813,48 @@ export async function waitForReceiptAndExtractEvent(params: {
       }),
     )
 
+    // Also extract amountAfterFee from the portal's DepositToAztecPublic event
+    // (BridgeAndFuel calls the portal internally, which emits this event with the post-fee amount)
+    const portalLogs = parseEventLogs({ abi: CustomTokenPortalAbi, logs: txReceipt.logs })
+    const portalDepositEvent: any = portalLogs.find((l: any) => l.eventName === 'DepositToAztecPublic')
+    const amountAfterFee = portalDepositEvent?.args?.amount != null
+      ? BigInt(portalDepositEvent.args.amount.toString())
+      : undefined
+
     return {
       l1TxHash, l1TxUrl, messageHashStr, messageLeafIndexStr,
       messageHash: args.tokenKey, messageLeafIndex: args.tokenIndex,
       fuelMessageHashStr, fuelMessageLeafIndexStr,
       fuelMessageHash: args.fuelKey, fuelMessageLeafIndex: args.fuelIndex,
       fuelAmount: fuelAmountReceived,
+      amountAfterFee,
     }
   }
 
-  // ── Standard path: extract DepositToAztecPublic/Private from TokenPortal ──
+  // ── Standard path: extract DepositToAztecPublic/Private from custom TokenPortal ──
+  // Use parseEventLogs with the custom ABI (includes `fee` field in events)
   const eventName = isPrivacyModeEnabled
     ? 'DepositToAztecPrivate'
     : 'DepositToAztecPublic'
 
-  const privateEventFilter = (log: any) =>
-    log.args.amount === amount &&
-    log.args.secretHashForL2MessageConsumption === claimSecretHash.toString()
+  const parsedLogs = parseEventLogs({ abi: CustomTokenPortalAbi, logs: txReceipt.logs })
+  const depositEvent: any = parsedLogs.find((l: any) => l.eventName === eventName)
 
-  const publicEventFilter = (log: any) =>
-    log.args.secretHash === claimSecretHash.toString() &&
-    log.args.amount === amount &&
-    log.args.to === aztecAddress
+  if (!depositEvent) {
+    throw new Error(`${eventName} event not found in transaction receipt`)
+  }
 
-  const eventFilter = isPrivacyModeEnabled ? privateEventFilter : publicEventFilter
-
-  const log = extractEvent(
-    txReceipt.logs,
-    l1PortalAddress as `0x${string}`,
-    TokenPortalAbi,
-    eventName,
-    eventFilter,
-  )
-
-  const messageHash = log.args.key
-  const messageLeafIndex = log.args.index
+  const messageHash = depositEvent.args.key
+  const messageLeafIndex = depositEvent.args.index
   const messageHashStr = messageHash.toString()
   const messageLeafIndexStr = messageLeafIndex.toString()
-  console.log('[L1→L2] Event extracted:', { eventName, messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr })
+  console.log('[L1→L2] Event extracted:', {
+    eventName,
+    messageHash: messageHashStr,
+    messageLeafIndex: messageLeafIndexStr,
+    amountAfterFee: depositEvent.args.amount?.toString(),
+    fee: depositEvent.args.fee?.toString(),
+  })
 
   updateLocalStorageItem(
     LS_KEY_BRIDGE_DEPOSITS,
@@ -793,7 +863,12 @@ export async function waitForReceiptAndExtractEvent(params: {
   )
   console.log('messageHash and messageLeafIndex stored immediately after receipt')
 
-  return { l1TxHash, l1TxUrl, messageHashStr, messageLeafIndexStr, messageHash, messageLeafIndex }
+  // The event's `amount` field is already the amount after fee deduction
+  const amountAfterFee = depositEvent.args.amount != null
+    ? BigInt(depositEvent.args.amount.toString())
+    : undefined
+
+  return { l1TxHash, l1TxUrl, messageHashStr, messageLeafIndexStr, messageHash, messageLeafIndex, amountAfterFee }
 }
 
 // ─── Step 6: Persist receipt data to backend ─────────────────────────

@@ -88,7 +88,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     // EVENTS
     // =============================================================
 
-    event Initialized(address registry, address underlying, bytes32 l2Bridge);
+    event Initialized(address indexed registry, address indexed underlying, bytes32 l2Bridge);
     event DepositToAztecPublic(
         bytes32 indexed to, uint256 amount, uint256 fee, bytes32 secretHash, bytes32 key, uint256 index
     );
@@ -97,7 +97,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     event FeeRecipientUpdated(address indexed newFeeRecipient);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
     event TokensRescued(address indexed token, address indexed to, uint256 amount);
-    event AttestationConfigUpdated(address attester, uint256 circuitId, address signer);
+    event AttestationConfigUpdated(address indexed attester, uint256 circuitId, address indexed signer);
     event OwnershipTransferProposed(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferCancelled(address indexed currentOwner);
     // =============================================================
@@ -119,6 +119,8 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
         feeRecipient = _feeRecipient;
         feeBasisPoints = _feeBasisPoints;
+        if (_humanIdAttester == address(0)) revert InvalidAddress();
+        if (_passportSigner == address(0)) revert InvalidAddress();
         humanIdAttester = _humanIdAttester;
         cleanHandsCircuitId = _cleanHandsCircuitId;
         passportSigner = _passportSigner;
@@ -127,7 +129,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     function initialize(address _registry, address _underlying, bytes32 _l2Bridge) external {
         if (_msgSender() != DEPLOYER) revert Unauthorized();
         if (address(registry) != address(0)) revert AlreadyInitialized();
-        if (_registry == address(0) || _underlying == address(0)) {
+        if (_registry == address(0) || _underlying == address(0) || _l2Bridge == bytes32(0)) {
             revert InvalidAddress();
         }
 
@@ -213,11 +215,11 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
             )
         });
 
-        outbox.consume(message, _l2BlockNumber, _leafIndex, _path);
-
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
         collectedFees += fee;
+
+        outbox.consume(message, _l2BlockNumber, _leafIndex, _path);
 
         underlying.safeTransfer(_recipient, amountAfterFee);
     }
@@ -235,6 +237,8 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     }
 
     function updateAttestationConfig(address _attester, uint256 _circuitId, address _signer) external onlyOwner {
+        if (_attester == address(0)) revert InvalidAddress();
+        if (_signer == address(0)) revert InvalidAddress();
         humanIdAttester = _attester;
         cleanHandsCircuitId = _circuitId;
         passportSigner = _signer;
@@ -315,7 +319,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     ) public view returns (bool) {
         bytes32 digest = keccak256(abi.encodePacked(nonce, circuitId, actionId, userAddress));
         bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
-        (address recovered,,) = ECDSA.tryRecover(personalSignPreimage, signature);
+        address recovered = ECDSA.recover(personalSignPreimage, signature);
 
         return recovered == humanIdAttester;
     }
@@ -329,7 +333,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         bytes32 messageHash = keccak256(abi.encodePacked(_msgSender(), maxAmount, nonce, deadline, address(this)));
         bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
 
-        (address recovered,,) = ECDSA.tryRecover(ethSignedMessageHash, signature);
+        address recovered = ECDSA.recover(ethSignedMessageHash, signature);
 
         return recovered == passportSigner;
     }

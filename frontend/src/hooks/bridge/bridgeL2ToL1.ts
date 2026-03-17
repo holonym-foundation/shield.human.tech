@@ -65,6 +65,48 @@ export interface L1WithdrawResult {
   l1TxUrl: string
 }
 
+// ─── Attestation for Private Withdrawals ─────────────────────────────
+
+/** Attestation data for L2 private exit (Schnorr signature). */
+export interface L2PochAttestation {
+  l2Signature: number[]
+  nonce: number
+  actionId: string
+}
+
+/** Passport attestation data for L2 private exit (Schnorr signature). */
+export interface L2PassportAttestation {
+  l2Signature: number[]
+  nonce: number
+  maxAmount: string
+  deadline: string
+}
+
+/**
+ * Fetch a POCH attestation from the backend for use in exit_to_l1_private.
+ * The API returns both L1 (ECDSA) and L2 (Schnorr) signatures — we only need the L2 one here.
+ */
+export async function fetchL2PochAttestation(
+  portalAddress: string,
+): Promise<L2PochAttestation> {
+  const res = await api.post('/api/attestation/poch', { portalAddress })
+  const data = res.data as { l2Signature: number[]; nonce: number; actionId: string }
+  return { l2Signature: data.l2Signature, nonce: data.nonce, actionId: data.actionId }
+}
+
+/**
+ * Fetch a Passport attestation from the backend for use in exit_to_l1_private.
+ * Requires bridgeAddress for L2 Schnorr signing.
+ */
+export async function fetchL2PassportAttestation(
+  portalAddress: string,
+  bridgeAddress: string,
+): Promise<L2PassportAttestation> {
+  const res = await api.post('/api/attestation/passport', { portalAddress, bridgeAddress })
+  const data = res.data as { l2Signature: number[]; nonce: number; maxAmount: string; deadline: string }
+  return { l2Signature: data.l2Signature, nonce: data.nonce, maxAmount: data.maxAmount, deadline: data.deadline }
+}
+
 // ═════════════════════════════════════════════════════════════════════
 // SHARED: Message Leaf Computation
 // ═════════════════════════════════════════════════════════════════════
@@ -130,14 +172,31 @@ export async function computeWitness(
   console.log('[L2→L1] Computing L2→L1 membership witness (block=', blockNumber, ')...')
 
   // Convert block number → epoch via L1 Rollup contract
-  const epochRaw = await publicClient.readContract({
-    address: rollupAddress as `0x${string}`,
-    abi: RollupAbi,
-    functionName: 'getEpochForCheckpoint',
-    args: [BigInt(blockNumber)],
-  })
-  const epoch = typeof epochRaw === 'bigint' ? epochRaw : BigInt(epochRaw as number)
-  console.log('[L2→L1] Block', blockNumber, '→ Epoch', epoch.toString())
+  // Retry on any error — checkpoint may not exist yet if the block was just proven
+  let epoch!: bigint
+  const maxRetries = 5
+  const retryDelayMs = 30_000
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const epochRaw = await publicClient.readContract({
+        address: rollupAddress as `0x${string}`,
+        abi: RollupAbi,
+        functionName: 'getEpochForCheckpoint',
+        args: [BigInt(blockNumber)],
+      })
+      epoch = typeof epochRaw === 'bigint' ? epochRaw : BigInt(epochRaw as number)
+      console.log('[L2→L1] Block', blockNumber, '→ Epoch', epoch.toString())
+      break
+    } catch (err) {
+      if (attempt < maxRetries) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.warn(`[L2→L1] getEpochForCheckpoint failed (attempt ${attempt}/${maxRetries}), retrying in ${retryDelayMs / 1000}s...`, msg)
+        await wait(retryDelayMs)
+        continue
+      }
+      throw err
+    }
+  }
 
   const witness = await computeL2ToL1MembershipWitness(
     aztecNode,
@@ -600,14 +659,30 @@ export async function executeBurnAndExit(params: {
   amount: bigint
   nonce: Fr
   isPrivacyModeEnabled: boolean
+  /** POCH attestation for private withdrawals (l2Signature + nonce/actionId) */
+  attestation?: { l2Signature: number[]; nonce: number; actionId: string }
+  /** Passport attestation for private withdrawals (fallback when POCH unavailable) */
+  passportAttestation?: L2PassportAttestation
 }): Promise<BurnExitResult> {
-  const { walletAdapter, l1Address, aztecAddress, amount, nonce, isPrivacyModeEnabled } = params
+  const { walletAdapter, l1Address, aztecAddress, amount, nonce, isPrivacyModeEnabled, attestation, passportAttestation } = params
   const userAddress = AztecAddress.fromString(aztecAddress)
 
-  console.log('[L2→L1] Sending burn+exit tx:', isPrivacyModeEnabled ? 'PRIVATE' : 'PUBLIC', 'amount:', amount.toString(), 'recipient:', l1Address)
-  const result = isPrivacyModeEnabled
-    ? await walletAdapter.executeWithdrawToL1Private(l1Address, amount, nonce, userAddress)
-    : await walletAdapter.executeWithdrawToL1Public(l1Address, amount, nonce, userAddress)
+  console.log('[L2→L1] Sending burn+exit tx:', isPrivacyModeEnabled ? 'PRIVATE' : 'PUBLIC', 'amount:', amount.toString(), 'recipient:', l1Address, 'hasPassport:', !!passportAttestation)
+
+  let result: { txHash: string; blockNumber?: number }
+  if (isPrivacyModeEnabled) {
+    // Build CleanHandsData from POCH attestation (or empty if none)
+    const cleanHandsData = attestation
+      ? { nonce: BigInt(attestation.nonce), action_id: BigInt(attestation.actionId), signature: attestation.l2Signature }
+      : { nonce: 0n, action_id: 0n, signature: new Array(64).fill(0) }
+    // Build PassportData from Passport attestation (or empty if none)
+    const passportData = passportAttestation
+      ? { max_amount: BigInt(passportAttestation.maxAmount), nonce: BigInt(passportAttestation.nonce), deadline: BigInt(passportAttestation.deadline), signature: passportAttestation.l2Signature }
+      : { max_amount: 0n, nonce: 0n, deadline: 0n, signature: new Array(64).fill(0) }
+    result = await walletAdapter.executeWithdrawToL1Private(l1Address, amount, nonce, cleanHandsData, passportData, userAddress)
+  } else {
+    result = await walletAdapter.executeWithdrawToL1Public(l1Address, amount, nonce, userAddress)
+  }
 
   const l2TxHash = result.txHash
   const l2BlockNumber: number | undefined = result.blockNumber

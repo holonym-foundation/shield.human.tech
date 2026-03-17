@@ -357,7 +357,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
           <DeploymentSelector />
 
           {/* Privacy Mode Toggle */}
-          {/* <div
+          <div
             className='flex px-[3px] py-[3px] pl-[8px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200'
             data-tooltip-id='privacy-mode-tooltip'
             data-tooltip-content={isPrivacyModeEnabled ? 'Private transactions enabled' : 'Enable private transactions'}>
@@ -401,7 +401,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
                 />
               </span>
             </button>
-          </div> */}
+          </div>
 
           {/* Wallet Controls */}
           {!isAnyWalletConnected ? (
@@ -507,7 +507,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
           <DeploymentSelector />
 
           {/* Mobile Privacy Mode Toggle */}
-          {/* <div className='flex px-[3px] py-[3px] pl-[8px] w-[240px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative hover:shadow-md transition-shadow duration-200 max-w-[190px]'>
+          <div className='flex px-[3px] py-[3px] pl-[8px] w-[240px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative hover:shadow-md transition-shadow duration-200 max-w-[190px]'>
             <Image
               src='/assets/svg/human.aztec.svg'
               alt='Aztec'
@@ -548,7 +548,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
                 />
               </span>
             </button>
-          </div> */}
+          </div>
 
           <div className='flex flex-col items-start gap-3'>
             {!isAnyWalletConnected ? (

@@ -27,6 +27,9 @@ interface BridgeSectionProps {
   onSwap?: () => void
   isPrivacyModeEnabled: boolean
   feeJuiceBalance?: string
+  feeJuiceLoading?: boolean
+  attestationMethod?: 'poch' | 'passport' | null
+  passportMaxAmount?: bigint
 }
 
 const BridgeSection: React.FC<BridgeSectionProps> = ({
@@ -44,6 +47,9 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
   onSwap,
   isPrivacyModeEnabled,
   feeJuiceBalance,
+  feeJuiceLoading = false,
+  attestationMethod,
+  passportMaxAmount,
 }) => {
   // Normalize balances to strings
   const l1NativeBalanceStr =
@@ -161,9 +167,26 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
                   {bridge.from.token?.title}
                 </p>
               </div>
+              {direction === BridgeDirection.L2_TO_L1 && (
+                <div className='flex gap-1 ml-auto'>
+                  <p className='text-latest-grey-500 text-12 font-medium break-all'>
+                    {feeJuiceLoading ? 'Loading...' : (feeJuiceBalance ?? '--')}
+                  </p>
+                  <p className='text-latest-grey-500 text-12 font-medium'>
+                    Fee Juice
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
+        {isPrivacyModeEnabled && attestationMethod === 'passport' && passportMaxAmount != null && (
+          <div className='bg-blue-50 border border-blue-200 rounded-md px-3 py-2 mt-2'>
+            <p className='text-12 text-blue-700'>
+              Using Passport attestation. Max: {(Number(passportMaxAmount) / 1e6).toFixed(2)} USDC per transaction.
+            </p>
+          </div>
+        )}
         <div className='flex justify-between mt-2'>
           <p className='text-16 font-medium text-latest-grey-500'>
             {/* USD value placeholder */}
@@ -258,6 +281,16 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
             {bridge.to.token?.title}
           </p>
         </div>
+        {direction === BridgeDirection.L1_TO_L2 && (
+          <div className='flex justify-between mt-1'>
+            <p className='text-latest-grey-500 text-12 font-medium'>
+              Fee Juice:
+            </p>
+            <p className='text-latest-grey-500 text-12 font-medium break-all'>
+              {feeJuiceLoading ? 'Loading...' : (feeJuiceBalance ?? '--')} FJ
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
