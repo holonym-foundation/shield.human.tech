@@ -204,9 +204,9 @@ export default function Home() {
 
   const l2PrivateBalance = l2Balance?.privateBalance
   const l2PublicBalance = l2Balance?.publicBalance
-  const { data: feeJuiceBalance, refetch: refetchFeeJuiceBalance } =
+  const { data: feeJuiceBalance, isLoading: feeJuiceBalanceLoading, refetch: refetchFeeJuiceBalance } =
     useL2FeeJuiceBalance()
-  const { data: privateFeeJuiceBalance, refetch: refetchPrivateFeeJuiceBalance } = useL2PrivateFeeJuiceBalance()
+  const { data: privateFeeJuiceBalance, isLoading: privateFeeJuiceBalanceLoading, refetch: refetchPrivateFeeJuiceBalance } = useL2PrivateFeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
     useL2MintSoulboundToken(mintL2SBTOnSuccess)
@@ -561,6 +561,8 @@ export default function Home() {
                       onAmountChange={setFuelAmount}
                       feeJuiceBalance={feeJuiceBalance}
                       privateFeeJuiceBalance={privateFeeJuiceBalance}
+                      feeJuiceBalanceLoading={feeJuiceBalanceLoading}
+                      privateFeeJuiceBalanceLoading={privateFeeJuiceBalanceLoading}
                       fuelType={fuelType}
                       onFuelTypeChange={setFuelType}
                     />
@@ -636,6 +638,7 @@ export default function Home() {
                 // Disable if L2 node error
                 l2NodeError={l2NodeIsReadyIsError && !l2NodeIsReadyLoading}
                 l2NodeIsReadyLoading={l2NodeIsReadyLoading}
+                feeJuiceBalanceLoading={feeJuiceBalanceLoading || privateFeeJuiceBalanceLoading}
               />
               <BridgeFooter />
             </div>

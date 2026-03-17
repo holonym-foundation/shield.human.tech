@@ -17,12 +17,9 @@
 
 import { Fr } from '@aztec/aztec.js/fields'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { L1ToL2Message, L1Actor, L2Actor } from '@aztec/stdlib/messaging'
-import { sha256ToField } from '@aztec/foundation/crypto/sha256'
-import { EthAddress } from '@aztec/foundation/eth-address'
 import { TestERC20Abi, TokenPortalAbi } from '@aztec/l1-artifacts'
 import { extractEvent } from '@aztec/ethereum/utils'
-import { encodeFunctionData, decodeEventLog, keccak256, toBytes } from 'viem'
+import { encodeFunctionData, decodeEventLog } from 'viem'
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { aztecNode } from '@/aztec'
 import { api } from '@/lib/api'
@@ -218,142 +215,6 @@ export async function getPostFeeClaimAmount(
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// DEBUG: Verify L1→L2 message hash (TODO remove after debugging)
-// ═════════════════════════════════════════════════════════════════════
-
-/**
- * Reconstruct the L1→L2 message hash client-side and compare with the L1 event key.
- * This helps diagnose "nonexistent L1-to-L2 message" errors by showing exactly
- * which component differs between what L1 stored and what L2 expects.
- */
-export async function debugVerifyL1ToL2Message(params: {
-  portalAddress: string
-  l2BridgeAddress: string
-  aztecRecipient: string
-  amountAfterFee: bigint
-  claimSecretHash: Fr
-  leafIndex: bigint
-  l1EventKey: string  // the 'key' from the L1 Inbox event (message hash)
-  isPrivate: boolean
-}): Promise<void> {
-  const TAG = '[DEBUG-MSG-HASH] TODO remove after debugging'
-  try {
-    console.log(`${TAG} ── Starting message hash verification ──`)
-    console.log(`${TAG} Params:`, {
-      portalAddress: params.portalAddress,
-      l2BridgeAddress: params.l2BridgeAddress,
-      aztecRecipient: params.aztecRecipient,
-      amountAfterFee: params.amountAfterFee.toString(),
-      claimSecretHash: params.claimSecretHash.toString(),
-      leafIndex: params.leafIndex.toString(),
-      l1EventKey: params.l1EventKey,
-      isPrivate: params.isPrivate,
-      l1ChainId: L1_CHAIN_ID,
-      rollupVersion: ROLLUP_VERSION,
-    })
-
-    // ── 1. Compute content hash (same as TokenPortal on L1) ──
-    const funcSig = params.isPrivate
-      ? 'mint_to_private(uint256)'
-      : 'mint_to_public(bytes32,uint256)'
-    const selectorHex = keccak256(toBytes(funcSig)).slice(0, 10) // '0xabcdef12'
-    const selectorBuf = Buffer.from(selectorHex.slice(2), 'hex') // 4 bytes
-
-    let contentBuf: Buffer
-    if (params.isPrivate) {
-      // mint_to_private(uint256): 4 + 32 = 36 bytes
-      const amountBuf = Buffer.from(params.amountAfterFee.toString(16).padStart(64, '0'), 'hex')
-      contentBuf = Buffer.concat([selectorBuf, amountBuf])
-    } else {
-      // mint_to_public(bytes32,uint256): 4 + 32 + 32 = 68 bytes
-      const recipientBuf = Buffer.from(params.aztecRecipient.replace('0x', '').padStart(64, '0'), 'hex')
-      const amountBuf = Buffer.from(params.amountAfterFee.toString(16).padStart(64, '0'), 'hex')
-      contentBuf = Buffer.concat([selectorBuf, recipientBuf, amountBuf])
-    }
-    const contentHash = sha256ToField([contentBuf])
-    console.log(`${TAG} Content hash computed:`, contentHash.toString())
-    console.log(`${TAG}   funcSig: "${funcSig}"`)
-    console.log(`${TAG}   selector: ${selectorHex}`)
-    console.log(`${TAG}   contentBuf (${contentBuf.length} bytes): 0x${contentBuf.toString('hex')}`)
-
-    // ── 2. Construct the full L1ToL2Message ──
-    const sender = new L1Actor(
-      EthAddress.fromString(params.portalAddress),
-      L1_CHAIN_ID,
-    )
-    const recipient = new L2Actor(
-      AztecAddress.fromString(params.l2BridgeAddress),
-      ROLLUP_VERSION,
-    )
-    const secretHashFr = Fr.fromString(params.claimSecretHash.toString())
-    const indexFr = new Fr(params.leafIndex)
-
-    const message = new L1ToL2Message(sender, recipient, contentHash, secretHashFr, indexFr)
-    const computedHash = message.hash()
-
-    console.log(`${TAG} ── Message components ──`)
-    console.log(`${TAG}   sender.actor (portal): ${params.portalAddress}`)
-    console.log(`${TAG}   sender.chainId: ${L1_CHAIN_ID}`)
-    console.log(`${TAG}   recipient.actor (l2Bridge): ${params.l2BridgeAddress}`)
-    console.log(`${TAG}   recipient.version (rollupVersion): ${ROLLUP_VERSION}`)
-    console.log(`${TAG}   content: ${contentHash.toString()}`)
-    console.log(`${TAG}   secretHash: ${secretHashFr.toString()}`)
-    console.log(`${TAG}   index: ${indexFr.toString()}`)
-    console.log(`${TAG}   toFields():`, message.toFields().map(f => f.toString()))
-
-    // ── 3. Compare with L1 event key ──
-    const l1Hash = Fr.fromString(params.l1EventKey)
-    const hashMatch = computedHash.toString() === l1Hash.toString()
-    console.log(`${TAG} ── Hash comparison ──`)
-    console.log(`${TAG}   L1 event key:   ${l1Hash.toString()}`)
-    console.log(`${TAG}   Computed hash:   ${computedHash.toString()}`)
-    console.log(`${TAG}   MATCH: ${hashMatch ? '✅ YES' : '❌ NO — hash mismatch!'}`)
-
-    if (!hashMatch) {
-      console.error(`${TAG} ❌ HASH MISMATCH — one of the message components differs between L1 and our computation`)
-      console.error(`${TAG}   Check: portalAddress, l2BridgeAddress, L1_CHAIN_ID, ROLLUP_VERSION, contentHash, secretHash, leafIndex`)
-    }
-
-    // ── 4. Query Aztec node for the L1 event hash ──
-    try {
-      const l1Block = await aztecNode.getL1ToL2MessageBlock(l1Hash)
-      console.log(`${TAG}   L1 event hash in L2 tree: ${l1Block !== undefined ? `YES (block ${l1Block})` : 'NO — not synced'}`)
-    } catch (e) {
-      console.warn(`${TAG}   Node query for L1 hash failed:`, e)
-    }
-
-    // ── 5. Query Aztec node for our computed hash ──
-    if (!hashMatch) {
-      try {
-        const computedBlock = await aztecNode.getL1ToL2MessageBlock(computedHash)
-        console.log(`${TAG}   Computed hash in L2 tree: ${computedBlock !== undefined ? `YES (block ${computedBlock})` : 'NO — not in tree'}`)
-      } catch (e) {
-        console.warn(`${TAG}   Node query for computed hash failed:`, e)
-      }
-    }
-
-    // ── 6. Query membership witness for L1 hash ──
-    try {
-      const witness = await aztecNode.getL1ToL2MessageMembershipWitness('latest', l1Hash)
-      if (witness) {
-        const [witnessIndex] = witness
-        console.log(`${TAG}   L1 hash tree index: ${witnessIndex}`)
-        console.log(`${TAG}   Expected leaf index: ${params.leafIndex}`)
-        console.log(`${TAG}   Index match: ${witnessIndex === params.leafIndex ? '✅ YES' : '❌ NO — index mismatch!'}`)
-      } else {
-        console.log(`${TAG}   No membership witness found for L1 hash`)
-      }
-    } catch (e) {
-      console.warn(`${TAG}   Membership witness query failed:`, e)
-    }
-
-    console.log(`${TAG} ── Verification complete ──`)
-  } catch (err) {
-    console.error(`${TAG} Diagnostic failed:`, err)
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════
 // SHARED: Message Sync Polling
 // ═════════════════════════════════════════════════════════════════════
 
@@ -444,16 +305,6 @@ export async function executeL2Claim(
   const walletTimeoutMs = options?.walletTimeoutMs ?? 5 * 60_000 // 5 min default
 
   const method = isPrivacyModeEnabled ? 'claim_private' : 'claim_public'
-
-  console.log('[DEBUG-CLAIM] TODO remove after debugging — executeL2Claim called:', { // TODO remove after debugging
-    method,
-    bridgeAddress: walletAdapter?.bridgeAddress,
-    aztecAddress,
-    amount: amount.toString(),
-    claimSecret: claimSecret.toString().slice(0, 18) + '...',
-    messageLeafIndex: messageLeafIndex?.toString() ?? 'null (brute-force)',
-    hasFeeOption: !!options?.feeOption,
-  })
 
   /** Race the wallet call against a timeout so we never hang forever. */
   const callWithTimeout = <T>(promise: Promise<T>): Promise<T> =>
@@ -1055,7 +906,10 @@ export async function sendL1DepositTransaction(params: {
       signature: permit2.signature,
     }
 
-    // Empty attestation data — private deposits with real attestation TBD
+    // Private router deposits are not production-ready yet.
+    // TokenPortal.depositToAztecPrivateFor requires real attestation payloads, so these
+    // placeholders are only acceptable while the private path is intentionally disabled
+    // or treated as experimental.
     const emptyCleanHands = { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` }
     const emptyPassport = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
 
@@ -1118,6 +972,9 @@ export async function sendL1DepositTransaction(params: {
 
   if (!txHash && fuel) {
     // ── Legacy fuel path: call BridgeAndFuel.bridgeWithFuel ──
+    // This exists only for deployments that have not fully migrated to SwapBridgeRouter.
+    // BridgeAndFuel executes an arbitrary external call with swapData, so it should not
+    // remain enabled in production once the router path is stable.
     const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
     const l1TokenAddress = selectedToken?.l1TokenContract ?? ''
 
@@ -1231,10 +1088,6 @@ export async function waitForReceiptAndExtractEvent(params: {
   // must use amountAfterFee (from the event) rather than the original pre-fee amount.
   const portalEventName = isPrivacyModeEnabled ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
   let claimAmount: bigint = amount // fallback to pre-fee amount if event not found
-  console.log('[DEBUG-CLAIM] TODO remove after debugging — searching for TokenPortal event:', { // TODO remove after debugging
-    portalEventName, l1PortalAddress, totalLogs: txReceipt.logs.length,
-    preFeeAmount: amount.toString(), isPrivacyModeEnabled,
-  })
   let portalEventFound = false
   for (const log of txReceipt.logs) {
     if (l1PortalAddress && log.address.toLowerCase() !== l1PortalAddress.toLowerCase()) continue
@@ -1249,13 +1102,6 @@ export async function waitForReceiptAndExtractEvent(params: {
         if (decoded.eventName === portalEventName) {
           claimAmount = (decoded.args as any).amount as bigint
           portalEventFound = true
-          const fee = (decoded.args as any).fee
-          console.log('[DEBUG-CLAIM] TODO remove after debugging — TokenPortal event decoded:', { // TODO remove after debugging
-            eventName: decoded.eventName,
-            claimAmount: claimAmount.toString(),
-            fee: fee?.toString() ?? 'N/A (upstream ABI)',
-            preFeeAmount: amount.toString(),
-          })
           break
         }
       } catch {
@@ -1265,7 +1111,7 @@ export async function waitForReceiptAndExtractEvent(params: {
     if (portalEventFound) break
   }
   if (!portalEventFound) {
-    console.warn('[DEBUG-CLAIM] TODO remove after debugging — TokenPortal event NOT found! Using pre-fee amount as fallback:', amount.toString()) // TODO remove after debugging
+    console.warn('[L1→L2] TokenPortal event not found — using pre-fee amount as fallback')
   }
 
   if (fuel) {
@@ -1518,4 +1364,3 @@ export function finalizeLocalStorageAfterDeposit(params: {
   localStorage.setItem(LS_KEY_BRIDGE_DEPOSITS, JSON.stringify(claims))
   return { updatedClaim, wasExisting: false }
 }
-

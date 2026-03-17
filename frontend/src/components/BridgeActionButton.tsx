@@ -76,6 +76,7 @@ function BridgeActionButton({
   bridgeCompleted = false,
   l2NodeError = false,
   l2NodeIsReadyLoading = false,
+  feeJuiceBalanceLoading = false,
 }: {
   isDisabled?: boolean
   // Connection states
@@ -126,6 +127,7 @@ function BridgeActionButton({
   bridgeCompleted?: boolean
   l2NodeError?: boolean
   l2NodeIsReadyLoading?: boolean
+  feeJuiceBalanceLoading?: boolean
 }) {
   const [isConnecting, setIsConnecting] = useState(false)
   const [isOperationPending, setIsOperationPending] = useState(false)
@@ -358,7 +360,7 @@ function BridgeActionButton({
     // Disable during loading states
     (isWaapConnected &&
       isAztecConnected &&
-      (!isStateInitialized || l1BalanceLoading)) ||
+      (!isStateInitialized || l1BalanceLoading || feeJuiceBalanceLoading)) ||
     isConnecting ||
     requestFaucetPending ||
     withdrawTokensToL1Pending ||

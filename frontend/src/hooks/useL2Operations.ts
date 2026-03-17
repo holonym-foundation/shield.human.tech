@@ -158,7 +158,9 @@ export const useL2FeeJuiceBalance = () => {
       ])
 
       const publicBalance = BigInt(publicBalanceResult.result.toString())
-      return formatUnits(publicBalance, FEE_JUICE_DECIMALS)
+      const raw = formatUnits(publicBalance, FEE_JUICE_DECIMALS)
+      const dot = raw.indexOf('.')
+      return dot === -1 ? `${raw}.00` : raw.slice(0, dot + 3).padEnd(dot + 3, '0')
     } catch (error) {
       handleL2Error<string>(error, 'BALANCE')
       throw error
@@ -205,7 +207,9 @@ export const useL2PrivateFeeJuiceBalance = () => {
       ])
 
       const balance = BigInt(balanceResult.result.toString())
-      return formatUnits(balance, FEE_JUICE_DECIMALS)
+      const raw = formatUnits(balance, FEE_JUICE_DECIMALS)
+      const dot = raw.indexOf('.')
+      return dot === -1 ? `${raw}.00` : raw.slice(0, dot + 3).padEnd(dot + 3, '0')
     } catch (error) {
       handleL2Error<string>(error, 'BALANCE')
       throw error

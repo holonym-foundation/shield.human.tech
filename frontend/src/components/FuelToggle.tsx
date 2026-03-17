@@ -18,6 +18,8 @@ interface FuelToggleProps {
   onAmountChange: (amount: string) => void
   feeJuiceBalance?: string
   privateFeeJuiceBalance?: string
+  feeJuiceBalanceLoading?: boolean
+  privateFeeJuiceBalanceLoading?: boolean
   fuelType: 'public' | 'private'
   onFuelTypeChange: (type: 'public' | 'private') => void
 }
@@ -81,33 +83,12 @@ function useV4FuelQuote(
   return { fjOutput, loading, error }
 }
 
-function FuelBreakdown({ fuelNum, netBridge, tokenSymbol, fjOutput, loading, error, prices }: {
-  fuelNum: number; netBridge: number; tokenSymbol: string
-  fjOutput: bigint | null; loading: boolean; error: string | null
-  prices: Record<string, number> | null
-}) {
-  if (loading) {
-    return (
-      <div className='space-y-2 animate-pulse'>
-        <div className='h-3.5 bg-neutral-400/70 rounded w-3/4' />
-        <div className='h-3.5 bg-neutral-400/70 rounded w-full' />
-      </div>
-    )
-  }
-  if (error) {
-    return <p className='text-red-500'>{error}</p>
-  }
-  if (fjOutput === null) {
-    return null
-  }
-
-  const fjDisplay = formatFjAmount(fjOutput)
-  const usdValue = (Number(fjOutput) / 1e18) * getFeeJuicePriceUsd(prices)
+function QuoteSkeleton() {
   return (
-    <>
-      <p>Swapping {fuelNum} {tokenSymbol} → ~{fjDisplay} FJ (~${usdValue.toFixed(2)})</p>
-      <p>You&apos;ll receive: {netBridge} {tokenSymbol} + ~{fjDisplay} Fee Juice</p>
-    </>
+    <div className='space-y-2 animate-pulse'>
+      <div className='h-4 bg-neutral-300 rounded w-3/4' />
+      <div className='h-4 bg-neutral-300 rounded w-full' />
+    </div>
   )
 }
 
@@ -122,6 +103,8 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   onAmountChange,
   feeJuiceBalance,
   privateFeeJuiceBalance,
+  feeJuiceBalanceLoading,
+  privateFeeJuiceBalanceLoading,
   fuelType,
   onFuelTypeChange,
 }) => {
@@ -167,12 +150,20 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
       <div className='text-xs text-latest-grey-500 mt-1 space-y-0.5'>
         <div className='flex justify-between'>
           <span>Public Fee Juice:</span>
-          <span className='font-semibold'>{feeJuiceBalance ?? '--'}</span>
+          <span className='font-semibold'>
+            {feeJuiceBalanceLoading
+              ? <span className='inline-block h-3 w-12 bg-neutral-300 rounded animate-pulse align-middle' />
+              : feeJuiceBalance ?? '--'}
+          </span>
         </div>
         {hasBridgedFpc && (
           <div className='flex justify-between'>
             <span>Private Fee Juice:</span>
-            <span className='font-semibold'>{privateFeeJuiceBalance ?? '--'}</span>
+            <span className='font-semibold'>
+              {privateFeeJuiceBalanceLoading
+                ? <span className='inline-block h-3 w-12 bg-neutral-300 rounded animate-pulse align-middle' />
+                : privateFeeJuiceBalance ?? '--'}
+            </span>
           </div>
         )}
       </div>
@@ -247,15 +238,21 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                 })}
               </div>
 
-              {fuelAmount && (
+              {fuelAmount && !isValid && fuelNum >= bridgeNum && (
+                <p className='text-xs text-red-500'>
+                  Gas amount must be less than bridge amount
+                </p>
+              )}
+              {isValid && (loading || (fjOutput === null && !error)) && (
+                <QuoteSkeleton />
+              )}
+              {isValid && error && (
+                <p className='text-xs text-red-500'>{error}</p>
+              )}
+              {isValid && !loading && !error && fjOutput !== null && (
                 <div className='text-xs text-latest-grey-700 space-y-0.5'>
-                  {isValid ? (
-                    <FuelBreakdown fuelNum={fuelNum} netBridge={netBridge} tokenSymbol={tokenSymbol} fjOutput={fjOutput} loading={loading} error={error} prices={prices} />
-                  ) : fuelNum >= bridgeNum ? (
-                    <p className='text-red-500'>
-                      Gas amount must be less than bridge amount
-                    </p>
-                  ) : null}
+                  <p>Swapping {fuelNum} {tokenSymbol} → ~{formatFjAmount(fjOutput)} FJ (~${((Number(fjOutput) / 1e18) * getFeeJuicePriceUsd(prices)).toFixed(2)})</p>
+                  <p>You&apos;ll receive: {netBridge} {tokenSymbol} + ~{formatFjAmount(fjOutput)} Fee Juice</p>
                 </div>
               )}
             </div>
