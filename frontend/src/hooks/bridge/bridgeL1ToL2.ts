@@ -850,23 +850,28 @@ async function signPermit2Transfer(
     verifyingContract: PERMIT2_ADDRESS,
   }
 
-  const routeHash = keccak256(encodeAbiParameters(
-    [
-      {
-        name: 'path',
-        type: 'tuple[]',
-        components: [
-          { name: 'currency0', type: 'address' },
-          { name: 'currency1', type: 'address' },
-          { name: 'fee', type: 'uint24' },
-          { name: 'tickSpacing', type: 'int24' },
-          { name: 'hooks', type: 'address' },
+  // When there's no swap route (simple bridge, no fuel), the contract uses bytes32(0)
+  // as the routeHash. Only compute the keccak256 when there are actual pool keys.
+  const zeroBytes32Route = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
+  const routeHash = poolKeys.length > 0
+    ? keccak256(encodeAbiParameters(
+        [
+          {
+            name: 'path',
+            type: 'tuple[]',
+            components: [
+              { name: 'currency0', type: 'address' },
+              { name: 'currency1', type: 'address' },
+              { name: 'fee', type: 'uint24' },
+              { name: 'tickSpacing', type: 'int24' },
+              { name: 'hooks', type: 'address' },
+            ],
+          },
+          { name: 'zeroForOnes', type: 'bool[]' },
         ],
-      },
-      { name: 'zeroForOnes', type: 'bool[]' },
-    ],
-    [poolKeys, zeroForOnes],
-  ))
+        [poolKeys, zeroForOnes],
+      ))
+    : zeroBytes32Route
 
   const message = {
     permitted: {
@@ -951,7 +956,7 @@ export async function sendL1DepositTransaction(params: {
     totalAmount: amount,
     fuelAmount: fuel?.fuelAmount ?? 0n,
     aztecRecipient: aztecAddress as `0x${string}`,
-    fuelRecipient: (privateFuel ? privateFuel.fpcAddress : (fuel ? aztecAddress : '0x0000000000000000000000000000000000000000')) as `0x${string}`,
+    fuelRecipient: (privateFuel ? privateFuel.fpcAddress : (fuel ? aztecAddress : zeroBytes32)) as `0x${string}`,
     tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
     fuelSecretHash: fuelSecretHashHex,
     minFuelOutput: fuel?.fuelQuote.minOutput ?? 0n,
