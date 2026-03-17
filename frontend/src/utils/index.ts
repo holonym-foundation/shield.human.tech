@@ -100,14 +100,10 @@ export const exportClaimData = (claimData: any) => {
   const exportData = {
     type: BridgeDirection.L1_TO_L2,
     timestamp: new Date().toISOString(),
-    warning: '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
+    warning: '⚠️ CRITICAL: Keep this file safe! If you lose the claimSecret, your funds will be permanently locked.',
     data: {
-      id: claimData.id,
+      claimSecret: claimData.claimSecret,
       claimSecretHash: claimData.claimSecretHash,
-      encryptedCiphertext: claimData.encryptedCiphertext,
-      encryptedIv: claimData.encryptedIv,
-      encryptedTag: claimData.encryptedTag,
-      keyDerivationDomain: claimData.keyDerivationDomain,
       messageHash: claimData.messageHash,
       messageLeafIndex: claimData.messageLeafIndex,
       claimAmount: claimData.claimAmount,
@@ -121,7 +117,7 @@ export const exportClaimData = (claimData: any) => {
       status: claimData.status,
     },
   }
-
+  
   const filename = `aztec-bridge-claim-${claimData.id}-${Date.now()}.json`
   exportToJsonFile(exportData, filename)
 }

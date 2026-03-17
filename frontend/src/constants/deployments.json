@@ -135,8 +135,9 @@
           "passportSigner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
         }
       ],
-      "bridgeAndFuelAddress": "0xf826d4fd35eb8b599536a5823ecb28f8c2a1728e",
-      "mockFuelSwapAddress": "0x5919fb767baf26e603bd0c7d108e18f805e8ccc0"
+      "uniswapFuelSwapAddress": "0x547BE2F85f371f85fFB7f5BA1a972EAd88D7dB42",
+      "swapBridgeRouterAddress": "0x4f32F9fdfED1d64d8cE2bdA5c559df0C915F43A3",
+      "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
     }
   ]
 }

@@ -170,6 +170,7 @@ export const WAAP_METHOD = {
   eth_call: 'eth_call',
   eth_getBalance: 'eth_getBalance',
   eth_getTransactionReceipt: 'eth_getTransactionReceipt',
+  eth_signTypedData_v4: 'eth_signTypedData_v4',
 } as const
 
 export const requestWaapWallet = async (
@@ -270,7 +271,6 @@ const walletStore = create<WalletState>((set, get) => ({
       discoveredWallets: [],
       isAztecConnecting: true,
     })
-
     logInfo('Aztec wallet discovery started', {
       walletType: WalletType.AZTEC,
       loginMethod: 'wallet-sdk',
@@ -387,12 +387,16 @@ const walletStore = create<WalletState>((set, get) => ({
 
     // Show loading state while confirming
     set({ isAztecConnecting: true })
-
     try {
-      // Await confirm() directly — no timeout. The timeout interferes with
-      // the SDK's internal channel state. User can cancel manually if needed.
-      const wallet = await pendingConnection.confirm()
-
+      // Generous timeout — only fires when the connection is truly stuck.
+      // Short timeouts interfere with the SDK's internal channel state,
+      // but 60s is well above normal connection time.
+      const wallet = await Promise.race([
+        pendingConnection.confirm(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Wallet connection timed out after 60 seconds. Please try again.')), 60_000)
+        ),
+      ])
       // Transition to 'requesting' phase while we request capabilities
       set({
         walletConnectionPhase: 'requesting',
@@ -406,13 +410,18 @@ const walletStore = create<WalletState>((set, get) => ({
       // Fall back to getAccounts if requestCapabilities is not supported.
       let rawAccounts: Array<{ item?: unknown; address?: unknown; alias?: string } | unknown> = []
       try {
-        const capabilities = await wallet.requestCapabilities(buildCapabilityManifest())
+        const capabilities = await Promise.race([
+          wallet.requestCapabilities(buildCapabilityManifest()),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('requestCapabilities timed out')), 15_000)
+          ),
+        ])
         const accountsCap = capabilities.granted.find(
           (c: { type: string }) => c.type === 'accounts'
         ) as { type: 'accounts'; accounts: Array<{ item?: unknown; address?: unknown; alias?: string }> } | undefined
         rawAccounts = accountsCap?.accounts ?? []
       } catch (capErr) {
-        console.warn('[walletStore] requestCapabilities failed, falling back to getAccounts:', capErr)
+        console.warn('[walletStore] requestCapabilities failed/timed out, falling back to getAccounts:', capErr)
       }
 
       // Fall back to getAccounts if requestCapabilities didn't yield accounts

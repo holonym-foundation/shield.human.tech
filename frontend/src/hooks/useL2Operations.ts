@@ -1,11 +1,11 @@
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { aztecNode } from '@/aztec'
 import {
+  BRIDGED_FPC_ADDRESS,
   L1_CHAIN_ID,
   L1_CONTRACT_ADDRESSES,
   L1_TOKENS,
   L2_CHAIN_ID,
-  L2_NODE_URL,
 } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { logError, logInfo } from '@/utils/datadog'
@@ -161,7 +161,9 @@ export const useL2FeeJuiceBalance = () => {
       ])
 
       const publicBalance = BigInt(publicBalanceResult.result.toString())
-      return formatUnits(publicBalance, FEE_JUICE_DECIMALS)
+      const raw = formatUnits(publicBalance, FEE_JUICE_DECIMALS)
+      const dot = raw.indexOf('.')
+      return dot === -1 ? `${raw}.00` : raw.slice(0, dot + 3).padEnd(dot + 3, '0')
     } catch (error) {
       handleL2Error<string>(error, 'BALANCE')
       throw error
@@ -172,6 +174,55 @@ export const useL2FeeJuiceBalance = () => {
     queryKey,
     queryFn,
     enabled: !!aztecAddress && !!walletAdapter,
+    refetchInterval: 30_000,
+  })
+}
+
+export const useL2PrivateFeeJuiceBalance = () => {
+  const { aztecAddress } = useWalletStore()
+  const handleL2Error = useL2ErrorHandler()
+  const walletAdapter = useWalletAdapter()
+
+  const queryKey = ['l2PrivateFeeJuiceBalance', aztecAddress]
+
+  const queryFn = async (): Promise<string> => {
+    try {
+      if (!aztecAddress) {
+        throw new Error('Aztec address not found')
+      }
+      if (!walletAdapter) {
+        throw new Error(
+          'Aztec wallet not connected or contracts not initialized',
+        )
+      }
+      if (!BRIDGED_FPC_ADDRESS) {
+        return '0'
+      }
+
+      const userAddress = AztecAddress.fromString(aztecAddress)
+
+      const [balanceResult] = await walletAdapter.simulateViews([
+        {
+          contract: BRIDGED_FPC_ADDRESS,
+          method: 'balance_of',
+          args: [userAddress],
+        },
+      ])
+
+      const balance = BigInt(balanceResult.result.toString())
+      const raw = formatUnits(balance, FEE_JUICE_DECIMALS)
+      const dot = raw.indexOf('.')
+      return dot === -1 ? `${raw}.00` : raw.slice(0, dot + 3).padEnd(dot + 3, '0')
+    } catch (error) {
+      handleL2Error<string>(error, 'BALANCE')
+      throw error
+    }
+  }
+
+  return useQuery<string, Error>({
+    queryKey,
+    queryFn,
+    enabled: !!aztecAddress && !!walletAdapter && !!BRIDGED_FPC_ADDRESS,
     refetchInterval: 30_000,
   })
 }
@@ -922,7 +973,7 @@ export const useL2PendingTxCount = () => {
   // Query function without tracking state
   const queryFn = async (): Promise<number> => {
     try {
-      const response = await fetch(L2_NODE_URL, {
+      const response = await fetch('/api/aztec-node', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

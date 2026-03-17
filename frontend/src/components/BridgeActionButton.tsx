@@ -88,6 +88,7 @@ interface BridgeActionButtonProps {
   bridgeCompleted?: boolean
   l2NodeError?: boolean
   l2NodeIsReadyLoading?: boolean
+  feeJuiceBalanceLoading?: boolean
 }
 
 function BridgeActionButton({
@@ -134,6 +135,7 @@ function BridgeActionButton({
   bridgeCompleted = false,
   l2NodeError = false,
   l2NodeIsReadyLoading = false,
+  feeJuiceBalanceLoading = false,
 }: BridgeActionButtonProps) {
   const [isConnecting, setIsConnecting] = useState(false)
   const [isOperationPending, setIsOperationPending] = useState(false)

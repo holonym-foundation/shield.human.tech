@@ -13,6 +13,7 @@ import {
   useL2WithdrawTokensToL1,
   useL2TokenBalance,
   useL2FeeJuiceBalance,
+  useL2PrivateFeeJuiceBalance,
 } from '@/hooks/useL2Operations'
 import { useL1TokenBalances, useL1BridgeToL2 } from '@/hooks/useL1Operations'
 import { useResumeL1BridgeToL2 } from '@/hooks/useResumeL1BridgeToL2'
@@ -48,6 +49,7 @@ export default function ProgressPage() {
     recoveryWithdrawalData,
     fuelEnabled,
     fuelAmount: fuelAmountStr,
+    fuelType,
   } = useBridgeStore()
 
   const isRecoveryMode = !!recoveryOperationId && (!!recoveryClaimData || !!recoveryWithdrawalData)
@@ -61,16 +63,17 @@ export default function ProgressPage() {
   const { refetch: refetchL1Balance } = useL1TokenBalances()
   const { refetch: refetchL2Balance } = useL2TokenBalance()
   const { refetch: refetchFeeJuiceBalance } = useL2FeeJuiceBalance()
+  const { refetch: refetchPrivateFeeJuiceBalance } = useL2PrivateFeeJuiceBalance()
   const handleBridgeSuccess = useCallback(() => {
     notify.promise(
-      Promise.all([refetchL1Balance(), refetchL2Balance(), refetchFeeJuiceBalance()]),
+      Promise.all([refetchL1Balance(), refetchL2Balance(), refetchFeeJuiceBalance(), refetchPrivateFeeJuiceBalance()]),
       {
         pending: 'Refreshing balances...',
         success: 'Balances updated',
         error: 'Failed to refresh balances',
       }
     )
-  }, [notify, refetchL1Balance, refetchL2Balance, refetchFeeJuiceBalance])
+  }, [notify, refetchL1Balance, refetchL2Balance, refetchFeeJuiceBalance, refetchPrivateFeeJuiceBalance])
 
   // Bridge operations
   const {
@@ -431,7 +434,7 @@ export default function ProgressPage() {
           </p>
           {!isRecoveryMode && fuelEnabled && Number(fuelAmountStr) > 0 && (
             <p className='text-center text-12 font-medium text-latest-grey-500 mt-1'>
-              {(Number(bridgeAmount) - Number(fuelAmountStr)).toFixed(2)} USDC to bridge + {Number(fuelAmountStr).toFixed(2)} USDC to top up Fee Juice
+              {(Number(bridgeAmount) - Number(fuelAmountStr)).toFixed(2)} USDC to bridge + {Number(fuelAmountStr).toFixed(2)} USDC to top up {fuelType === 'private' ? 'private Fee Juice' : 'Fee Juice'}
             </p>
           )}
         </div>

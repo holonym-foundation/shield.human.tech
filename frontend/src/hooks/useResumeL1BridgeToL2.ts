@@ -7,10 +7,11 @@ import { useToast } from './useToast'
 import { wait } from '@/utils'
 import { getAztecscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
 import { BridgeOperationStatus } from '@prisma/client'
-// @ts-ignore — JSON import from forge build output (custom compliant portal w/ attestation structs)
-import CustomTokenPortalJson from '../../../l1-contracts/out/TokenPortal.sol/TokenPortal.json'
-const CustomTokenPortalAbi = CustomTokenPortalJson.abi
-import { decodeEventLog, parseEventLogs } from 'viem'
+import { TokenPortalAbi } from '@aztec/l1-artifacts'
+import { extractEvent } from '@aztec/ethereum/utils'
+import { decodeEventLog } from 'viem'
+import { SWAP_BRIDGE_ROUTER_ADDRESS } from '@/config'
+import { SwapBridgeRouterAbi } from '@/constants/abis/SwapBridgeRouterAbi'
 import {
   LS_KEY_BRIDGE_DEPOSITS,
   patchOperationWithRetry,
@@ -21,6 +22,8 @@ import {
 import {
   pollL1ToL2MessageSync,
   executeL2Claim,
+  getPostFeeClaimAmount,
+  CustomTokenPortalEventAbi,
 } from './bridge/bridgeL1ToL2'
 
 /**
@@ -41,21 +44,64 @@ async function recoverFromReceipt(
     hash: l1TxHash as `0x${string}`,
   })
 
+  // Try SwapBridgeRouter Bridge event first (our custom portal has different event signatures)
+  if (SWAP_BRIDGE_ROUTER_ADDRESS) {
+    for (const txLog of receipt.logs) {
+      if (txLog.address.toLowerCase() !== SWAP_BRIDGE_ROUTER_ADDRESS.toLowerCase()) continue
+      try {
+        const decoded = decodeEventLog({
+          abi: SwapBridgeRouterAbi,
+          data: txLog.data,
+          topics: txLog.topics,
+        })
+        if (decoded.eventName === 'Bridge' || decoded.eventName === 'BridgeWithFuel') {
+          const args = decoded.args as any
+          const messageHash = (args.key ?? args.tokenKey).toString()
+          const messageLeafIndex = (args.index ?? args.tokenIndex).toString()
+          console.log('[Resume L1→L2] Recovered from router event:', { messageHash, messageLeafIndex })
+          return { messageHash, messageLeafIndex }
+        }
+      } catch {
+        // Not our event, skip
+      }
+    }
+  }
+
+  // Fallback: try DepositToAztecPublic/Private from TokenPortal (legacy path)
+  // Try our custom ABI first (has fee field), then upstream as fallback
   const eventName = isPrivacyModeEnabled
     ? 'DepositToAztecPrivate'
     : 'DepositToAztecPublic'
 
-  const parsedLogs = parseEventLogs({ abi: CustomTokenPortalAbi, logs: receipt.logs })
-  const depositEvent: any = parsedLogs.find((l: any) => l.eventName === eventName)
+  // Match by secretHash only — event amount is post-fee (amountAfterFee),
+  // so we can't filter by the pre-fee amount the recovery data stores.
+  const privateFilter = (log: any) =>
+    log.args.secretHash === claimSecretHash
 
-  if (!depositEvent) {
-    throw new Error(`${eventName} event not found in receipt ${l1TxHash}`)
+  const publicFilter = (log: any) =>
+    log.args.secretHash === claimSecretHash &&
+    log.args.to === aztecAddress
+
+  const filter = isPrivacyModeEnabled ? privateFilter : publicFilter
+
+  for (const abi of [CustomTokenPortalEventAbi, TokenPortalAbi]) {
+    try {
+      const log = extractEvent(
+        receipt.logs,
+        portalAddress as `0x${string}`,
+        abi,
+        eventName,
+        filter,
+      )
+      const messageHash = log.args.key.toString()
+      const messageLeafIndex = log.args.index.toString()
+      console.log('[Resume L1→L2] Recovered from receipt: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
+      return { messageHash, messageLeafIndex }
+    } catch {
+      // This ABI didn't match, try next
+    }
   }
-
-  const messageHash = depositEvent.args.key.toString()
-  const messageLeafIndex = depositEvent.args.index.toString()
-  console.log('[Resume L1→L2] Recovered from receipt: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
-  return { messageHash, messageLeafIndex }
+  throw new Error('Could not extract deposit event from receipt (tried custom + upstream ABIs)')
 }
 
 /**
@@ -77,8 +123,12 @@ async function recoverFromBlockScan(
 
   console.log('[Resume L1→L2] Scanning L1 blocks', fromBlock.toString(), '→', toBlock.toString(), 'for portal events...')
 
+  const addresses = [portalAddress as `0x${string}`]
+  if (SWAP_BRIDGE_ROUTER_ADDRESS) {
+    addresses.push(SWAP_BRIDGE_ROUTER_ADDRESS as `0x${string}`)
+  }
   const logs = await publicClient.getLogs({
-    address: portalAddress as `0x${string}`,
+    address: addresses,
     fromBlock,
     toBlock,
   })
@@ -88,28 +138,52 @@ async function recoverFromBlockScan(
     : 'DepositToAztecPublic'
 
   for (const rawLog of logs) {
-    try {
-      const decoded = decodeEventLog({
-        abi: CustomTokenPortalAbi,
-        data: rawLog.data,
-        topics: rawLog.topics,
-      })
-      if (decoded.eventName !== targetEventName) continue
-
-      const args = decoded.args as any
-      // Custom portal event uses `secretHash` for both public and private events
-      const matches = isPrivacyModeEnabled
-        ? args.secretHash === claimSecretHash
-        : args.secretHash === claimSecretHash && args.to === aztecAddress
-
-      if (matches) {
-        const messageHash = args.key.toString()
-        const messageLeafIndex = args.index.toString()
-        console.log('[Resume L1→L2] Found event in block scan: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
-        return { messageHash, messageLeafIndex }
+    // Try SwapBridgeRouter events first
+    if (SWAP_BRIDGE_ROUTER_ADDRESS && rawLog.address.toLowerCase() === SWAP_BRIDGE_ROUTER_ADDRESS.toLowerCase()) {
+      try {
+        const decoded = decodeEventLog({
+          abi: SwapBridgeRouterAbi,
+          data: rawLog.data,
+          topics: rawLog.topics,
+        })
+        if (decoded.eventName === 'Bridge' || decoded.eventName === 'BridgeWithFuel') {
+          const args = decoded.args as any
+          const messageHash = (args.key ?? args.tokenKey).toString()
+          const messageLeafIndex = (args.index ?? args.tokenIndex).toString()
+          console.log('[Resume L1→L2] Found router event in block scan:', { messageHash, messageLeafIndex })
+          return { messageHash, messageLeafIndex }
+        }
+      } catch {
+        // Not our event, skip
       }
-    } catch {
-      // Skip logs that can't be decoded with our ABI
+    }
+
+    // Fallback: try TokenPortal events (custom ABI first, then upstream)
+    for (const abi of [CustomTokenPortalEventAbi, TokenPortalAbi]) {
+      try {
+        const decoded = decodeEventLog({
+          abi,
+          data: rawLog.data,
+          topics: rawLog.topics,
+        })
+        if (decoded.eventName !== targetEventName) continue
+
+        const args = decoded.args as any
+        // Match by secretHash only — event amount is post-fee (amountAfterFee),
+        // so we can't filter by the pre-fee amount the recovery data stores.
+        const matches = isPrivacyModeEnabled
+          ? args.secretHash === claimSecretHash
+          : args.secretHash === claimSecretHash && args.to === aztecAddress
+
+        if (matches) {
+          const messageHash = args.key.toString()
+          const messageLeafIndex = args.index.toString()
+          console.log('[Resume L1→L2] Found event in block scan: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
+          return { messageHash, messageLeafIndex }
+        }
+      } catch {
+        // Skip logs that can't be decoded with this ABI
+      }
     }
   }
 
@@ -279,10 +353,14 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     patchOperationAsync(operationId, { currentStep: 3 })
 
     const claimSecretFr = Fr.fromString(claimSecret)
+    // TokenPortal deducts fees before computing the L1→L2 content hash.
+    // The L2 claim must use the post-fee amount to match the content hash.
+    const preFeeBridgeAmount = BigInt(amount)
+    const claimAmountPostFee = await getPostFeeClaimAmount(portalAddress, preFeeBridgeAmount)
     const claimResult = await executeL2Claim(
       { walletAdapter, aztecAddress, isPrivacyModeEnabled },
       {
-        amount: BigInt(amount),
+        amount: claimAmountPostFee,
         claimSecret: claimSecretFr,
         messageLeafIndex: messageLeafIndex ? BigInt(messageLeafIndex) : null,
       },
