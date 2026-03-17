@@ -53,18 +53,10 @@ import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
 import 'dotenv/config'
 // @ts-ignore
 import TestERC20Json from './constants/TestERC20.json'
-// @ts-ignore
-import BridgeAndFuelJson from '../l1-contracts/out/BridgeAndFuel.sol/BridgeAndFuel.json'
-// @ts-ignore
-import MockFuelSwapJson from '../l1-contracts/out/MockFuelSwap.sol/MockFuelSwap.json'
 
 // Fix the bytecode format
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
-const BridgeAndFuelAbi = BridgeAndFuelJson.abi
-const BridgeAndFuelBytecode = BridgeAndFuelJson.bytecode.object as `0x${string}`
-const MockFuelSwapAbi = MockFuelSwapJson.abi
-const MockFuelSwapBytecode = MockFuelSwapJson.bytecode.object as `0x${string}`
 
 import { createPublicClient, encodeFunctionData, getContract, http, toFunctionSelector } from 'viem'
 
@@ -81,7 +73,6 @@ import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
   createDeployment,
   saveTokenToDeployment,
-  saveFuelInfraToDeployment,
   loadExistingTokens,
   copyToFrontend,
   type DeployedToken,

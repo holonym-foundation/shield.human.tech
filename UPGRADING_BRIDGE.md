@@ -33,7 +33,7 @@ cd l1-contracts
 forge build
 ```
 
-This generates the `out/` directory with contract artifacts (BridgeAndFuel, MockFuelSwap, etc.) needed by the deployment script.
+This generates the `out/` directory with contract artifacts (SwapBridgeRouter, UniswapFuelSwap, etc.) needed by the deployment script.
 
 ## 5) Deploy contracts to devnet
 
@@ -48,7 +48,7 @@ The script will:
 - Deploy TestERC20 tokens (USDC, USDT, DAI, HUMN, GOAT, WBTC) on L1
 - Use pre-existing WETH on Sepolia
 - Deploy TokenPortal, TokenContract, TokenBridgeContract for each token
-- Deploy BridgeAndFuel, MockFuelSwap, and FeeAssetHandler
+- Deploy UniswapFuelSwap and SwapBridgeRouter
 - Save deployment data to `deployments/` and `frontend/src/constants/deployments.json`
 
 ## 6) If contract JSON changes, upload artifacts
@@ -135,5 +135,4 @@ Force Webpack and keep Buffer polyfills enabled:
 
 2. In `frontend/next.config.ts`, keep the webpack polyfills:
 - `buffer`, `crypto`, `stream`, `util`, etc.
-
 
