@@ -18,6 +18,7 @@ error InvalidPassportSignature();
 error AmountExceedsLimit();
 error Unauthorized();
 error NoPendingOwner();
+error NotTrustedForwarder();
 
 // Mock contracts for Aztec dependencies
 import {IRegistry} from "@aztec/governance/interfaces/IRegistry.sol";
@@ -114,6 +115,7 @@ contract TokenPortalTest is Test {
     event FeesWithdrawn(address indexed recipient, uint256 amount);
     event TokensRescued(address indexed token, address indexed to, uint256 amount);
     event AttestationConfigUpdated(address indexed attester, uint256 circuitId, address indexed signer);
+    event TrustedForwarderUpdated(address indexed forwarder, bool trusted);
     event OwnershipTransferProposed(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferCancelled(address indexed currentOwner);
 
@@ -962,5 +964,142 @@ contract TokenPortalTest is Test {
 
     function test_MaxFeeBasisPoints() public view {
         assertEq(portal.MAX_FEE_BASIS_POINTS(), 1000);
+    }
+
+    // =============================================================
+    // TRUSTED FORWARDER TESTS
+    // =============================================================
+
+    function test_SetTrustedForwarder() public {
+        address forwarder = makeAddr("forwarder");
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit TrustedForwarderUpdated(forwarder, true);
+        portal.setTrustedForwarder(forwarder, true);
+
+        assertTrue(portal.trustedForwarders(forwarder));
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit TrustedForwarderUpdated(forwarder, false);
+        portal.setTrustedForwarder(forwarder, false);
+
+        assertFalse(portal.trustedForwarders(forwarder));
+    }
+
+    function test_SetTrustedForwarder_RevertWhen_NotOwner() public {
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
+        portal.setTrustedForwarder(makeAddr("forwarder"), true);
+    }
+
+    function test_SetTrustedForwarder_RevertWhen_ZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(InvalidAddress.selector);
+        portal.setTrustedForwarder(address(0), true);
+    }
+
+    // =============================================================
+    // DEPOSIT TO AZTEC PRIVATE FOR (TRUSTED FORWARDER) TESTS
+    // =============================================================
+
+    function test_DepositToAztecPrivateFor_WithCleanHands() public {
+        address forwarder = makeAddr("forwarder");
+        uint256 amount = 1000 ether;
+        bytes32 secretHash = bytes32(uint256(0x789));
+
+        // Setup: owner sets forwarder as trusted
+        vm.prank(owner);
+        portal.setTrustedForwarder(forwarder, true);
+
+        // Give tokens to forwarder (simulates Permit2 pull)
+        token.mint(forwarder, amount);
+        vm.prank(forwarder);
+        token.approve(address(portal), type(uint256).max);
+
+        // Create attestation signed for user address
+        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
+            _createCleanHandsData(1, 100);
+
+        uint256 expectedFee = portal.calculateFee(amount);
+
+        // Forwarder calls depositToAztecPrivateFor on behalf of user
+        vm.prank(forwarder);
+        (bytes32 key, uint256 index) =
+            portal.depositToAztecPrivateFor(user, amount, secretHash, cleanHands, passport);
+
+        assertEq(portal.collectedFees(), expectedFee);
+        assertTrue(portal.cleanHandsNonces(user, 1));
+        assertEq(key, keccak256(abi.encodePacked(uint256(1))));
+        assertEq(index, 1);
+        // Tokens came from forwarder
+        assertEq(token.balanceOf(forwarder), 0);
+        assertEq(token.balanceOf(address(portal)), amount);
+    }
+
+    function test_DepositToAztecPrivateFor_WithPassport() public {
+        address forwarder = makeAddr("forwarder");
+        uint256 amount = 500 ether;
+        bytes32 secretHash = bytes32(uint256(0x789));
+
+        vm.prank(owner);
+        portal.setTrustedForwarder(forwarder, true);
+
+        token.mint(forwarder, amount);
+        vm.prank(forwarder);
+        token.approve(address(portal), type(uint256).max);
+
+        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
+            _createPassportData(1, 1000 ether);
+
+        vm.prank(forwarder);
+        portal.depositToAztecPrivateFor(user, amount, secretHash, cleanHands, passport);
+
+        assertTrue(portal.passportNonces(user, 1));
+        assertEq(token.balanceOf(forwarder), 0);
+    }
+
+    function test_DepositToAztecPrivateFor_RevertWhen_NotTrustedForwarder() public {
+        address notForwarder = makeAddr("notForwarder");
+        uint256 amount = 1000 ether;
+
+        TokenPortal.CleanHandsData memory cleanHands;
+        TokenPortal.PassportData memory passport;
+
+        vm.prank(notForwarder);
+        vm.expectRevert(NotTrustedForwarder.selector);
+        portal.depositToAztecPrivateFor(user, amount, bytes32(0), cleanHands, passport);
+    }
+
+    function test_DepositToAztecPrivateFor_RevertWhen_Paused() public {
+        address forwarder = makeAddr("forwarder");
+
+        vm.prank(owner);
+        portal.setTrustedForwarder(forwarder, true);
+
+        vm.prank(owner);
+        portal.pause();
+
+        TokenPortal.CleanHandsData memory cleanHands;
+        TokenPortal.PassportData memory passport;
+
+        vm.prank(forwarder);
+        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
+        portal.depositToAztecPrivateFor(user, 100 ether, bytes32(0), cleanHands, passport);
+    }
+
+    function test_DepositToAztecPrivateFor_RevertWhen_ZeroAmount() public {
+        address forwarder = makeAddr("forwarder");
+
+        vm.prank(owner);
+        portal.setTrustedForwarder(forwarder, true);
+
+        TokenPortal.CleanHandsData memory cleanHands;
+        TokenPortal.PassportData memory passport;
+
+        vm.prank(forwarder);
+        vm.expectRevert("Amount must be greater than zero");
+        portal.depositToAztecPrivateFor(user, 0, bytes32(0), cleanHands, passport);
     }
 }
