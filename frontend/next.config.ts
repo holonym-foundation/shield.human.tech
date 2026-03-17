@@ -16,6 +16,8 @@ const nextConfig: NextConfig = {
     '@aztec/foundation',
     '@aztec/stdlib',
     '@aztec/circuits.js',
+    'pino',
+    'pino-pretty',
   ],
   // Use webpack for polyfills compatibility
   webpack: (config, { isServer }) => {
