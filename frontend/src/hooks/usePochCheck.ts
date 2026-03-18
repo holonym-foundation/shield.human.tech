@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
+import { useAuthStore } from '@/stores/useAuthStore'
 
 /**
  * Lightweight pre-check: does the current user have Proof of Clean Hands (POCH)?
@@ -13,6 +14,7 @@ import { useBridgeStore } from '@/stores/bridgeStore'
 export function usePochCheck() {
   const { isWaapConnected, isAztecConnected, waapAddress } = useWalletStore()
   const { isPrivacyModeEnabled } = useBridgeStore()
+  const token = useAuthStore((s) => s.token)
 
   return useQuery({
     queryKey: ['pochCheck', waapAddress],
@@ -29,7 +31,7 @@ export function usePochCheck() {
         return { eligible: false, reason } as { eligible: boolean; reason?: string }
       }
     },
-    enabled: isWaapConnected && isAztecConnected && !!waapAddress && isPrivacyModeEnabled,
+    enabled: isWaapConnected && isAztecConnected && !!waapAddress && isPrivacyModeEnabled && !!token,
     staleTime: 5 * 60 * 1000, // cache for 5 minutes
     retry: false,
   })
