@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
-import { sanitizeEthAddress } from '@/lib/validation'
+import { PochAttestationSchema } from '@/lib/validation'
 import { enforceAddressBinding, getNextNonce } from '@/lib/address-binding'
 import {
   checkCleanHands,
@@ -32,13 +32,18 @@ export async function POST(request: NextRequest) {
     const { l1Address, l2Address } = authResult.user
 
     const body = await request.json()
-    const portalAddress = sanitizeEthAddress(body.portalAddress)
-    if (!portalAddress) {
+
+    // ── Validate + sanitize inputs via Zod ──────────────────────────────
+    const parsed = PochAttestationSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0]
       return NextResponse.json(
-        { error: 'Invalid portalAddress (must be 0x + 40 hex chars)' },
-        { status: 400 }
+        { error: `Validation error: ${firstError.path.join('.')} — ${firstError.message}` },
+        { status: 400 },
       )
     }
+
+    const data = parsed.data
 
     // 2. Enforce 1:1 address binding
     const bindingError = await enforceAddressBinding(l1Address, l2Address)

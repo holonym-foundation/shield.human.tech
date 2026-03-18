@@ -3,25 +3,53 @@ import { BridgeOperationStatus } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 import {
-  sanitizeString,
-  sanitizeTxHash,
-  sanitizeHexString,
-  sanitizeNumericString,
-  sanitizeUrl,
-  sanitizeInt,
-  sanitizeEthAddress,
-  sanitizeSiblingPath,
-  MAX_ERROR_LENGTH,
+  PatchOperationSchema,
+  IMMUTABLE_FIELDS,
+  WRITE_ONCE_FIELDS,
+  VALID_TRANSITIONS,
 } from '@/lib/validation'
 
-/** Valid forward-only status transitions. Any status can transition to 'failed'. */
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  pending: ['submitted', 'deposited', 'completed', 'failed'],
-  deposited: ['claimed', 'completed', 'failed'],
-  claimed: ['completed', 'failed'],
-  submitted: ['ready', 'pending_finalize', 'completed', 'failed'],
-  ready: ['pending_finalize', 'completed', 'failed'],
-  pending_finalize: ['completed', 'failed'],
+/**
+ * GET /api/bridge/operations/:id
+ *
+ * Fetch a single bridge operation by ID.
+ * Auth required; user must own the operation.
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id: idStr } = await params
+    const id = parseInt(idStr, 10)
+    if (isNaN(id)) {
+      return NextResponse.json({ error: 'Invalid operation ID' }, { status: 400 })
+    }
+
+    const authResult = await authenticateRequest(request)
+    if (!authResult.success || !authResult.user) {
+      return createAuthErrorResponse(authResult.error ?? 'Unauthorized', 401)
+    }
+
+    const operation = await prisma.bridgeActivity.findFirst({
+      where: { id, fkUserId: authResult.user.id },
+    })
+
+    if (!operation) {
+      return NextResponse.json(
+        { error: 'Operation not found or access denied' },
+        { status: 404 },
+      )
+    }
+
+    return NextResponse.json({ operation })
+  } catch (error) {
+    console.error('[bridge/operations/[id] GET]', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch operation' },
+      { status: 500 },
+    )
+  }
 }
 
 /**
@@ -36,7 +64,11 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { id } = await params
+    const { id: idStr } = await params
+    const id = parseInt(idStr, 10)
+    if (isNaN(id)) {
+      return NextResponse.json({ error: 'Invalid operation ID' }, { status: 400 })
+    }
 
     const authResult = await authenticateRequest(request)
     if (!authResult.success || !authResult.user) {
@@ -56,61 +88,24 @@ export async function PATCH(
 
     const body = await request.json()
 
-    // ── Sanitize all inputs ─────────────────────────────────────────────
-    const status = sanitizeString(body.status, 20)
-    const l1TxHash = sanitizeTxHash(body.l1TxHash)
-    const l1TxUrl = sanitizeUrl(body.l1TxUrl)
-    const messageHash = sanitizeHexString(body.messageHash, 130)
-    const messageLeafIndex = sanitizeNumericString(body.messageLeafIndex)
-    const l2TxHash = sanitizeString(body.l2TxHash, 130) // L2 tx hashes may differ from ETH format
-    const l2TxUrl = sanitizeUrl(body.l2TxUrl)
-    const lastErrorMessage = body.lastErrorMessage !== undefined
-      ? (sanitizeString(body.lastErrorMessage, MAX_ERROR_LENGTH) ?? '')
-      : undefined
-    const completedAt = sanitizeString(body.completedAt, 30) // ISO date string
-    // L2→L1 withdrawal fields
-    const l2BlockNumber = sanitizeNumericString(body.l2BlockNumber)
-    const l2BlockNumberBeforeTx = sanitizeNumericString(body.l2BlockNumberBeforeTx)
-    const l2ToL1MessageIndex = sanitizeNumericString(body.l2ToL1MessageIndex)
-    const siblingPath = sanitizeSiblingPath(body.siblingPath)
-    const recipientL1Address = sanitizeEthAddress(body.recipientL1Address)
-    const currentStep = sanitizeInt(body.currentStep, 0, 10)
-    // Fuel fields (L1→L2 BridgeAndFuel path)
-    const fuelMessageHash = sanitizeHexString(body.fuelMessageHash, 130)
-    const fuelMessageLeafIndex = sanitizeNumericString(body.fuelMessageLeafIndex)
-    const fuelAmount = sanitizeNumericString(body.fuelAmount)
-    // L2→L1 witness epoch
-    const epoch = sanitizeInt(body.epoch, 0, 1_000_000_000)
+    // ── Validate + sanitize all inputs via Zod ────────────────────────────
+    const parsed = PatchOperationSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0]
+      return NextResponse.json(
+        { error: `Validation error: ${firstError.path.join('.')} — ${firstError.message}` },
+        { status: 400 },
+      )
+    }
 
+    const data = parsed.data
 
     // ── Immutable field guard ───────────────────────────────────────────
-    // These fields are set once during operation creation and must never be
-    // overwritten by subsequent PATCH calls (e.g. from the resume flow).
-    const IMMUTABLE_FIELDS = [
-      'encryptedCiphertext',
-      'encryptedIv',
-      'encryptedTag',
-      'amountL1',
-      'amountL2',
-      'direction',
-      'l1BlockNumberBeforeTx',
-      'keyDerivationMessage',
-      'keyDerivationDomain',
-      'rollupVersion',
-      'chainIdL1',
-      'chainIdL2',
-      'portalAddressL1',
-      'bridgeAddressL2',
-      'tokenAddressL1',
-      'tokenAddressL2',
-    ] as const
-
+    // Block any PATCH that tries to set an immutable field, regardless of
+    // whether the DB value is currently null. Only initial creation can set these fields.
     const blockedFields: string[] = []
     for (const field of IMMUTABLE_FIELDS) {
-      if (
-        body[field] !== undefined &&
-        (operation as Record<string, unknown>)[field] != null
-      ) {
+      if (data[field] !== undefined) {
         blockedFields.push(field)
       }
     }
@@ -129,35 +124,43 @@ export async function PATCH(
       )
     }
 
-    // Validate status is a known BridgeOperationStatus value
-    const VALID_STATUSES = new Set([
-      'pending', 'deposited', 'claimed', 'submitted',
-      'ready', 'pending_finalize', 'completed', 'failed',
-    ])
-    if (status && !VALID_STATUSES.has(status)) {
-      return NextResponse.json(
-        { error: `Invalid status value: ${status}` },
-        { status: 400 },
-      )
+    // ── Write-once field guard ──────────────────────────────────────────
+    // These recovery-critical fields may only be set when their DB value is null.
+    const alreadySetFields = new Set<string>()
+    for (const field of WRITE_ONCE_FIELDS) {
+      if ((operation as any)[field] != null) {
+        alreadySetFields.add(field)
+      }
+    }
+    if (alreadySetFields.size > 0) {
+      const attempted = [...alreadySetFields].filter(f => (data as any)[f] !== undefined)
+      if (attempted.length > 0) {
+        console.log(
+          '[bridge/operations PATCH]',
+          id,
+          'Skipping write-once fields (already set):',
+          attempted.join(', '),
+        )
+      }
     }
 
-    // Validate status transition if status is being changed
-    if (status && status !== operation.status) {
+    // ── Validate status transition ────────────────────────────────────────
+    if (data.status && data.status !== operation.status) {
       const allowed = VALID_TRANSITIONS[operation.status]
-      if (!allowed || !allowed.includes(status)) {
+      if (!allowed || !allowed.includes(data.status)) {
         return NextResponse.json(
           {
-            error: `Invalid status transition: ${operation.status} → ${status}`,
+            error: `Invalid status transition: ${operation.status} → ${data.status}`,
           },
           { status: 400 },
         )
       }
     }
 
-    // Validate completedAt is a valid date if provided
+    // ── Validate completedAt date ─────────────────────────────────────────
     let completedAtDate: Date | undefined
-    if (completedAt) {
-      completedAtDate = new Date(completedAt)
+    if (data.completedAt) {
+      completedAtDate = new Date(data.completedAt)
       if (isNaN(completedAtDate.getTime())) {
         return NextResponse.json(
           { error: 'Invalid completedAt date format' },
@@ -166,31 +169,40 @@ export async function PATCH(
       }
     }
 
-    // Build update data — only include fields that were provided and sanitized
+    // ── Build update data ─────────────────────────────────────────────────
+    // Only include fields that were provided and sanitized.
+    // Write-once fields are skipped if the DB already has a non-null value.
+    const wo = alreadySetFields
     const updateData: Record<string, unknown> = {}
-    if (status) updateData.status = status as BridgeOperationStatus
-    if (l1TxHash) updateData.l1TxHash = l1TxHash
-    if (l1TxUrl) updateData.l1TxUrl = l1TxUrl
-    if (messageHash) updateData.messageHash = messageHash
-    if (messageLeafIndex) updateData.messageLeafIndex = messageLeafIndex
-    if (l2TxHash) updateData.l2TxHash = l2TxHash
-    if (l2TxUrl) updateData.l2TxUrl = l2TxUrl
-    if (lastErrorMessage !== undefined)
-      updateData.lastErrorMessage = lastErrorMessage
+    if (data.status) updateData.status = data.status as BridgeOperationStatus
+    if (data.l1TxHash && !wo.has('l1TxHash')) updateData.l1TxHash = data.l1TxHash
+    if (data.l1TxUrl && !wo.has('l1TxUrl')) updateData.l1TxUrl = data.l1TxUrl
+    if (data.messageHash && !wo.has('messageHash')) updateData.messageHash = data.messageHash
+    if (data.messageLeafIndex) updateData.messageLeafIndex = data.messageLeafIndex
+    if (data.l2TxHash && !wo.has('l2TxHash')) updateData.l2TxHash = data.l2TxHash
+    if (data.l2TxUrl && !wo.has('l2TxUrl')) updateData.l2TxUrl = data.l2TxUrl
+    if (data.lastErrorMessage !== undefined)
+      updateData.lastErrorMessage = data.lastErrorMessage
     if (completedAtDate) updateData.completedAt = completedAtDate
     // L2→L1 withdrawal fields
-    if (l2BlockNumber) updateData.l2BlockNumber = l2BlockNumber
-    if (l2BlockNumberBeforeTx) updateData.l2BlockNumberBeforeTx = l2BlockNumberBeforeTx
-    if (l2ToL1MessageIndex) updateData.l2ToL1MessageIndex = l2ToL1MessageIndex
-    if (siblingPath) updateData.siblingPath = siblingPath
-    if (recipientL1Address) updateData.recipientL1Address = recipientL1Address
-    if (currentStep != null) updateData.currentStep = currentStep
+    if (data.l2BlockNumber && !wo.has('l2BlockNumber')) updateData.l2BlockNumber = data.l2BlockNumber
+    if (data.l2BlockNumberBeforeTx) updateData.l2BlockNumberBeforeTx = data.l2BlockNumberBeforeTx
+    if (data.l2ToL1MessageIndex) updateData.l2ToL1MessageIndex = data.l2ToL1MessageIndex
+    if (data.siblingPath) updateData.siblingPath = data.siblingPath
+    if (data.recipientL1Address) updateData.recipientL1Address = data.recipientL1Address
+    if (data.currentStep != null) updateData.currentStep = data.currentStep
+    // Confirmed L1 block number
+    if (data.l1BlockNumber && !wo.has('l1BlockNumber')) updateData.l1BlockNumber = data.l1BlockNumber
+    // L1→L2 post-fee amount
+    if (data.amountAfterFee && !wo.has('amountAfterFee')) updateData.amountAfterFee = data.amountAfterFee
     // Fuel fields
-    if (fuelMessageHash) updateData.fuelMessageHash = fuelMessageHash
-    if (fuelMessageLeafIndex) updateData.fuelMessageLeafIndex = fuelMessageLeafIndex
-    if (fuelAmount) updateData.fuelAmount = fuelAmount
+    if (data.fuelMessageHash && !wo.has('fuelMessageHash')) updateData.fuelMessageHash = data.fuelMessageHash
+    if (data.fuelMessageLeafIndex && !wo.has('fuelMessageLeafIndex')) updateData.fuelMessageLeafIndex = data.fuelMessageLeafIndex
+    if (data.fuelAmount && !wo.has('fuelAmount')) updateData.fuelAmount = data.fuelAmount
     // L2→L1 witness epoch
-    if (epoch != null) updateData.epoch = epoch
+    if (data.epoch != null) updateData.epoch = data.epoch
+
+    console.log(`[bridge/operations PATCH ${id}] updateData →`, updateData, '| write-once blocked:', [...alreadySetFields])
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json(
@@ -199,10 +211,22 @@ export async function PATCH(
       )
     }
 
-    await prisma.bridgeActivity.update({
-      where: { id },
+    // Optimistic locking: include current status in WHERE clause to prevent
+    // concurrent PATCH requests from racing past status transition validation.
+    // Include fkUserId in WHERE clause for defense-in-depth ownership check
+    const currentStatus = operation.status
+    const result = await prisma.bridgeActivity.updateMany({
+      where: { id, status: currentStatus as BridgeOperationStatus, fkUserId: authResult.user.id },
       data: updateData,
     })
+
+    if (result.count === 0) {
+      // Status changed between our read and write — retry-safe for the client
+      return NextResponse.json(
+        { error: 'Operation was modified concurrently. Please retry.' },
+        { status: 409 },
+      )
+    }
 
     return NextResponse.json({ ok: true })
   } catch (error) {

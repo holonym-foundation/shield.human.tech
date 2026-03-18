@@ -1,4 +1,13 @@
 import { Network, Token } from '@/types/bridge'
+import {
+  ALL_DEPLOYMENTS,
+  ACTIVE_DEPLOYMENT_ID as SDK_ACTIVE_DEPLOYMENT_ID,
+  getDeployment,
+  getAztecscanUrl as sdkGetAztecscanUrl,
+  getEtherscanUrl as sdkGetEtherscanUrl,
+  type DeploymentData,
+} from '@human.tech/aztec-bridge-sdk'
+
 // -------------------------------------
 
 // Maintenance mode flag - set to true to enable maintenance overlay
@@ -9,35 +18,28 @@ export const MAINTENANCE_MESSAGE =
 
 export const MAINTENANCE_TITLE = 'Bridge Under Maintenance'
 
-// -------------------------------------
-
-// Import bundled deployments (auto-synced by deployment script)
-import deploymentsData from '@/constants/deployments.json'
-
 // ─── Deployment Selection ─────────────────────────────────────────────
 // On the server, always uses the active deployment.
 // On the client, checks localStorage for a user override.
 
-export type DeploymentData = (typeof deploymentsData.deployments)[number]
+export type { DeploymentData }
 
-/** All available deployments (for the version selector) */
-export const ALL_DEPLOYMENTS = deploymentsData.deployments
-export const ACTIVE_DEPLOYMENT_ID = deploymentsData.activeDeploymentId
+export { ALL_DEPLOYMENTS }
+export const ACTIVE_DEPLOYMENT_ID = SDK_ACTIVE_DEPLOYMENT_ID
 
 function getSelectedDeployment(): DeploymentData {
-  let selectedId = deploymentsData.activeDeploymentId
+  let selectedId = SDK_ACTIVE_DEPLOYMENT_ID
   if (typeof window !== 'undefined') {
     try {
       const override = localStorage.getItem('selectedDeploymentId')
-      if (override) selectedId = override
+      if (override && ALL_DEPLOYMENTS.some((d) => d.id === override)) {
+        selectedId = override
+      }
     } catch {
       // Ignore localStorage errors (SSR, security restrictions)
     }
   }
-  return (
-    deploymentsData.deployments.find((d) => d.id === selectedId) ??
-    deploymentsData.deployments[0]
-  )
+  return getDeployment(selectedId) ?? ALL_DEPLOYMENTS[0]
 }
 
 const activeDeployment = getSelectedDeployment()
@@ -46,33 +48,17 @@ const activeDeployment = getSelectedDeployment()
 
 export const L1_CHAIN_ID = activeDeployment.network.l1ChainId
 export const L2_CHAIN_ID = activeDeployment.network.l2ChainId
-export const L2_CHAIN_KEY = `aztec:${L2_CHAIN_ID}`
 export const L2_NODE_URL = activeDeployment.network.nodeUrl
 export const DEPLOYMENT_ID = activeDeployment.id
 export const ROLLUP_VERSION = activeDeployment.network.rollupVersion
-export const AZTEC_VERSION = activeDeployment.network.aztecVersion
 
-// L1 Aztec protocol contract addresses (from deployment snapshot)
-export const L1_CONTRACT_ADDRESSES = activeDeployment.l1ContractAddresses
-
-// Aztecscan URLs for different networks
-export const AZTECSCAN_URLS: Record<number, string> = {
-  [L2_CHAIN_ID]: 'https://devnet.aztecscan.xyz', // Aztec Devnet
-}
-
-
-export const getAztecscanUrl = (chainId: number): string => {
-  return AZTECSCAN_URLS[chainId] || 'https://aztecscan.xyz'
-}
+export const getAztecscanUrl = sdkGetAztecscanUrl
+export const getEtherscanUrl = sdkGetEtherscanUrl
 
 export const BRIDGE_AND_FUEL_ADDRESS: `0x${string}` =
-  ((activeDeployment as any).bridgeAndFuelAddress ?? '') as `0x${string}`
+  (activeDeployment.bridgeAndFuelAddress ?? '') as `0x${string}`
 export const MOCK_FUEL_SWAP_ADDRESS: `0x${string}` =
-  ((activeDeployment as any).mockFuelSwapAddress ?? '') as `0x${string}`
-export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
-  (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuicePortalAddress ?? '') as `0x${string}`
-export const FEE_JUICE_ADDRESS: `0x${string}` =
-  (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
+  (activeDeployment.mockFuelSwapAddress ?? '') as `0x${string}`
 
 // Non-token protocol addresses (SBT)
 export const ADDRESS = {
@@ -173,7 +159,7 @@ export function getTokenContracts(symbol: string) {
   }
 }
 
-// ─── Token Metadata (derived from first token for backward compat) ──
+// ─── Token Metadata (derived from first token) ──
 
 export const L1_TOKEN_METADATA = {
   name: activeDeployment.tokens[0]?.symbol || 'USDC',

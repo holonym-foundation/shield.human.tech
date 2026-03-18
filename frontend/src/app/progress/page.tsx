@@ -7,7 +7,6 @@ import StyledImage from '@/components/StyledImage'
 import LoadingStepsBars from '@/components/LoadingStepsBars'
 import BridgeHeader from '@/components/BridgeHeader'
 import { useBridgeStore } from '@/stores/bridgeStore'
-import { wait } from '@/utils'
 import { formatUnits, parseUnits } from 'viem'
 import {
   useL2WithdrawTokensToL1,
@@ -99,13 +98,9 @@ export default function ProgressPage() {
     isError: isResumeWithdrawalError,
   } = useResumeL2WithdrawToL1(handleBridgeSuccess)
 
-  // console.log({
-  //   isBridgeTokensToL2Error,
-  //   // withdrawTokensToL1Error,
-  // })
   // Add countdown timer with controls
   const L1_TO_L2_TIME = 15 * 60 // 15 minutes
-  const L2_TO_L1_TIME = 50 * 60 // 50 minutes
+  const L2_TO_L1_TIME = 15 * 60 // 15 minutes
   const [count, { startCountdown, stopCountdown, resetCountdown }] =
     useCountdown({
       countStart: direction === BridgeDirection.L1_TO_L2 ? L1_TO_L2_TIME : L2_TO_L1_TIME, // Convert minutes to seconds
@@ -265,56 +260,6 @@ export default function ProgressPage() {
       stopCountdown()
     }
   }, [steps, stopCountdown])
-
-  // Show error message if there's an error
-  // useEffect(() => {
-  //   if (isBridgeTokensToL2Error) {
-  //     notify('error', 'Bridge operation failed')
-  //   }
-  //   if (withdrawTokensToL1Error) {
-  //     notify('error', 'Withdrawal operation failed')
-  //   }
-  // }, [isBridgeTokensToL2Error, withdrawTokensToL1Error, notify])
-
-  // useEffect(() => {
-  //   let isMounted = true
-
-  //   async function updateProgress() {
-  //     try {
-  //       if (!isMounted) return
-
-  //       if (!isMounted) return
-  //       setProgressStep(1, 'active')
-  //       await wait(2000)
-
-  //       if (!isMounted) return
-  //       setProgressStep(1, 'completed')
-  //       setProgressStep(2, 'active')
-  //       await wait(2000)
-
-  //       if (!isMounted) return
-  //       setProgressStep(2, 'completed')
-  //       setProgressStep(3, 'active')
-
-  //       await wait(2000)
-  //       if (!isMounted) return
-  //       setProgressStep(3, 'completed')
-  //       setProgressStep(4, 'active')
-  //       await wait(2000)
-
-  //       if (!isMounted) return
-  //       setProgressStep(4, 'completed')
-  //     } catch (error) {
-  //       console.error('Error updating progress:', error)
-  //     }
-  //   }
-
-  // updateProgress()
-
-  // return () => {
-  //   isMounted = false
-  // }
-  // }, [setProgressStep])
 
   return (
     <RootStyle className=''>

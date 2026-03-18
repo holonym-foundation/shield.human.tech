@@ -131,7 +131,7 @@ import {
   saveFuelInfraToDeployment,
   loadExistingTokens,
   loadActiveDeployment,
-  copyToFrontend,
+  copyToSdk,
   type DeployedToken,
   type L1ContractAddresses,
 } from './utils/save_contracts.js'
@@ -2136,9 +2136,9 @@ async function main() {
       logger.error(`Failed to deploy fuel infrastructure: ${error}`)
     }
 
-    // Sync active deployment to frontend
-    copyToFrontend()
-    logger.info('✅ Deployment finalized and synced to frontend')
+    // Sync deployments, ABIs, and Aztec artifacts to SDK
+    copyToSdk()
+    logger.info('✅ Deployment finalized and synced to SDK')
   }
 
   // Run tests against the deployed/targeted token

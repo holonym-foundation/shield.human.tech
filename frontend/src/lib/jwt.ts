@@ -13,7 +13,7 @@ function getSecret(): string {
 }
 
 export interface JWTPayload {
-  userId: string
+  userId: number
   l1Address: string
   l2Address: string
   iat?: number
@@ -22,13 +22,19 @@ export interface JWTPayload {
 
 export function signJWT(payload: Omit<JWTPayload, 'iat' | 'exp'>): string {
   return jwt.sign(payload, getSecret(), {
+    algorithm: 'HS256',
     expiresIn: JWT_EXPIRES_IN,
   } as jwt.SignOptions)
 }
 
 export function verifyJWT(token: string): JWTPayload | null {
   try {
-    const decoded = jwt.verify(token, getSecret()) as unknown as JWTPayload
+    const decoded = jwt.verify(token, getSecret(), { algorithms: ['HS256'] }) as unknown as JWTPayload
+    // Reject old tokens that have a string userId (pre-autoincrement migration)
+    if (typeof decoded.userId !== 'number') {
+      console.warn('[auth] Rejecting JWT with non-numeric userId — user must re-authenticate')
+      return null
+    }
     return decoded
   } catch (error) {
     console.error('JWT verification failed:', error)

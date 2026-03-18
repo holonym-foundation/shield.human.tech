@@ -1,0 +1,91 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "_feeJuice",
+        "type": "address"
+      },
+      {
+        "name": "_feeAssetHandler",
+        "type": "address"
+      },
+      {
+        "name": "_rate",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "feeAssetHandler",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "feeJuice",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "rate",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "swap",
+    "inputs": [
+      {
+        "name": "inputToken",
+        "type": "address"
+      },
+      {
+        "name": "inputAmount",
+        "type": "uint256"
+      },
+      {
+        "name": "minOutput",
+        "type": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "output",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address"
+      }
+    ]
+  }
+]

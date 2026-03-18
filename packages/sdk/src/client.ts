@@ -1,0 +1,138 @@
+/**
+ * HumanTechBridge — Main SDK entry point.
+ */
+
+import { createAztecNodeClient } from '@aztec/aztec.js/node'
+
+import { BridgeApiClient } from './api'
+import { createConfig, ACTIVE_DEPLOYMENT_ID } from './config'
+import { authenticate } from './auth'
+import { getOperations, getOperation, retryFailedPatches } from './operations'
+import { bridgeL1ToL2 } from './bridge/l1ToL2'
+import { withdrawL2ToL1 } from './bridge/l2ToL1'
+import { resume as resumeBridge } from './bridge/resume'
+import type {
+  HumanTechBridgeConfig,
+  ResolvedConfig,
+  BridgeL1ToL2Params,
+  WithdrawL2ToL1Params,
+  ResumeParams,
+  BridgeResult,
+  BridgeOperation,
+} from './types'
+
+const DEFAULT_API_URL = 'https://bridge.human.tech'
+
+function resolveDomain(domain?: string): string {
+  if (domain) return domain
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin
+  }
+  throw new Error('domain is required when not running in a browser')
+}
+
+export class HumanTechBridge {
+  private config: ResolvedConfig
+  private apiClient: BridgeApiClient
+  private aztecNode: any
+  readonly domain: string
+
+  constructor(options: HumanTechBridgeConfig) {
+    this.config = createConfig(options.deployment ?? ACTIVE_DEPLOYMENT_ID, {
+      l1RpcUrl: options.l1RpcUrl,
+      l2NodeUrl: options.l2NodeUrl,
+    })
+    this.domain = resolveDomain(options.domain)
+    this.apiClient = new BridgeApiClient(options.apiUrl ?? DEFAULT_API_URL)
+    this.aztecNode = createAztecNodeClient(this.config.l2NodeUrl)
+  }
+
+  /**
+   * Authenticate with the bridge backend using SIWE (EIP-4361).
+   *
+   * BREAKING CHANGE from v1: requires domain, uri, and chainId.
+   */
+  async authenticate(params: {
+    l1Address: string
+    l2Address: string
+    domain: string
+    uri: string
+    chainId: number
+    signMessage: (msg: string) => Promise<string>
+    nonce?: string
+    l1LoginMethod?: string
+    l1WalletProvider?: string
+    l2LoginMethod?: string
+    l2WalletProvider?: string
+  }): ReturnType<typeof authenticate> {
+    return authenticate(this.apiClient, params)
+  }
+
+  /**
+   * Bridge tokens from L1 (Ethereum) to L2 (Aztec).
+   */
+  async bridgeL1ToL2(params: BridgeL1ToL2Params): Promise<BridgeResult> {
+    return bridgeL1ToL2(this.config, this.apiClient, this.aztecNode, this.domain, params)
+  }
+
+  /**
+   * Withdraw tokens from L2 (Aztec) to L1 (Ethereum).
+   */
+  async withdrawL2ToL1(params: WithdrawL2ToL1Params): Promise<BridgeResult> {
+    return withdrawL2ToL1(this.config, this.apiClient, this.aztecNode, this.domain, params)
+  }
+
+  /**
+   * Resume an incomplete bridge operation.
+   */
+  async resume(
+    operationId: number,
+    params: ResumeParams,
+  ): Promise<BridgeResult> {
+    return resumeBridge(
+      this.config,
+      this.apiClient,
+      this.aztecNode,
+      this.domain,
+      operationId,
+      params,
+    )
+  }
+
+  /**
+   * Get all bridge operations for the authenticated user.
+   */
+  async getOperations(): Promise<BridgeOperation[]> {
+    return getOperations(this.apiClient)
+  }
+
+  /**
+   * Get a single bridge operation by ID.
+   */
+  async getOperation(operationId: number): Promise<BridgeOperation> {
+    return getOperation(this.apiClient, operationId)
+  }
+
+  /**
+   * Check attestation eligibility before starting a private bridge operation.
+   * Returns binding status, nonce counts, and attester config.
+   */
+  async getAttestationStatus(): Promise<import('./types').AttestationStatus> {
+    return this.apiClient.getAttestationStatus()
+  }
+
+  /**
+   * Set the auth token on the API client (e.g. to restore a persisted JWT on page reload).
+   */
+  setAuthToken(token: string): void {
+    this.apiClient.setAuthToken(token)
+  }
+
+  /**
+   * Retry all queued failed PATCHes from previous sessions.
+   * Call this after authentication to drain the failed-PATCH queue.
+   */
+  async retryFailedPatches(): Promise<{ succeeded: number; failed: number; total: number }> {
+    return retryFailedPatches(this.apiClient)
+  }
+}

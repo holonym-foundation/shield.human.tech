@@ -22,15 +22,23 @@ enum BridgeDirection {
   L2_TO_L1
 }
 
+// Status transitions:
+//   L1→L2: pending → deposited → claimed → completed
+//   L2→L1: pending → submitted → ready → pending_finalize → completed
+//
+// "failed" = error before any tx was sent. No funds moved, no recovery needed,
+// safe to retry. If funds ARE at risk (tx sent or confirmed), the status stays
+// at the last successful step (e.g. deposited, submitted) so the user can
+// resume from the Activity page.
 enum BridgeOperationStatus {
-  pending
-  deposited
-  claimed
-  submitted
-  ready
-  pending_finalize
-  completed
-  failed
+  pending           // Operation created, no tx sent yet
+  deposited         // L1→L2: L1 deposit confirmed (funds locked on L1)
+  claimed           // L1→L2: L2 claim submitted
+  submitted         // L2→L1: L2 burn confirmed (funds burned on L2)
+  ready             // L2→L1: L2 block proven on L1, ready to finalize
+  pending_finalize  // L2→L1: Waiting for block finalization
+  completed         // Done — funds arrived at destination
+  failed            // No funds moved — safe to retry
 }
 
 // ---------------------------------------------------------------------------
@@ -40,7 +48,7 @@ enum BridgeOperationStatus {
 // ---------------------------------------------------------------------------
 
 model User {
-  id             String   @id @unique @default(cuid(2))
+  id             Int      @id @default(autoincrement())
   // L1 (Ethereum / WaaP)
   l1Address      String   // L1 Ethereum address (normalized lowercase)
   l1LoginMethod  String?  // waap | injected | walletconnect (WaapLoginMethod)
@@ -70,7 +78,7 @@ model User {
 // ---------------------------------------------------------------------------
 
 model AddressBinding {
-  id         String   @id @default(cuid(2))
+  id         Int      @id @default(autoincrement())
   l1Address  String   @unique // one L1 address can only bind to one L2 address
   l2Address  String   @unique // one L2 address can only bind to one L1 address
   createdAt  DateTime @default(now())
@@ -90,7 +98,7 @@ enum AttestationType {
 }
 
 model AttestationNonce {
-  id         String          @id @default(cuid(2))
+  id         Int             @id @default(autoincrement())
   l1Address  String
   type       AttestationType
   nonce      Int             @default(0) // current nonce (incremented after each issuance)
@@ -101,12 +109,27 @@ model AttestationNonce {
 }
 
 // ---------------------------------------------------------------------------
+// AuthNonce: SIWE nonces stored in DB for serverless compatibility.
+// One-time use; consumed on authenticate, expired entries cleaned up periodically.
+// ---------------------------------------------------------------------------
+
+model AuthNonce {
+  id            Int      @id @default(autoincrement())
+  nonce         String   @unique
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("auth_nonces")
+}
+
+// ---------------------------------------------------------------------------
 // BridgeActivity: one bridge activity (L1→L2 or L2→L1) with encrypted backup
 // ---------------------------------------------------------------------------
 
 model BridgeActivity {
-  id            String                @id @unique @default(cuid(2))
-  fkUserId      String                // FK to User.id (one user = L1 + L2 pair)
+  id            Int                   @id @default(autoincrement())
+  fkUserId      Int                   // FK to User.id (one user = L1 + L2 pair)
   user          User?                 @relation(fields: [fkUserId], references: [id], onDelete: Cascade)
   direction BridgeDirection
   status    BridgeOperationStatus
@@ -130,6 +153,9 @@ model BridgeActivity {
   messageHash     String? // L1→L2 message key (from portal event); used for sync check and claim
   messageLeafIndex String? // L1→L2 leaf index; required for claim_public/claim_private on L2
 
+  // --- L1→L2 post-fee amount (custom portal deducts fees before L2 message) ---
+  amountAfterFee  String? // Post-fee amount from portal event; use for L2 claim instead of raw amount
+
   // --- L1→L2 fuel recovery (when BridgeAndFuel path used) ---
   fuelMessageHash     String? // Fuel message key from BridgeWithFuel event (fuelKey)
   fuelMessageLeafIndex String? // Fuel leaf index from BridgeWithFuel event (fuelIndex)
@@ -141,6 +167,8 @@ model BridgeActivity {
   l2ToL1MessageIndex String? // Leaf index in L2→L1 message tree (same as frontend l2ToL1MessageIndex)
   siblingPath       Json?   // Merkle sibling path (array of hex strings) for L1 portal withdraw
   epoch             Int?    // L2→L1: epoch derived from l2BlockNumber; needed for L1 withdraw proof
+
+  l1BlockNumber          String? // L1 block where the deposit (L1→L2) or withdrawal (L2→L1) tx was confirmed
 
   // --- L1→L2 recovery hint ---
   l1BlockNumberBeforeTx String? // L1 block number captured before sending deposit tx; starting point if receipt lost

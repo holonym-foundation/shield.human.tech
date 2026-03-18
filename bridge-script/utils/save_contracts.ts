@@ -65,7 +65,46 @@ export interface DeploymentRegistry {
 
 const DEPLOYMENTS_DIR = join('deployments');
 const REGISTRY_FILE = join(DEPLOYMENTS_DIR, 'registry.json');
-const FRONTEND_DEPLOYMENTS = resolve('..', 'frontend', 'src', 'constants', 'deployments.json');
+const SDK_CONTRACTS_DIR = resolve('..', 'packages', 'sdk', 'src', 'contracts');
+const SDK_DEPLOYMENTS = join(SDK_CONTRACTS_DIR, 'deployments.json');
+const SDK_ABIS_DIR = join(SDK_CONTRACTS_DIR, 'abis');
+const SDK_ARTIFACTS_DIR = join(SDK_CONTRACTS_DIR, 'artifacts');
+const L1_OUT = resolve('..', 'l1-contracts', 'out');
+const AZTEC_CONTRACTS = resolve('..', 'aztec-contracts');
+
+// L1 Forge build output → SDK ABI JSON mappings
+// Each entry: { src: forge JSON path, dest: SDK output path }
+const L1_ABI_SOURCES: { src: string; dest: string }[] = [
+  {
+    src: join(L1_OUT, 'TokenPortal.sol', 'TokenPortal.json'),
+    dest: join(SDK_ABIS_DIR, 'TokenPortal.json'),
+  },
+  {
+    src: join(L1_OUT, 'BridgeAndFuel.sol', 'BridgeAndFuel.json'),
+    dest: join(SDK_ABIS_DIR, 'BridgeAndFuel.json'),
+  },
+  {
+    src: join(L1_OUT, 'MockFuelSwap.sol', 'MockFuelSwap.json'),
+    dest: join(SDK_ABIS_DIR, 'MockFuelSwap.json'),
+  },
+];
+
+// Aztec (Noir) contract artifacts → SDK
+// These are full Noir artifacts (not Solidity ABIs) — copied as-is
+const AZTEC_ARTIFACT_SOURCES: { src: string; dest: string }[] = [
+  {
+    src: join(AZTEC_CONTRACTS, 'token_bridge', 'target', 'token_contract-Token.json'),
+    dest: join(SDK_ARTIFACTS_DIR, 'Token.json'),
+  },
+  {
+    src: join(AZTEC_CONTRACTS, 'token_bridge', 'target', 'token_bridge_contract-TokenBridge.json'),
+    dest: join(SDK_ARTIFACTS_DIR, 'TokenBridge.json'),
+  },
+  {
+    src: join(AZTEC_CONTRACTS, 'token_minter_proxy', 'target', 'token_minter_proxy-TokenMinterProxy.json'),
+    dest: join(SDK_ARTIFACTS_DIR, 'TokenMinterProxy.json'),
+  },
+];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -251,27 +290,83 @@ export function loadExistingTokens(): DeployedToken[] {
 }
 
 /**
- * Bundle all deployments + registry into a single JSON for the frontend.
- * Format: { activeDeploymentId, deployments: DeploymentFile[] }
+ * Copy all deployment data, contract ABIs, and Aztec artifacts to the SDK.
+ *
+ * - Deployments: bundles all deployment files into packages/sdk/src/deployments.json
+ * - L1 ABIs (Forge): extracts `abi` array, strips `internalType` fields
+ * - Aztec artifacts (Noir): copies full artifact JSON as-is
+ *
+ * Call this at the end of a deployment run.
  */
-export function copyToFrontend(): void {
+export function copyToSdk(): void {
+  // ── Deployments ──
   const registry = loadRegistry();
   if (!registry || registry.deployments.length === 0) {
     console.warn('⚠️  No deployments to copy');
-    return;
+  } else {
+    const allDeployments: DeploymentFile[] = [];
+    for (const entry of registry.deployments) {
+      const deployment = readJson<DeploymentFile>(join(DEPLOYMENTS_DIR, entry.file));
+      if (deployment) allDeployments.push(deployment);
+    }
+
+    const bundle = {
+      activeDeploymentId: registry.activeDeploymentId,
+      deployments: allDeployments,
+    };
+
+    writeJson(SDK_DEPLOYMENTS, bundle);
+    console.log(`📋 Synced ${allDeployments.length} deployment(s) to SDK: ${SDK_DEPLOYMENTS}`);
   }
 
-  const allDeployments: DeploymentFile[] = [];
-  for (const entry of registry.deployments) {
-    const deployment = readJson<DeploymentFile>(join(DEPLOYMENTS_DIR, entry.file));
-    if (deployment) allDeployments.push(deployment);
-  }
+  // ── L1 Forge ABIs ──
+  ensureDir(SDK_CONTRACTS_DIR);
+  ensureDir(SDK_ABIS_DIR);
+  ensureDir(SDK_ARTIFACTS_DIR);
 
-  const bundle = {
-    activeDeploymentId: registry.activeDeploymentId,
-    deployments: allDeployments,
+  // Strip internalType fields — Solidity compiler metadata, not needed at runtime
+  const strip = (obj: unknown): unknown => {
+    if (Array.isArray(obj)) return obj.map(strip);
+    if (obj && typeof obj === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+        if (k !== 'internalType') out[k] = strip(v);
+      }
+      return out;
+    }
+    return obj;
   };
 
-  writeJson(FRONTEND_DEPLOYMENTS, bundle);
-  console.log(`📋 Synced ${allDeployments.length} deployment(s) to frontend: ${FRONTEND_DEPLOYMENTS}`);
+  for (const { src, dest } of L1_ABI_SOURCES) {
+    if (!existsSync(src)) {
+      console.warn(`⚠️  L1 ABI source not found (run forge build?): ${src}`);
+      continue;
+    }
+
+    const raw = JSON.parse(readFileSync(src, 'utf8'));
+    const abi = raw.abi;
+    if (!abi) {
+      console.warn(`⚠️  No "abi" key in: ${src}`);
+      continue;
+    }
+
+    writeJson(dest, strip(abi));
+    console.log(`✅ Synced L1 ABI: ${src} → ${dest}`);
+  }
+
+  // ── Aztec (Noir) artifacts ──
+  for (const { src, dest } of AZTEC_ARTIFACT_SOURCES) {
+    if (!existsSync(src)) {
+      console.warn(`⚠️  Aztec artifact not found (run aztec codegen?): ${src}`);
+      continue;
+    }
+
+    // Copy as-is — Noir artifacts are consumed whole by the Aztec SDK
+    const content = readFileSync(src, 'utf8');
+    writeFileSync(dest, content, 'utf8');
+    console.log(`✅ Synced Aztec artifact: ${src} → ${dest}`);
+  }
 }
+
+/** @deprecated Use copyToSdk() instead */
+export const copyToFrontend = copyToSdk;

@@ -9,13 +9,9 @@ import TextButton from '@/components/TextButton'
 import {
   useBridgeOperations,
   decryptOperationPayload,
-  type BridgeOperation,
 } from '@/hooks/useBridgeOperations'
-import {
-  useBridgeStore,
-  type RecoveryClaimData,
-  type RecoveryWithdrawalData,
-} from '@/stores/bridgeStore'
+import type { BridgeOperation, RecoveryClaimData, RecoveryWithdrawalData } from '@human.tech/aztec-bridge-sdk'
+import { useBridgeStore } from '@/stores/bridgeStore'
 import { useWalletStore } from '@/stores/walletStore'
 import { useToast } from '@/hooks/useToast'
 import { BridgeDirection } from '@/types/bridge'
@@ -23,7 +19,7 @@ import { BridgeDirection } from '@/types/bridge'
 export default function ActivityPage() {
   const router = useRouter()
   const notify = useToast()
-  const [resumingId, setResumingId] = useState<string | null>(null)
+  const [resumingId, setResumingId] = useState<number | null>(null)
 
   const { waapAddress: l1Address, signWaapMessage } = useWalletStore()
   const { setRecovery, setWithdrawalRecovery, setDirection } = useBridgeStore()

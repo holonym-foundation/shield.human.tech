@@ -60,6 +60,7 @@ import AccountSelectorModal from '@/components/model/AccountSelectorModal'
 import WalletDiscoveryModal from '@/components/model/WalletDiscoveryModal'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
+import { useAuthStore } from '@/stores/useAuthStore'
 import { useRouter } from 'next/navigation'
 import MaintenanceOverlay from '@/components/MaintenanceOverlay'
 import FuelToggle from '@/components/FuelToggle'
@@ -70,21 +71,13 @@ import {
   BRIDGE_AND_FUEL_ADDRESS,
 } from '@/config'
 
-// const variants = {
-//   hidden: { opacity: 0, y: 100 },
-//   enter: { opacity: 1, y: 0 },
-//   exit: { opacity: 0, y: -100 },
-// }
-
 export default function Home() {
   const router = useRouter()
 
   // UI state
   const [selectNetwork, setSelectNetwork] = useState<boolean>(false)
   const [selectToken, setSelectToken] = useState<boolean>(false)
- console.log("selectToken ", selectToken);
   const [isFromSection, setIsFromSection] = useState<boolean>(true)
-  // const [showBreakdown, setShowBreakdown] = useState(false)
   const [mounted, setMounted] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const [inputAmount, setInputAmount] = useState('')
@@ -198,6 +191,8 @@ export default function Home() {
 
   // Prefer Alchemy if available, fall back to direct RPC
   const l1Balance = l1BalanceAlchemy ?? l1BalanceRpc
+  const { token: authToken, authFailed } = useAuthStore()
+  const isAuthenticated = !!authToken
   const { data: attestationData, isLoading: attestationLoading } = useAttestationCheck()
   const { data: hasL1SBT } = useL1HasSoulboundToken()
   const { mutate: mintL1SBT, isPending: mintL1SBTPending } =
@@ -534,8 +529,6 @@ export default function Home() {
             }
           />
         )}
-        {/* Wallet selection is now handled by WalletDiscoveryModal above */}
-
         <div
           className={`grid grid-rows-[max-content_1fr_max-content] h-full ${
             MAINTENANCE_MODE ? 'pointer-events-none' : ''
@@ -545,7 +538,9 @@ export default function Home() {
               onClick={async () => {
                 await disconnectWaapWallet()
                 await disconnectAztecWallet()
-                localStorage.clear()
+                localStorage.removeItem('aztecLoginMethod')
+                localStorage.removeItem('privacyModeEnabled')
+                localStorage.removeItem('aztec-bridge-query-state')
                 window.location.reload()
               }}
             />
@@ -643,6 +638,9 @@ export default function Home() {
                 passportThreshold={attestationData?.passportThreshold}
                 // Operation completion state
                 bridgeCompleted={bridgeCompleted}
+                // Auth state
+                isAuthenticated={isAuthenticated}
+                authFailed={authFailed}
                 // Disable if L2 node error
                 l2NodeError={l2NodeIsReadyIsError && !l2NodeIsReadyLoading}
                 l2NodeIsReadyLoading={l2NodeIsReadyLoading}

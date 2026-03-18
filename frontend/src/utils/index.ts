@@ -1,4 +1,30 @@
 import { BridgeDirection } from '@prisma/client'
+import { createSigningMessage, deriveEncryptionKey, decryptData } from '@human.tech/aztec-bridge-sdk'
+
+// Frontend-only anti-phishing guard: only prompt for encryption signatures on our domain.
+// This is NOT an SDK concern — the SDK is domain-agnostic.
+const ALLOWED_ENCRYPTION_DOMAIN = 'https://bridge.human.tech'
+
+function isDevelopmentOrigin(): boolean {
+  if (typeof window === 'undefined') return false
+  const h = window.location.hostname
+  return h === 'localhost' || h === '127.0.0.1'
+}
+
+/**
+ * Verify the current page origin is allowed for encryption key derivation.
+ * Prevents phishing sites from tricking users into signing key-derivation messages.
+ * Must be called in the frontend before any signMessage used for encryption.
+ */
+export function verifyEncryptionDomain(): void {
+  if (typeof window === 'undefined') return // SSR — skip
+  const origin = window.location.origin
+  if (origin === ALLOWED_ENCRYPTION_DOMAIN || isDevelopmentOrigin()) return
+  throw new Error(
+    `Security Error: Encryption key derivation is only allowed on ${ALLOWED_ENCRYPTION_DOMAIN}. ` +
+    `Current origin: ${origin}. Please access the bridge at ${ALLOWED_ENCRYPTION_DOMAIN}`,
+  )
+}
 
 export const truncateDecimals = (
   value: number | string,
@@ -91,6 +117,45 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
       return false
     }
   }
+}
+
+/**
+ * Decrypt a field from an encrypted localStorage entry.
+ * Shared by copyClaimSecret (L1→L2) and copyNonce (L2→L1).
+ */
+export async function decryptStorageEntry(
+  storageKey: string,
+  entryId: string,
+  fieldName: string,
+  signMessage: (message: string, address: string) => Promise<string>,
+): Promise<{ value: string; entry: any } | null> {
+  // Verify encryption domain before prompting for signature
+  verifyEncryptionDomain()
+
+  const raw = localStorage.getItem(storageKey)
+  if (!raw) return null
+
+  // Wrap JSON.parse in try/catch for malformed localStorage data
+  let entries: any[]
+  try {
+    entries = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const entry = entries.find((e: any) => e.id === entryId)
+  if (!entry?.encryptedCiphertext) return null
+
+  const signingMessage = createSigningMessage(entry.l1Address, entry.keyDerivationDomain)
+  const signature = await signMessage(signingMessage, entry.l1Address)
+  const encryptionKey = await deriveEncryptionKey(entry.l1Address, signature, entry.keyDerivationDomain)
+  const decrypted = JSON.parse(
+    await decryptData(entry.encryptedCiphertext, entry.encryptedIv, entry.encryptedTag, encryptionKey)
+  )
+
+  const value = decrypted[fieldName]
+  if (!value) return null
+
+  return { value, entry }
 }
 
 /**

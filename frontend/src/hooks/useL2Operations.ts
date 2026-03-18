@@ -1,48 +1,26 @@
-import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { aztecNode } from '@/aztec'
 import {
-  L1_CHAIN_ID,
-  L1_CONTRACT_ADDRESSES,
   L1_TOKENS,
+  L1_CHAIN_ID,
   L2_CHAIN_ID,
   L2_NODE_URL,
+  getAztecscanUrl,
+  getEtherscanUrl,
 } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
-import { logError, logInfo } from '@/utils/datadog'
+import { logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, parseUnits } from 'viem'
 import { useToast, useToastMutation } from './useToast'
-import { wait, exportWithdrawalData, copyToClipboard } from '@/utils'
-import {
-  createSigningMessage,
-  deriveEncryptionKey,
-  decryptData,
-} from '@/utils/encryption'
+import { exportWithdrawalData, copyToClipboard, decryptStorageEntry, verifyEncryptionDomain } from '@/utils'
 import { useL2ErrorHandler } from '@/utils/l2ErrorHandler'
 import { requestWaapWallet, WAAP_METHOD, useWalletStore } from '@/stores/walletStore'
 import { useWalletAdapter } from './useWalletAdapter'
-import {
-  LS_KEY_BRIDGE_WITHDRAWALS,
-  patchOperationAsync,
-  patchOperationWithRetry,
-  updateLocalStorageItem,
-} from './bridge/bridgeUtils'
-import {
-  computeL2ToL1MessageLeaf,
-  computeWitness,
-  waitForBlockProven,
-  executeL1Withdraw,
-  validateAndCaptureBlocksL2,
-  encryptAndBackupWithdrawalNonce,
-  executeBurnAndExit,
-  persistBurnReceiptAndPollBlock,
-  fetchNodeInfoAndComputeWitness,
-  fetchL2PochAttestation,
-  fetchL2PassportAttestation,
-  type L2PassportAttestation,
-} from './bridge/bridgeL2ToL1'
+import { useBridge } from '@/hooks/useBridge'
+import type { BridgeEvent, StepStatus } from '@human.tech/aztec-bridge-sdk'
+import { STORAGE_KEYS } from '@human.tech/aztec-bridge-sdk'
 
 // Define types for balance queries
 export interface L2TokenBalanceData {
@@ -53,7 +31,7 @@ export interface L2TokenBalanceData {
 // -----------------------------------
 
 export const useL2TokenBalance = () => {
-  const { aztecAddress, isAztecConnected } = useWalletStore()
+  const { aztecAddress } = useWalletStore()
   const handleL2Error = useL2ErrorHandler()
   const walletAdapter = useWalletAdapter()
   const { bridgeConfig } = useBridgeStore()
@@ -252,13 +230,12 @@ export function useNetworkHealth() {
 
 export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
   const { waapAddress: l1Address } = useWalletStore()
-  const { aztecAddress, aztecAccount, aztecLoginMethod } = useWalletStore()
+  const { aztecAddress, aztecLoginMethod } = useWalletStore()
   const queryClient = useQueryClient()
   const notify = useToast()
-  const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled, bridgeConfig } =
+  const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled, bridgeConfig, l2TxUrl: currentL2TxUrl } =
     useBridgeStore()
 
-  // Get wallet information from useWalletStore
   const {
     waapLoginMethod: loginMethod,
     waapWalletProvider: walletProvider,
@@ -266,6 +243,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
   } = useWalletStore()
   const walletAdapter = useWalletAdapter()
   const selectedToken = bridgeConfig.from.token ?? undefined
+  const bridge = useBridge()
 
   const mutationFn = async (params: {
     amountL1: string
@@ -273,353 +251,179 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
     amountDisplayL1: string
     amountDisplayL2: string
   }) => {
-    const { amountL1, amountL2, amountDisplayL1, amountDisplayL2 } = params
-    const amount = BigInt(amountL2)
-    if (!l1Address) {
-      throw new Error('Ethereum wallet not connected')
-    }
-    if (!aztecAddress) {
-      throw new Error('Aztec wallet not connected')
-    }
-    if (!aztecAccount) {
-      throw new Error('Required accounts not connected')
-    }
+    const { amountDisplayL2 } = params
 
-    // 🔒 Track whether L2 burn+exit has been confirmed (funds are burned on L2).
-    // If true, the outer catch must NEVER mark the operation as 'failed' — it stays
-    // 'submitted' so the user can Resume from the activity page.
-    let burnConfirmed = false
-    let operationId: string | undefined
+    if (!l1Address) throw new Error('Ethereum wallet not connected')
+    if (!aztecAddress) throw new Error('Aztec wallet not connected')
+    if (!walletAdapter) throw new Error('Aztec wallet adapter not ready')
 
-    try {
-      // ─── Step 1: Validate wallets and capture block numbers ──────────
-      setProgressStep(1, 'active')
-
-      const { l1BlockNumberBeforeTx, l2BlockNumberBeforeTx, nodeInfoSnapshot } =
-        await validateAndCaptureBlocksL2(
-          l1Address,
-          aztecAddress,
-          walletAdapter,
-          {
-            walletType: WalletType.WAAP,
-            loginMethod: loginMethod,
-            walletProvider: walletProvider,
-            address: l1Address,
-            chainId: chainId,
-            aztecLoginMethod: aztecLoginMethod,
-            aztecAddress: aztecAddress,
-            amount: amount.toString(),
-          },
-          selectedToken,
-        )
-
-      console.log('[L2→L1] Initiating withdrawal from L2 to L1...', {
-        amount: amount.toString(),
-        l1Address,
-        private: isPrivacyModeEnabled,
-        l2BlockNumberBeforeTx: l2BlockNumberBeforeTx ?? null,
-      })
-
-      // ─── Step 2: Encrypt nonce and backup to server ─────────────────
-      const backup = await encryptAndBackupWithdrawalNonce({
-        l1Address,
-        aztecAddress,
-        amountL1,
-        amountL2,
-        amountDisplayL1,
-        amountDisplayL2,
-        isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
-        l1BlockNumberBeforeTx,
-        l2BlockNumberBeforeTx,
-        nodeInfoSnapshot,
-        selectedToken,
-      })
-      operationId = backup.operationId
-
-      // ─── Step 2b: Fetch attestation for private withdrawal (POCH → Passport fallback) ──
-      let attestation: { l2Signature: number[]; nonce: number; actionId: string } | undefined
-      let passportAttestation: L2PassportAttestation | undefined
-      if (isPrivacyModeEnabled) {
-        const portalAddress = selectedToken?.l1PortalContract
-        if (!portalAddress) {
-          throw new Error('Portal address not configured — cannot fetch attestation for private withdrawal')
-        }
-        try {
-          console.log('[L2→L1] Fetching POCH attestation for private exit...')
-          attestation = await fetchL2PochAttestation(portalAddress)
-          console.log('[L2→L1] POCH attestation received:', { nonce: attestation.nonce, actionId: attestation.actionId })
-        } catch (pochErr) {
-          console.warn('[L2→L1] POCH attestation failed, trying Passport fallback...', pochErr)
-          const bridgeAddress = selectedToken?.l2BridgeContract
-          if (!bridgeAddress) {
-            throw new Error('Bridge address not configured — cannot fetch Passport attestation for private withdrawal')
+    const result = await bridge.withdrawL2ToL1({
+      token: selectedToken?.symbol ?? 'cUSDC',
+      amount: amountDisplayL2,
+      l1Address,
+      l2Address: aztecAddress,
+      isPrivate: isPrivacyModeEnabled ?? false,
+      sendTransaction: async (tx) => {
+        return await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx]) as string
+      },
+      walletAdapter,
+      signMessage: async (msg: string) => {
+        verifyEncryptionDomain()
+        return await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, l1Address]) as string
+      },
+      onStep: (step: number, status: StepStatus) => {
+        setProgressStep(step, status)
+      },
+      onEvent: (event: BridgeEvent) => {
+        switch (event.type) {
+          // Persist encrypted nonce payload (recovery-critical)
+          case 'nonce_generated':
+            console.log('[L2→L1] Nonce generated, encrypted payload persisted to localStorage via SDK')
+            notify('warn', {
+              heading: 'Backup Available',
+              message: 'Your withdrawal data is encrypted and backed up — only you can access it. For extra safety, click here to export a local copy — useful if you ever need to recover manually',
+            }, {
+              autoClose: false,
+              onClick: () => {
+                try {
+                  const withdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
+                  if (withdrawals) {
+                    const parsed = JSON.parse(withdrawals)
+                    const latest = parsed.filter((w: any) => !w.success).pop()
+                    if (latest) exportWithdrawalData(latest)
+                  }
+                } catch (e) {
+                  console.error('[L2→L1] Failed to export withdrawal data on toast click:', e)
+                }
+              },
+            })
+            break
+          // Track operation ID for correlation
+          case 'operation_created':
+            console.log('[L2→L1] Operation created:', event.operationId)
+            break
+          case 'burn_sent':
+            notify('warn', {
+              heading: 'Withdrawal In Progress',
+              message: 'Please keep this page open while your withdrawal completes. Your data is encrypted and backed up — only you can access it.',
+            }, { autoClose: false })
+            break
+          case 'burn_confirmed':
+            setTransactionUrls(null, event.l2TxUrl)
+            // Prompt user to backup their withdrawal data (matches old flow pattern)
+            notify('warn', {
+              heading: 'Withdrawal Confirmed',
+              message: 'Your withdrawal is confirmed on L2. Click here to export a full backup — this includes all the data needed to resume if anything interrupts the process.',
+            }, {
+              autoClose: false,
+              onClick: () => {
+                try {
+                  const withdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
+                  if (withdrawals) {
+                    const parsed = JSON.parse(withdrawals)
+                    const latest = parsed.filter((w: any) => !w.success).pop()
+                    if (latest) exportWithdrawalData(latest)
+                  }
+                } catch (e) {
+                  console.error('[L2→L1] Failed to export withdrawal data on toast click:', e)
+                }
+              },
+            })
+            break
+          // Handle recovery_l2_block event
+          case 'recovery_l2_block':
+            console.log('[L2→L1] Recovered L2 block number:', event.l2BlockNumber)
+            break
+          // Persist witness data on witness_computed (recovery-critical)
+          case 'witness_computed':
+            console.log('[L2→L1] Witness computed: leafIndex=', event.leafIndex, 'epoch=', event.epoch)
+            break
+          case 'proven_poll':
+            notify('info', `Waiting for L2 block to be proven on L1 (${Math.round(event.elapsedMs / 60_000)} min elapsed)...`, { toastId: 'l2-to-l1-progress', autoClose: 15000 })
+            break
+          case 'proven_fallback':
+            notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, { toastId: 'l2-to-l1-progress', autoClose: 15000 })
+            break
+          case 'l1_withdraw_sent':
+            setTransactionUrls(event.l1TxUrl, currentL2TxUrl)
+            break
+          case 'operation_completed': {
+            const l1Url = event.l1TxHash ? `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${event.l1TxHash}` : null
+            const l2Url = event.l2TxHash ? `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${event.l2TxHash}` : null
+            setTransactionUrls(l1Url, l2Url)
+            break
           }
-          passportAttestation = await fetchL2PassportAttestation(portalAddress, bridgeAddress)
-          console.log('[L2→L1] Passport attestation received:', { nonce: passportAttestation.nonce, maxAmount: passportAttestation.maxAmount })
-          // Enforce amount limit for Passport path
-          if (amount > BigInt(passportAttestation.maxAmount)) {
-            const maxFormatted = (Number(passportAttestation.maxAmount) / 1e6).toFixed(2)
-            throw new Error(`Passport allows up to ${maxFormatted} USDC per transaction. Mint a POCH SBT to remove this limit.`)
-          }
+          case 'attestation_fetch':
+            console.log(`[L2→L1] Fetching ${event.method} attestation...`)
+            break
+          case 'attestation_fallback':
+            console.log(`[L2→L1] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
+            break
+          case 'patch_failed':
+            notify('warn', {
+              heading: 'Backup Warning',
+              message: 'Could not save withdrawal proof to server. Please do not close this page until the withdrawal completes.',
+            }, { autoClose: false })
+            break
+          case 'error':
+            console.log('[L2→L1] Error event raw:', event.error)
+            console.log('[L2→L1] Error message:', event.error?.message)
+            if (event.fundsAtRisk) {
+              notify('warn', {
+                heading: 'L1 Withdraw Failed — Funds Burned on L2',
+                message: 'Your tokens were burned on L2 but the L1 withdrawal did not complete. Go to Activity to resume.',
+              }, { autoClose: false })
+            } else {
+              // Skip generic toast for backup failures — onError handler shows a more specific one
+              const errorMsg = event.error?.message ?? 'Unknown error'
+              console.log('[L2→L1] errorMsg for toast:', JSON.stringify(errorMsg))
+              if (errorMsg.includes('Failed to backup')) break
+
+              if (errorMsg.includes('Contract artifact not found') || errorMsg.includes('artifact not found')) {
+                notify('error', {
+                  heading: 'Contract Artifact Not Found',
+                  message: 'The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.',
+                })
+              } else {
+                notify('error', {
+                  heading: 'Withdrawal Failed — No Funds Moved',
+                  message: 'The transaction was not sent. Your balance is unchanged and no recovery is needed. You can safely retry.',
+                })
+              }
+            }
+            break
         }
-      }
+      },
+    })
 
-      // ─── Step 3: Burn + exit on L2 (DANGER ZONE) ───────────────────
-      notify(
-        'warn',
-        {
-          heading: 'Do Not Reload',
-          message:
-            'Your withdrawal is in progress. Please do not reload or close this page until it completes, or it may be difficult to recover your funds.',
-        },
-        { autoClose: false },
-      )
+    logInfo('Withdrawal from L2 to L1 completed', {
+      walletType: WalletType.WAAP,
+      loginMethod,
+      walletProvider,
+      address: l1Address,
+      chainId,
+      aztecLoginMethod,
+      aztecAddress,
+      direction: 'L2_TO_L1',
+      fromNetwork: 'Aztec',
+      toNetwork: 'Ethereum',
+      fromToken: selectedToken?.symbol ?? 'cUSDC',
+      toToken: selectedToken?.pairedSymbol ?? 'USDC',
+      amount: amountDisplayL2,
+      l1Address,
+      l2Address: aztecAddress,
+      l2TxHash: result.l2TxHash,
+      l1TxHash: result.l1TxHash,
+      isPrivacyModeEnabled,
+      userAction: 'withdrawal_l2_to_l1_completed',
+    })
 
-      const burnResult = await executeBurnAndExit({
-        walletAdapter,
-        l1Address,
-        aztecAddress,
-        amount,
-        nonce: backup.nonce,
-        isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
-        attestation,
-        passportAttestation,
-      })
-      burnConfirmed = true // 🔒 Funds are now burned — never mark as 'failed'
-
-      const l2TxHash = burnResult.l2TxHash
-
-      // ─── Step 4: Persist receipt + poll for block number ────────────
-      setProgressStep(1, 'completed')
-      setProgressStep(2, 'active')
-
-      const receiptResult = await persistBurnReceiptAndPollBlock({
-        operationId,
-        l2TxHash,
-        l2BlockNumber: burnResult.l2BlockNumber,
-      })
-      if (!receiptResult.l2TxHashPatchOk) {
-        notify(
-          'warn',
-          {
-            heading: 'Backup Warning',
-            message:
-              'Could not save L2 transaction hash to server. Please do not close this page until the withdrawal completes.',
-          },
-          { autoClose: false },
-        )
-      }
-
-      setTransactionUrls(null, receiptResult.l2TxUrl)
-
-      // ─── Step 5: Fetch nodeInfo + compute witness + persist ─────────
-      const witnessResult = await fetchNodeInfoAndComputeWitness({
-        operationId,
-        l1Address,
-        amount,
-        l2BridgeAddress: backup.l2BridgeAddress,
-        blockNumberForProof: receiptResult.blockNumberForProof,
-        portalAddress: selectedToken?.l1PortalContract,
-      })
-      if (!witnessResult.witnessPatchOk) {
-        notify(
-          'warn',
-          {
-            heading: 'Backup Warning',
-            message:
-              'Could not save withdrawal proof to server. Please do not close this page until the withdrawal completes.',
-          },
-          { autoClose: false },
-        )
-      }
-
-      setProgressStep(2, 'completed')
-
-      // ─── Step 6: Wait for block proven on L1 ───────────────────────
-      setProgressStep(3, 'active')
-
-      await waitForBlockProven({
-        blockNumberForProof: receiptResult.blockNumberForProof,
-        rollupAddress: witnessResult.rollupAddress,
-        onPoll: (provenBlock, neededBlock, elapsedMs) => {
-          const elapsedMin = Math.round(elapsedMs / 60_000)
-          notify(
-            'info',
-            `Waiting for L2 block to be proven on L1 (proven: ${provenBlock}, need: ${neededBlock}, ${elapsedMin} min elapsed)...`,
-          )
-        },
-        onFallback: (fixedWaitMs) => {
-          notify(
-            'info',
-            `Waiting ~${Math.round(fixedWaitMs / 60_000)} min for block finalization...`,
-          )
-        },
-      })
-
-      setProgressStep(3, 'completed')
-
-      // Final wait before sending L1 withdraw tx
-      console.log('[L2→L1] Final wait before L1 withdraw (30s)...')
-      await wait(30_000)
-
-      // ─── Step 7: L1 withdraw ───────────────────────────────────────
-      setProgressStep(4, 'active')
-      patchOperationAsync(operationId, { currentStep: 4 })
-
-      let l1WithdrawTxHash: string | undefined
-      try {
-        const withdrawResult = await executeL1Withdraw({
-          l1Address,
-          amount,
-          epoch: witnessResult.epoch,
-          leafIndex: witnessResult.leafIndex,
-          siblingPath: witnessResult.siblingPath,
-          portalAddress: selectedToken?.l1PortalContract,
-        })
-
-        l1WithdrawTxHash = withdrawResult.l1TxHash
-        setTransactionUrls(withdrawResult.l1TxUrl, receiptResult.l2TxUrl)
-
-        // PATCH: mark as completed on server (retry — critical for DB consistency)
-        await patchOperationWithRetry(operationId, {
-          status: 'completed',
-          l1TxHash: withdrawResult.l1TxHash,
-          l1TxUrl: withdrawResult.l1TxUrl,
-          completedAt: new Date().toISOString(),
-          currentStep: 5,
-        }, { label: 'L2→L1 completion' })
-
-        // Update localStorage
-        updateLocalStorageItem(
-          LS_KEY_BRIDGE_WITHDRAWALS,
-          (w: any) => w.id === operationId,
-          (w: any) => ({
-            ...w,
-            success: true,
-            status: BridgeOperationStatus.completed,
-            l1TxHash: withdrawResult.l1TxHash,
-            l1TxUrl: withdrawResult.l1TxUrl,
-            completedAt: Date.now(),
-          }),
-        )
-      } catch (error) {
-        // L1 withdraw failed — tokens are still burned on L2.
-        // PATCH lastErrorMessage but do NOT change status (stays 'ready' for Resume).
-        const errorMessage =
-          error instanceof Error ? error.message : String(error)
-        if (operationId) {
-          patchOperationAsync(operationId, {
-            lastErrorMessage: `L1 withdraw failed: ${errorMessage}`.slice(
-              0,
-              500,
-            ),
-          })
-        }
-
-        const isArtifactError =
-          errorMessage.includes('Contract artifact not found') ||
-          errorMessage.includes('artifact not found') ||
-          errorMessage.includes('Contract artifact') ||
-          (errorMessage.includes('artifact') &&
-            errorMessage.includes('not found'))
-
-        if (isArtifactError) {
-          notify('error', {
-            heading: 'Contract Artifact Not Found',
-            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.`,
-          })
-        } else {
-          notify('error', `Failed to withdraw tokens on L1. ${errorMessage}`)
-        }
-        throw error
-      }
-
-      // ─── Step 8: Bridge Complete ───────────────────────────────────
-      setProgressStep(4, 'completed')
-      setProgressStep(5, 'active')
-
-      logInfo('Withdrawal from L2 to L1 completed', {
-        walletType: WalletType.WAAP,
-        loginMethod: loginMethod,
-        walletProvider: walletProvider,
-        address: l1Address,
-        chainId: chainId,
-        aztecLoginMethod: aztecLoginMethod,
-        aztecAddress: aztecAddress,
-        direction: BridgeDirection.L2_TO_L1,
-        fromNetwork: 'Aztec',
-        toNetwork: 'Ethereum',
-        fromToken: selectedToken?.symbol ?? 'cUSDC',
-        toToken: selectedToken?.pairedSymbol ?? 'USDC',
-        amount: amount.toString(),
-        l1Address: l1Address,
-        l2Address: aztecAddress,
-        l2TxHash: l2TxHash,
-        l1TxHash: l1WithdrawTxHash,
-        isPrivacyModeEnabled: isPrivacyModeEnabled,
-        userAction: 'withdrawal_l2_to_l1_completed',
-      })
-
-      await wait(3000)
-      setProgressStep(5, 'completed')
-
-      return l2TxHash
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error'
-
-      logError('Withdrawal from L2 to L1 failed', {
-        walletType: WalletType.WAAP,
-        loginMethod: loginMethod,
-        walletProvider: walletProvider,
-        address: l1Address,
-        chainId: chainId,
-        aztecLoginMethod: aztecLoginMethod,
-        aztecAddress: aztecAddress,
-        direction: BridgeDirection.L2_TO_L1,
-        fromNetwork: 'Aztec',
-        toNetwork: 'Ethereum',
-        fromToken: selectedToken?.symbol ?? 'cUSDC',
-        toToken: selectedToken?.pairedSymbol ?? 'USDC',
-        amount: amount.toString(),
-        l1Address: l1Address,
-        l2Address: aztecAddress,
-        error: errorMessage,
-        userAction: 'withdrawal_l2_to_l1_failed',
-      })
-
-      // 🔒 CRITICAL: Only mark as 'failed' if burn has NOT happened.
-      // If burn confirmed, status stays 'submitted'/'ready' so user can Resume.
-      if (operationId) {
-        const patchData: Record<string, unknown> = {
-          lastErrorMessage: errorMessage.slice(0, 500),
-        }
-        if (!burnConfirmed) {
-          patchData.status = 'failed'
-        }
-        patchOperationAsync(operationId, patchData)
-      }
-
-      const isBlockNotProven =
-        /BlockNotProven|NothingToConsumeAtBlock|block.*required|required.*block/i.test(
-          errorMessage,
-        ) ||
-        (errorMessage.includes('leaf') && errorMessage.includes('block'))
-      const userMessage = isBlockNotProven
-        ? `L1 withdraw failed: the L2 block may not be proven on Ethereum yet. Wait the full ~40 minutes after the L2 exit, then try again. (${errorMessage})`
-        : `Failed to withdraw tokens. ${errorMessage}`
-      notify('error', userMessage)
-      throw error
-    }
+    return result.l2TxHash
   }
 
   return useToastMutation({
     mutationFn,
     onSuccess: (txHash) => {
-      console.log('[L2→L1] Withdrawal mutation onSuccess', {
-        txHash,
-        hasOnBridgeSuccess: !!onBridgeSuccess,
-      })
       queryClient.invalidateQueries({
         queryKey: ['l1TokenBalances', l1Address],
       })
@@ -636,7 +440,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         chainId: chainId,
         aztecLoginMethod: aztecLoginMethod,
         aztecAddress: aztecAddress ?? '',
-        direction: BridgeDirection.L2_TO_L1,
+        direction: 'L2_TO_L1',
         fromNetwork: 'Aztec',
         toNetwork: 'Ethereum',
         fromToken: selectedToken?.symbol ?? 'cUSDC',
@@ -648,8 +452,18 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       })
 
       if (onBridgeSuccess) {
-        console.log('[L2→L1] Calling onBridgeSuccess (handleBridgeSuccess)')
         onBridgeSuccess(txHash)
+      }
+    },
+    onError: (error) => {
+      // The onEvent 'error' handler already shows a toast for most errors.
+      // Only show here for backup failures (which are skipped in onEvent).
+      const errorMessage = error instanceof Error ? error.message : (typeof error === 'object' ? JSON.stringify(error) : String(error))
+      if (errorMessage.includes('Failed to backup')) {
+        notify('error', {
+          heading: 'Backup Failed — Withdrawal Aborted',
+          message: errorMessage.length > 200 ? errorMessage.slice(0, 200) + '...' : errorMessage,
+        }, { autoClose: false })
       }
     },
   })
@@ -657,122 +471,82 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
 
 // -----------------------------------
 
-/**
- * Recovery for L2→L1 withdrawals when witness data is missing (e.g. after refresh).
- * Recomputes L2→L1 message leaf and membership witness from stored withdrawal (nonce, amount, l1Address, l2BlockNumber).
- * ⚠️ Cannot recover the nonce – if nonce is lost after burn, withdrawal cannot be completed.
- */
 export function useL2RecoverWithdrawal() {
-  const { aztecAccount, aztecAddress } = useWalletStore()
-  const walletAdapter = useWalletAdapter()
+  const { waapAddress: l1Address } = useWalletStore()
+  const { aztecAddress } = useWalletStore()
+  const { setProgressStep, setTransactionUrls, l2TxUrl: currentL2TxUrl } = useBridgeStore()
+  const bridge = useBridge()
   const notify = useToast()
 
   const mutationFn = async ({
     l2TxHash,
-    l1Address,
+    l1Address: paramL1Address,
   }: {
     l2TxHash: string
     l1Address: string
   }) => {
-    if (!aztecNode) {
-      throw new Error('Aztec node not available')
-    }
-    if (!walletAdapter) {
-      throw new Error('Wallet adapter not initialized')
-    }
+    const resolvedL1Address = paramL1Address || l1Address
 
-    const storedWithdrawals = localStorage.getItem(LS_KEY_BRIDGE_WITHDRAWALS)
+    const storedWithdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
     const list = storedWithdrawals ? JSON.parse(storedWithdrawals) : []
     const w = list.find(
-      (x: any) => x.l2TxHash === l2TxHash && x.l1Address === l1Address,
+      (x: any) => x.l2TxHash === l2TxHash && x.l1Address?.toLowerCase() === resolvedL1Address?.toLowerCase(),
     )
-    if (!w) {
-      throw new Error(
-        'Withdrawal not found in storage. To recover, provide L2 tx hash, L1 address, and ensure nonce is saved.',
-      )
-    }
-    if (w.l2ToL1MessageIndex != null && w.siblingPath != null) {
-      notify('info', 'Withdrawal data already complete. No recovery needed.')
-      return { success: true, withdrawal: w }
-    }
-    const blockNumber = w.l2BlockNumber ?? w.l2TxReceipt?.blockNumber
-    if (!blockNumber) {
-      const beforeHint = w.l2BlockNumberBeforeTx
-        ? ` Your backup may include l2BlockNumberBeforeTx (${w.l2BlockNumberBeforeTx}); the tx block is at or after that.`
-        : ''
-      throw new Error(
-        'Block number is required for recovery. Provide the L2 block number where the transaction was included.' +
-          beforeHint,
-      )
-    }
-    const nodeInfo = await aztecNode.getNodeInfo()
-    const rollupVersion = nodeInfo?.rollupVersion
-    if (rollupVersion == null) {
-      throw new Error('Rollup version not available from node.')
-    }
-    const l1Addresses = nodeInfo?.l1ContractAddresses as Record<string, any> | undefined
-    const rollupAddress = l1Addresses?.rollupAddress?.toString() || L1_CONTRACT_ADDRESSES.rollupAddress
-    if (!rollupAddress) {
-      throw new Error('Rollup address not available. Cannot convert block number to epoch for L2→L1 witness.')
-    }
-    const amount = BigInt(w.amount)
-    if (!w.l2BridgeAddress) {
-      throw new Error('l2BridgeAddress not stored in operation. Cannot recover witness without knowing which L2 bridge contract was used.')
-    }
-    if (!w.portalAddressL1) {
-      throw new Error('portalAddressL1 not stored in operation. Cannot recover witness without knowing which token portal was used.')
-    }
-    const l2BridgeAddress = w.l2BridgeAddress
-    const portalAddress = w.portalAddressL1
 
-    const msgLeaf = computeL2ToL1MessageLeaf({
-      l1Recipient: w.l1Address,
-      amount,
-      l2BridgeAddress,
-      portalAddress,
-      rollupVersion,
-      chainId: L1_CHAIN_ID,
+    const operationId = w?.id ?? w?.operationId
+    if (!operationId) {
+      throw new Error(
+        'Operation ID not found in storage. Recovery requires the operation ID. Please use the Activity page to resume.',
+      )
+    }
+
+    await bridge.resume(operationId, {
+      sendTransaction: async (tx) => {
+        return await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx]) as string
+      },
+      signMessage: async (msg: string) => {
+        verifyEncryptionDomain()
+        return await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, resolvedL1Address]) as string
+      },
+      l1Address: resolvedL1Address ?? undefined,
+      l2Address: aztecAddress ?? undefined,
+      onStep: (step, status) => setProgressStep(step, status),
+      onEvent: (event: BridgeEvent) => {
+        switch (event.type) {
+          case 'proven_poll':
+            notify('info', `Waiting for L2 block to be proven (proven: ${event.provenBlock}, need: ${event.neededBlock}, ${Math.round(event.elapsedMs / 60_000)} min)...`, { toastId: 'resume-l2-to-l1-progress', autoClose: false })
+            break
+          case 'proven_fallback':
+            notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, { toastId: 'resume-l2-to-l1-progress', autoClose: false })
+            break
+          case 'l1_withdraw_sent':
+            setTransactionUrls(event.l1TxUrl, currentL2TxUrl)
+            break
+          case 'operation_completed':
+            if (event.l1TxHash) {
+              const l1Url = `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${event.l1TxHash}`
+              setTransactionUrls(l1Url, null)
+            }
+            break
+          case 'patch_failed':
+            notify('warn', {
+              heading: 'Backup Warning',
+              message: `Could not save ${event.label} to server. Do not close this page.`,
+            }, { autoClose: false })
+            break
+          case 'error':
+            if (event.fundsAtRisk) {
+              notify('error', {
+                heading: 'Recovery Error — Funds Safe',
+                message: 'Your withdrawal proof is saved. Go to Activity to try again.',
+              }, { autoClose: false })
+            }
+            break
+        }
+      },
     })
 
-    const witnessResult = await computeWitness(Number(blockNumber), msgLeaf, rollupAddress)
-    const leafIndexStr = witnessResult.leafIndex
-    const siblingPathArr = witnessResult.siblingPath
-    const recoveredEpoch = witnessResult.epoch
-    const updatedWithdrawals = list.map((x: any) =>
-      x.l2TxHash === l2TxHash && x.l1Address === l1Address
-        ? {
-            ...x,
-            l2ToL1MessageIndex: leafIndexStr,
-            siblingPath: siblingPathArr,
-            status: 'ready',
-          }
-        : x,
-    )
-    localStorage.setItem(
-      LS_KEY_BRIDGE_WITHDRAWALS,
-      JSON.stringify(updatedWithdrawals),
-    )
-
-    // Sync recovered witness data back to server
-    if (w.operationId) {
-      patchOperationAsync(w.operationId, {
-        l2ToL1MessageIndex: leafIndexStr,
-        siblingPath: siblingPathArr,
-        epoch: recoveredEpoch != null ? Number(recoveredEpoch) : undefined,
-        status: 'ready',
-      })
-    }
-
-    notify('success', 'Withdrawal data recovered successfully!')
-    return {
-      success: true,
-      withdrawal: {
-        ...w,
-        l2ToL1MessageIndex: leafIndexStr,
-        siblingPath: siblingPathArr,
-        status: 'ready',
-      },
-    }
+    return { success: true, operationId }
   }
 
   return useToastMutation({
@@ -795,7 +569,7 @@ export function useExportWithdrawalData() {
 
   const exportWithdrawal = (withdrawalId: string) => {
     try {
-      const raw = localStorage.getItem(LS_KEY_BRIDGE_WITHDRAWALS)
+      const raw = localStorage.getItem(STORAGE_KEYS.withdrawals)
       if (!raw) {
         notify('error', 'No withdrawal data found')
         return
@@ -819,43 +593,27 @@ export function useExportWithdrawalData() {
 
   const copyNonce = async (withdrawalId: string) => {
     try {
-      const raw = localStorage.getItem(LS_KEY_BRIDGE_WITHDRAWALS)
-      if (!raw) {
-        notify('error', 'No withdrawal data found')
-        return false
-      }
-      const withdrawals = JSON.parse(raw)
-      const w = withdrawals.find((x: any) => x.id === withdrawalId)
-      if (!w?.encryptedCiphertext) {
+      const result = await decryptStorageEntry(
+        STORAGE_KEYS.withdrawals,
+        withdrawalId,
+        'nonce',
+        async (msg, addr) => await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, addr]) as string,
+      )
+
+      if (!result) {
         notify('error', 'Encrypted withdrawal data not found')
         return false
       }
 
-      // Decrypt the nonce from the encrypted localStorage entry
-      const signingMessage = createSigningMessage(w.l1Address)
-      const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [
-        signingMessage,
-        w.l1Address,
-      ]) as string
-      const encryptionKey = await deriveEncryptionKey(w.l1Address, signature, w.keyDerivationDomain)
-      const decrypted = JSON.parse(
-        await decryptData(w.encryptedCiphertext, w.encryptedIv, w.encryptedTag, encryptionKey)
-      )
-
       logInfo('bridge.decrypt_nonce', {
-        l1Address: w.l1Address,
-        operationId: w.id,
-        tokenSymbol: w.tokenSymbol,
-        amount: w.amount?.toString(),
+        l1Address: result.entry.l1Address,
+        operationId: result.entry.id,
+        tokenSymbol: result.entry.tokenSymbol,
+        amount: result.entry.amount?.toString(),
         userAction: 'copy_nonce',
       })
 
-      if (!decrypted.nonce) {
-        notify('error', 'Nonce not found in decrypted data')
-        return false
-      }
-
-      const ok = await copyToClipboard(decrypted.nonce)
+      const ok = await copyToClipboard(result.value)
       if (ok) notify('success', 'Nonce copied to clipboard!')
       else notify('error', 'Failed to copy')
       return ok
@@ -868,7 +626,7 @@ export function useExportWithdrawalData() {
 
   const getAllPendingWithdrawals = () => {
     try {
-      const raw = localStorage.getItem(LS_KEY_BRIDGE_WITHDRAWALS)
+      const raw = localStorage.getItem(STORAGE_KEYS.withdrawals)
       if (!raw) return []
       const withdrawals = JSON.parse(raw)
       return withdrawals.filter((x: any) => !x.success)
@@ -944,7 +702,7 @@ export function useL2MintSoulboundToken(onSuccess: (data: any) => void) {
 }
 
 export const useL2PendingTxCount = () => {
-  const { aztecAddress, isAztecConnected } = useWalletStore()
+  const { aztecAddress } = useWalletStore()
   const handleL2Error = useL2ErrorHandler()
 
   // Create a stable query key that doesn't change with renders
@@ -986,7 +744,7 @@ export const useL2PendingTxCount = () => {
 }
 
 export const useL2TokenTransfer = () => {
-  const { aztecAddress, isAztecConnected } = useWalletStore()
+  const { aztecAddress } = useWalletStore()
   const handleL2Error = useL2ErrorHandler()
   const walletAdapter = useWalletAdapter()
 

@@ -1,0 +1,40 @@
+{
+  "name": "@human.tech/aztec-bridge-sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aztec/aztec.js": "4.0.0-devnet.2-patch.3",
+    "@aztec/ethereum": "4.0.0-devnet.2-patch.3",
+    "@aztec/foundation": "4.0.0-devnet.2-patch.3",
+    "@aztec/l1-artifacts": "4.0.0-devnet.2-patch.3",
+    "@aztec/stdlib": "4.0.0-devnet.2-patch.3",
+    "@aztec/wallet-sdk": "4.0.0-devnet.2-patch.3",
+    "@noble/ciphers": "^2.1.1",
+    "@noble/hashes": "^2.0.1",
+    "axios": "^1.13.6",
+    "siwe": "^3.0.0",
+    "viem": "^2.22.8"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5"
+  }
+}

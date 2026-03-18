@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { BridgeDirection, BridgeState, Network, Token } from '@/types/bridge'
 import { L1_NETWORKS, L2_NETWORKS, L1_TOKENS, L2_TOKENS } from '@/config'
+import type { RecoveryClaimData, RecoveryWithdrawalData } from '@human.tech/aztec-bridge-sdk'
 
 // Types
 export interface LoadingStep {
@@ -29,58 +30,8 @@ interface TransactionState {
   l2TxUrl: string | null
 }
 
-/** Data needed to resume an incomplete L1→L2 bridge operation */
-export interface RecoveryClaimData {
-  operationId: string
-  claimSecret: string
-  claimSecretHash: string
-  messageHash: string | null
-  messageLeafIndex: string | null
-  amount: string
-  l1Address: string
-  l2Address: string
-  l1TxHash: string | null
-  l1TxUrl: string | null
-  l1BlockNumberBeforeTx: string | null
-  isPrivacyModeEnabled: boolean
-  nodeInfo: Record<string, unknown> | null
-  status: string
-  currentStep: number | null
-  // Recovery-critical contract snapshot (multi-token support)
-  portalAddressL1: string | null
-  bridgeAddressL2: string | null
-  tokenAddressL1: string | null
-  tokenAddressL2: string | null
-}
-
-/** Data needed to resume an incomplete L2→L1 withdrawal */
-export interface RecoveryWithdrawalData {
-  operationId: string
-  amount: string
-  l1Address: string
-  l2Address: string
-  l2TxHash: string | null
-  l2TxUrl: string | null
-  l2BlockNumber: string | null
-  l2BlockNumberBeforeTx: string | null
-  l2ToL1MessageIndex: string | null
-  siblingPath: string[] | null
-  recipientL1Address: string | null
-  // Recovery-critical contract & version snapshot
-  rollupVersion: number | null
-  chainIdL1: number | null
-  portalAddressL1: string | null
-  bridgeAddressL2: string | null
-  l1RollupAddress: string | null
-  l1OutboxAddress: string | null
-  isPrivacyModeEnabled: boolean
-  nodeInfo: Record<string, unknown> | null
-  status: string
-  currentStep: number | null
-}
-
 interface RecoveryState {
-  recoveryOperationId: string | null
+  recoveryOperationId: number | null
   recoveryClaimData: RecoveryClaimData | null
   recoveryWithdrawalData: RecoveryWithdrawalData | null
 }
@@ -123,8 +74,8 @@ interface BridgeStoreState
   setTransactionUrls: (l1TxUrl: string | null, l2TxUrl: string | null) => void
 
   // Recovery actions
-  setRecovery: (operationId: string, claimData: RecoveryClaimData) => void
-  setWithdrawalRecovery: (operationId: string, withdrawalData: RecoveryWithdrawalData) => void
+  setRecovery: (operationId: number, claimData: RecoveryClaimData) => void
+  setWithdrawalRecovery: (operationId: number, withdrawalData: RecoveryWithdrawalData) => void
   clearRecovery: () => void
 
   // Reset
@@ -137,7 +88,7 @@ const DEFAULT_BRIDGE_STATE: BridgeState = {
   from: { network: L1_NETWORKS[0], token: L1_TOKENS[0] },
   to: { network: L2_NETWORKS[0], token: L2_TOKENS[0] },
   direction: BridgeDirection.L1_TO_L2,
-  amount: '1',
+  amount: '',
 }
 
 const initialStepState: StepState = {
@@ -368,9 +319,9 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   setTransactionUrls: (l1TxUrl, l2TxUrl) => set({ l1TxUrl, l2TxUrl }),
 
   // Recovery actions
-  setRecovery: (operationId: string, claimData: RecoveryClaimData) =>
+  setRecovery: (operationId: number, claimData: RecoveryClaimData) =>
     set({ recoveryOperationId: operationId, recoveryClaimData: claimData, recoveryWithdrawalData: null }),
-  setWithdrawalRecovery: (operationId: string, withdrawalData: RecoveryWithdrawalData) =>
+  setWithdrawalRecovery: (operationId: number, withdrawalData: RecoveryWithdrawalData) =>
     set({ recoveryOperationId: operationId, recoveryWithdrawalData: withdrawalData, recoveryClaimData: null }),
   clearRecovery: () =>
     set({ recoveryOperationId: null, recoveryClaimData: null, recoveryWithdrawalData: null }),

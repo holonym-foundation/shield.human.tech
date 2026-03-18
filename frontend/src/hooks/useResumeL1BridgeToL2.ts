@@ -1,363 +1,109 @@
 import { useMutation } from '@tanstack/react-query'
-import { Fr } from '@aztec/aztec.js/fields'
-import { useBridgeStore, type RecoveryClaimData } from '@/stores/bridgeStore'
-import { useWalletStore } from '@/stores/walletStore'
+import { useBridgeStore } from '@/stores/bridgeStore'
+import type { RecoveryClaimData } from '@human.tech/aztec-bridge-sdk'
+import { useWalletStore, requestWaapWallet, WAAP_METHOD } from '@/stores/walletStore'
 import { useWalletAdapter } from './useWalletAdapter'
 import { useToast } from './useToast'
-import { wait } from '@/utils'
-import { getAztecscanUrl, L1_CHAIN_ID, L2_CHAIN_ID } from '@/config'
-import { BridgeOperationStatus } from '@prisma/client'
-// @ts-ignore — JSON import from forge build output (custom compliant portal w/ attestation structs)
-import CustomTokenPortalJson from '../../../l1-contracts/out/TokenPortal.sol/TokenPortal.json'
-const CustomTokenPortalAbi = CustomTokenPortalJson.abi
-import { decodeEventLog, parseEventLogs } from 'viem'
-import {
-  LS_KEY_BRIDGE_DEPOSITS,
-  patchOperationWithRetry,
-  patchOperationAsync,
-  updateLocalStorageItem,
-  publicClient,
-} from './bridge/bridgeUtils'
-import {
-  pollL1ToL2MessageSync,
-  executeL2Claim,
-} from './bridge/bridgeL1ToL2'
+import { useBridge } from '@/hooks/useBridge'
+import type { BridgeEvent } from '@human.tech/aztec-bridge-sdk'
+import { getAztecscanUrl, L2_CHAIN_ID } from '@/config'
+import { verifyEncryptionDomain } from '@/utils'
 
-/**
- * Recover messageHash and messageLeafIndex from an L1 transaction receipt.
- * Used when these values were not stored (e.g. page crash between deposit and receipt parsing).
- */
-async function recoverFromReceipt(
-  l1TxHash: string,
-  portalAddress: string,
-  claimSecretHash: string,
-  amount: bigint,
-  aztecAddress: string,
-  isPrivacyModeEnabled: boolean,
-): Promise<{ messageHash: string; messageLeafIndex: string }> {
-  console.log('[Resume L1→L2] Recovering messageHash from L1 receipt (txHash=', l1TxHash, ')...')
 
-  const receipt = await publicClient.getTransactionReceipt({
-    hash: l1TxHash as `0x${string}`,
-  })
-
-  const eventName = isPrivacyModeEnabled
-    ? 'DepositToAztecPrivate'
-    : 'DepositToAztecPublic'
-
-  const parsedLogs = parseEventLogs({ abi: CustomTokenPortalAbi, logs: receipt.logs })
-  const depositEvent: any = parsedLogs.find((l: any) => l.eventName === eventName)
-
-  if (!depositEvent) {
-    throw new Error(`${eventName} event not found in receipt ${l1TxHash}`)
-  }
-
-  const messageHash = depositEvent.args.key.toString()
-  const messageLeafIndex = depositEvent.args.index.toString()
-  console.log('[Resume L1→L2] Recovered from receipt: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
-  return { messageHash, messageLeafIndex }
-}
-
-/**
- * Recover messageHash and messageLeafIndex by scanning L1 blocks for portal events.
- * Last-resort recovery when l1TxHash is also missing (e.g. crash right after sending tx).
- */
-async function recoverFromBlockScan(
-  l1BlockNumberBeforeTx: string,
-  portalAddress: string,
-  claimSecretHash: string,
-  amount: bigint,
-  aztecAddress: string,
-  isPrivacyModeEnabled: boolean,
-): Promise<{ messageHash: string; messageLeafIndex: string }> {
-  const fromBlock = BigInt(l1BlockNumberBeforeTx)
-  const currentBlock = await publicClient.getBlockNumber()
-  const toBlock = currentBlock
-
-  console.log('[Resume L1→L2] Scanning L1 blocks', fromBlock.toString(), '→', toBlock.toString(), 'for portal events...')
-
-  const logs = await publicClient.getLogs({
-    address: portalAddress as `0x${string}`,
-    fromBlock,
-    toBlock,
-  })
-
-  const targetEventName = isPrivacyModeEnabled
-    ? 'DepositToAztecPrivate'
-    : 'DepositToAztecPublic'
-
-  for (const rawLog of logs) {
-    try {
-      const decoded = decodeEventLog({
-        abi: CustomTokenPortalAbi,
-        data: rawLog.data,
-        topics: rawLog.topics,
-      })
-      if (decoded.eventName !== targetEventName) continue
-
-      const args = decoded.args as any
-      // Custom portal event uses `secretHash` for both public and private events
-      const matches = isPrivacyModeEnabled
-        ? args.secretHash === claimSecretHash
-        : args.secretHash === claimSecretHash && args.to === aztecAddress
-
-      if (matches) {
-        const messageHash = args.key.toString()
-        const messageLeafIndex = args.index.toString()
-        console.log('[Resume L1→L2] Found event in block scan: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
-        return { messageHash, messageLeafIndex }
-      }
-    } catch {
-      // Skip logs that can't be decoded with our ABI
-    }
-  }
-
-  throw new Error(
-    `Could not find deposit event in blocks ${fromBlock}–${toBlock}. ` +
-    'The deposit may not have been mined yet, or the block range may need to be extended. ' +
-    'Try resuming again later.'
-  )
-}
-
-/**
- * Hook to resume an incomplete L1→L2 bridge operation.
- *
- * Determines the current stage from RecoveryClaimData and picks up
- * from where the user left off:
- *
- * Stage 1: has messageHash + messageLeafIndex → poll for sync → claim on L2
- * Stage 2: has l1TxHash but no messageHash → recover from L1 receipt → then Stage 1
- * Stage 3: has l1BlockNumberBeforeTx only → scan L1 blocks → then Stage 1
- * Stage 4: brute-force messageLeafIndex if extraction gave messageHash but not index
- *
- * Pre-deposit failures (status=pending/failed with no l1TxHash) are safe — no funds at risk.
- */
 export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
-  const { setProgressStep, setTransactionUrls, clearRecovery } =
-    useBridgeStore()
+  const { setProgressStep, setTransactionUrls, clearRecovery } = useBridgeStore()
   const { aztecAddress, aztecLoginMethod } = useWalletStore()
   const walletAdapter = useWalletAdapter()
   const notify = useToast()
+  const bridge = useBridge()
 
-  const mutationFn = async (
-    claimData: RecoveryClaimData,
-  ): Promise<string | undefined> => {
-    const {
-      operationId,
-      claimSecret,
-      claimSecretHash,
-      amount,
-      l2Address,
-      l1TxHash,
-      l1TxUrl,
-      l1BlockNumberBeforeTx,
-      isPrivacyModeEnabled,
-      portalAddressL1,
-    } = claimData
+  const mutationFn = async (claimData: RecoveryClaimData): Promise<string | undefined> => {
+    if (!aztecAddress) throw new Error('Aztec wallet not connected')
+    if (!walletAdapter) throw new Error('Aztec wallet adapter not initialized. Please wait for wallet to connect.')
 
-    let { messageHash, messageLeafIndex } = claimData
+    const l1Address = claimData.l1Address
+    if (!l1Address) throw new Error('L1 address not available for decryption. Cannot resume without the original L1 wallet address.')
 
-    console.log('[Resume L1→L2] Starting resume with recovery data:', {
-      operationId,
-      hasClaimSecret: !!claimSecret,
-      hasClaimSecretHash: !!claimSecretHash,
-      amount,
-      l2Address,
-      l1TxHash: l1TxHash ? l1TxHash.slice(0, 14) + '...' : null,
-      l1TxUrl: l1TxUrl ? 'set' : null,
-      l1BlockNumberBeforeTx,
-      isPrivacyModeEnabled,
-      messageHash: messageHash ?? null,
-      messageLeafIndex: messageLeafIndex ?? null,
-      currentStep: claimData.currentStep ?? null,
+    // Warn if resume wallet differs from deposit wallet — decryption will fail
+    const { waapAddress } = useWalletStore.getState()
+    if (waapAddress && l1Address.toLowerCase() !== waapAddress.toLowerCase()) {
+      console.warn('[Resume L1→L2] Connected wallet differs from deposit wallet:', waapAddress, 'vs', l1Address)
+    }
+
+    const result = await bridge.resume(claimData.operationId, {
+      walletAdapter,
+      l1Address,
+      l2Address: aztecAddress,
+      sendTransaction: async (tx) => {
+        return await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx]) as string
+      },
+      callContract: async (tx) => {
+        return await requestWaapWallet(WAAP_METHOD.eth_call, [tx]) as string
+      },
+      signMessage: async (msg: string) => {
+        verifyEncryptionDomain()
+        const sig = await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, l1Address])
+        return sig as string
+      },
+      onStep: (step, status) => setProgressStep(step, status),
+      onEvent: (event: BridgeEvent) => {
+        switch (event.type) {
+          case 'recovery_from_receipt':
+            notify('info', 'Recovering from L1 receipt...', { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
+            break
+          case 'recovery_from_block_scan':
+            notify('info', 'Scanning L1 blocks for deposit...', { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
+            break
+          case 'sync_poll':
+            notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
+            break
+          case 'deposit_confirmed':
+            if ('l1TxUrl' in event) setTransactionUrls(event.l1TxUrl, null)
+            break
+          case 'claim_attempt':
+            notify('info', `Claiming tokens on L2 (attempt ${event.attempt}/${event.maxAttempts})...`, { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
+            break
+          case 'claim_retry':
+            notify('info', `L2 node hasn't synced this message yet. Retrying in ${Math.round(event.delayMs / 60_000)} min (${event.attempt}/${event.maxAttempts})...`, { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
+            break
+          case 'operation_completed':
+            if ('l2TxHash' in event && event.l2TxHash) {
+              const l2TxUrl = `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${event.l2TxHash}`
+              setTransactionUrls(claimData.l1TxUrl ?? null, l2TxUrl)
+            }
+            break
+          case 'attestation_fetch':
+            console.log(`[Resume L1→L2] Fetching ${event.method} attestation...`)
+            break
+          case 'attestation_fallback':
+            console.log(`[Resume L1→L2] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
+            break
+          case 'patch_failed':
+            notify('warn', {
+              heading: 'Backup Warning',
+              message: `Could not save ${event.label} to server. Please do not close this page until the bridge completes.`,
+            }, { autoClose: false })
+            break
+          case 'error':
+            if (event.fundsAtRisk) {
+              notify('error', {
+                heading: 'Resume Error — Funds Safe',
+                message: 'Your deposit is safe on L1. Go to Activity to try again.',
+              }, { autoClose: false })
+            }
+            break
+        }
+      },
     })
 
-    if (!aztecAddress) {
-      throw new Error('Aztec wallet not connected')
-    }
-    if (!walletAdapter) {
-      throw new Error(
-        'Aztec wallet adapter not initialized. Please wait for wallet to connect.',
-      )
-    }
-
-    if (!portalAddressL1) {
-      throw new Error(
-        'portalAddressL1 not stored in operation. Cannot resume without knowing which token portal to use. Contact support with your operation ID.',
-      )
-    }
-    const portalAddress = portalAddressL1
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // RECOVERY: Recover messageHash + messageLeafIndex if missing
-    // ═══════════════════════════════════════════════════════════════════════
-    if (!messageHash || !messageLeafIndex) {
-      console.log('[Resume L1→L2] messageHash or messageLeafIndex missing — attempting recovery...')
-      setProgressStep(1, 'active')
-
-      try {
-        const amountBigInt = BigInt(amount)
-        const targetAddress = l2Address || aztecAddress
-
-        if (l1TxHash) {
-          // Path A: We have the L1 tx hash — get receipt and extract event
-          const recovered = await recoverFromReceipt(
-            l1TxHash,
-            portalAddress,
-            claimSecretHash,
-            amountBigInt,
-            targetAddress,
-            isPrivacyModeEnabled,
-          )
-          messageHash = recovered.messageHash
-          messageLeafIndex = recovered.messageLeafIndex
-        } else if (l1BlockNumberBeforeTx) {
-          // Path B: No tx hash — scan L1 blocks for portal events
-          const recovered = await recoverFromBlockScan(
-            l1BlockNumberBeforeTx,
-            portalAddress,
-            claimSecretHash,
-            amountBigInt,
-            targetAddress,
-            isPrivacyModeEnabled,
-          )
-          messageHash = recovered.messageHash
-          messageLeafIndex = recovered.messageLeafIndex
-        } else {
-          throw new Error(
-            'Cannot resume: no messageHash, no l1TxHash, and no l1BlockNumberBeforeTx. ' +
-            'There is not enough data to recover. Contact support.',
-          )
-        }
-
-        // Persist recovered data to backend (3 retries)
-        const ok = await patchOperationWithRetry(operationId, {
-          status: 'deposited',
-          messageHash,
-          messageLeafIndex,
-          currentStep: 2,
-        }, { label: 'recovered data' })
-        if (ok) {
-          console.log('[Resume L1→L2] Recovered data stored on backend')
-        }
-      } catch (recoveryError) {
-        console.error('[Resume L1→L2] Recovery failed:', recoveryError)
-        throw new Error(
-          `Recovery failed: ${recoveryError instanceof Error ? recoveryError.message : 'Unknown error'}. ` +
-          'Your funds are safe on L1. You can try resuming again later.',
-        )
-      }
-    }
-
-    // Set UI to show L1 tx URL if available
-    if (l1TxUrl) {
-      setTransactionUrls(l1TxUrl, null)
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 2: Poll for L1→L2 message sync
-    // ═══════════════════════════════════════════════════════════════════════
-    setProgressStep(1, 'completed') // L1 deposit already done
-    setProgressStep(2, 'active')
-    patchOperationAsync(operationId, { currentStep: 2 })
-
-    const syncResult = await pollL1ToL2MessageSync(messageHash!)
-    if (!syncResult.synced) {
-      throw new Error(
-        `L1-to-L2 message sync timeout after ${syncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming again later.`,
-      )
-    }
-
-    // Extra buffer so the message is visible on the wallet's node
-    console.log('[Resume L1→L2] Final wait before claiming (2 min)...')
-    await wait(120_000)
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 3: Claim on L2
-    // ═══════════════════════════════════════════════════════════════════════
-    setProgressStep(2, 'completed')
-    setProgressStep(3, 'active')
-    patchOperationAsync(operationId, { currentStep: 3 })
-
-    const claimSecretFr = Fr.fromString(claimSecret)
-    const claimResult = await executeL2Claim(
-      { walletAdapter, aztecAddress, isPrivacyModeEnabled },
-      {
-        amount: BigInt(amount),
-        claimSecret: claimSecretFr,
-        messageLeafIndex: messageLeafIndex ? BigInt(messageLeafIndex) : null,
-      },
-      {
-        onAttempt: (attempt, maxAttempts) => {
-          notify('info', `Claiming tokens on L2 (attempt ${attempt}/${maxAttempts})...`)
-        },
-        onRetry: (attempt, maxAttempts, delayMs) => {
-          notify('info', `L2 node hasn't synced this message yet. Retrying in ${Math.round(delayMs / 60_000)} min (${attempt}/${maxAttempts})...`)
-        },
-      },
-    )
-
-    const l2TxHash = claimResult.l2TxHash
-    if (claimResult.usedBruteForce && claimResult.bruteForceLeafIndex != null) {
-      messageLeafIndex = claimResult.bruteForceLeafIndex.toString()
-    }
-
-    const l2TxUrl = `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${l2TxHash}`
-    setTransactionUrls(l1TxUrl ?? null, l2TxUrl)
-
-    // Backend: mark operation as completed (retry — critical for DB consistency)
-    console.log('[Resume L1→L2] PATCH completed →', { operationId, status: 'completed', l2TxHash, currentStep: 4 })
-    await patchOperationWithRetry(operationId, {
-      status: 'completed',
-      l2TxHash,
-      l2TxUrl,
-      completedAt: new Date().toISOString(),
-      currentStep: 4,
-    }, { label: 'L1→L2 resume completion' })
-
-    // Update localStorage
-    updateLocalStorageItem(
-      LS_KEY_BRIDGE_DEPOSITS,
-      (c: any) => c.id === operationId,
-      (c: any) => ({
-        ...c,
-        success: true,
-        status: BridgeOperationStatus.completed,
-        l2TxHash,
-        l2TxUrl,
-        completedAt: Date.now(),
-      }),
-    )
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 4: Complete
-    // ═══════════════════════════════════════════════════════════════════════
-    setProgressStep(3, 'completed')
-    setProgressStep(4, 'active')
-    await wait(3000)
-    setProgressStep(4, 'completed')
-
-    // Register token in wallet
-    if (aztecLoginMethod && walletAdapter) {
-      try {
-        await walletAdapter.registerToken(walletAdapter.tokenAddress)
-      } catch {
-        // Not critical
-      }
-    }
-
-    // Clear recovery state
     clearRecovery()
-
-    return l2TxHash
+    return result.l2TxHash
   }
 
   return useMutation({
     mutationFn,
     onSuccess: (txHash) => {
-      if (onSuccess) {
-        onSuccess(txHash)
-      }
+      if (onSuccess) onSuccess(txHash)
     },
   })
 }

@@ -16,9 +16,18 @@ export async function enforceAddressBinding(l1Address: string, l2Address: string
   })
 
   if (!existing) {
-    await prisma.addressBinding.create({
-      data: { l1Address, l2Address },
-    })
+    try {
+      await prisma.addressBinding.create({
+        data: { l1Address, l2Address },
+      })
+    } catch (err: any) {
+      // P2002 = unique constraint violation (concurrent request created it first).
+      // Re-check to see if the binding matches or conflicts.
+      if (err?.code === 'P2002') {
+        return enforceAddressBinding(l1Address, l2Address)
+      }
+      throw err
+    }
     return null
   }
 

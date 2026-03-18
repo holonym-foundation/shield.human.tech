@@ -3,7 +3,7 @@ import { verifyJWT, extractTokenFromHeader, type JWTPayload } from './jwt'
 import { prisma } from './prisma'
 
 export interface AuthUser {
-  id: string
+  id: number
   l1Address: string
   l2Address: string
   l1LoginMethod: string | null

@@ -4,6 +4,7 @@ import StyledImage from './StyledImage'
 import { Oval } from 'react-loader-spinner'
 import { BridgeDirection } from '@/types/bridge'
 import { useToast } from '@/hooks/useToast'
+import { useAuthStore } from '@/stores/useAuthStore'
 import { parseUnits } from 'viem'
 import CongestionWarningModal from './model/CongestionWarningModal'
 import { useL2PendingTxCount, useNetworkHealth } from '@/hooks/useL2Operations'
@@ -28,6 +29,8 @@ function LoadingContent({ label }: { label: string }) {
 
 interface BridgeActionButtonProps {
   isDisabled?: boolean
+  isAuthenticated?: boolean
+  authFailed?: boolean
 
   // Connection states
   isWaapConnected: boolean
@@ -131,6 +134,8 @@ function BridgeActionButton({
   passportMaxAmount,
   passportScore,
   passportThreshold,
+  isAuthenticated = false,
+  authFailed = false,
   bridgeCompleted = false,
   l2NodeError = false,
   l2NodeIsReadyLoading = false,
@@ -145,7 +150,10 @@ function BridgeActionButton({
   const isNetworkDown = networkHealth?.isNetworkDown ?? false
 
   const bothWalletsConnected = isWaapConnected && isAztecConnected
-  const balancesLoading = bothWalletsConnected && (!isStateInitialized || l1BalanceLoading || l2BalanceLoading || feeJuiceLoading)
+  const balancesActuallyLoading = bothWalletsConnected && (!isStateInitialized || l1BalanceLoading || l2BalanceLoading || feeJuiceLoading)
+  const authInProgress = bothWalletsConnected && !isAuthenticated && !authFailed
+  // Show balance loading only after auth is done (balances load in parallel, but auth takes priority in UI)
+  const balancesLoading = balancesActuallyLoading && isAuthenticated && !authInProgress
 
   // Helper functions
   const getOperationType = (dir: BridgeDirection) =>
@@ -242,7 +250,17 @@ function BridgeActionButton({
       return
     }
 
-    // Step 3: Faucet if needed
+    // Step 3: Auth check — bridge requires authentication
+    if (authFailed) {
+      useAuthStore.getState().triggerRetryAuth()
+      return
+    }
+    if (!isAuthenticated) {
+      notify('info', 'Authenticating... please wait')
+      return
+    }
+
+    // Step 4: Faucet if needed
     if (isStateInitialized && isEligibleForFaucet) {
       if (useExternalFaucet && handleExternalFaucet && needsGas && !needsTokensOnly) {
         handleExternalFaucet()
@@ -260,48 +278,30 @@ function BridgeActionButton({
       }
     }
 
-    // Step 4: SBT check
+    // Step 5: SBT check
     if (!checkSBTRequirements()) {
       return
     }
 
-    // Step 5: Attestation check (privacy mode, both directions)
+    // Step 6: Attestation check (privacy mode, both directions)
     if (isPrivacyModeEnabled) {
       if (pochLoading) {
         notify('info', 'Checking eligibility...')
         return
       }
       if (!pochEligible) {
+        const reason = pochReason ? `${pochReason}. ` : 'Cannot use private mode. '
+        const scoreInfo = passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''
         notify('error', {
           heading: 'Attestation Required',
-          message: React.createElement('span', null,
-            React.createElement('span', null,
-              pochReason ? `${pochReason}. ` : 'Cannot use private mode. ',
-            ),
-            React.createElement('br'),
-            React.createElement('a', {
-              href: 'https://id.human.tech/sandbox/clean-hands',
-              target: '_blank',
-              rel: 'noopener noreferrer',
-              style: { color: '#2563eb', textDecoration: 'underline' },
-            }, 'Mint your POCH SBT here'),
-            React.createElement('br'),
-            React.createElement('a', {
-              href: 'https://app.passport.xyz/',
-              target: '_blank',
-              rel: 'noopener noreferrer',
-              style: { color: '#2563eb', textDecoration: 'underline' },
-            }, `Build your Passport score${passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''}`),
-            React.createElement('br'),
-            'Or switch to public mode.',
-          ),
+          message: `${reason}Mint your POCH SBT at id.human.tech/sandbox/clean-hands or build your Passport score${scoreInfo} at app.passport.xyz. Or switch to public mode.`,
         })
         return
       }
     }
 
-    // Step 6: Validate amount
-    // Step 6a: Passport amount limit check
+    // Step 7: Validate amount
+    // Step 7a: Passport amount limit check
     if (isPrivacyModeEnabled && attestationMethod === 'passport' && passportMaxAmount != null) {
       try {
         const decimals = 6 // USDC decimals
@@ -310,16 +310,7 @@ function BridgeActionButton({
           const maxFormatted = (Number(passportMaxAmount) / 10 ** decimals).toFixed(2)
           notify('error', {
             heading: 'Amount Exceeds Passport Limit',
-            message: React.createElement('span', null,
-              `Passport allows up to ${maxFormatted} USDC per transaction. `,
-              React.createElement('a', {
-                href: 'https://id.human.tech/sandbox/clean-hands',
-                target: '_blank',
-                rel: 'noopener noreferrer',
-                style: { color: '#2563eb', textDecoration: 'underline' },
-              }, 'Mint a POCH SBT'),
-              ' to remove this limit.',
-            ),
+            message: `Passport allows up to ${maxFormatted} USDC per transaction. Mint a POCH SBT at id.human.tech/sandbox/clean-hands to remove this limit.`,
           })
           return
         }
@@ -333,13 +324,13 @@ function BridgeActionButton({
       return
     }
 
-    // Step 7: Congestion check
+    // Step 8: Congestion check
     if (isCongested) {
       setShowCongestionWarning(true)
       return
     }
 
-    // Step 8: Execute
+    // Step 9: Execute
     processBridgeOperation()
   }
 
@@ -356,6 +347,7 @@ function BridgeActionButton({
     isNetworkDown ||
     balancesLoading ||
     isConnecting ||
+    authInProgress ||
     requestFaucetPending ||
     withdrawTokensToL1Pending ||
     bridgeTokensToL2Pending ||
@@ -373,13 +365,15 @@ function BridgeActionButton({
     l2NodeIsReadyLoading ||
     balancesLoading ||
     isOperationInFlight ||
+    authInProgress ||
     (isPrivacyModeEnabled && pochLoading && bothWalletsConnected)
 
   const getLoadingText = () => {
     if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...'
     if (balancesLoading) return 'Loading balances...'
     if (isConnecting) return 'Connecting...'
-    if (requestFaucetPending) return 'Getting Eth & Testnet USDC...'
+    if (authInProgress) return 'Authenticating...'
+    if (requestFaucetPending) return 'Getting Testnet tokens...'
     if (pochLoading && isPrivacyModeEnabled) return 'Checking eligibility...'
     if (withdrawTokensToL1Pending) return 'Withdrawing Tokens...'
     if (bridgeTokensToL2Pending) return 'Bridging Tokens...'
@@ -396,6 +390,10 @@ function BridgeActionButton({
     // Connection states
     if (!isWaapConnected) return 'Connect Ethereum Wallet'
     if (!isAztecConnected) return 'Connect Aztec Wallet'
+
+    // Auth check
+    if (authFailed) return 'Sign in to Bridge'
+    if (authInProgress) return 'Authenticating...'
 
     // Faucet
     if (needsGas || needsTokensOnly) {

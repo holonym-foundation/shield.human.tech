@@ -47,6 +47,16 @@ export const useL2ErrorHandler = () => {
       return getDefaultValue<T>(type)
     }
 
+    // Aztec wallet is locked — tell user to unlock it
+    const isWalletLocked = /locked/i.test(errorMessage)
+    if (isWalletLocked) {
+      notify('warn', {
+        heading: 'Aztec Wallet Locked',
+        message: 'Your Aztec wallet is locked. Please open the Aztec wallet extension and unlock it to load your balances.',
+      })
+      return getDefaultValue<T>(type)
+    }
+
     // Check for Aztec network / node errors (any node URL or Failed to fetch)
     const isNodeUnavailable =
       errorMessage.includes('500 from server') ||

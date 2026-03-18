@@ -1,35 +1,22 @@
+// frontend/src/components/AuthSync.tsx
 'use client'
 
 import { useEffect, useRef } from 'react'
 import { useWalletStore } from '@/stores/walletStore'
 import { useAuthStore } from '@/stores/useAuthStore'
-import { api } from '@/lib/api'
+import { useBridge } from '@/hooks/useBridge'
 import { showToast } from '@/hooks/useToast'
 import {
   requestWaapWallet,
   WAAP_METHOD,
 } from '@/stores/walletStore'
+import { L1_CHAIN_ID } from '@/config'
+
+const MAX_AUTH_RETRIES = 2
 
 /**
- * Build the deterministic auth message that the backend verifies.
- * Must match buildAuthMessage() in /api/auth/authenticate/route.ts.
- */
-function buildAuthMessage(l1Address: string, l2Address: string): string {
-  return [
-    'Aztec Bridge - Authenticate',
-    '',
-    'Sign this message to prove you own this wallet.',
-    'This does not cost any gas.',
-    '',
-    `L1 Wallet: ${l1Address.toLowerCase()}`,
-    `L2 Wallet: ${l2Address.toLowerCase()}`,
-  ].join('\n')
-}
-
-/**
- * When both L1 (Waap) and L2 (Aztec) wallets are connected, authenticate with the backend.
- * Signs a message with the L1 wallet to prove ownership, then sends the signature to the backend.
- * When either wallet disconnects, clear auth.
+ * When both L1 (Waap) and L2 (Aztec) wallets are connected, authenticate
+ * via SIWE (EIP-4361) using the SDK. Auto-retries on nonce expiry.
  */
 export default function AuthSync() {
   const {
@@ -39,8 +26,11 @@ export default function AuthSync() {
     waapWalletProvider,
     aztecLoginMethod,
   } = useWalletStore()
-  const { setAuth, clearAuth, user } = useAuthStore()
+  const { setAuth, setAuthFailed, clearAuth, user, retryAuth } = useAuthStore()
   const prevKeyRef = useRef<string | null>(null)
+  const bridge = useBridge()
+
+  const { token } = useAuthStore()
 
   const l1Normalized = waapAddress?.toLowerCase() ?? null
   const l2Normalized = aztecAddress?.toLowerCase().trim() ?? null
@@ -51,6 +41,24 @@ export default function AuthSync() {
     aztecLoginMethod === 'wallet-sdk'
       ? 'WalletSDK'
       : null
+
+  // Sync persisted JWT to bridge instance on mount/token change + drain failed patches
+  useEffect(() => {
+    if (!token) return
+    bridge.setAuthToken(token)
+    bridge.retryFailedPatches().catch((err: unknown) => {
+      console.warn('[AuthSync] retryFailedPatches on mount failed:', err)
+    })
+
+    // Drain failed PATCHes when connectivity resumes
+    const handleOnline = () => {
+      bridge.retryFailedPatches().catch((err: unknown) => {
+        console.warn('[AuthSync] retryFailedPatches on online failed:', err)
+      })
+    }
+    window.addEventListener('online', handleOnline)
+    return () => window.removeEventListener('online', handleOnline)
+  }, [token, bridge])
 
   useEffect(() => {
     if (!bothConnected) {
@@ -68,51 +76,58 @@ export default function AuthSync() {
 
     let cancelled = false
 
-    async function authenticate() {
+    async function authenticate(retryCount = 0) {
       try {
-        // Sign a message to prove ownership of the L1 wallet
-        const message = buildAuthMessage(l1Normalized!, l2Normalized!)
-        const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [
-          message,
-          waapAddress,
-        ])
-
         if (cancelled) return
 
-        const res = await api.post<{
-          success: boolean
-          token: string
-          user: {
-            id: string
-            l1Address: string
-            l2Address: string
-            l1LoginMethod: string | null
-            l1WalletProvider: string | null
-            l2LoginMethod: string | null
-            l2WalletProvider: string | null
-          }
-        }>('/api/auth/authenticate', {
-          l1Address: waapAddress,
-          l2Address: aztecAddress,
-          signature,
+        setAuthFailed(false)
+
+        const result = await bridge.authenticate({
+          l1Address: waapAddress!,
+          l2Address: aztecAddress!,
+          domain: window.location.host,
+          uri: window.location.origin,
+          chainId: L1_CHAIN_ID,
+          signMessage: async (msg: string) => {
+            const sig = await requestWaapWallet(WAAP_METHOD.personal_sign, [
+              msg,
+              waapAddress,
+            ])
+            return sig as string
+          },
           l1LoginMethod: waapLoginMethod ?? undefined,
           l1WalletProvider: waapWalletProvider ?? undefined,
           l2LoginMethod: aztecLoginMethod ?? undefined,
           l2WalletProvider: l2WalletProvider ?? undefined,
         })
 
-        if (cancelled || !res.data?.token || !res.data?.user) return
-        setAuth(res.data.token, res.data.user)
+        if (cancelled || !result.token || !result.user) return
+        setAuth(result.token, result.user)
         prevKeyRef.current = currentKey
+
+        // Drain any failed PATCHes from previous sessions
+        bridge.retryFailedPatches().catch((err: unknown) => {
+          console.warn('[AuthSync] retryFailedPatches failed:', err)
+        })
       } catch (err: any) {
-        if (!cancelled) {
-          const msg = err?.response?.data?.error || err?.message || 'Unknown error'
-          console.warn('[AuthSync] authenticate failed:', msg, err)
-          showToast('warn', {
-            message: `Authentication failed: ${msg}`,
-            heading: 'Auth Error',
-          })
+        if (cancelled) return
+
+        const errorMsg = err?.response?.data?.error || err?.body || err?.message || 'Unknown error'
+        const isNonceError =
+          errorMsg.includes('nonce') || errorMsg.includes('expired')
+
+        // Auto-retry on nonce errors (up to MAX_AUTH_RETRIES)
+        if (isNonceError && retryCount < MAX_AUTH_RETRIES) {
+          showToast('info', 'Session expired — please sign again')
+          authenticate(retryCount + 1)
+          return
         }
+
+        setAuthFailed(true)
+        showToast('error', {
+          message: `Authentication failed: ${errorMsg}`,
+          heading: 'Auth Error',
+        })
       }
     }
 
@@ -136,6 +151,8 @@ export default function AuthSync() {
     clearAuth,
     l1Normalized,
     l2Normalized,
+    bridge,
+    retryAuth,
   ])
 
   return null
