@@ -1,4 +1,3 @@
-import { aztecNode } from '@/aztec'
 import {
   L1_TOKENS,
   L1_CHAIN_ID,
@@ -194,10 +193,11 @@ const NETWORK_STALE_THRESHOLD_SECONDS = 300 // 5 minutes
  * Returns `{ isNetworkDown, timeSinceLastBlock }`.
  */
 export function useNetworkHealth() {
+  const bridge = useBridge()
   const queryKey = ['networkHealth']
 
   const queryFn = async () => {
-    const header = await aztecNode.getBlockHeader('latest')
+    const header = await bridge.getAztecBlockHeader('latest')
     if (!header) {
       return { isNetworkDown: true, timeSinceLastBlock: Infinity }
     }

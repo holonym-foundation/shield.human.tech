@@ -171,6 +171,13 @@ export class HumanTechBridge {
   }
 
   /**
+   * Get an Aztec L2 block header by number or tag ('latest').
+   */
+  async getAztecBlockHeader(numberOrTag: number | 'latest'): Promise<any> {
+    return this.aztecNode.getBlockHeader(numberOrTag)
+  }
+
+  /**
    * Mint test tokens via the backend faucet (devnet only).
    */
   async mintTestTokens(address: string, tokenAddress: string): Promise<MintTokensResult> {
