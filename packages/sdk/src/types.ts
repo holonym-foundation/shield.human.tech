@@ -200,8 +200,6 @@ export interface BridgeL1ToL2Params {
   fuelQuote?: FuelQuote
   /** Callback to send an L1 transaction (e.g. via wallet provider) */
   sendTransaction: (tx: TransactionRequest) => Promise<string>
-  /** Callback to read L1 contract state (e.g. via wallet provider eth_call) */
-  callContract: (tx: { to: string; data: string }) => Promise<string>
   /** Aztec wallet adapter (from @aztec/wallet-sdk) */
   walletAdapter: WalletAdapterInterface
   /** Callback to sign a message with the L1 wallet */
@@ -238,8 +236,6 @@ export interface WithdrawL2ToL1Params {
 export interface ResumeParams {
   /** Callback to send an L1 transaction (needed for L2→L1 resume) */
   sendTransaction?: (tx: TransactionRequest) => Promise<string>
-  /** Callback to read L1 contract state */
-  callContract?: (tx: { to: string; data: string }) => Promise<string>
   /** Aztec wallet adapter (needed for L1→L2 resume) */
   walletAdapter?: WalletAdapterInterface
   /** L1 (Ethereum) wallet address (used for encryption key derivation; avoids fragile regex parsing) */

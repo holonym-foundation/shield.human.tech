@@ -10,8 +10,6 @@ import {
   useL1Faucet,
   useL1HasSoulboundToken,
   useL1MintSoulboundToken,
-  useL1MintTokens,
-  useL1NativeBalance,
   useL1TokenBalance,
   useL1TokenBalances,
 } from '@/hooks/useL1Operations'
@@ -22,7 +20,6 @@ import {
   useL2TokenBalance,
   useL2FeeJuiceBalance,
   useL2WithdrawTokensToL1,
-  useL1ContractAddresses,
   useL2NodeIsReady,
 } from '@/hooks/useL2Operations'
 import { showToast, useToast } from '@/hooks/useToast'

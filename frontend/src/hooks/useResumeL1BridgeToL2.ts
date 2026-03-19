@@ -37,9 +37,6 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       sendTransaction: async (tx) => {
         return await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx]) as string
       },
-      callContract: async (tx) => {
-        return await requestWaapWallet(WAAP_METHOD.eth_call, [tx]) as string
-      },
       signMessage: async (msg: string) => {
         verifyEncryptionDomain()
         const sig = await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, l1Address])

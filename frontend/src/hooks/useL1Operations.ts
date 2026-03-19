@@ -602,9 +602,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       sendTransaction: async (tx) => {
         return await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx]) as string
       },
-      callContract: async (tx) => {
-        return await requestWaapWallet(WAAP_METHOD.eth_call, [tx]) as string
-      },
       walletAdapter,
       signMessage: async (msg: string) => {
         verifyEncryptionDomain()

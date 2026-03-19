@@ -178,7 +178,6 @@ export async function bridgeL1ToL2(
     fuel,
     fuelQuote,
     sendTransaction,
-    callContract,
     walletAdapter,
     signMessage,
     onStep,
@@ -421,21 +420,17 @@ export async function bridgeL1ToL2(
       ? config.bridgeAndFuelAddress
       : tokenConfig.l1PortalContract
 
-    const allowanceData = encodeFunctionData({
+    const allowance = await publicClient.readContract({
+      address: tokenConfig.l1TokenContract as `0x${string}`,
       abi: TestERC20Abi,
       functionName: 'allowance',
       args: [l1Address as `0x${string}`, spender as `0x${string}`],
     })
 
-    const allowance = await callContract({
-      to: tokenConfig.l1TokenContract,
-      data: allowanceData,
-    })
-
     // When fuel is enabled, BridgeAndFuel pulls totalAmount = amount + fuelAmountTokenUnits
     const totalApprovalNeeded = amount + fuelAmountTokenUnits
 
-    if (BigInt(allowance) < totalApprovalNeeded) {
+    if (BigInt(allowance as bigint) < totalApprovalNeeded) {
       const approveData = encodeFunctionData({
         abi: TestERC20Abi,
         functionName: 'approve',
