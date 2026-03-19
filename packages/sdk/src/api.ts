@@ -78,6 +78,22 @@ export class BridgeApiClient {
     return this.get('/api/attestation/status')
   }
 
+  async checkPochEligibility(): Promise<import('./types').PochCheckResult> {
+    return this.get('/api/attestation/poch/check')
+  }
+
+  async checkPassportEligibility(): Promise<import('./types').PassportCheckResult> {
+    return this.get('/api/attestation/passport/check')
+  }
+
+  async getL1TokenBalances(address: string, chains: number[]): Promise<import('./types').L1TokenBalance[]> {
+    return this.post('/api/alchemy/tokens-balances', { address, chains })
+  }
+
+  async mintTestTokens(address: string, tokenAddress: string): Promise<import('./types').MintTokensResult> {
+    return this.post('/api/mint-tokens', { address, tokenAddress })
+  }
+
   private async request<T>(
     method: string,
     path: string,

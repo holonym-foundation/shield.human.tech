@@ -27,6 +27,10 @@ export type {
   PassportAttestationData,
   WalletAdapterInterface,
   AttestationStatus,
+  PochCheckResult,
+  PassportCheckResult,
+  L1TokenBalance,
+  MintTokensResult,
 } from './types'
 
 // Config (deployments.json is the single source of truth)

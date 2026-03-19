@@ -19,6 +19,11 @@ import type {
   ResumeParams,
   BridgeResult,
   BridgeOperation,
+  PochCheckResult,
+  PassportCheckResult,
+  L1TokenBalance,
+  AttestationStatus,
+  MintTokensResult,
 } from './types'
 
 const DEFAULT_API_URL = 'https://bridge.human.tech'
@@ -117,8 +122,59 @@ export class HumanTechBridge {
    * Check attestation eligibility before starting a private bridge operation.
    * Returns binding status, nonce counts, and attester config.
    */
-  async getAttestationStatus(): Promise<import('./types').AttestationStatus> {
+  async getAttestationStatus(): Promise<AttestationStatus> {
     return this.apiClient.getAttestationStatus()
+  }
+
+  /**
+   * Lightweight pre-check: does the current user have Proof of Clean Hands (POCH)?
+   * Does not issue an attestation or increment nonces.
+   */
+  async checkPochEligibility(): Promise<PochCheckResult> {
+    return this.apiClient.checkPochEligibility()
+  }
+
+  /**
+   * Lightweight pre-check: does the current user meet the Passport score threshold?
+   * Does not issue an attestation or increment nonces.
+   */
+  async checkPassportEligibility(): Promise<PassportCheckResult> {
+    return this.apiClient.checkPassportEligibility()
+  }
+
+  /**
+   * Fetch L1 token balances for an address via the Alchemy proxy endpoint.
+   */
+  async getL1TokenBalances(address: string, chains: number[]): Promise<L1TokenBalance[]> {
+    return this.apiClient.getL1TokenBalances(address, chains)
+  }
+
+  /**
+   * Get Aztec L2 node info (version, L1 contract addresses, etc.).
+   */
+  async getAztecNodeInfo(): Promise<Record<string, unknown>> {
+    return this.aztecNode.getNodeInfo()
+  }
+
+  /**
+   * Check whether the Aztec L2 node is ready to accept requests.
+   */
+  async isAztecNodeReady(): Promise<boolean> {
+    return this.aztecNode.isReady()
+  }
+
+  /**
+   * Get the number of pending transactions in the Aztec L2 mempool.
+   */
+  async getAztecPendingTxCount(): Promise<number> {
+    return this.aztecNode.getPendingTxCount()
+  }
+
+  /**
+   * Mint test tokens via the backend faucet (devnet only).
+   */
+  async mintTestTokens(address: string, tokenAddress: string): Promise<MintTokensResult> {
+    return this.apiClient.mintTestTokens(address, tokenAddress)
   }
 
   /**

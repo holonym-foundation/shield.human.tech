@@ -6,7 +6,6 @@ import {
   decryptStorageEntry,
   verifyEncryptionDomain,
 } from '@/utils'
-import axios from 'axios'
 import { logError, logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { useWalletAdapter } from './useWalletAdapter'
@@ -25,7 +24,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, parseUnits, encodeFunctionData } from 'viem'
 import PortalSBTJson from '../constants/PortalSBT.json'
 import { useToast, useToastMutation, useToastQuery } from './useToast'
-import { useAuthStore } from '@/stores/useAuthStore'
 import {
   requestWaapWallet,
   useWalletStore,
@@ -89,18 +87,11 @@ export function useL1TokenBalances() {
   const { waapAddress: l1Address } = useWalletStore()
   const notify = useToast()
 
+  const bridge = useBridge()
   const queryKey = ['l1TokenBalances', l1Address]
   const queryFn = async () => {
     try {
-      const response = await axios.post<T_AlchemyTokenBalanceResponse[]>(
-        '/api/alchemy/tokens-balances',
-        {
-          address: l1Address,
-          chains: [L1_CHAIN_ID], // Sepolia testnet
-        },
-      )
-
-      const tokens = response?.data
+      const tokens = await bridge.getL1TokenBalances(l1Address!, [L1_CHAIN_ID])
 
       const tokenBalnces = tokens?.map(
         (token: T_AlchemyTokenBalanceResponse) => {
@@ -176,8 +167,8 @@ export function useL1TokenBalances() {
 
 export function useL1Faucet() {
   const { waapAddress: l1Address } = useWalletStore()
-  const { token: authToken } = useAuthStore()
   const queryClient = useQueryClient()
+  const bridge = useBridge()
 
   // Get wallet information from useWalletStore
   const {
@@ -302,11 +293,8 @@ export function useL1Faucet() {
             // notify('info', 'Getting tokens...')
             // await wait(30000) // 30 seconds
 
-            // Call our mint-tokens API endpoint with the first token address
-            const { data: mintResult } = await axios.post<{ txHash?: string }>(
-              '/api/mint-tokens',
-              { address: l1Address, tokenAddress: L1_TOKENS[0]?.l1TokenContract },
-              { headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} },
+            const mintResult = await bridge.mintTestTokens(
+              l1Address, L1_TOKENS[0]?.l1TokenContract ?? '',
             )
             result.tokensMinted = true
             result.tokenHash = mintResult.txHash

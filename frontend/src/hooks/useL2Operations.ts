@@ -3,7 +3,6 @@ import {
   L1_TOKENS,
   L1_CHAIN_ID,
   L2_CHAIN_ID,
-  L2_NODE_URL,
   getAztecscanUrl,
   getEtherscanUrl,
 } from '@/config'
@@ -157,11 +156,12 @@ export const useL2FeeJuiceBalance = () => {
 
 export function useL1ContractAddresses() {
   const { isAztecConnected } = useWalletStore()
+  const bridge = useBridge()
 
   const queryKey = ['l1ContractAddresses']
   const queryFn = async () => {
-    const info = await aztecNode.getNodeInfo()
-    return info?.l1ContractAddresses ?? null
+    const info = await bridge.getAztecNodeInfo()
+    return (info as any)?.l1ContractAddresses ?? null
   }
   return useQuery({
     queryKey,
@@ -172,9 +172,10 @@ export function useL1ContractAddresses() {
 
 export function useL2NodeIsReady() {
   const { isAztecConnected } = useWalletStore()
+  const bridge = useBridge()
   const queryKey = ['nodeIsReady']
   const queryFn = async () => {
-    return await aztecNode.isReady()
+    return await bridge.isAztecNodeReady()
   }
   return useQuery({
     queryKey,
@@ -704,41 +705,25 @@ export function useL2MintSoulboundToken(onSuccess: (data: any) => void) {
 export const useL2PendingTxCount = () => {
   const { aztecAddress } = useWalletStore()
   const handleL2Error = useL2ErrorHandler()
+  const bridge = useBridge()
 
-  // Create a stable query key that doesn't change with renders
   const queryKey = ['l2PendingTxCount']
 
-  // Query function without tracking state
   const queryFn = async (): Promise<number> => {
     try {
-      const response = await fetch(L2_NODE_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 15,
-          method: 'node_getPendingTxCount',
-          params: [],
-        }),
-      })
-
-      const data = await response.json()
-      return (data.result as number) ?? 0
+      return await bridge.getAztecPendingTxCount()
     } catch (error) {
       handleL2Error<number>(error, 'NODE')
       throw error
     }
   }
 
-  // Use regular React Query instead of toast query
   return useQuery<number, Error>({
     queryKey,
     queryFn,
     enabled: !!aztecAddress,
     meta: {
-      persist: false, // Mark this query for persistence
+      persist: false,
     },
   })
 }

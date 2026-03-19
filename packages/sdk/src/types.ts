@@ -510,6 +510,50 @@ export interface FuelParams {
   fuelQuote: FuelQuote
 }
 
+// ─── Attestation Eligibility Check Types ─────────────────────────────
+
+/** POCH eligibility pre-check result from GET /api/attestation/poch/check */
+export interface PochCheckResult {
+  eligible: boolean
+  reason?: string
+}
+
+/** Passport eligibility pre-check result from GET /api/attestation/passport/check */
+export interface PassportCheckResult {
+  eligible: boolean
+  score: number
+  threshold: number
+  maxAmount: string
+  reason?: string
+}
+
+// ─── L1 Token Balance Types ──────────────────────────────────────────
+
+/** Token balance response from Alchemy token balances API */
+export interface L1TokenBalance {
+  address: string
+  network: string
+  tokenAddress: string | null
+  tokenBalance: string
+  chainId: number
+  tokenMetadata: {
+    name: string
+    symbol: string
+    decimals: number
+    logo: string | null
+  }
+  tokenPrices: Array<{ currency: string; value: string; lastUpdatedAt: string }>
+}
+
+// ─── Faucet Types ────────────────────────────────────────────────────
+
+/** Faucet mint response from POST /api/mint-tokens */
+export interface MintTokensResult {
+  success: boolean
+  txHash?: string
+  message?: string
+}
+
 // ─── Attestation Types ──────────────────────────────────────────────
 
 /** POCH attestation response from POST /api/attestation/poch */
