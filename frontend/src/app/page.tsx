@@ -48,7 +48,6 @@ import {
   getL1PairedToken,
 } from '@/config'
 import MetaMaskPrompt from '@/components/model/MetaMaskPrompt'
-import BalanceCard from '@/components/BalanceCard'
 import { logInfo, logError } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { AztecLoginMethod } from '@/types/wallet'
@@ -194,9 +193,6 @@ export default function Home() {
   const { data: hasL1SBT } = useL1HasSoulboundToken()
   const { mutate: mintL1SBT, isPending: mintL1SBTPending } =
     useL1MintSoulboundToken(mintL1SBTOnSuccess)
-
-  // const { mutate: mintL1Tokens, isPending: mintL1TokensPending } =
-  //   useL1MintTokens()
 
   // L2 (Aztec) balances and operations
   const {

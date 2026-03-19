@@ -37,7 +37,7 @@ import {
   T_UserTokenType,
 } from '@/types/token.balances.types'
 import { axiosErrorMessage } from './helper'
-import { networkConfig, silkUrl } from '@/config/l1.config'
+import { networkConfig } from '@/config/l1.config'
 import { getMockFuelQuote } from '@/utils/fuelQuote'
 import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent, StepStatus, FuelQuote } from '@human.tech/aztec-bridge-sdk'
@@ -45,50 +45,6 @@ import { STORAGE_KEYS } from '@human.tech/aztec-bridge-sdk'
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
-
-export function useL1NativeBalance() {
-  const { waapAddress: l1Address } = useWalletStore()
-
-  const queryKey = ['l1NativeBalance', l1Address]
-  const queryFn = async () => {
-    if (!l1Address) return null
-
-    const chainIds = [L1_CHAIN_ID]
-
-    try {
-      const url = `${silkUrl}/api/alchemy/tokens-balances`
-
-      const response = await axios.post<T_AlchemyTokenBalanceResponse[]>(url, {
-        address: l1Address,
-        chains: chainIds,
-      })
-
-      const tokens = response?.data
-      if (tokens && tokens.length > 0) {
-        // Native token has tokenAddress === null
-        const nativeToken = tokens.find((t) => t.tokenAddress === null)
-        if (nativeToken?.tokenBalance) {
-          return Number(nativeToken.tokenBalance)
-        }
-      }
-    } catch (error) {
-      // Error handled silently - return 0 balance
-    }
-
-    return 0
-  }
-
-  return useQuery({
-    queryKey,
-    queryFn,
-    enabled: !!l1Address,
-    meta: {
-      persist: true, // Mark this query for persistence
-    },
-  })
-}
-
-// -----------------------------------
 
 export function useL1TokenBalance() {
   const { waapAddress: l1Address, isWaapConnected } = useWalletStore()
@@ -451,87 +407,6 @@ export function useL1Faucet() {
     hasGas,
     l1BalanceLoading,
     balancesLoaded,
-  }
-}
-
-// -----------------------------------
-export function useL1MintTokens() {
-  const { waapAddress: l1Address } = useWalletStore()
-  const queryClient = useQueryClient()
-  const { data: nativeBalance } = useL1NativeBalance()
-  const { data: tokenBalance } = useL1TokenBalance()
-
-  // Check if user has enough gas for minting
-  const hasGas = !!nativeBalance && Number(nativeBalance) > 0.01
-
-  // Check if user already has tokens
-  const hasTokens = !!tokenBalance && Number(tokenBalance) > 0
-
-  // User is eligible to mint tokens if they have gas but no tokens
-  const isEligibleForTokens = hasGas && !hasTokens
-
-  const mutationFn = async () => {
-    if (!l1Address) throw new Error('Wallet not connected')
-
-    // Check eligibility
-    if (!hasGas) {
-      throw new Error(
-        'Not enough ETH for gas. Please get ETH from the faucet first.',
-      )
-    }
-
-    const mintAmount = BigInt(1000000000000000000)
-
-    console.log('Minting tokens for address:', l1Address)
-
-    // Prepare the transaction data
-    const data = encodeFunctionData({
-      abi: TestERC20Abi,
-      functionName: 'mint',
-      args: [l1Address, mintAmount],
-    })
-
-    // Send the transaction
-    const txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
-      {
-        from: l1Address,
-        to: L1_TOKENS[0]?.l1TokenContract ?? '',
-        data,
-      },
-    ])
-    console.log('Mint transaction sent, hash:', txHash)
-
-    // Wait for confirmation
-    const receipt = await requestWaapWallet(
-      WAAP_METHOD.eth_getTransactionReceipt,
-      [txHash],
-    )
-    console.log('Mint transaction confirmed, receipt:', receipt)
-    return receipt
-  }
-
-  return {
-    ...useToastMutation({
-      mutationFn,
-      onSuccess: () => {
-        console.log('Refetching balances after successful mint')
-        // Invalidate both balances to refresh them
-        queryClient.invalidateQueries({
-          queryKey: ['l1TokenBalance', l1Address],
-        })
-        queryClient.invalidateQueries({
-          queryKey: ['l1NativeBalance', l1Address],
-        })
-      },
-      toastMessages: {
-        pending: 'Minting tokens...',
-        success: 'Tokens successfully minted!',
-        error: 'Failed to mint tokens',
-      },
-    }),
-    hasGas,
-    hasTokens,
-    isEligibleForTokens,
   }
 }
 
