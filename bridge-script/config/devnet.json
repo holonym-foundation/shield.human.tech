@@ -2,7 +2,7 @@
   "name": "devnet",
   "environment": "devnet",
   "network": {
-    "nodeUrl": "https://v4-devnet-2.aztec-labs.com",
+    "aztecNodeUrl": "https://v4-devnet-2.aztec-labs.com",
     "l1RpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
     "l1ChainId": 11155111
   },

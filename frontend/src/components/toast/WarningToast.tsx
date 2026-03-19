@@ -2,6 +2,18 @@ import clsxm from '@/utils/clsxm'
 import React from 'react'
 import { ToastContentProps } from 'react-toastify'
 
+function highlightClickHere(text: string): React.ReactNode {
+  const match = text.match(/(.*?)(click here)(.*)/i)
+  if (!match) return text
+  return (
+    <>
+      {match[1]}
+      <span className='text-[#0A0A0A] font-semibold underline'>{match[2]}</span>
+      {match[3]}
+    </>
+  )
+}
+
 interface WarningToastProps extends Partial<ToastContentProps> {
   heading?: string
   message?: string
@@ -33,7 +45,7 @@ const WarningToast = ({
             heading ? 'text-[12px]' : 'text-[16px]',
             heading && 'font-medium'
           )}>
-          {message}
+          {highlightClickHere(message)}
         </span>
       )}
     </div>

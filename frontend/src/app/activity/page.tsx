@@ -26,7 +26,8 @@ export default function ActivityPage() {
 
   // Prefetch routes this page navigates to
   useEffect(() => {
-    router.prefetch('/progress')
+    router.prefetch('/progress/resume')
+    router.prefetch('/activity/local-recovery')
     router.prefetch('/')
   }, [router])
 
@@ -89,7 +90,7 @@ export default function ActivityPage() {
 
           setDirection(BridgeDirection.L2_TO_L1)
           setWithdrawalRecovery(operation.id, recoveryData)
-          router.push('/progress')
+          router.push('/progress/resume')
         } else {
           // ── L1→L2 Resume ──
           if (!decrypted.claimSecret || !decrypted.claimSecretHash) {
@@ -123,7 +124,7 @@ export default function ActivityPage() {
 
           setDirection(BridgeDirection.L1_TO_L2)
           setRecovery(operation.id, recoveryData)
-          router.push('/progress')
+          router.push('/progress/resume')
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to decrypt'
@@ -173,9 +174,14 @@ export default function ActivityPage() {
           ))}
         </div>
 
-        <div className='mt-4'>
+        <div className='mt-4 flex flex-col gap-2'>
           <TextButton onClick={() => router.push('/')}>
             Back to Bridge
+          </TextButton>
+          <TextButton
+            onClick={() => router.push('/activity/local-recovery')}
+            className='!bg-transparent !text-gray-600 hover:!text-gray-900 !font-medium'>
+            Recover from local data
           </TextButton>
         </div>
       </div>

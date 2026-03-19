@@ -48,7 +48,7 @@ const activeDeployment = getSelectedDeployment()
 
 export const L1_CHAIN_ID = activeDeployment.network.l1ChainId
 export const L2_CHAIN_ID = activeDeployment.network.l2ChainId
-export const L2_NODE_URL = activeDeployment.network.nodeUrl
+export const L2_NODE_URL = activeDeployment.network.aztecNodeUrl
 export const DEPLOYMENT_ID = activeDeployment.id
 export const ROLLUP_VERSION = activeDeployment.network.rollupVersion
 

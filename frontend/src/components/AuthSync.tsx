@@ -42,10 +42,27 @@ export default function AuthSync() {
       ? 'WalletSDK'
       : null
 
-  // Sync persisted JWT to bridge instance on mount/token change + drain failed patches
+  // Sync persisted JWT to bridge instance on mount/token change + verify session + drain failed patches
   useEffect(() => {
     if (!token) return
     bridge.setAuthToken(token)
+
+    let cancelled = false
+
+    // Verify the session is still valid (user exists, token not expired)
+    bridge.verifySession().then((status) => {
+      if (cancelled) return
+
+      if (!status.valid && (status.reason === 'user_not_found' || status.reason === 'token_expired')) {
+        clearAuth()
+        showToast('error', {
+          heading: 'Session Expired',
+          message: 'Please sign again to continue.',
+        })
+      }
+    })
+
+    // Drain failed PATCHes from previous sessions
     bridge.retryFailedPatches().catch((err: unknown) => {
       console.warn('[AuthSync] retryFailedPatches on mount failed:', err)
     })
@@ -57,8 +74,11 @@ export default function AuthSync() {
       })
     }
     window.addEventListener('online', handleOnline)
-    return () => window.removeEventListener('online', handleOnline)
-  }, [token, bridge])
+    return () => {
+      cancelled = true
+      window.removeEventListener('online', handleOnline)
+    }
+  }, [token, bridge, clearAuth])
 
   useEffect(() => {
     if (!bothConnected) {

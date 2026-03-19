@@ -17,8 +17,8 @@ export interface HumanTechBridgeConfig {
   domain?: string
   /** Backend API URL. Defaults to "https://bridge.human.tech". Use "" for same-origin. */
   apiUrl?: string
-  /** Override the L1 RPC URL from deployment config */
-  l1RpcUrl?: string
+  /** L1 (Ethereum) JSON-RPC URL. Required — the SDK does not bundle a default RPC endpoint. */
+  l1RpcUrl: string
   /** Override the L2 node URL from deployment config */
   l2NodeUrl?: string
 }
@@ -119,6 +119,39 @@ export type BridgeEventCallback = (event: BridgeEvent) => void
 // ─── Bridge Operation (from backend) ────────────────────────────────
 
 export type BridgeDirection = 'L1_TO_L2' | 'L2_TO_L1'
+
+/**
+ * All possible bridge operation statuses.
+ *
+ * Status transitions:
+ *   L1→L2: pending → deposited → claimed → completed
+ *   L2→L1: pending → submitted → ready → pending_finalize → completed
+ *
+ * "failed" = error before any tx was sent. No funds moved, no recovery needed,
+ * safe to retry. If funds ARE at risk (tx sent or confirmed), the status stays
+ * at the last successful step (e.g. deposited, submitted) so the user can
+ * resume from the Activity page.
+ */
+export type BridgeOperationStatus =
+  | 'pending'
+  | 'deposited'
+  | 'claimed'
+  | 'submitted'
+  | 'ready'
+  | 'pending_finalize'
+  | 'completed'
+  | 'failed'
+
+export const BRIDGE_STATUS_INFO: Record<BridgeOperationStatus, { label: string; description: string }> = {
+  pending: { label: 'Pending', description: 'Operation created, waiting for transaction' },
+  deposited: { label: 'Deposited', description: 'L1 deposit confirmed — waiting for L2 claim' },
+  claimed: { label: 'Claimed', description: 'L2 claim submitted — waiting for confirmation' },
+  submitted: { label: 'Submitted', description: 'L2 burn confirmed — waiting for L1 proof' },
+  ready: { label: 'Ready', description: 'L2 block proven on L1 — ready to finalize withdrawal' },
+  pending_finalize: { label: 'Finalizing', description: 'Waiting for L1 block finalization' },
+  completed: { label: 'Completed', description: 'Bridge operation completed successfully' },
+  failed: { label: 'Failed', description: 'No funds moved, no recovery needed — safe to retry' },
+}
 
 /** Shape returned by GET /api/bridge/operations */
 export interface BridgeOperation {
@@ -620,3 +653,23 @@ export interface L2PassportStruct {
   deadline: bigint
   signature: number[]
 }
+
+// ─── Session Validation ────────────────────────────────────────────
+
+export type SessionStatus =
+  | {
+      valid: true
+      user: {
+        id: number
+        l1Address: string
+        l2Address: string
+        l1LoginMethod: string | null
+        l1WalletProvider: string | null
+        l2LoginMethod: string | null
+        l2WalletProvider: string | null
+      }
+    }
+  | {
+      valid: false
+      reason: 'token_expired' | 'user_not_found' | 'no_token' | 'network_error'
+    }

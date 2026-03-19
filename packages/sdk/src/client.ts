@@ -4,7 +4,7 @@
 
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
 
-import { BridgeApiClient } from './api'
+import { BridgeApiClient, BridgeApiError } from './api'
 import { createConfig, ACTIVE_DEPLOYMENT_ID } from './config'
 import { authenticate } from './auth'
 import { getOperations, getOperation, retryFailedPatches } from './operations'
@@ -24,6 +24,7 @@ import type {
   L1TokenBalance,
   AttestationStatus,
   MintTokensResult,
+  SessionStatus,
 } from './types'
 
 const DEFAULT_API_URL = 'https://bridge.human.tech'
@@ -43,6 +44,11 @@ export class HumanTechBridge {
   readonly domain: string
 
   constructor(options: HumanTechBridgeConfig) {
+    if (!options.l1RpcUrl) {
+      throw new Error(
+        'l1RpcUrl is required. Provide an Ethereum JSON-RPC URL (e.g. Alchemy, Infura).',
+      )
+    }
     this.config = createConfig(options.deployment ?? ACTIVE_DEPLOYMENT_ID, {
       l1RpcUrl: options.l1RpcUrl,
       l2NodeUrl: options.l2NodeUrl,
@@ -189,6 +195,42 @@ export class HumanTechBridge {
    */
   setAuthToken(token: string): void {
     this.apiClient.setAuthToken(token)
+  }
+
+  /**
+   * Verify the current session is still valid.
+   *
+   * Unlike other SDK methods, this NEVER throws. It returns a structured
+   * result so callers can branch on the reason without try/catch.
+   *
+   * Call this on page load to detect stale JWTs before starting operations.
+   */
+  async verifySession(): Promise<SessionStatus> {
+    if (!this.apiClient.hasAuthToken()) {
+      return { valid: false, reason: 'no_token' }
+    }
+
+    try {
+      const res = await this.apiClient.get<Extract<SessionStatus, { valid: true }>>('/api/auth/verify')
+      return res
+    } catch (err) {
+      if (err instanceof BridgeApiError) {
+        if (err.status === 401) {
+          try {
+            const parsed = JSON.parse(err.body)
+            const reason = parsed?.reason
+            if (reason === 'user_not_found' || reason === 'token_expired' || reason === 'no_token') {
+              return { valid: false, reason }
+            }
+          } catch {
+            // JSON parse failed — fall through to default
+          }
+          return { valid: false, reason: 'token_expired' }
+        }
+        return { valid: false, reason: 'network_error' }
+      }
+      return { valid: false, reason: 'network_error' }
+    }
   }
 
   /**

@@ -35,7 +35,7 @@ import type {
   L1WithdrawResult,
   BridgeEventCallback,
 } from '../types'
-import { createL1PublicClient, serializeNodeInfo, wait } from './utils'
+import { createL1PublicClient, serializeNodeInfo, wait, extractErrorString } from './utils'
 import { getEtherscanUrl as getEtherscanBaseUrl, getAztecscanUrl as getAztecscanBaseUrl } from '../config'
 import { waitForBlockProven } from './polling'
 import { computeL2ToL1MessageLeaf, computeWitness } from './witness'
@@ -705,7 +705,7 @@ export async function withdrawL2ToL1(
   } catch (error) {
     // 🔒 CRITICAL: Only mark as 'failed' if burn has NOT happened.
     // If burn confirmed, status stays 'submitted'/'ready' so user can Resume.
-    const err = error instanceof Error ? error : new Error(String(error))
+    const err = error instanceof Error ? error : new Error(extractErrorString(error))
     const errorMessage = err.message
 
     emit({ type: 'error', error: err, fundsAtRisk: burnConfirmed, operationId })

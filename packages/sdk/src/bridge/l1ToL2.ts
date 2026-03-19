@@ -42,7 +42,7 @@ import type {
   BridgeEventCallback,
   FuelQuote,
 } from '../types'
-import { createL1PublicClient, serializeNodeInfo, wait } from './utils'
+import { createL1PublicClient, serializeNodeInfo, wait, extractErrorString } from './utils'
 import { getEtherscanUrl as getEtherscanBaseUrl, getAztecscanUrl as getAztecscanBaseUrl } from '../config'
 import { pollL1ToL2MessageSync } from './polling'
 import { pushDeposit, updateDeposit } from '../storage'
@@ -862,7 +862,7 @@ export async function bridgeL1ToL2(
     // 🔒 CRITICAL: Only mark as 'failed' if no funds are at risk.
     // If deposit was confirmed OR l1TxHash was sent (tx may be mining),
     // status stays 'deposited'/'pending' so user can Resume from Activity page.
-    const err = error instanceof Error ? error : new Error(String(error))
+    const err = error instanceof Error ? error : new Error(extractErrorString(error))
     const errorMessage = err.message
 
     // Funds may be at risk if deposit confirmed OR tx was broadcast

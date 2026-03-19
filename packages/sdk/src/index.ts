@@ -1,12 +1,16 @@
 // Main client
 export { HumanTechBridge } from './client'
 
+// Status info
+export { BRIDGE_STATUS_INFO } from './types'
+
 // Types
 export type {
   HumanTechBridgeConfig,
   ResolvedConfig,
   TokenConfig,
   StepStatus,
+  BridgeOperationStatus,
   BridgeOperation,
   BridgeL1ToL2Params,
   WithdrawL2ToL1Params,
@@ -31,6 +35,7 @@ export type {
   PassportCheckResult,
   L1TokenBalance,
   MintTokensResult,
+  SessionStatus,
 } from './types'
 
 // Config (deployments.json is the single source of truth)

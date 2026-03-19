@@ -27,8 +27,7 @@ export interface L1ContractAddresses {
 
 export interface DeploymentNetwork {
   name: string;
-  nodeUrl: string;
-  l1RpcUrl: string;
+  aztecNodeUrl: string;
   l1ChainId: number;
   l2ChainId: number;
   aztecVersion: string;
@@ -163,8 +162,7 @@ export function loadDeploymentById(id: string): DeploymentFile | null {
  * Call this once at the start of a deployment run (before deploying tokens).
  */
 export function createDeployment(params: {
-  nodeUrl: string;
-  l1RpcUrl: string;
+  aztecNodeUrl: string;
   l1ChainId: number;
   l2ChainId: number;
   aztecVersion: string;
@@ -189,8 +187,7 @@ export function createDeployment(params: {
     deployedAt: existing?.deployedAt ?? new Date().toISOString(),
     network: {
       name: params.networkName,
-      nodeUrl: params.nodeUrl,
-      l1RpcUrl: params.l1RpcUrl,
+      aztecNodeUrl: params.aztecNodeUrl,
       l1ChainId: params.l1ChainId,
       l2ChainId: params.l2ChainId,
       aztecVersion: params.aztecVersion,

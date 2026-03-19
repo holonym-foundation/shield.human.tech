@@ -9,10 +9,10 @@ export interface BridgeProviderConfig extends HumanTechBridgeConfig {
   children: React.ReactNode
 }
 
-export function useBridgeInstance(config?: HumanTechBridgeConfig): HumanTechBridge {
+export function useBridgeInstance(config: HumanTechBridgeConfig): HumanTechBridge {
   return useMemo(
-    () => new HumanTechBridge(config ?? {}),
-    [config?.deployment, config?.domain, config?.apiUrl, config?.l1RpcUrl, config?.l2NodeUrl],
+    () => new HumanTechBridge(config),
+    [config.deployment, config.domain, config.apiUrl, config.l1RpcUrl, config.l2NodeUrl],
   )
 }
 

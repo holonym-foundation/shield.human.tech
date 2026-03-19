@@ -29,6 +29,10 @@ export class BridgeApiClient {
     this.authToken = null
   }
 
+  hasAuthToken(): boolean {
+    return this.authToken !== null
+  }
+
   async get<T>(path: string): Promise<T> {
     return this.request<T>('GET', path)
   }

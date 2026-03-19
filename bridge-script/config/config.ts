@@ -6,7 +6,7 @@ import * as dotenv from 'dotenv';
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 export interface NetworkConfig {
-  nodeUrl: string;
+  aztecNodeUrl: string;
   l1RpcUrl: string;
   l1ChainId: number;
 }
@@ -74,7 +74,7 @@ export class ConfigManager {
   }
 
   public getNodeUrl(): string {
-    return this.config.network.nodeUrl;
+    return this.config.network.aztecNodeUrl;
   }
 
   public getL1RpcUrl(): string {

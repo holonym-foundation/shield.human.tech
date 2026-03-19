@@ -76,3 +76,22 @@ export function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/**
+ * Extract a human-readable error string from an unknown thrown value.
+ * Prevents `String({...})` from producing "[object Object]" in error messages.
+ */
+export function extractErrorString(error: unknown): string {
+  if (!error) return 'Unknown error'
+  if (typeof error === 'string') return error
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object') {
+    const obj = error as Record<string, unknown>
+    if (typeof obj.message === 'string') return obj.message
+    if (typeof obj.error === 'string') return obj.error
+    if (typeof obj.reason === 'string') return obj.reason
+    if (typeof obj.shortMessage === 'string') return obj.shortMessage
+    try { return JSON.stringify(error) } catch { /* circular ref */ }
+  }
+  return String(error)
+}
+

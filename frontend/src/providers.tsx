@@ -50,7 +50,10 @@ function InitializeDatadog() {
 function BridgeProvider({ children }: { children: ReactNode }) {
   // apiUrl: '' uses same-origin (relative URLs) since this app hosts the API routes.
   // External SDK consumers don't need to set this — it defaults to https://bridge.human.tech
-  const bridge = useBridgeInstance({ apiUrl: '' })
+  const bridge = useBridgeInstance({
+    apiUrl: '',
+    l1RpcUrl: process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL ?? '',
+  })
   return (
     <BridgeContext.Provider value={bridge}>{children}</BridgeContext.Provider>
   )

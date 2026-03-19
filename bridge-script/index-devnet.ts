@@ -517,8 +517,7 @@ async function main() {
   }
 
   createDeployment({
-    nodeUrl,
-    l1RpcUrl: L1_URL,
+    aztecNodeUrl: nodeUrl,
     l1ChainId: nodeInfo.l1ChainId,
     l2ChainId,
     aztecVersion: nodeInfo.nodeVersion ?? configManager.getConfig().settings.version,
