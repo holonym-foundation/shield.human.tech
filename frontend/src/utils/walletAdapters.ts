@@ -3,7 +3,7 @@ import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
 import type { Wallet } from '@aztec/aztec.js/wallet'
-import { SetPublicAuthwitContractInteraction } from '@aztec/aztec.js/authorization'
+import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
 import { L1_TOKENS } from '@/config'
 import { aztecNode } from '@/aztec'
 
@@ -230,29 +230,22 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Set public authwit: allow proxy to burn_private on behalf of user
-    // Uses AuthRegistry (on-chain) instead of createAuthWit (RPC serialization issues with Azguard)
-    const authwit = await SetPublicAuthwitContractInteraction.create(
-      this.wallet,
-      this.account,
-      {
-        caller: proxyAddr,
-        action: token.methods.burn_private(user, amount, nonce),
-      },
-      true,
-    )
+    // Create private authwit: allow proxy to call token.burn_private on behalf of user.
+    // burn_private uses assert_current_call_valid_authwit (private PXE check), not the
+    // public auth registry — so we need a private witness, not SetPublicAuthwitContractInteraction.
+    const burnAction = token.methods.burn_private(user, amount, nonce)
+    const innerHash = await computeInnerAuthWitHashFromAction(proxyAddr, burnAction)
+    const authWitness = await this.wallet.createAuthWit(this.account, { consumer: tokenAddr, innerHash })
 
-    // Batch authwit + exit into a single tx
-    const exitCall = bridge.methods.exit_to_l1_private(
+    // Attach the witness explicitly to the exit call so the PXE finds it during simulation
+    const receipt = await bridge.methods.exit_to_l1_private(
       EthAddress.fromString(l1Address),
       amount,
       EthAddress.ZERO,
       nonce,
       cleanHandsData,
       passportData,
-    )
-    const batch = new BatchCall(this.wallet, [authwit, exitCall])
-    const receipt = await batch.send({ from: this.account })
+    ).with({ authWitnesses: [authWitness] }).send({ from: this.account })
 
     return {
       txHash: receipt.txHash.toString(),
