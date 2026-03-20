@@ -687,7 +687,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         amountL2,
         amountDisplayL1,
         amountDisplayL2,
-        isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
+        isPrivacyModeEnabled: (isPrivacyModeEnabled ?? false) || !!privateFuel,
         l1BlockNumberBeforeTx,
         l2BlockNumberBeforeTx,
         nodeInfo,
@@ -735,7 +735,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         amount,
         claimSecretHash: backup.claimSecretHash,
         claimSecret: backup.claimSecret,
-        isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
+        isPrivacyModeEnabled: (isPrivacyModeEnabled ?? false) || !!privateFuel,
         operationId: backup.operationId,
         selectedToken,
         // Public fuel: needs fuelSecretHash from backup (random secret).
@@ -936,8 +936,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         const claimAmount = receipt.claimAmount
         console.log('[L1→L2] Claim amount (after fee):', claimAmount.toString())
 
+        // Private fuel (BridgedFPC) implies a private claim — the tokens go to private balance
+        const usePrivateClaim = (isPrivacyModeEnabled ?? false) || !!privateFuel
         const claimResult = await executeL2Claim(
-          { walletAdapter, aztecAddress, isPrivacyModeEnabled: isPrivacyModeEnabled ?? false },
+          { walletAdapter, aztecAddress, isPrivacyModeEnabled: usePrivateClaim },
           {
             amount: claimAmount,
             claimSecret: backup.claimSecret,

@@ -24,6 +24,8 @@ import { useWalletStore } from '@/stores/walletStore'
 import { useToast } from '@/hooks/useToast'
 import { useCountdown } from 'usehooks-ts'
 import TextButton from '@/components/TextButton'
+import { useTokenPrices } from '@/utils/coinGeckoPrice'
+import { getTokenPriceUsd } from '@/utils/fuelPricing'
 
 export default function ProgressPage() {
   const router = useRouter()
@@ -58,6 +60,22 @@ export default function ProgressPage() {
   const steps = getProgressSteps()
 
   const bridgeAmount = bridgeConfig.amount
+  const tokenSymbol = bridgeConfig.from.token?.symbol ?? 'USDC'
+
+  // Show enough decimals so the number is meaningful (e.g. 0.003 WETH, not 0.00)
+  const formatTokenAmount = (val: number) => {
+    if (val === 0) return '0'
+    if (val >= 1) return val.toFixed(2)
+    // Find first significant digit and show 2 digits after it
+    const magnitude = -Math.floor(Math.log10(Math.abs(val)))
+    return val.toFixed(Math.min(magnitude + 2, 8))
+  }
+
+  // Token prices for displaying fuel amount in USD
+  const { prices } = useTokenPrices()
+  const fuelUsd = fuelAmountStr && Number(fuelAmountStr) > 0
+    ? (Number(fuelAmountStr) * getTokenPriceUsd(tokenSymbol, prices)).toFixed(2)
+    : null
 
   // Refetch balances when bridge/withdrawal completes (show toast on progress page too)
   const { refetch: refetchL1Balance } = useL1TokenBalances()
@@ -429,12 +447,12 @@ export default function ProgressPage() {
           <hr className='text-latest-grey-300 my-3' />
           <p className='text-32 text-black font-medium text-center'>
             {isRecoveryMode
-              ? `${formatUnits(BigInt((recoveryClaimData?.amount ?? recoveryWithdrawalData?.amount) || '0'), isL2ToL1Recovery ? L2_TOKEN_METADATA.decimals : L1_TOKEN_METADATA.decimals)} USDC`
-              : `${bridgeAmount} USDC`}
+              ? `${formatUnits(BigInt((recoveryClaimData?.amount ?? recoveryWithdrawalData?.amount) || '0'), isL2ToL1Recovery ? L2_TOKEN_METADATA.decimals : L1_TOKEN_METADATA.decimals)} ${bridgeConfig.from.token?.symbol ?? 'USDC'}`
+              : `${bridgeAmount} ${bridgeConfig.from.token?.symbol ?? 'USDC'}`}
           </p>
           {!isRecoveryMode && fuelEnabled && Number(fuelAmountStr) > 0 && (
             <p className='text-center text-12 font-medium text-latest-grey-500 mt-1'>
-              {(Number(bridgeAmount) - Number(fuelAmountStr)).toFixed(2)} USDC to bridge + {Number(fuelAmountStr).toFixed(2)} USDC to top up {fuelType === 'private' ? 'private Fee Juice' : 'Fee Juice'}
+              {formatTokenAmount(Number(bridgeAmount) - Number(fuelAmountStr))} {tokenSymbol} to bridge + {fuelUsd ? `$${fuelUsd}` : `${formatTokenAmount(Number(fuelAmountStr))} ${tokenSymbol}`} to top up {fuelType === 'private' ? 'private Fee Juice' : 'Fee Juice'}
             </p>
           )}
         </div>
