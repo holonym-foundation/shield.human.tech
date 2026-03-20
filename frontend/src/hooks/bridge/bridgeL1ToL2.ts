@@ -1011,7 +1011,7 @@ export async function sendL1DepositTransaction(params: {
     minFuelOutput: fuel?.fuelQuote.minOutput ?? 0n,
     poolKeys: fuel?.fuelQuote.poolKeys ?? [],
     zeroForOnes: fuel?.fuelQuote.zeroForOnes ?? [],
-    isPrivate: isPrivacyModeEnabled || !!privateFuel,
+    isPrivate: isPrivacyModeEnabled,
   })
   const permitArgs = {
     nonce: permit2.nonce,
@@ -1047,7 +1047,7 @@ export async function sendL1DepositTransaction(params: {
           minFuelOutput: fuel.fuelQuote.minOutput,
           path: fuel.fuelQuote.poolKeys!,
           zeroForOnes: fuel.fuelQuote.zeroForOnes!,
-          isPrivate: isPrivacyModeEnabled || !!privateFuel,
+          isPrivate: isPrivacyModeEnabled,
           cleanHands,
           passport,
         },
@@ -1070,7 +1070,7 @@ export async function sendL1DepositTransaction(params: {
           amount,
           aztecRecipient: aztecAddress as `0x${string}`,
           secretHash: claimSecretHash.toString() as `0x${string}`,
-          isPrivate: isPrivacyModeEnabled || !!privateFuel,
+          isPrivate: isPrivacyModeEnabled,
           cleanHands,
           passport,
         },

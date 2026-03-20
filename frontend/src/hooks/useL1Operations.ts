@@ -687,7 +687,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         amountL2,
         amountDisplayL1,
         amountDisplayL2,
-        isPrivacyModeEnabled: (isPrivacyModeEnabled ?? false) || !!privateFuel,
+        isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
         l1BlockNumberBeforeTx,
         l2BlockNumberBeforeTx,
         nodeInfo,
@@ -729,13 +729,21 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         message: 'Your deposit is in progress. Please do not reload or close this page until it completes, or it may be difficult to recover your funds.',
       }, { autoClose: false })
 
+      console.log('[L1→L2] Pre-deposit params:', {
+        hasFuel: !!fuel,
+        hasPrivateFuel: !!privateFuel,
+        fuelAmount: fuel?.fuelAmount?.toString(),
+        privateFuelFpcAddress: privateFuel?.fpcAddress,
+        hasFuelSecretHash: !!backup.fuelSecretHash,
+        hasPrivateFuelSecretHash: !!backup.privateFuelSecretHash,
+      })
       const deposit = await sendL1DepositTransaction({
         l1Address,
         aztecAddress,
         amount,
         claimSecretHash: backup.claimSecretHash,
         claimSecret: backup.claimSecret,
-        isPrivacyModeEnabled: (isPrivacyModeEnabled ?? false) || !!privateFuel,
+        isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
         operationId: backup.operationId,
         selectedToken,
         // Public fuel: needs fuelSecretHash from backup (random secret).
@@ -876,6 +884,13 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         // - Public fuel: FeeJuicePaymentMethodWithClaim (claim FJ to user, pay gas)
         // - Private fuel: BridgedMintAndPayFeePaymentMethod (FeeJuice.claim + mint_and_pay_fee, all private)
         let feeOption: { fee: { paymentMethod: any; gasSettings?: any } } | undefined
+        console.log('[L1→L2] Private fuel check:', {
+          hasPrivateFuel: !!privateFuel,
+          hasSecret: !!backup.privateFuelSecret,
+          hasSalt: !!backup.privateFuelSalt,
+          fuelMessageLeafIndex: receipt.fuelMessageLeafIndex,
+          fuelAmount: receipt.fuelAmount?.toString(),
+        })
         if (privateFuel && backup.privateFuelSecret && backup.privateFuelSalt && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
           try {
             const { BridgedMintAndPayFeePaymentMethod, REASONABLE_GAS_LIMITS, maxFeesPerGasFromBaseFees, maxGasCostFor } =
@@ -936,10 +951,8 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         const claimAmount = receipt.claimAmount
         console.log('[L1→L2] Claim amount (after fee):', claimAmount.toString())
 
-        // Private fuel (BridgedFPC) implies a private claim — the tokens go to private balance
-        const usePrivateClaim = (isPrivacyModeEnabled ?? false) || !!privateFuel
         const claimResult = await executeL2Claim(
-          { walletAdapter, aztecAddress, isPrivacyModeEnabled: usePrivateClaim },
+          { walletAdapter, aztecAddress, isPrivacyModeEnabled: isPrivacyModeEnabled ?? false },
           {
             amount: claimAmount,
             claimSecret: backup.claimSecret,
