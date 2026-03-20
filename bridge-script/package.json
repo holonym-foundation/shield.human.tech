@@ -23,7 +23,6 @@
     "build": "pnpm run compile && pnpm run compile:l1 && pnpm run codegen",
     "deploy-contract": "node --import tsx deploy-contract.ts",
     "deploy-account": "node --loader ts-node/esm scripts/deploy-account.ts",
-    "redeploy-permit2": "AZTEC_ENV=devnet node --import tsx redeploy-permit2.ts",
     "get-block": "node --loader ts-node/esm scripts/getBlock.ts",
     "test:js": "NODE_NO_WARNINGS=1 node --experimental-vm-modules $(yarn bin jest) --no-cache --runInBand --config jest.integration.config.json",
     "test:nr": "aztec test"

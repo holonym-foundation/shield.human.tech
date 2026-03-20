@@ -133,5 +133,7 @@
     }
   ],
   "bridgeAndFuelAddress": "0xf826d4fd35eb8b599536a5823ecb28f8c2a1728e",
-  "mockFuelSwapAddress": "0x5919fb767baf26e603bd0c7d108e18f805e8ccc0"
+  "mockFuelSwapAddress": "0x5919fb767baf26e603bd0c7d108e18f805e8ccc0",
+  "swapBridgeRouterAddress": "0x9E21891e2a3a7A366C1bbAB18a2B88Fd72C5D6D7",
+  "uniswapFuelSwapAddress": "0x547BE2F85f371f85fFB7f5BA1a972EAd88D7dB42"
 }

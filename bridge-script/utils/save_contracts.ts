@@ -248,3 +248,21 @@ export function copyToFrontend(): void {
   writeJson(FRONTEND_DEPLOYMENTS, bundle);
   console.log(`📋 Synced ${allDeployments.length} deployment(s) to frontend: ${FRONTEND_DEPLOYMENTS}`);
 }
+
+export function saveFuelInfraToDeployment(params: {
+  bridgeAndFuelAddress: string;
+  mockFuelSwapAddress: string;
+}, deploymentId?: string): void {
+  const registry = loadRegistry();
+  if (!registry) throw new Error('No registry found');
+  const id = deploymentId ?? registry.activeDeploymentId;
+  const deployment = loadDeploymentById(id);
+  if (!deployment) throw new Error(`Deployment ${id} not found`);
+
+  (deployment as any).bridgeAndFuelAddress = params.bridgeAndFuelAddress;
+  (deployment as any).mockFuelSwapAddress = params.mockFuelSwapAddress;
+
+  const filePath = join(DEPLOYMENTS_DIR, `${id}.json`);
+  writeJson(filePath, deployment);
+  console.log(`✅ Saved fuel infra to deployment ${id}`);
+}

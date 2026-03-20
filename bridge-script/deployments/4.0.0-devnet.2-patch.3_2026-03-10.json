@@ -131,5 +131,7 @@
       "humanIdAttester": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
       "passportSigner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
     }
-  ]
+  ],
+  "swapBridgeRouterAddress": "0x9E21891e2a3a7A366C1bbAB18a2B88Fd72C5D6D7",
+  "uniswapFuelSwapAddress": "0x547BE2F85f371f85fFB7f5BA1a972EAd88D7dB42"
 }
