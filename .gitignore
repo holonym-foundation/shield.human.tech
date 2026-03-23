@@ -53,3 +53,7 @@ aztec-contracts/token_bridge/target
 # build artifacts
 packages/*/dist
 .turbo
+
+# claude code
+.claude
+docs
