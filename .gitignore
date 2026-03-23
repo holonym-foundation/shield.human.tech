@@ -34,6 +34,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env
+.env.local
 
 # vercel
 .vercel
@@ -47,3 +48,12 @@ aztec-contracts/token_minter_proxy/target/*.bak
 
 # profiling
 bridge-script/profiling-results/
+aztec-contracts/token_bridge/target
+
+# build artifacts
+packages/*/dist
+.turbo
+
+# claude code
+.claude
+docs
