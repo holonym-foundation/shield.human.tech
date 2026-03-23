@@ -7,6 +7,11 @@ const FEE_JUICE_ADDRESS = AztecAddress.fromString(
   '0x0000000000000000000000000000000000000000000000000000000000000005',
 )
 
+/** Auth Registry protocol contract on L2 (canonical address = 1) */
+const AUTH_REGISTRY_ADDRESS = AztecAddress.fromString(
+  '0x0000000000000000000000000000000000000000000000000000000000000001',
+)
+
 function pattern(
   contract: AztecAddress,
   fn: string,
@@ -59,7 +64,7 @@ export function buildCapabilityManifest() {
     .filter((addr): addr is string => !!addr)
     .map((addr) => AztecAddress.fromString(addr))
 
-  const allContracts = [...tokenAddresses, ...bridgeAddresses, ...proxyAddresses, FEE_JUICE_ADDRESS]
+  const allContracts = [...tokenAddresses, ...bridgeAddresses, ...proxyAddresses, FEE_JUICE_ADDRESS, AUTH_REGISTRY_ADDRESS]
 
   const simulationUtilities: ContractFunctionPattern[] = tokenAddresses.flatMap(
     (addr) => patternsFor(addr, [...TOKEN_UTILITY_SIMULATION_METHODS]),
@@ -79,6 +84,10 @@ export function buildCapabilityManifest() {
     ...bridgeAddresses.flatMap((addr) =>
       patternsFor(addr, [...BRIDGE_TRANSACTION_METHODS]),
     ),
+    // Required by FeeJuicePaymentMethodWithClaim when paying gas with bridged Fee Juice
+    pattern(FEE_JUICE_ADDRESS, 'claim_and_end_setup'),
+    // Required by SetPublicAuthwitContractInteraction (used during withdrawal to authorize burn)
+    pattern(AUTH_REGISTRY_ADDRESS, 'set_authorized'),
   ]
 
   return {
