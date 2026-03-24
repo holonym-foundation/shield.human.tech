@@ -1,0 +1,40 @@
+name: Release SDK
+
+on:
+  push:
+    branches:
+      - feat/sdk
+    paths:
+      - 'packages/sdk/**'
+      - '.github/workflows/release.yaml'
+
+jobs:
+  release:
+    name: Publish SDK
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment: Production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build SDK
+        run: pnpm build --filter=@human.tech/aztec-bridge-sdk
+
+      - name: Publish
+        run: |
+          cd packages/sdk
+          npm publish --access public --tag dev --provenance
