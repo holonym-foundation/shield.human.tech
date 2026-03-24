@@ -5,7 +5,8 @@ import { useWalletStore } from '@/stores/walletStore'
 import { useWalletAdapter } from './useWalletAdapter'
 import { useToast } from './useToast'
 import { wait } from '@/utils'
-import { getAztecscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
+import { getAztecscanUrl, BRIDGED_FPC_ADDRESS, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
+import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { BridgeOperationStatus } from '@prisma/client'
 // import { TokenPortalAbi } from '@aztec/l1-artifacts'
 // @ts-ignore — JSON import from forge build output (custom compliant portal w/ attestation structs)
@@ -29,9 +30,19 @@ import {
   CustomTokenPortalEventAbi,
 } from './bridge/bridgeL1ToL2'
 
+/** Recovery result with optional fuel fields from BridgeWithFuel events */
+interface RecoveryResult {
+  messageHash: string
+  messageLeafIndex: string
+  fuelMessageHash?: string
+  fuelMessageLeafIndex?: string
+  fuelAmount?: string
+}
+
 /**
  * Recover messageHash and messageLeafIndex from an L1 transaction receipt.
  * Used when these values were not stored (e.g. page crash between deposit and receipt parsing).
+ * Also extracts fuel fields from BridgeWithFuel events when present.
  */
 async function recoverFromReceipt(
   l1TxHash: string,
@@ -40,7 +51,7 @@ async function recoverFromReceipt(
   amount: bigint,
   aztecAddress: string,
   isPrivacyModeEnabled: boolean,
-): Promise<{ messageHash: string; messageLeafIndex: string }> {
+): Promise<RecoveryResult> {
   console.log('[Resume L1→L2] Recovering messageHash from L1 receipt (txHash=', l1TxHash, ')...')
 
   const receipt = await publicClient.getTransactionReceipt({
@@ -59,10 +70,20 @@ async function recoverFromReceipt(
         })
         if (decoded.eventName === 'Bridge' || decoded.eventName === 'BridgeWithFuel') {
           const args = decoded.args as any
+          // Verify this event belongs to the user by checking secretHash
+          const eventSecretHash = (args.secretHash ?? args.tokenSecretHash)?.toString()
+          if (eventSecretHash && eventSecretHash !== claimSecretHash) continue
           const messageHash = (args.key ?? args.tokenKey).toString()
           const messageLeafIndex = (args.index ?? args.tokenIndex).toString()
-          console.log('[Resume L1→L2] Recovered from router event:', { messageHash, messageLeafIndex })
-          return { messageHash, messageLeafIndex }
+          const result: RecoveryResult = { messageHash, messageLeafIndex }
+          // Extract fuel fields from BridgeWithFuel events
+          if (decoded.eventName === 'BridgeWithFuel') {
+            if (args.fuelKey) result.fuelMessageHash = args.fuelKey.toString()
+            if (args.fuelIndex != null) result.fuelMessageLeafIndex = args.fuelIndex.toString()
+            if (args.fuelAmount) result.fuelAmount = args.fuelAmount.toString()
+          }
+          console.log('[Resume L1→L2] Recovered from router event:', result)
+          return result
         }
       } catch {
         // Not our event, skip
@@ -110,6 +131,7 @@ async function recoverFromReceipt(
 /**
  * Recover messageHash and messageLeafIndex by scanning L1 blocks for portal events.
  * Last-resort recovery when l1TxHash is also missing (e.g. crash right after sending tx).
+ * Also extracts fuel fields from BridgeWithFuel events when present.
  */
 async function recoverFromBlockScan(
   l1BlockNumberBeforeTx: string,
@@ -118,11 +140,11 @@ async function recoverFromBlockScan(
   amount: bigint,
   aztecAddress: string,
   isPrivacyModeEnabled: boolean,
-): Promise<{ messageHash: string; messageLeafIndex: string }> {
+): Promise<RecoveryResult> {
   const fromBlock = BigInt(l1BlockNumberBeforeTx)
   const currentBlock = await publicClient.getBlockNumber()
-  // Scan up to 2000 blocks (enough for ~7 hours at 12s/block)
-  const toBlock = fromBlock + 2000n > currentBlock ? currentBlock : fromBlock + 2000n
+  // Scan up to 50000 blocks (~7 days at 12s/block) to cover delayed resumes
+  const toBlock = fromBlock + 50000n > currentBlock ? currentBlock : fromBlock + 50000n
 
   console.log('[Resume L1→L2] Scanning L1 blocks', fromBlock.toString(), '→', toBlock.toString(), 'for portal events...')
 
@@ -151,10 +173,19 @@ async function recoverFromBlockScan(
         })
         if (decoded.eventName === 'Bridge' || decoded.eventName === 'BridgeWithFuel') {
           const args = decoded.args as any
+          // Verify this event belongs to the user by checking secretHash
+          const eventSecretHash = (args.secretHash ?? args.tokenSecretHash)?.toString()
+          if (eventSecretHash && eventSecretHash !== claimSecretHash) continue
           const messageHash = (args.key ?? args.tokenKey).toString()
           const messageLeafIndex = (args.index ?? args.tokenIndex).toString()
-          console.log('[Resume L1→L2] Found router event in block scan:', { messageHash, messageLeafIndex })
-          return { messageHash, messageLeafIndex }
+          const result: RecoveryResult = { messageHash, messageLeafIndex }
+          if (decoded.eventName === 'BridgeWithFuel') {
+            if (args.fuelKey) result.fuelMessageHash = args.fuelKey.toString()
+            if (args.fuelIndex != null) result.fuelMessageLeafIndex = args.fuelIndex.toString()
+            if (args.fuelAmount) result.fuelAmount = args.fuelAmount.toString()
+          }
+          console.log('[Resume L1→L2] Found router event in block scan:', result)
+          return result
         }
       } catch {
         // Not our event, skip
@@ -231,9 +262,16 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       l1BlockNumberBeforeTx,
       isPrivacyModeEnabled,
       portalAddressL1,
+      // Fuel recovery fields (from decrypted blob)
+      fuelSecret,
+      privateFuelSalt,
+      privateFuelSecret,
     } = claimData
 
     let { messageHash, messageLeafIndex } = claimData
+    // Fuel receipt fields — may be populated from DB or recovered from L1 events
+    let fuelMessageLeafIndex = claimData.fuelMessageLeafIndex
+    let fuelAmount = claimData.fuelAmount
 
     console.log('[Resume L1→L2] Starting resume with recovery data:', {
       operationId,
@@ -277,9 +315,10 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
         const amountBigInt = BigInt(amount)
         const targetAddress = l2Address || aztecAddress
 
+        let recovered: RecoveryResult
         if (l1TxHash) {
           // Path A: We have the L1 tx hash — get receipt and extract event
-          const recovered = await recoverFromReceipt(
+          recovered = await recoverFromReceipt(
             l1TxHash,
             portalAddress,
             claimSecretHash,
@@ -287,11 +326,9 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
             targetAddress,
             isPrivacyModeEnabled,
           )
-          messageHash = recovered.messageHash
-          messageLeafIndex = recovered.messageLeafIndex
         } else if (l1BlockNumberBeforeTx) {
           // Path B: No tx hash — scan L1 blocks for portal events
-          const recovered = await recoverFromBlockScan(
+          recovered = await recoverFromBlockScan(
             l1BlockNumberBeforeTx,
             portalAddress,
             claimSecretHash,
@@ -299,8 +336,6 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
             targetAddress,
             isPrivacyModeEnabled,
           )
-          messageHash = recovered.messageHash
-          messageLeafIndex = recovered.messageLeafIndex
         } else {
           throw new Error(
             'Cannot resume: no messageHash, no l1TxHash, and no l1BlockNumberBeforeTx. ' +
@@ -308,13 +343,29 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
           )
         }
 
+        messageHash = recovered.messageHash
+        messageLeafIndex = recovered.messageLeafIndex
+        // Backfill fuel receipt data if recovered from BridgeWithFuel event
+        if (recovered.fuelMessageLeafIndex && !fuelMessageLeafIndex) {
+          fuelMessageLeafIndex = recovered.fuelMessageLeafIndex
+        }
+        if (recovered.fuelAmount && !fuelAmount) {
+          fuelAmount = recovered.fuelAmount
+        }
+
         // Persist recovered data to backend (3 retries)
-        const ok = await patchOperationWithRetry(operationId, {
+        const patchData: Record<string, unknown> = {
           status: 'deposited',
           messageHash,
           messageLeafIndex,
           currentStep: 2,
-        }, { label: 'recovered data' })
+        }
+        // Also persist recovered fuel fields so they survive future session crashes
+        if (recovered.fuelMessageHash) patchData.fuelMessageHash = recovered.fuelMessageHash
+        if (recovered.fuelMessageLeafIndex) patchData.fuelMessageLeafIndex = recovered.fuelMessageLeafIndex
+        if (recovered.fuelAmount) patchData.fuelAmount = recovered.fuelAmount
+
+        const ok = await patchOperationWithRetry(operationId, patchData, { label: 'recovered data' })
         if (ok) {
           console.log('[Resume L1→L2] Recovered data stored on backend')
         }
@@ -362,6 +413,52 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     // The L2 claim must use the post-fee amount to match the content hash.
     const preFeeBridgeAmount = BigInt(amount)
     const claimAmountPostFee = await getPostFeeClaimAmount(portalAddress, preFeeBridgeAmount)
+
+    // ── Build fuel fee payment method (if fuel data is available) ──
+    // Same logic as useL1Operations.ts:883-945 — atomically claim FeeJuice and pay gas
+    let feeOption: { fee: { paymentMethod: any; gasSettings?: any } } | undefined
+    if (privateFuelSecret && privateFuelSalt && fuelMessageLeafIndex && fuelAmount && BRIDGED_FPC_ADDRESS) {
+      // Private fuel path: BridgedMintAndPayFeePaymentMethod
+      try {
+        const { BridgedMintAndPayFeePaymentMethod, REASONABLE_GAS_LIMITS, maxFeesPerGasFromBaseFees } =
+          await import('@defi-wonderland/aztec-fee-payment')
+        const { Fr: FieldFr } = await import('@aztec/aztec.js/fields')
+        const { Gas, GasFees } = await import('@aztec/stdlib/gas')
+        const { aztecNode } = await import('@/aztec')
+
+        const baseFees = await aztecNode.getCurrentMinFees()
+        const maxFeesPerGas = maxFeesPerGasFromBaseFees(baseFees)
+        const gasLimits = REASONABLE_GAS_LIMITS
+        const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
+
+        console.log('[Resume L1→L2] Building BridgedMintAndPayFeePaymentMethod (private fuel)')
+        const paymentMethod = new BridgedMintAndPayFeePaymentMethod(
+          AztecAddress.fromString(BRIDGED_FPC_ADDRESS),
+          BigInt(fuelAmount),
+          privateFuelSecret,
+          privateFuelSalt,
+          new FieldFr(BigInt(fuelMessageLeafIndex)),
+        )
+        feeOption = { fee: { paymentMethod, gasSettings: { gasLimits, teardownGasLimits, maxFeesPerGas, maxPriorityFeesPerGas: GasFees.empty() } } }
+      } catch (err) {
+        console.warn('[Resume L1→L2] Failed to create BridgedMintAndPayFeePaymentMethod, falling back to default:', err)
+      }
+    } else if (fuelSecret && fuelMessageLeafIndex && fuelAmount) {
+      // Public fuel path: FeeJuicePaymentMethodWithClaim
+      try {
+        const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+        console.log('[Resume L1→L2] Building FeeJuicePaymentMethodWithClaim (public fuel)')
+        const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
+          claimAmount: BigInt(fuelAmount),
+          claimSecret: Fr.fromString(fuelSecret),
+          messageLeafIndex: BigInt(fuelMessageLeafIndex),
+        })
+        feeOption = { fee: { paymentMethod } }
+      } catch (err) {
+        console.warn('[Resume L1→L2] Failed to create FeeJuicePaymentMethodWithClaim, falling back to default:', err)
+      }
+    }
+
     const claimResult = await executeL2Claim(
       { walletAdapter, aztecAddress, isPrivacyModeEnabled },
       {
@@ -376,6 +473,7 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
         onRetry: (attempt, maxAttempts, delayMs) => {
           notify('info', `L2 node hasn't synced this message yet. Retrying in ${Math.round(delayMs / 60_000)} min (${attempt}/${maxAttempts})...`)
         },
+        feeOption,
       },
     )
 

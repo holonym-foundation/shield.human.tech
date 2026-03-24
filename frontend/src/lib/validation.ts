@@ -84,20 +84,32 @@ export function sanitizeNumericString(value: unknown): string | undefined {
   return s
 }
 
-/** Sanitize a URL string. Returns trimmed URL or undefined. */
+/** Known-good explorer URL prefixes for transaction links. */
+const ALLOWED_URL_PREFIXES = [
+  'https://etherscan.io/',
+  'https://sepolia.etherscan.io/',
+  'https://goerli.etherscan.io/',
+  'https://holesky.etherscan.io/',
+  'https://aztec.network/',
+  'https://aztecscan.io/',
+  'https://aztec-connect.com/',
+]
+
+/** Sanitize a URL string. Only allows known explorer hosts. Returns trimmed URL or undefined. */
 export function sanitizeUrl(value: unknown): string | undefined {
   const s = sanitizeString(value, 2048)
   if (!s) return undefined
   try {
     const url = new URL(s)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+    if (url.protocol !== 'https:') return undefined
+    if (!ALLOWED_URL_PREFIXES.some((prefix) => s.startsWith(prefix))) return undefined
     return s
   } catch {
     return undefined
   }
 }
 
-/** Validate and clamp an integer to a range. Returns the clamped value or undefined. */
+/** Validate an integer is within range. Returns the value or undefined if out of range. */
 export function sanitizeInt(
   value: unknown,
   min: number = 0,
@@ -106,7 +118,8 @@ export function sanitizeInt(
   if (value == null) return undefined
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined
-  return Math.max(min, Math.min(max, n))
+  if (n < min || n > max) return undefined
+  return n
 }
 
 /** Validate a boolean. Returns the boolean or undefined. */

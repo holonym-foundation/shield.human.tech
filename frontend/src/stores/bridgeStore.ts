@@ -51,6 +51,14 @@ export interface RecoveryClaimData {
   bridgeAddressL2: string | null
   tokenAddressL1: string | null
   tokenAddressL2: string | null
+  // Fuel recovery fields (from decrypted blob — secrets needed to claim FeeJuice on L2)
+  fuelSecret: string | null
+  privateFuelSalt: string | null
+  privateFuelSecret: string | null
+  // Fuel receipt fields (from DB — extracted from BridgeWithFuel event)
+  fuelMessageHash: string | null
+  fuelMessageLeafIndex: string | null
+  fuelAmount: string | null
 }
 
 /** Data needed to resume an incomplete L2→L1 withdrawal */

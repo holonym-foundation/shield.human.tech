@@ -49,6 +49,7 @@ import {
   patchOperationWithRetry,
   updateLocalStorageItem,
   pushToLocalStorageArray,
+  getL1TxUrl,
 } from './bridgeUtils'
 
 // ─── Shared Types ───────────────────────────────────────────────────
@@ -298,9 +299,19 @@ export async function waitForBlockProven(params: {
         await wait(pollIntervalMs)
       }
       if (!blockProven) {
-        console.warn('[L2→L1] Max wait reached; proceeding (may revert if block not proven).')
+        // Block is confirmed NOT proven after exhaustive polling — do NOT proceed.
+        // Sending an L1 withdraw would burn gas on a guaranteed revert.
+        throw new Error(
+          '[L2→L1] Block not yet proven after max wait. ' +
+          'The L1 withdraw would revert. Please resume later when the block is proven.'
+        )
       }
     } catch (e) {
+      // If the block was confirmed unproven (our own timeout error), propagate it.
+      // Only swallow transient RPC errors (getProvenCheckpointNumber call failures).
+      if (e instanceof Error && e.message.includes('Block not yet proven after max wait')) {
+        throw e
+      }
       console.warn('[L2→L1] Rollup poll failed, using fixed wait:', e)
       usedPoll = false
     }
@@ -375,8 +386,15 @@ export async function executeL1Withdraw(params: {
   })
   console.log('[L2→L1] L1 withdraw tx confirmed:', receipt.transactionHash, 'status:', receipt.status)
 
+  if (receipt.status === 'reverted') {
+    throw new Error(
+      `L1 withdraw transaction reverted: ${receipt.transactionHash}. ` +
+      'The block may not be proven yet or the proof is invalid. Retry via Resume later.'
+    )
+  }
+
   const l1TxHash = receipt.transactionHash.toString()
-  const l1TxUrl = `https://sepolia.etherscan.io/tx/${l1TxHash}`
+  const l1TxUrl = getL1TxUrl(l1TxHash)
 
   return { l1TxHash, l1TxUrl }
 }
@@ -840,6 +858,7 @@ export async function fetchNodeInfoAndComputeWitness(params: {
       ...w,
       l2ToL1MessageIndex: leafIndex,
       siblingPath,
+      epoch: epoch != null ? Number(epoch) : undefined,
       status: 'ready',
     }),
   )

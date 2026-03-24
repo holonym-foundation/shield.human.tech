@@ -123,6 +123,13 @@ export default function ActivityPage() {
             bridgeAddressL2: operation.bridgeAddressL2,
             tokenAddressL1: operation.tokenAddressL1,
             tokenAddressL2: operation.tokenAddressL2,
+            // Fuel recovery: secrets from decrypted blob, receipt data from DB
+            fuelSecret: decrypted.fuelSecret ?? null,
+            privateFuelSalt: decrypted.privateFuelSalt ?? null,
+            privateFuelSecret: decrypted.privateFuelSecret ?? null,
+            fuelMessageHash: operation.fuelMessageHash ?? null,
+            fuelMessageLeafIndex: operation.fuelMessageLeafIndex ?? null,
+            fuelAmount: operation.fuelAmount ?? null,
           }
 
           setDirection(BridgeDirection.L1_TO_L2)

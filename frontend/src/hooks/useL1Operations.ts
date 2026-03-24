@@ -40,6 +40,7 @@ import {
   patchOperationAsync,
   patchOperationWithRetry,
   updateLocalStorageItem,
+  getL1TxUrl,
 } from './bridge/bridgeUtils'
 import {
   pollL1ToL2MessageSync,
@@ -622,9 +623,8 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     let fuel: FuelParams | undefined
     let privateFuel: PrivateFuelParams | undefined
     if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr) {
-      const fuelAmountTokenUnits = BigInt(
-        Math.floor(Number(fuelAmountStr) * 10 ** (selectedToken?.decimals ?? 6))
-      )
+      const { parseUnits } = await import('viem')
+      const fuelAmountTokenUnits = parseUnits(fuelAmountStr, selectedToken?.decimals ?? 6)
       const hasSwapTarget = UNISWAP_FUEL_SWAP_ADDRESS
       if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amount) {
         if (fuelType === 'private' && BRIDGED_FPC_ADDRESS && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
@@ -761,9 +761,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         attestation,
         passportAttestation,
       })
-      // 🔒 Funds are now POTENTIALLY locked on L1 — from this point, the outer catch must
-      // NEVER mark the operation as 'failed'.
-      depositConfirmed = true
 
       // ─── Step 5: Wait for receipt and extract event ─────────────────
       const receipt = await waitForReceiptAndExtractEvent({
@@ -774,9 +771,13 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         aztecAddress,
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
         l1Address,
+        operationId,
         selectedToken,
         fuel,
       })
+      // 🔒 Receipt confirmed with status=success — funds ARE locked on L1.
+      // From this point, the outer catch must NEVER mark the operation as 'failed'.
+      depositConfirmed = true
       receiptData = receipt
       setTransactionUrls(receipt.l1TxUrl, null)
 
@@ -808,6 +809,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         l1BlockNumberBeforeTx,
         nodeInfo,
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
+        operationId,
       })
 
       if (wasExisting && updatedClaim) {
@@ -1459,7 +1461,7 @@ export function useL1MintSoulboundToken(onSuccess: (data: any) => void) {
       )
       const txHashStr = receipt?.transactionHash?.toString()
 
-      const etherscanUrl = `https://sepolia.etherscan.io/tx/${txHashStr}`
+      const etherscanUrl = getL1TxUrl(txHashStr ?? '')
       notify(
         'info',
         `SBT minted successfully on Ethereum! Click to view on Ethereum`,

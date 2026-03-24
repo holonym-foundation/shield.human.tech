@@ -130,7 +130,11 @@ model BridgeActivity {
   messageHash     String? // L1→L2 message key (from portal event); used for sync check and claim
   messageLeafIndex String? // L1→L2 leaf index; required for claim_public/claim_private on L2
 
-  // --- L1→L2 fuel recovery (when BridgeAndFuel path used) ---
+  // --- L1→L2 fuel secret hashes (plaintext for querying; actual secrets are in encrypted blob) ---
+  fuelSecretHash        String? // Hash of the public fuel secret (poseidon2); set at creation
+  privateFuelSecretHash String? // Hash of the BridgedFPC-derived fuel secret; set at creation
+
+  // --- L1→L2 fuel recovery (when SwapBridgeRouter fuel path is used) ---
   fuelMessageHash     String? // Fuel message key from BridgeWithFuel event (fuelKey)
   fuelMessageLeafIndex String? // Fuel leaf index from BridgeWithFuel event (fuelIndex)
   fuelAmount           String? // Fuel amount received (in smallest unit, from BridgeWithFuel event)
@@ -164,7 +168,6 @@ model BridgeActivity {
   tokenSymbolL1   String?
   tokenNameL1     String?
   tokenDecimalsL1 Int?
-  tokenLogoUrlL1  String?
   tokenAddressL1  String?
   amountL1        String?  // Raw amount in smallest unit (e.g. "1000000" for 1 USDC)
   amountDisplayL1 String? // Human-readable amount as entered by the user (e.g. "1" for 1 USDC)
@@ -172,7 +175,6 @@ model BridgeActivity {
   tokenSymbolL2   String?
   tokenNameL2     String?
   tokenDecimalsL2 Int?
-  tokenLogoUrlL2  String?
   tokenAddressL2  String?
   amountL2        String?  // Raw amount in smallest unit (e.g. "1000000" for 1 USDC)
   amountDisplayL2 String? // Human-readable amount as entered by the user (e.g. "1" for 1 USDC)

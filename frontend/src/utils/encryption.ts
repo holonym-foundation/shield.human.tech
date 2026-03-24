@@ -203,20 +203,28 @@ export interface EncryptedData {
 }
 
 export interface BridgeActivityData {
-  // For L1→L2
+  // L1→L2: claim secrets (encrypted blob only — server never sees these)
   claimSecret?: string
   claimSecretHash?: string
-  messageHash?: string
-  messageLeafIndex?: string
-  
-  // For L2→L1
+
+  // L1→L2: fuel secrets (encrypted blob only)
+  fuelSecret?: string
+  fuelSecretHash?: string
+  privateFuelSalt?: string
+  privateFuelSecret?: string
+  privateFuelSecretHash?: string
+
+  // L1→L2: snapshot stored in blob for offline recovery
+  l1BlockNumberBeforeTx?: string
+  nodeInfo?: Record<string, unknown>
+
+  // L2→L1: authwit nonce (encrypted blob only — needed to re-attempt interrupted burn)
   nonce?: string
-  l2BlockNumber?: string
-  l2ToL1MessageIndex?: string
-  siblingPath?: string[]
-  
-  // Common
+  l2BridgeAddress?: string
+
+  // Common (present in both L1→L2 and L2→L1 blobs)
   amount?: string
   l1Address?: string
   l2Address?: string
+  isPrivacyModeEnabled?: boolean
 }

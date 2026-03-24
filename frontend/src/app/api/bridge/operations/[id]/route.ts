@@ -62,7 +62,7 @@ export async function PATCH(
     const l1TxUrl = sanitizeUrl(body.l1TxUrl)
     const messageHash = sanitizeHexString(body.messageHash, 130)
     const messageLeafIndex = sanitizeNumericString(body.messageLeafIndex)
-    const l2TxHash = sanitizeString(body.l2TxHash, 130) // L2 tx hashes may differ from ETH format
+    const l2TxHash = sanitizeHexString(body.l2TxHash, 130)
     const l2TxUrl = sanitizeUrl(body.l2TxUrl)
     const lastErrorMessage = body.lastErrorMessage !== undefined
       ? (sanitizeString(body.lastErrorMessage, MAX_ERROR_LENGTH) ?? '')
@@ -75,12 +75,12 @@ export async function PATCH(
     const siblingPath = sanitizeSiblingPath(body.siblingPath)
     const recipientL1Address = sanitizeEthAddress(body.recipientL1Address)
     const currentStep = sanitizeInt(body.currentStep, 0, 10)
-    // Fuel fields (L1→L2 BridgeAndFuel path)
+    // L2→L1 witness epoch
+    const epoch = sanitizeInt(body.epoch, 0, 1_000_000_000)
+    // L1→L2 fuel recovery fields
     const fuelMessageHash = sanitizeHexString(body.fuelMessageHash, 130)
     const fuelMessageLeafIndex = sanitizeNumericString(body.fuelMessageLeafIndex)
     const fuelAmount = sanitizeNumericString(body.fuelAmount)
-    // L2→L1 witness epoch
-    const epoch = sanitizeInt(body.epoch, 0, 1_000_000_000)
 
 
     // ── Immutable field guard ───────────────────────────────────────────
@@ -107,10 +107,7 @@ export async function PATCH(
 
     const blockedFields: string[] = []
     for (const field of IMMUTABLE_FIELDS) {
-      if (
-        body[field] !== undefined &&
-        (operation as Record<string, unknown>)[field] != null
-      ) {
+      if (body[field] !== undefined) {
         blockedFields.push(field)
       }
     }
@@ -177,7 +174,12 @@ export async function PATCH(
     if (l2TxUrl) updateData.l2TxUrl = l2TxUrl
     if (lastErrorMessage !== undefined)
       updateData.lastErrorMessage = lastErrorMessage
-    if (completedAtDate) updateData.completedAt = completedAtDate
+    // Set completedAt server-side for terminal states — ignore client-supplied value
+    if (status === 'completed' || status === 'failed') {
+      updateData.completedAt = new Date()
+    } else if (completedAtDate) {
+      updateData.completedAt = completedAtDate
+    }
     // L2→L1 withdrawal fields
     if (l2BlockNumber) updateData.l2BlockNumber = l2BlockNumber
     if (l2BlockNumberBeforeTx) updateData.l2BlockNumberBeforeTx = l2BlockNumberBeforeTx
@@ -185,7 +187,7 @@ export async function PATCH(
     if (siblingPath) updateData.siblingPath = siblingPath
     if (recipientL1Address) updateData.recipientL1Address = recipientL1Address
     if (currentStep != null) updateData.currentStep = currentStep
-    // Fuel fields
+    // L1→L2 fuel fields
     if (fuelMessageHash) updateData.fuelMessageHash = fuelMessageHash
     if (fuelMessageLeafIndex) updateData.fuelMessageLeafIndex = fuelMessageLeafIndex
     if (fuelAmount) updateData.fuelAmount = fuelAmount

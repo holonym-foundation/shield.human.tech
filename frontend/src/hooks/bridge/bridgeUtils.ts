@@ -11,6 +11,8 @@ import { createPublicClient, http } from 'viem'
 import { sepolia } from 'viem/chains'
 import { api } from '@/lib/api'
 import { wait } from '@/utils'
+import { L1_CHAIN_ID } from '@/config'
+import { networkConfig } from '@/config/l1.config'
 
 // ─── Shared Log Context ─────────────────────────────────────────────
 
@@ -34,6 +36,17 @@ export const LS_KEY_BRIDGE_DEPOSITS = 'bridge:deposits:l1ToL2'
 export const LS_KEY_BRIDGE_WITHDRAWALS = 'bridge:withdrawals:l2ToL1'
 
 const L1_RPC_URL = process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL
+
+/** Get the L1 block explorer base URL from networkConfig (e.g. 'https://sepolia.etherscan.io/'). */
+export function getL1ExplorerUrl(): string {
+  return networkConfig[L1_CHAIN_ID]?.blockExplorer ?? 'https://etherscan.io/'
+}
+
+/** Build a full L1 transaction URL from a tx hash. */
+export function getL1TxUrl(txHash: string): string {
+  const base = getL1ExplorerUrl().replace(/\/+$/, '')
+  return `${base}/tx/${txHash}`
+}
 
 /** Shared L1 public client for transaction polling and contract reads. */
 export const publicClient = createPublicClient({

@@ -1,5 +1,5 @@
 import { L1_CHAIN_ID } from '@/config'
-import { waapConfig } from '@/config/l1.config'
+import { networkConfig, waapConfig } from '@/config/l1.config'
 import { showToast } from '@/hooks/useToast'
 import {
   detectWalletByProvider,
@@ -958,7 +958,7 @@ const walletStore = create<WalletState>((set, get) => ({
                 decimals: 18,
               },
               rpcUrls: chainId === L1_CHAIN_ID ? [process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL || 'https://sepolia.infura.io/'] : [],
-              blockExplorerUrls: chainId === L1_CHAIN_ID ? ['https://sepolia.etherscan.io'] : [],
+              blockExplorerUrls: chainId === L1_CHAIN_ID ? [(networkConfig[L1_CHAIN_ID]?.blockExplorer ?? 'https://etherscan.io/').replace(/\/+$/, '')] : [],
             },
           ])
           set({ waapChainId: chainId })

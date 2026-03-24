@@ -192,9 +192,11 @@ async function quoteExactInputSingleCall(
  * @returns Expected output in FeeJuice (18 decimals).
  */
 let _quoteClient: ReturnType<typeof createPublicClient> | null = null
+let _quoteClientUrl: string | null = null
 function getQuoteClient(l1RpcUrl: string) {
-  if (!_quoteClient) {
+  if (!_quoteClient || _quoteClientUrl !== l1RpcUrl) {
     _quoteClient = createPublicClient({ chain: sepolia, transport: http(l1RpcUrl) })
+    _quoteClientUrl = l1RpcUrl
   }
   return _quoteClient
 }

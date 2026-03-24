@@ -98,11 +98,22 @@ export async function GET(request: NextRequest) {
         tokenSymbol: true,
         tokenAddressL1: true,
         tokenAddressL2: true,
+        tokenDecimalsL1: true,
+        tokenDecimalsL2: true,
+        tokenNameL1: true,
+        tokenNameL2: true,
+        // Network names
+        fromNetworkName: true,
+        toNetworkName: true,
+        // Additional contract snapshot
+        chainIdL2: true,
+        l1InboxAddress: true,
+        l1RegistryAddress: true,
         // Encrypted fields for client-side decryption
         encryptedCiphertext: true,
         encryptedIv: true,
         encryptedTag: true,
-        keyDerivationMessage: true,
+        // keyDerivationMessage omitted — client can reconstruct from createSigningMessage(l1Address)
         keyDerivationDomain: true,
       },
     })
@@ -187,6 +198,9 @@ export async function POST(request: NextRequest) {
     const tokenDecimalsL1 = sanitizeInt(body.tokenDecimalsL1, 0, 77)
     const tokenDecimalsL2 = sanitizeInt(body.tokenDecimalsL2, 0, 77)
     const currentStep = sanitizeInt(body.currentStep, 0, 10)
+    // Fuel secret hashes (plaintext for querying; actual secrets are in encrypted blob)
+    const fuelSecretHash = sanitizeHexString(body.fuelSecretHash, 130)
+    const privateFuelSecretHash = sanitizeHexString(body.privateFuelSecretHash, 130)
 
     // ── Validate required fields ────────────────────────────────────────
     if (!encryptedCiphertext || !encryptedIv || !encryptedTag) {
@@ -302,6 +316,9 @@ export async function POST(request: NextRequest) {
         tokenDecimalsL1: tokenDecimalsL1 ?? undefined,
         tokenDecimalsL2: tokenDecimalsL2 ?? undefined,
         currentStep: currentStep ?? 1,
+        // Fuel secret hashes (plaintext for querying; actual secrets in encrypted blob)
+        fuelSecretHash: fuelSecretHash ?? undefined,
+        privateFuelSecretHash: privateFuelSecretHash ?? undefined,
         // Client IP for audit trail
         clientIp:
           request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??

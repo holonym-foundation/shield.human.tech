@@ -58,6 +58,7 @@ import {
   publicClient,
   updateLocalStorageItem,
   pushToLocalStorageArray,
+  getL1TxUrl,
 } from './bridgeUtils'
 import { extractEvent } from '@aztec/ethereum/utils'
 
@@ -305,8 +306,11 @@ export async function getPostFeeClaimAmount(
     console.log('[L1→L2] Post-fee claim amount:', { amount: amount.toString(), fee: fee.toString(), claimAmount: claimAmount.toString() })
     return claimAmount
   } catch (err) {
-    console.warn('[L1→L2] Failed to query calculateFee, using original amount:', err)
-    return amount
+    console.error('[L1→L2] Failed to query calculateFee — cannot determine post-fee amount:', err)
+    throw new Error(
+      'Failed to query portal fee. Cannot safely determine the claim amount. ' +
+      'Please check your RPC connection and try again.'
+    )
   }
 }
 
@@ -453,10 +457,19 @@ export async function executeL2Claim(
         console.log('[L1→L2] Claim succeeded')
         return { l2TxHash: result.txHash, usedBruteForce: false }
       } catch (err) {
-        // Retry on any error — the claim is idempotent and most failures are transient
-        // (reorgs, block header not found, message not synced, PXE lag, etc.)
+        const errMsg = err instanceof Error ? err.message : String(err)
+        const errLower = errMsg.toLowerCase()
+
+        // Don't retry on user rejection or already-consumed messages — surface immediately
+        if (errLower.includes('user rejected') || errLower.includes('user denied') || errLower.includes('user cancelled')) {
+          throw new Error('Transaction rejected by user.')
+        }
+        if (errLower.includes('message already consumed') || errLower.includes('already been consumed')) {
+          throw new Error('This deposit has already been claimed.')
+        }
+
+        // Retry on transient errors (reorgs, block header not found, message not synced, PXE lag, etc.)
         if (attempt < maxAttempts) {
-          const errMsg = err instanceof Error ? err.message : String(err)
           options?.onRetry?.(attempt, maxAttempts, retryDelayMs)
           console.warn(
             `[L1→L2] Claim attempt ${attempt} failed, retrying in ${retryDelayMs / 1000}s...`,
@@ -610,6 +623,33 @@ export async function generateAndBackupClaimSecret(params: {
   const nodeInfoSnapshot = serializeNodeInfo(nodeInfo)
   console.log('[L1→L2] Claim secret generated, backing up to backend')
 
+  // ── Generate fuel secrets BEFORE backup so they are included in the encrypted payload ──
+  // Public fuel: random secret + hash → used with FeeJuicePaymentMethodWithClaim on L2.
+  // Private fuel: derived secret (poseidon2([salt, userAddress], DOM_SEP)) + hash → FJ
+  //   deposited to FPC on L1, then BridgedMintAndPayFeePaymentMethod on L2.
+  let fuelSecret: Fr | undefined
+  let fuelSecretHash: Fr | undefined
+  if (params.fuel && !params.privateFuel) {
+    fuelSecret = Fr.random()
+    fuelSecretHash = await computeSecretHash(fuelSecret)
+    console.log('[L1→L2] Public fuel secret generated')
+  }
+
+  let privateFuelSalt: Fr | undefined
+  let privateFuelSecret: Fr | undefined
+  let privateFuelSecretHash: Fr | undefined
+  if (params.privateFuel) {
+    privateFuelSalt = Fr.random()
+    const DOM_SEP_FPC_BRIDGE_SECRET = 3952304070
+    const claimerFr = Fr.fromString(params.aztecAddress)
+    privateFuelSecret = await poseidon2HashWithSeparator(
+      [privateFuelSalt, claimerFr],
+      DOM_SEP_FPC_BRIDGE_SECRET,
+    )
+    privateFuelSecretHash = await computeSecretHash(privateFuelSecret)
+    console.log('[L1→L2] Private fuel (BridgedFPC) secret generated')
+  }
+
   // Deterministic encryption: same wallet + same message = same key (always recoverable)
   const keyDerivationDomain = getKeyDerivationDomain()
   const signingMessage = createSigningMessage(l1Address)
@@ -619,7 +659,7 @@ export async function generateAndBackupClaimSecret(params: {
   }
   const encryptionKey = await deriveEncryptionKey(l1Address, signature, keyDerivationDomain)
 
-  const payloadToEncrypt = {
+  const payloadToEncrypt: Record<string, unknown> = {
     claimSecret: claimSecret.toString(),
     claimSecretHash: claimSecretHash.toString(),
     amount: amountL1,
@@ -629,6 +669,12 @@ export async function generateAndBackupClaimSecret(params: {
     l1BlockNumberBeforeTx,
     nodeInfo: nodeInfoSnapshot,
   }
+  // Include fuel secrets in the encrypted backup so they survive session crashes
+  if (fuelSecret) payloadToEncrypt.fuelSecret = fuelSecret.toString()
+  if (fuelSecretHash) payloadToEncrypt.fuelSecretHash = fuelSecretHash.toString()
+  if (privateFuelSalt) payloadToEncrypt.privateFuelSalt = privateFuelSalt.toString()
+  if (privateFuelSecret) payloadToEncrypt.privateFuelSecret = privateFuelSecret.toString()
+  if (privateFuelSecretHash) payloadToEncrypt.privateFuelSecretHash = privateFuelSecretHash.toString()
   console.log('[L1→L2] Payload to encrypt:', {
     amount: payloadToEncrypt.amount,
     l1Address: payloadToEncrypt.l1Address,
@@ -677,6 +723,9 @@ export async function generateAndBackupClaimSecret(params: {
     tokenNameL2: `Clean ${selectedToken?.symbol ?? 'USDC'}`,
     tokenAddressL1: selectedToken?.l1TokenContract ?? '',
     tokenAddressL2: selectedToken?.l2TokenContract ?? '',
+    // Fuel secret hashes (plaintext for querying; actual secrets in encrypted blob)
+    fuelSecretHash: fuelSecretHash?.toString(),
+    privateFuelSecretHash: privateFuelSecretHash?.toString(),
     tokenDecimalsL1: selectedToken?.decimals ?? 6,
     tokenDecimalsL2: selectedToken?.decimals ?? 6,
     currentStep: 1,
@@ -738,38 +787,6 @@ export async function generateAndBackupClaimSecret(params: {
     } : {}),
   })
   console.log('Encrypted claim data stored in localStorage')
-
-  // Generate fuel secrets.
-  // Public fuel: random secret + hash → used with FeeJuicePaymentMethodWithClaim on L2.
-  // Private fuel: derived secret (poseidon2([salt, userAddress], DOM_SEP)) + hash → FJ
-  //   deposited to FPC on L1, then BridgedMintAndPayFeePaymentMethod on L2
-  //   (FeeJuice.claim + BridgedFPC.mint_and_pay_fee, all private, in one tx).
-  // When private fuel is active, fuel is also set (for the swap quote), but we skip
-  // the public fuel secret since it would be unused — private fuel has its own secret.
-  let fuelSecret: Fr | undefined
-  let fuelSecretHash: Fr | undefined
-  if (params.fuel && !params.privateFuel) {
-    fuelSecret = Fr.random()
-    fuelSecretHash = await computeSecretHash(fuelSecret)
-    console.log('[L1→L2] Public fuel secret generated')
-  }
-
-  let privateFuelSalt: Fr | undefined
-  let privateFuelSecret: Fr | undefined
-  let privateFuelSecretHash: Fr | undefined
-  if (params.privateFuel) {
-    privateFuelSalt = Fr.random()
-    // Derive BridgedFPC secret: poseidon2([salt, claimer], DOM_SEP_FPC_BRIDGE_SECRET)
-    // claimer = user's Aztec address (the contract uses msg_sender() as claimer)
-    const DOM_SEP_FPC_BRIDGE_SECRET = 3952304070
-    const claimerFr = Fr.fromString(params.aztecAddress)
-    privateFuelSecret = await poseidon2HashWithSeparator(
-      [privateFuelSalt, claimerFr],
-      DOM_SEP_FPC_BRIDGE_SECRET,
-    )
-    privateFuelSecretHash = await computeSecretHash(privateFuelSecret)
-    console.log('[L1→L2] Private fuel (BridgedFPC) secret generated')
-  }
 
   return {
     operationId, claimSecret, claimSecretHash, nodeInfoSnapshot,
@@ -1067,7 +1084,7 @@ export async function sendL1DepositTransaction(params: {
     typeof txHash === 'string'
       ? txHash
       : ((txHash as { toString?: () => string })?.toString?.() ?? String(txHash))
-  const l1TxUrl = `https://sepolia.etherscan.io/tx/${l1TxHash}`
+  const l1TxUrl = getL1TxUrl(l1TxHash)
 
   updateLocalStorageItem(
     LS_KEY_BRIDGE_DEPOSITS,
@@ -1097,12 +1114,13 @@ export async function waitForReceiptAndExtractEvent(params: {
   aztecAddress: string
   isPrivacyModeEnabled: boolean
   l1Address: string
+  operationId?: string
   selectedToken?: Token
   fuel?: FuelParams
 }): Promise<ReceiptResult> {
   const {
     txHash, amount, claimSecretHash, claimSecret, aztecAddress,
-    isPrivacyModeEnabled, l1Address, selectedToken, fuel,
+    isPrivacyModeEnabled, l1Address, operationId, selectedToken, fuel,
   } = params
 
   const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
@@ -1111,8 +1129,12 @@ export async function waitForReceiptAndExtractEvent(params: {
   const txReceipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
 
   const l1TxHash = txReceipt?.transactionHash?.toString()
-  const l1TxUrl = `https://sepolia.etherscan.io/tx/${l1TxHash}`
+  const l1TxUrl = getL1TxUrl(l1TxHash)
   console.log('[L1→L2] Deposit tx confirmed:', l1TxHash, 'status:', txReceipt.status, 'logs:', txReceipt.logs.length)
+
+  if (txReceipt.status === 'reverted') {
+    throw new Error(`L1 deposit transaction reverted: ${l1TxHash}. Tokens were NOT taken — Permit2 signature or contract call failed.`)
+  }
 
   // ── Extract the post-fee claim amount from TokenPortal's DepositToAztecPublic/Private event ──
   // TokenPortal deducts fees before computing the L1→L2 content hash, so the L2 claim
@@ -1186,8 +1208,15 @@ export async function waitForReceiptAndExtractEvent(params: {
 
     updateLocalStorageItem(
       LS_KEY_BRIDGE_DEPOSITS,
-      (c: any) => c.l1Address === l1Address && c.status === BridgeOperationStatus.pending,
-      (c: any) => ({ ...c, messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr }),
+      (c: any) => c.claimSecretHash === claimSecretHash.toString() && c.status === BridgeOperationStatus.pending,
+      (c: any) => ({
+        ...c,
+        messageHash: messageHashStr,
+        messageLeafIndex: messageLeafIndexStr,
+        fuelMessageHash: fuelMessageHashStr,
+        fuelMessageLeafIndex: fuelMessageLeafIndexStr,
+        fuelAmount: fuelAmountReceived.toString(),
+      }),
     )
 
     return {
@@ -1277,7 +1306,7 @@ export async function waitForReceiptAndExtractEvent(params: {
 
   updateLocalStorageItem(
     LS_KEY_BRIDGE_DEPOSITS,
-    (c: any) => c.l1Address === l1Address && c.status === BridgeOperationStatus.pending,
+    (c: any) => operationId ? c.id === operationId : c.claimSecretHash === claimSecretHash.toString() && c.status === BridgeOperationStatus.pending,
     (c: any) => ({ ...c, messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr }),
   )
   console.log('messageHash and messageLeafIndex stored immediately after receipt')
@@ -1294,9 +1323,12 @@ export async function persistReceiptToBackend(
     messageLeafIndexStr: string
     l1TxHash: string
     l1TxUrl: string
+    fuelMessageHashStr?: string
+    fuelMessageLeafIndexStr?: string
+    fuelAmount?: bigint
   },
 ): Promise<boolean> {
-  const patchData = {
+  const patchData: Record<string, unknown> = {
     status: 'deposited',
     messageHash: receiptData.messageHashStr,
     messageLeafIndex: receiptData.messageLeafIndexStr,
@@ -1304,6 +1336,10 @@ export async function persistReceiptToBackend(
     l1TxUrl: receiptData.l1TxUrl,
     currentStep: 2,
   }
+  // Include fuel recovery data if present
+  if (receiptData.fuelMessageHashStr) patchData.fuelMessageHash = receiptData.fuelMessageHashStr
+  if (receiptData.fuelMessageLeafIndexStr) patchData.fuelMessageLeafIndex = receiptData.fuelMessageLeafIndexStr
+  if (receiptData.fuelAmount != null) patchData.fuelAmount = receiptData.fuelAmount.toString()
   console.log('[L1→L2] PATCH receipt data →', { operationId, ...patchData })
 
   const succeeded = operationId
@@ -1334,20 +1370,21 @@ export function finalizeLocalStorageAfterDeposit(params: {
   l1BlockNumberBeforeTx: string
   nodeInfo: any
   isPrivacyModeEnabled: boolean
+  operationId?: string
 }): { updatedClaim: any; wasExisting: boolean } {
   const {
     claimSecret, claimSecretHash, claimAmount, l1Address, aztecAddress,
     messageHashStr, messageLeafIndexStr, l1TxHash, l1TxUrl,
-    l1BlockNumberBeforeTx, nodeInfo, isPrivacyModeEnabled,
+    l1BlockNumberBeforeTx, nodeInfo, isPrivacyModeEnabled, operationId,
   } = params
 
   const existingClaims = localStorage.getItem(LS_KEY_BRIDGE_DEPOSITS)
   const claims = existingClaims ? JSON.parse(existingClaims) : []
 
   const claimIndex = claims.findIndex(
-    (c: any) =>
-      c.l1Address === l1Address &&
-      c.status === BridgeOperationStatus.pending,
+    (c: any) => operationId
+      ? c.id === operationId
+      : c.claimSecretHash === claimSecretHash.toString() && c.status === BridgeOperationStatus.pending,
   )
 
   let updatedClaim: any = null
@@ -1355,6 +1392,7 @@ export function finalizeLocalStorageAfterDeposit(params: {
   if (claimIndex !== -1) {
     updatedClaim = {
       ...claims[claimIndex],
+      claimAmount: claimAmount.toString(),
       messageHash: messageHashStr,
       messageLeafIndex: messageLeafIndexStr,
       l1TxHash,

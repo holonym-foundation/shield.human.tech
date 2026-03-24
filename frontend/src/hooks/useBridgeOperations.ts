@@ -51,6 +51,17 @@ export interface BridgeOperation {
   tokenSymbol: string | null
   tokenAddressL1: string | null
   tokenAddressL2: string | null
+  tokenDecimalsL1: number | null
+  tokenDecimalsL2: number | null
+  tokenNameL1: string | null
+  tokenNameL2: string | null
+  // Network names
+  fromNetworkName: string | null
+  toNetworkName: string | null
+  // Additional contract snapshot
+  chainIdL2: number | null
+  l1InboxAddress: string | null
+  l1RegistryAddress: string | null
   // Progress tracking
   currentStep: number | null
   // Common

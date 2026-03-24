@@ -286,7 +286,9 @@ class WalletAdapter {
     l1Address: string,
     amount: bigint,
     nonce: Fr,
-    userAddress?: AztecAddress | string
+    cleanHandsData?: { nonce: bigint; action_id: bigint; signature: number[] },
+    passportData?: { max_amount: bigint; nonce: bigint; deadline: bigint; signature: number[] },
+    userAddress?: AztecAddress | string,
   ): Promise<ExecuteCallResult> {
     const user = userAddress
       ? (typeof userAddress === 'string' ? AztecAddress.fromString(userAddress) : userAddress)
@@ -310,14 +312,19 @@ class WalletAdapter {
     await this.wallet.createAuthWit(
       this.account,
       {
-        consumer: tokenAddr,
+        consumer: bridgeAddr,
         innerHash,
       }
     )
 
-    // Send exit transaction
-    const receipt = await bridge.methods
-      .exit_to_l1_private(tokenAddr, EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
+    // Send exit transaction — pass attestation data if available
+    const exitArgs = cleanHandsData && passportData
+      ? [tokenAddr, EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce, cleanHandsData, passportData]
+      : [tokenAddr, EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce]
+    const exitMethod = cleanHandsData && passportData
+      ? 'exit_to_l1_private'
+      : 'exit_to_l1_private'
+    const receipt = await bridge.methods[exitMethod](...exitArgs)
       .send({ from: this.account })
 
     return {

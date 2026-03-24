@@ -119,6 +119,12 @@ export const exportClaimData = (claimData: any) => {
       nodeInfo: claimData.nodeInfo ?? undefined,
       isPrivacyModeEnabled: claimData.isPrivacyModeEnabled,
       status: claimData.status,
+      // Contract snapshot (required for manual recovery)
+      portalAddressL1: claimData.portalAddressL1 ?? undefined,
+      bridgeAddressL2: claimData.bridgeAddressL2 ?? undefined,
+      tokenAddressL1: claimData.tokenAddressL1 ?? undefined,
+      tokenAddressL2: claimData.tokenAddressL2 ?? undefined,
+      // Fuel recovery fields
       fuelMessageHash: claimData.fuelMessageHash ?? undefined,
       fuelMessageLeafIndex: claimData.fuelMessageLeafIndex ?? undefined,
       fuelAmount: claimData.fuelAmount ?? undefined,
@@ -155,8 +161,14 @@ export const exportWithdrawalData = (withdrawalData: any) => {
       amount: withdrawalData.amount,
       l1Address: withdrawalData.l1Address,
       l2Address: withdrawalData.l2Address,
-      l2BridgeAddress: withdrawalData.l2BridgeAddress,
+      bridgeAddressL2: withdrawalData.bridgeAddressL2 ?? withdrawalData.l2BridgeAddress,
+      recipientL1Address: withdrawalData.recipientL1Address ?? withdrawalData.l1Address,
       status: withdrawalData.status,
+      // Contract & version snapshot (required for manual recovery)
+      portalAddressL1: withdrawalData.portalAddressL1 ?? undefined,
+      rollupVersion: withdrawalData.rollupVersion ?? undefined,
+      chainIdL1: withdrawalData.chainIdL1 ?? undefined,
+      l1RollupAddress: withdrawalData.l1RollupAddress ?? undefined,
     },
   }
 
