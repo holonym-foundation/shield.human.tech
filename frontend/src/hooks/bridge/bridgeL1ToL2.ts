@@ -1147,8 +1147,8 @@ export async function waitForReceiptAndExtractEvent(params: {
   let portalEventFound = false
   for (const log of txReceipt.logs) {
     if (l1PortalAddress && log.address.toLowerCase() !== l1PortalAddress.toLowerCase()) continue
-    // Try our custom ABI first (has fee field), then upstream ABI as fallback
-    for (const abi of [CustomTokenPortalEventAbi, CustomTokenPortalAbi]) {
+    // Try custom ABI (has fee field), local Forge build, then upstream @aztec/l1-artifacts
+    for (const abi of [CustomTokenPortalEventAbi, CustomTokenPortalAbi, TokenPortalAbi]) {
       try {
         const decoded = decodeEventLog({
           abi,
@@ -1167,10 +1167,16 @@ export async function waitForReceiptAndExtractEvent(params: {
     if (portalEventFound) break
   }
   if (!portalEventFound) {
-    throw new Error(
-      `[L1→L2] TokenPortal ${portalEventName} event not found in receipt. ` +
-      `Cannot determine post-fee claim amount. L1 tx succeeded — tokens are safe in the portal. ` +
-      `Resume the operation to retry event extraction.`
+    // Log all receipt log addresses for debugging
+    console.error(
+      `[L1→L2] TokenPortal ${portalEventName} event not found in receipt.`,
+      `Portal address: ${l1PortalAddress}`,
+      `Receipt logs (${txReceipt.logs.length}):`,
+      txReceipt.logs.map(l => l.address),
+    )
+    console.warn(
+      '[L1→L2] Falling back to pre-fee amount — L2 claim may fail if fees are enabled. ' +
+      'Resume will re-extract the event from the receipt.',
     )
   }
 
@@ -1268,7 +1274,7 @@ export async function waitForReceiptAndExtractEvent(params: {
   // Fallback: try DepositToAztecPublic/Private from TokenPortal logs if needed
   if (!messageHash) {
     // Try with our custom ABI first (has fee field), then upstream as fallback
-    for (const abi of [CustomTokenPortalEventAbi, CustomTokenPortalAbi]) {
+    for (const abi of [CustomTokenPortalEventAbi, CustomTokenPortalAbi, TokenPortalAbi]) {
       try {
         const eventName = isPrivacyModeEnabled
           ? 'DepositToAztecPrivate'
