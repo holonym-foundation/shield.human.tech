@@ -26,10 +26,16 @@ export const ACTIVE_DEPLOYMENT_ID = deploymentsData.activeDeploymentId
 
 function getSelectedDeployment(): DeploymentData {
   let selectedId = deploymentsData.activeDeploymentId
-  if (typeof window !== 'undefined') {
+  // Allow deployment override only in development (prevents localStorage manipulation
+  // from redirecting users to old/compromised contract addresses in production).
+  const isDev = process.env.NODE_ENV === 'development'
+  if (isDev && typeof window !== 'undefined') {
     try {
       const override = localStorage.getItem('selectedDeploymentId')
-      if (override) selectedId = override
+      if (override) {
+        console.warn('[Config] Using deployment override from localStorage:', override)
+        selectedId = override
+      }
     } catch {
       // Ignore localStorage errors (SSR, security restrictions)
     }

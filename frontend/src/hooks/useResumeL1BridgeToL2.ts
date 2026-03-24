@@ -35,6 +35,8 @@ import {
 interface RecoveryResult {
   messageHash: string
   messageLeafIndex: string
+  /** Post-fee claim amount from the TokenPortal deposit event (source of truth for L2 claim). */
+  claimAmount?: string
   fuelMessageHash?: string
   fuelMessageLeafIndex?: string
   fuelAmount?: string
@@ -83,6 +85,28 @@ async function recoverFromReceipt(
             if (args.fuelIndex != null) result.fuelMessageLeafIndex = args.fuelIndex.toString()
             if (args.fuelAmount) result.fuelAmount = args.fuelAmount.toString()
           }
+          // Extract post-fee claimAmount from the TokenPortal event in the same receipt
+          // (the router calls TokenPortal which emits DepositToAztecPublic/Private with the post-fee amount)
+          const portalEventName = isPrivacyModeEnabled ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
+          for (const portalLog of receipt.logs) {
+            if (portalLog.address.toLowerCase() !== portalAddress.toLowerCase()) continue
+            try {
+              const portalDecoded = decodeEventLog({
+                abi: CustomTokenPortalEventAbi,
+                data: portalLog.data,
+                topics: portalLog.topics,
+              })
+              if (portalDecoded.eventName === portalEventName) {
+                const portalArgs = portalDecoded.args as any
+                if (portalArgs.amount != null) {
+                  result.claimAmount = portalArgs.amount.toString()
+                }
+                break
+              }
+            } catch {
+              // Not a portal event, skip
+            }
+          }
           console.log('[Resume L1→L2] Recovered from router event:', result)
           return result
         }
@@ -120,8 +144,13 @@ async function recoverFromReceipt(
       )
       const messageHash = log.args.key.toString()
       const messageLeafIndex = log.args.index.toString()
-      console.log('[Resume L1→L2] Recovered from receipt: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
-      return { messageHash, messageLeafIndex }
+      const result: RecoveryResult = { messageHash, messageLeafIndex }
+      // Extract post-fee claimAmount from the deposit event (amount field is post-fee)
+      if (log.args.amount != null) {
+        result.claimAmount = log.args.amount.toString()
+      }
+      console.log('[Resume L1→L2] Recovered from receipt:', result)
+      return result
     } catch {
       // This ABI didn't match, try next
     }
@@ -185,6 +214,28 @@ async function recoverFromBlockScan(
             if (args.fuelIndex != null) result.fuelMessageLeafIndex = args.fuelIndex.toString()
             if (args.fuelAmount) result.fuelAmount = args.fuelAmount.toString()
           }
+          // Extract post-fee claimAmount from the TokenPortal event in the same tx
+          const portalEventName = isPrivacyModeEnabled ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
+          for (const portalLog of logs) {
+            if (portalLog.transactionHash !== rawLog.transactionHash) continue
+            if (portalLog.address.toLowerCase() === (SWAP_BRIDGE_ROUTER_ADDRESS ?? '').toLowerCase()) continue
+            try {
+              const portalDecoded = decodeEventLog({
+                abi: CustomTokenPortalEventAbi,
+                data: portalLog.data,
+                topics: portalLog.topics,
+              })
+              if (portalDecoded.eventName === portalEventName) {
+                const portalArgs = portalDecoded.args as any
+                if (portalArgs.amount != null) {
+                  result.claimAmount = portalArgs.amount.toString()
+                }
+                break
+              }
+            } catch {
+              // Not a portal event, skip
+            }
+          }
           console.log('[Resume L1→L2] Found router event in block scan:', result)
           return result
         }
@@ -213,8 +264,12 @@ async function recoverFromBlockScan(
         if (matches) {
           const messageHash = args.key.toString()
           const messageLeafIndex = args.index.toString()
-          console.log('[Resume L1→L2] Found event in block scan: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
-          return { messageHash, messageLeafIndex }
+          const result: RecoveryResult = { messageHash, messageLeafIndex }
+          if (args.amount != null) {
+            result.claimAmount = args.amount.toString()
+          }
+          console.log('[Resume L1→L2] Found event in block scan:', result)
+          return result
         }
       } catch {
         // Skip logs that can't be decoded with this ABI
@@ -273,6 +328,8 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     // Fuel receipt fields — may be populated from DB or recovered from L1 events
     let fuelMessageLeafIndex = claimData.fuelMessageLeafIndex
     let fuelAmount = claimData.fuelAmount
+    // Post-fee claim amount — prefer DB value, backfill from recovery if needed
+    let recoveredClaimAmount: string | null = claimData.claimAmount
 
     console.log('[Resume L1→L2] Starting resume with recovery data:', {
       operationId,
@@ -346,7 +403,10 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
 
         messageHash = recovered.messageHash
         messageLeafIndex = recovered.messageLeafIndex
-        // Backfill fuel receipt data if recovered from BridgeWithFuel event
+        // Backfill claimAmount and fuel receipt data from recovery
+        if (recovered.claimAmount && !recoveredClaimAmount) {
+          recoveredClaimAmount = recovered.claimAmount
+        }
         if (recovered.fuelMessageLeafIndex && !fuelMessageLeafIndex) {
           fuelMessageLeafIndex = recovered.fuelMessageLeafIndex
         }
@@ -361,7 +421,8 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
           messageLeafIndex,
           currentStep: 2,
         }
-        // Also persist recovered fuel fields so they survive future session crashes
+        // Also persist recovered fuel + claimAmount fields so they survive future session crashes
+        if (recovered.claimAmount) patchData.claimAmount = recovered.claimAmount
         if (recovered.fuelMessageHash) patchData.fuelMessageHash = recovered.fuelMessageHash
         if (recovered.fuelMessageLeafIndex) patchData.fuelMessageLeafIndex = recovered.fuelMessageLeafIndex
         if (recovered.fuelAmount) patchData.fuelAmount = recovered.fuelAmount
@@ -428,10 +489,11 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     const claimSecretFr = Fr.fromString(claimSecret)
     // TokenPortal deducts fees before computing the L1→L2 content hash.
     // The L2 claim must use the post-fee amount to match the content hash.
-    // Prefer the stored claimAmount (from the deposit event) over re-deriving from current fee rate.
+    // Priority: DB value > recovered from L1 event > re-derive from current fee rate (last resort).
     const preFeeBridgeAmount = BigInt(amount)
-    const claimAmountPostFee = claimData.claimAmount
-      ? BigInt(claimData.claimAmount)
+    const storedClaimAmount = recoveredClaimAmount
+    const claimAmountPostFee = storedClaimAmount
+      ? BigInt(storedClaimAmount)
       : await getPostFeeClaimAmount(portalAddress, preFeeBridgeAmount)
 
     // ── Build fuel fee payment method (if fuel data is available) ──

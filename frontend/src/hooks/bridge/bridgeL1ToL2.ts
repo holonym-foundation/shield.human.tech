@@ -1095,11 +1095,13 @@ export async function sendL1DepositTransaction(params: {
   console.log('L1 tx hash stored immediately in localStorage')
 
   console.log('[L1→L2] PATCH l1TxHash →', { operationId, l1TxHash })
-  try {
-    await api.patch(`/api/bridge/operations/${operationId}`, { l1TxHash, l1TxUrl })
-    console.log('[L1→L2] l1TxHash stored on backend')
-  } catch (err) {
-    console.warn('[L1→L2] PATCH l1TxHash failed (will retry after receipt):', err)
+  const l1TxPatchOk = await patchOperationWithRetry(
+    operationId,
+    { l1TxHash, l1TxUrl },
+    { label: 'l1TxHash' },
+  )
+  if (!l1TxPatchOk) {
+    console.warn('[L1→L2] l1TxHash PATCH failed after retries — will be retried in persistReceiptToBackend')
   }
 
   return { txHash, l1TxHash, l1TxUrl }
