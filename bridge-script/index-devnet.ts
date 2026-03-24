@@ -70,6 +70,8 @@ const SwapBridgeRouterAbi = SwapBridgeRouterJson.abi
 const SwapBridgeRouterBytecode = SwapBridgeRouterJson.bytecode.object as `0x${string}`
 
 import { createPublicClient, encodeFunctionData, getContract, http, toFunctionSelector } from 'viem'
+import { execFileSync } from 'child_process'
+import path from 'path'
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -643,6 +645,46 @@ async function main() {
     })
   } catch (error) {
     logger.error(`Failed to deploy fuel swap infrastructure: ${error}`)
+  }
+
+  // Seed Uniswap V4 pools (ETH/AZTEC + ERC20/WETH) so the fuel swap quoter works
+  try {
+    logger.info('\n=== Seeding Uniswap V4 Pools ===')
+    const l1PrivateKey = L1_PRIVATE_KEY || ''
+    if (!l1PrivateKey) {
+      logger.warn('Skipping pool seeding: L1_PRIVATE_KEY not set (required for forge script)')
+    } else {
+      const l1ContractsDir = path.resolve(__dirname, '../l1-contracts')
+      // Use the first deployed ERC20 token (e.g. USDC) for the ERC20/WETH pool
+      const erc20Token = deployedContracts[0]?.l1TokenContract ?? ''
+
+      const forgeArgs = [
+        'script',
+        'script/SeedUniswapPools.s.sol:SeedUniswapPools',
+        '--rpc-url', L1_URL,
+        '--broadcast',
+        '-vvv',
+      ]
+
+      logger.info(`Running: forge ${forgeArgs.join(' ')}`)
+      logger.info(`  ERC20_TOKEN=${erc20Token || '(none)'}`)
+
+      execFileSync('forge', forgeArgs, {
+        cwd: l1ContractsDir,
+        stdio: 'inherit',
+        timeout: 300_000, // 5 min timeout
+        env: {
+          ...process.env,
+          PRIVATE_KEY: l1PrivateKey,
+          ...(erc20Token ? { ERC20_TOKEN: erc20Token } : {}),
+        },
+      })
+      logger.info('Uniswap V4 pools seeded successfully')
+    }
+  } catch (error) {
+    logger.error(`Failed to seed Uniswap pools: ${error}`)
+    logger.warn('Fuel swap quotes will fail until pools are seeded manually.')
+    logger.warn('Run: cd l1-contracts && PRIVATE_KEY=0x... ERC20_TOKEN=<addr> forge script script/SeedUniswapPools.s.sol:SeedUniswapPools --rpc-url <rpc> --broadcast -vvv')
   }
 
   // Sync active deployment to frontend

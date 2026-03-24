@@ -126,6 +126,62 @@ pnpm deploy-contract    # Deploy a single contract
 pnpm deploy-account     # Deploy a Schnorr account
 ```
 
+## Uniswap V4 Pool Seeding
+
+The deployment script (`pnpm start-devnet`) automatically seeds two Uniswap V4 pools on Sepolia so the fuel swap quoter works. If automatic seeding fails, you can run it manually:
+
+```bash
+cd l1-contracts
+PRIVATE_KEY=0x... ERC20_TOKEN=<erc20-address> \
+  forge script script/SeedUniswapPools.s.sol:SeedUniswapPools \
+  --rpc-url $L1_URL --broadcast -vvv
+```
+
+> **Note:** `L1_URL` must be set to your Sepolia RPC endpoint (e.g. Alchemy or Infura). Either `export L1_URL=https://...` beforehand or pass the URL directly with `--rpc-url https://...`.
+
+### Pools Created
+
+| Pool | Fee | Price Ratio | Default Seed |
+|------|-----|-------------|--------------|
+| ETH / FeeJuice (AZTEC) | 0.3% | ~10,000 FJ per ETH | 0.3 ETH + 100k FJ |
+| ERC20 / WETH | 0.3% | ~2,100 USDC per WETH | 5,000 USDC + 1.5 WETH |
+
+The ERC20/WETH pool is only created if `ERC20_TOKEN` is set (the deployment script passes the first deployed token automatically).
+
+To seed only the ERC20/WETH pool separately (e.g. after the initial deployment):
+
+```bash
+cd l1-contracts
+PRIVATE_KEY=0x... ERC20_TOKEN=<usdc-address> \
+  forge script script/SeedUniswapPools.s.sol:SeedUniswapPools \
+  --rpc-url $L1_URL --broadcast -vvv
+```
+
+### Pool Seeding Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PRIVATE_KEY` | — | **(Required)** Deployer private key |
+| `ERC20_TOKEN` | `address(0)` | ERC20 token address for the ERC20/WETH pool. Skipped if not set |
+| `ERC20_DECIMALS` | `6` | Decimals for the ERC20 token |
+| `SKIP_ETH_AZTEC` | `false` | Skip the ETH/AZTEC pool |
+| `FEE_MINT_COUNT` | `100` | Number of `FeeAssetHandler.mint()` calls (each mints 1,000 FJ) |
+| `ETH_SEED` | `0.3 ether` | ETH deposited into the ETH/AZTEC pool |
+| `ETH_AZTEC_LIQUIDITY` | `1e18` | Liquidity delta for ETH/AZTEC pool |
+| `ERC20_AMOUNT` | `5000 × 10^decimals` | ERC20 amount to seed |
+| `WETH_SEED` | `1.5 ether` | ETH wrapped to WETH for ERC20/WETH pool |
+| `ERC20_WETH_LIQUIDITY` | `6e13` | Liquidity delta for ERC20/WETH pool |
+
+### Key Addresses (Sepolia)
+
+| Contract | Address |
+|----------|---------|
+| Uniswap V4 PoolManager | `0xE03A1074c86CFeDd5C142C4F04F1a1536e203543` |
+| WETH | `0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14` |
+| AZTEC (FeeJuice) | `0x35d0186d1FD53b72996475D965C5Ed171D52b986` |
+| FeeAssetHandler | `0xED9c5557d2E0abCc7c7FCA958eE4292199413494` |
+| Permit2 | `0x000000000022D473030F116dDEE9F6B43aC78BA3` |
+
 ## Deployment Files
 
 Deployments are saved to `deployments/<version>_<date>.json` and tracked via `deployments/registry.json`. The active deployment is automatically synced to `../frontend/src/constants/deployments.json`.
