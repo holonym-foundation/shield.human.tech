@@ -36,8 +36,13 @@ function isResumable(op: BridgeOperation): boolean {
     // - Best: messageHash + messageLeafIndex already stored
     // - Fallback: l1TxHash → scan receipt for portal events
     // - Last resort: l1BlockNumberBeforeTx → scan L1 blocks for portal events
+    // Also allow 'pending' if l1TxHash exists (L1 tx mined but status PATCH failed)
+    const resumableStatus =
+      op.status === 'deposited' ||
+      op.status === 'claimed' ||
+      (op.status === 'pending' && !!op.l1TxHash)
     return (
-      (op.status === 'deposited' || op.status === 'claimed') &&
+      resumableStatus &&
       (!!op.messageHash || !!op.l1TxHash || !!op.l1BlockNumberBeforeTx)
     )
   }

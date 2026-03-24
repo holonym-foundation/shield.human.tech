@@ -64,15 +64,22 @@ export function verifyDomain(): void {
  * Security: domain-bound + wallet-bound. personal_sign is deterministic
  * for the same message and wallet.
  */
-export function createSigningMessage(l1Address: string): string {
-  const domain = getKeyDerivationDomain()
+/**
+ * @param l1Address - User's L1 (Ethereum) address
+ * @param domain - Optional domain override. When decrypting old backups, pass
+ *   the stored `keyDerivationDomain` so the signing message (and thus the
+ *   derived key) matches the one used at encryption time.  When encrypting
+ *   (creating new operations), omit this to use the current domain.
+ */
+export function createSigningMessage(l1Address: string, domain?: string): string {
+  const effectiveDomain = domain ?? getKeyDerivationDomain()
   return [
     'Aztec Bridge - Unlock My Secrets',
     '',
     'This signature derives an encryption key that protects your bridge operation secrets.',
     'Your encrypted data is stored securely and can only be decrypted by you.',
     '',
-    `ONLY sign this on: ${domain}`,
+    `ONLY sign this on: ${effectiveDomain}`,
     `Wallet: ${l1Address.toLowerCase()}`,
   ].join('\n')
 }

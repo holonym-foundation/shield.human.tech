@@ -16,6 +16,7 @@ import { decodeEventLog, parseEventLogs } from 'viem'
 import { extractEvent } from '@aztec/ethereum/utils'
 import { SWAP_BRIDGE_ROUTER_ADDRESS } from '@/config'
 import { SwapBridgeRouterAbi } from '@/constants/abis/SwapBridgeRouterAbi'
+import { api } from '@/lib/api'
 import {
   LS_KEY_BRIDGE_DEPOSITS,
   patchOperationWithRetry,
@@ -404,6 +405,22 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     // ═══════════════════════════════════════════════════════════════════════
     // Step 3: Claim on L2
     // ═══════════════════════════════════════════════════════════════════════
+
+    // Guard: check if the operation was already completed (e.g. a previous claim
+    // succeeded but the UI didn't update). Prevents double-claim confusion.
+    if (operationId) {
+      try {
+        const { data } = await api.get(`/api/bridge/operations/${operationId}`)
+        if (data?.status === 'completed') {
+          notify('info', 'This deposit has already been claimed successfully.')
+          setProgressStep(3, 'completed')
+          return operationId
+        }
+      } catch {
+        // Non-critical — proceed with the claim attempt
+      }
+    }
+
     setProgressStep(2, 'completed')
     setProgressStep(3, 'active')
     patchOperationAsync(operationId, { currentStep: 3 })

@@ -44,6 +44,9 @@ importers:
       '@aztec/wallets':
         specifier: 4.0.0-devnet.2-patch.2
         version: 4.0.0-devnet.2-patch.2(typescript@5.9.3)(zod@3.25.76)
+      '@defi-wonderland/aztec-fee-payment':
+        specifier: https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-b6315f1/defi-wonderland-aztec-fee-payment-4.0.0-devnet.2-patch.1-prerelease.b6315f1.tgz
+        version: https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-b6315f1/defi-wonderland-aztec-fee-payment-4.0.0-devnet.2-patch.1-prerelease.b6315f1.tgz
       '@defi-wonderland/aztec-standards':
         specifier: 4.0.0-devnet.2-patch.1
         version: 4.0.0-devnet.2-patch.1
@@ -624,6 +627,10 @@ packages:
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
+
+  '@defi-wonderland/aztec-fee-payment@https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-b6315f1/defi-wonderland-aztec-fee-payment-4.0.0-devnet.2-patch.1-prerelease.b6315f1.tgz':
+    resolution: {tarball: https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-b6315f1/defi-wonderland-aztec-fee-payment-4.0.0-devnet.2-patch.1-prerelease.b6315f1.tgz}
+    version: 4.0.0-devnet.2-patch.1-prerelease.b6315f1
 
   '@defi-wonderland/aztec-standards@4.0.0-devnet.2-patch.1':
     resolution: {integrity: sha512-pr7O+l61IaXSF0DAHsXxETeU8SXsBE2KB+LughHbp8yVRjQ+OiQBYJNZPEAQrOkqi5Z4IWFI6NoToqeqBKPgWA==}
@@ -4874,6 +4881,8 @@ snapshots:
   '@cspotcode/source-map-support@0.8.1':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
+
+  '@defi-wonderland/aztec-fee-payment@https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-b6315f1/defi-wonderland-aztec-fee-payment-4.0.0-devnet.2-patch.1-prerelease.b6315f1.tgz': {}
 
   '@defi-wonderland/aztec-standards@4.0.0-devnet.2-patch.1': {}
 

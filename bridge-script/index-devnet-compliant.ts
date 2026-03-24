@@ -62,13 +62,14 @@ const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
 
 // @ts-ignore
-import BridgeAndFuelJson from '../l1-contracts/out/BridgeAndFuel.sol/BridgeAndFuel.json'
+import UniswapFuelSwapJson from '../l1-contracts/out/UniswapFuelSwap.sol/UniswapFuelSwap.json'
 // @ts-ignore
-import MockFuelSwapJson from '../l1-contracts/out/MockFuelSwap.sol/MockFuelSwap.json'
-const BridgeAndFuelAbi = BridgeAndFuelJson.abi
-const BridgeAndFuelBytecode = BridgeAndFuelJson.bytecode.object as `0x${string}`
-const MockFuelSwapAbi = MockFuelSwapJson.abi
-const MockFuelSwapBytecode = MockFuelSwapJson.bytecode.object as `0x${string}`
+import SwapBridgeRouterJson from '../l1-contracts/out/SwapBridgeRouter.sol/SwapBridgeRouter.json'
+import { registerBridgedContract } from '@defi-wonderland/aztec-fee-payment'
+const UniswapFuelSwapAbi = UniswapFuelSwapJson.abi
+const UniswapFuelSwapBytecode = UniswapFuelSwapJson.bytecode.object as `0x${string}`
+const SwapBridgeRouterAbi = SwapBridgeRouterJson.abi
+const SwapBridgeRouterBytecode = SwapBridgeRouterJson.bytecode.object as `0x${string}`
 
 import {
   createPublicClient,
@@ -128,7 +129,7 @@ import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
   createDeployment,
   saveTokenToDeployment,
-  saveFuelInfraToDeployment,
+  saveFuelSwapInfraToDeployment,
   loadExistingTokens,
   loadActiveDeployment,
   copyToFrontend,
@@ -145,7 +146,9 @@ import configManager from './config/config.js'
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
+const L1_PRIVATE_KEY = process.env.L1_PRIVATE_KEY
 const MNEMONIC = process.env.MNEMONIC || 'test test test test test test test test test test test junk'
+const L1_CREDENTIAL = L1_PRIVATE_KEY || MNEMONIC
 const L1_URL = process.env.L1_URL || getL1RpcUrl()
 
 const MINT_AMOUNT = BigInt(process.env.MINT_AMOUNT || '1000000000000000') // 1e15
@@ -870,175 +873,6 @@ async function testPublicBridgeFlow(
     .simulate({ from: ownerAztecAddress })
   logger.info(`[L2] Public balance: ${balance}`)
   logger.info(`Public bridge flow (deposit + claim) successful!`)
-}
-
-/**
- * Test: BridgeAndFuel — atomic swap-for-gas + public deposit in one L1 tx.
- * Only works for public deposits (BridgeAndFuel calls depositToAztecPublic).
- * NOT compatible with private deposits — BridgeAndFuel would be msg.sender to the
- * portal, so attestation signatures (signed over user address) would fail ECDSA recovery,
- * and the ITokenPortal interface doesn't expose depositToAztecPrivate.
- */
-async function testBridgeWithFuelFlow(
-  deployed: DeployedCompliantToken,
-  wallet: EmbeddedWallet,
-  ownerAztecAddress: AztecAddress,
-  l1Client: ExtendedViemWalletClient,
-  ownerEthAddress: string,
-  l1ContractAddresses: any,
-  sponsoredPaymentMethod: any,
-  node: any,
-  logger: Logger
-) {
-  logger.info(`\n=== Testing BridgeWithFuel flow (atomic swap + public deposit) ===`)
-
-  // Load fuel infra addresses from active deployment
-  const activeDeployment = loadActiveDeployment()
-  const bridgeAndFuelAddr = activeDeployment?.bridgeAndFuelAddress
-  const mockFuelSwapAddr = activeDeployment?.mockFuelSwapAddress
-  const feeJuicePortalAddr = (l1ContractAddresses as any).feeJuicePortalAddress?.toString()
-
-  if (!bridgeAndFuelAddr || !mockFuelSwapAddr) {
-    logger.warn('[BridgeWithFuel] Fuel infra not deployed — skipping test')
-    return
-  }
-  if (!feeJuicePortalAddr) {
-    logger.warn('[BridgeWithFuel] feeJuicePortalAddress not in l1ContractAddresses — skipping test')
-    return
-  }
-
-  logger.info(`[BridgeWithFuel] BridgeAndFuel: ${bridgeAndFuelAddr}`)
-  logger.info(`[BridgeWithFuel] MockFuelSwap:  ${mockFuelSwapAddr}`)
-  logger.info(`[BridgeWithFuel] FeeJuicePortal: ${feeJuicePortalAddr}`)
-
-  const l1Token = getContract({
-    address: deployed.l1TokenContract as `0x${string}`,
-    abi: TestERC20Abi,
-    client: l1Client as any,
-  }) as any
-
-  // Mint tokens for this test (only for TestERC20 — skip if pre-existing token)
-  const totalAmount = BigInt(100_000) // 100k units
-  const fuelAmount = BigInt(10_000)   // 10% for gas
-
-  const tokenConfig = TOKEN_CONFIGS.find(tc => tc.symbol === deployed.symbol)
-  if (!tokenConfig?.l1TokenAddress) {
-    logger.info(`[L1] Minting ${totalAmount} tokens for BridgeWithFuel test`)
-    const mintTx = await l1Token.write.mint([ownerEthAddress, totalAmount])
-    await l1Client.waitForTransactionReceipt({ hash: mintTx, timeout: getTimeouts().txTimeout })
-  }
-
-  // Approve BridgeAndFuel to pull totalAmount
-  logger.info(`[L1] Approving BridgeAndFuel to spend ${totalAmount} tokens`)
-  const approveTx = await l1Token.write.approve([bridgeAndFuelAddr as `0x${string}`, totalAmount])
-  await l1Client.waitForTransactionReceipt({ hash: approveTx, timeout: getTimeouts().txTimeout })
-
-  // Build secrets for both the token deposit and the fuel deposit
-  const tokenSecret = Fr.random()
-  const tokenSecretHash = await computeSecretHash(tokenSecret)
-  const fuelSecret = Fr.random()
-  const fuelSecretHash = await computeSecretHash(fuelSecret)
-
-  // Build swap calldata: MockFuelSwap.swap(inputToken, inputAmount, minOutput)
-  // For 1:1 rate with decimal normalization: minOutput = fuelAmount * 10^(18 - tokenDecimals)
-  const tokenDecimals = deployed.decimals
-  const minFuelOutput = fuelAmount * BigInt(10 ** (18 - tokenDecimals))
-
-  const swapData = encodeFunctionData({
-    abi: MockFuelSwapAbi,
-    functionName: 'swap',
-    args: [deployed.l1TokenContract as `0x${string}`, fuelAmount, minFuelOutput],
-  })
-
-  // Build BridgeAndFuel.bridgeWithFuel calldata
-  const bridgeWithFuelData = encodeFunctionData({
-    abi: BridgeAndFuelAbi,
-    functionName: 'bridgeWithFuel',
-    args: [
-      {
-        tokenPortal: deployed.l1PortalContract as `0x${string}`,
-        bridgeToken: deployed.l1TokenContract as `0x${string}`,
-        totalAmount,
-        fuelAmount,
-        aztecRecipient: ownerAztecAddress.toString() as `0x${string}`,
-        tokenSecretHash: tokenSecretHash.toString() as `0x${string}`,
-        fuelSecretHash: fuelSecretHash.toString() as `0x${string}`,
-        feeJuicePortal: feeJuicePortalAddr as `0x${string}`,
-        swapTarget: mockFuelSwapAddr as `0x${string}`,
-        swapAllowanceTarget: mockFuelSwapAddr as `0x${string}`,
-        minFuelOutput,
-      },
-      swapData,
-    ],
-  })
-
-  logger.info(`[L1] Sending bridgeWithFuel tx (total=${totalAmount}, fuel=${fuelAmount})`)
-  const txHash = await l1Client.sendTransaction({
-    to: bridgeAndFuelAddr as `0x${string}`,
-    data: bridgeWithFuelData,
-  })
-  const receipt = await l1Client.waitForTransactionReceipt({ hash: txHash, timeout: getTimeouts().txTimeout })
-  logger.info(`[L1] BridgeWithFuel tx confirmed: ${txHash}`)
-
-  // Parse BridgeWithFuel event to get token messageHash + leafIndex
-  const { parseEventLogs } = await import('viem')
-  const bridgeEvents = parseEventLogs({ abi: BridgeAndFuelAbi, logs: receipt.logs })
-  const bwfEvent: any = bridgeEvents.find((l: any) => l.eventName === 'BridgeWithFuel')
-  if (!bwfEvent) throw new Error('BridgeWithFuel event not found')
-
-  const { tokenKey, tokenIndex, tokenAmount, fuelKey, fuelIndex, fuelAmount: fuelReceived } = bwfEvent.args
-  logger.info(`[L1] BridgeWithFuel event: tokenAmount=${tokenAmount}, tokenKey=${tokenKey}, fuelReceived=${fuelReceived}`)
-
-  // Parse the DepositToAztecPublic event from the portal for the actual amountAfterFee
-  const portalLogs = parseEventLogs({ abi: CustomTokenPortalAbi, logs: receipt.logs })
-  const depositEvent: any = portalLogs.find((l: any) => l.eventName === 'DepositToAztecPublic')
-  if (!depositEvent) throw new Error('DepositToAztecPublic event not found in BridgeWithFuel tx')
-
-  const { amount: amountAfterFee, fee } = depositEvent.args
-  logger.info(`[L1] Portal event: amountAfterFee=${amountAfterFee}, fee=${fee}`)
-
-  // Poll for L1→L2 message sync (token deposit message)
-  const messageHashFr = Fr.fromString(tokenKey)
-  logger.info(`[L1→L2] Polling for token message sync...`)
-  const maxWaitMs = 20 * 60 * 1000
-  const startWait = Date.now()
-  while (Date.now() - startWait < maxWaitMs) {
-    try {
-      const messageBlock = await node.getL1ToL2MessageBlock(messageHashFr)
-      if (messageBlock !== undefined) {
-        logger.info(`[L1→L2] Token message synced at block ${messageBlock}`)
-        break
-      }
-    } catch (e) { /* retry */ }
-    logger.info(`[L1→L2] Waiting 2 min...`)
-    await wait(120_000)
-  }
-  await wait(120_000) // Final buffer
-
-  // Claim token deposit on L2
-  logger.info(`[L2] Claiming tokens publicly (from BridgeWithFuel deposit)`)
-  const l2BridgeContract = TokenBridgeContract.at(
-    AztecAddress.fromString(deployed.l2BridgeContract),
-    wallet
-  )
-
-  await l2BridgeContract.methods
-    .claim_public(ownerAztecAddress, amountAfterFee, tokenSecret, tokenIndex)
-    .send({
-      from: ownerAztecAddress,
-      fee: { paymentMethod: sponsoredPaymentMethod },
-      wait: { timeout: getTimeouts().txTimeout },
-    })
-
-  const l2TokenContract = TokenContract.at(
-    AztecAddress.fromString(deployed.l2TokenContract),
-    wallet
-  )
-  const newBalance = await l2TokenContract.methods
-    .balance_of_public(ownerAztecAddress)
-    .simulate({ from: ownerAztecAddress })
-  logger.info(`[L2] Public balance after BridgeWithFuel claim: ${newBalance}`)
-  logger.info(`BridgeWithFuel flow successful!`)
 }
 
 /**
@@ -1946,7 +1780,7 @@ async function main() {
   const node = createAztecNodeClient(nodeUrl)
   const nodeInfo = await node.getNodeInfo()
   const chain = createEthereumChain([L1_URL], nodeInfo.l1ChainId)
-  const l1Client = createExtendedL1Client(chain.rpcUrls, MNEMONIC, chain.chainInfo)
+  const l1Client = createExtendedL1Client(chain.rpcUrls, L1_CREDENTIAL, chain.chainInfo)
   const ownerEthAddress = l1Client.account.address
 
   const l1ContractAddresses = nodeInfo.l1ContractAddresses
@@ -2087,53 +1921,53 @@ async function main() {
       }
     }
 
-    // Deploy BridgeAndFuel + MockFuelSwap (fuel infrastructure)
+    // Deploy fuel swap infrastructure (UniswapFuelSwap + SwapBridgeRouter + BridgedFPC)
     try {
-      logger.info('\n=== Deploying Fuel Infrastructure ===')
+      logger.info('\n=== Deploying Fuel Swap Infrastructure ===')
 
-      logger.info('Deploying BridgeAndFuel contract...')
-      const bridgeAndFuelAddress = await deployL1Contract(
-        l1Client,
-        BridgeAndFuelAbi,
-        BridgeAndFuelBytecode,
-        [l1Client.account.address]
-      ).then(({ address }) => address)
-      logger.info(`BridgeAndFuel deployed at ${bridgeAndFuelAddress.toString()}`)
+      // Known Sepolia constants
+      const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3'
+      const V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543'
+      const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'
 
       const feeJuiceAddress = (l1ContractAddresses as any).feeJuiceAddress?.toString()
-      const feeAssetHandlerAddress = (l1ContractAddresses as any).feeAssetHandlerAddress?.toString()
-      if (!feeJuiceAddress || !feeAssetHandlerAddress) {
-        throw new Error('Missing feeJuiceAddress or feeAssetHandlerAddress from node info')
+      const feeJuicePortalAddress = (l1ContractAddresses as any).feeJuicePortalAddress?.toString()
+      if (!feeJuiceAddress || !feeJuicePortalAddress) {
+        throw new Error('Missing feeJuiceAddress or feeJuicePortalAddress from node info')
       }
 
-      logger.info('Deploying MockFuelSwap contract...')
-      const mockFuelSwapAddress = await deployL1Contract(
+      // 1. Deploy UniswapFuelSwap (L1)
+      logger.info('Deploying UniswapFuelSwap contract...')
+      const uniswapFuelSwapAddress = await deployL1Contract(
         l1Client,
-        MockFuelSwapAbi,
-        MockFuelSwapBytecode,
-        [feeJuiceAddress, feeAssetHandlerAddress, BigInt(1e18)]
+        UniswapFuelSwapAbi,
+        UniswapFuelSwapBytecode,
+        [V4_POOL_MANAGER, feeJuiceAddress, WETH_ADDRESS],
       ).then(({ address }) => address)
-      logger.info(`MockFuelSwap deployed at ${mockFuelSwapAddress.toString()}`)
+      logger.info(`✅ UniswapFuelSwap deployed at ${uniswapFuelSwapAddress.toString()}`)
 
-      // Whitelist MockFuelSwap as an allowed swap target
-      logger.info('Whitelisting MockFuelSwap as allowed swap target...')
-      const setSwapTargetHash = await l1Client.sendTransaction({
-        to: bridgeAndFuelAddress.toString() as `0x${string}`,
-        data: encodeFunctionData({
-          abi: BridgeAndFuelAbi,
-          functionName: 'setSwapTarget',
-          args: [mockFuelSwapAddress.toString(), true],
-        }),
-      })
-      await l1Client.waitForTransactionReceipt({ hash: setSwapTargetHash })
-      logger.info(`MockFuelSwap whitelisted on BridgeAndFuel`)
+      // 2. Deploy SwapBridgeRouter (L1)
+      logger.info('Deploying SwapBridgeRouter contract...')
+      const swapBridgeRouterAddress = await deployL1Contract(
+        l1Client,
+        SwapBridgeRouterAbi,
+        SwapBridgeRouterBytecode,
+        [PERMIT2_ADDRESS, feeJuicePortalAddress, uniswapFuelSwapAddress.toString()],
+      ).then(({ address }) => address)
+      logger.info(`✅ SwapBridgeRouter deployed at ${swapBridgeRouterAddress.toString()}`)
 
-      saveFuelInfraToDeployment({
-        bridgeAndFuelAddress: bridgeAndFuelAddress.toString(),
-        mockFuelSwapAddress: mockFuelSwapAddress.toString(),
+      // 3. Register BridgedFPC (L2) — fully private contract, no deploy tx needed
+      logger.info('Registering BridgedFPC contract...')
+      const bridgedFpc = await registerBridgedContract(wallet)
+      logger.info(`✅ BridgedFPC registered at ${bridgedFpc.address.toString()}`)
+
+      saveFuelSwapInfraToDeployment({
+        uniswapFuelSwapAddress: uniswapFuelSwapAddress.toString(),
+        swapBridgeRouterAddress: swapBridgeRouterAddress.toString(),
+        bridgedFpcAddress: bridgedFpc.address.toString(),
       })
     } catch (error) {
-      logger.error(`Failed to deploy fuel infrastructure: ${error}`)
+      logger.error(`Failed to deploy fuel swap infrastructure: ${error}`)
     }
 
     // Sync active deployment to frontend
@@ -2189,13 +2023,9 @@ async function main() {
     )
 
     // ════════════════════════════════════════════════════════════════════════════
-    // Test 1b: BridgeWithFuel — atomic swap-for-gas + public deposit
-    // (Only public — private deposits need attestation which can't flow through BridgeAndFuel)
+    // Test 1b: SwapBridgeRouter — atomic Permit2 swap + bridge
+    // TODO: Add SwapBridgeRouter test flow (Permit2 signature + atomic swap + bridge)
     // ════════════════════════════════════════════════════════════════════════════
-    await testBridgeWithFuelFlow(
-      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-      l1ContractAddresses, sponsoredPaymentMethod, node, logger
-    )
 
     // ════════════════════════════════════════════════════════════════════════════
     // Test 2: L1 Private Deposit (POCH) → L2 Private Claim

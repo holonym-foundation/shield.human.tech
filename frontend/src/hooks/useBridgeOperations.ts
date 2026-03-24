@@ -121,7 +121,7 @@ export async function decryptOperationPayload(
 
   const domain =
     operation.keyDerivationDomain ?? getKeyDerivationDomain()
-  const signingMessage = createSigningMessage(l1Address)
+  const signingMessage = createSigningMessage(l1Address, domain)
   const signature = await signMessage(signingMessage)
   if (!signature) {
     throw new Error('Wallet signature required to decrypt operation data')

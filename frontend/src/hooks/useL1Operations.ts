@@ -1308,7 +1308,8 @@ export function useExportClaimData() {
       }
 
       // Decrypt the claim secret from the encrypted localStorage entry
-      const signingMessage = createSigningMessage(claim.l1Address)
+      // Use stored domain so decryption works even after a domain migration
+      const signingMessage = createSigningMessage(claim.l1Address, claim.keyDerivationDomain)
       const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [
         signingMessage,
         claim.l1Address,

@@ -5,11 +5,13 @@
  * Environment Variables:
  * - AZTEC_ENV: Set to 'devnet' for devnet, or 'sandbox' for local (default: sandbox)
  * - L1_URL: L1 RPC URL (optional, uses config if not set)
- * - MNEMONIC: Wallet mnemonic (required for devnet, defaults to test mnemonic for sandbox)
+ * - L1_PRIVATE_KEY: Wallet private key (0x-prefixed hex string, preferred for devnet)
+ * - MNEMONIC: Wallet mnemonic (fallback if L1_PRIVATE_KEY is not set)
  *
  * Examples:
  * Local sandbox: npm run start-testnet
- * Devnet: AZTEC_ENV=devnet MNEMONIC="your mnemonic" npm run start-testnet
+ * Devnet (private key): AZTEC_ENV=devnet L1_PRIVATE_KEY="0x..." npm run start-testnet
+ * Devnet (mnemonic): AZTEC_ENV=devnet MNEMONIC="your mnemonic" npm run start-testnet
  */
 
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
@@ -53,10 +55,19 @@ import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
 import 'dotenv/config'
 // @ts-ignore
 import TestERC20Json from './constants/TestERC20.json'
+// @ts-ignore
+import UniswapFuelSwapJson from '../l1-contracts/out/UniswapFuelSwap.sol/UniswapFuelSwap.json'
+// @ts-ignore
+import SwapBridgeRouterJson from '../l1-contracts/out/SwapBridgeRouter.sol/SwapBridgeRouter.json'
+import { registerBridgedContract } from '@defi-wonderland/aztec-fee-payment'
 
 // Fix the bytecode format
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
+const UniswapFuelSwapAbi = UniswapFuelSwapJson.abi
+const UniswapFuelSwapBytecode = UniswapFuelSwapJson.bytecode.object as `0x${string}`
+const SwapBridgeRouterAbi = SwapBridgeRouterJson.abi
+const SwapBridgeRouterBytecode = SwapBridgeRouterJson.bytecode.object as `0x${string}`
 
 import { createPublicClient, encodeFunctionData, getContract, http, toFunctionSelector } from 'viem'
 
@@ -73,6 +84,7 @@ import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
   createDeployment,
   saveTokenToDeployment,
+  saveFuelSwapInfraToDeployment,
   loadExistingTokens,
   copyToFrontend,
   type DeployedToken,
@@ -86,10 +98,12 @@ import {
 } from './config/config.js'
 import configManager from './config/config.js'
 
-// Get environment configuration
+// Get environment configuration — prefer private key over mnemonic
+const L1_PRIVATE_KEY = process.env.L1_PRIVATE_KEY
 const MNEMONIC =
   process.env.MNEMONIC ||
   'test test test test test test test test test test test junk'
+const L1_CREDENTIAL = L1_PRIVATE_KEY || MNEMONIC
 const L1_URL = process.env.L1_URL || getL1RpcUrl()
 
 const MINT_AMOUNT = BigInt(1e15)
@@ -417,7 +431,7 @@ async function main() {
   const chain = createEthereumChain([L1_URL], nodeInfo.l1ChainId)
   const l1Client = createExtendedL1Client(
     chain.rpcUrls,
-    MNEMONIC,
+    L1_CREDENTIAL,
     chain.chainInfo,
   )
   const ownerEthAddress = l1Client.account.address
@@ -582,60 +596,53 @@ async function main() {
     }
   }
 
-  // Deploy BridgeAndFuel + MockFuelSwap (fuel infrastructure)
+  // Deploy fuel swap infrastructure (UniswapFuelSwap + SwapBridgeRouter + BridgedFPC)
   try {
-    logger.info('\n=== Deploying Fuel Infrastructure ===')
+    logger.info('\n=== Deploying Fuel Swap Infrastructure ===')
 
-    logger.info('Deploying BridgeAndFuel contract...')
-    const bridgeAndFuelAddress = await deployL1Contract(
-      l1Client,
-      BridgeAndFuelAbi,
-      BridgeAndFuelBytecode,
-      [l1Client.account.address],
-    ).then(({ address }) => address)
-    logger.info(`BridgeAndFuel deployed at ${bridgeAndFuelAddress.toString()}`)
+    // Known Sepolia constants
+    const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3'
+    const V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543'
+    const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'
 
-    // MockFuelSwap needs: feeJuiceAddress, feeAssetHandlerAddress, rate (1:1 = 1e18)
-    const feeJuiceAddress = (
-      l1ContractAddresses as any
-    ).feeJuiceAddress?.toString()
-    const feeAssetHandlerAddress = (
-      l1ContractAddresses as any
-    ).feeAssetHandlerAddress?.toString()
-    if (!feeJuiceAddress || !feeAssetHandlerAddress) {
-      throw new Error(
-        'Missing feeJuiceAddress or feeAssetHandlerAddress from node info',
-      )
+    const feeJuiceAddress = (l1ContractAddresses as any).feeJuiceAddress?.toString()
+    const feeJuicePortalAddress = (l1ContractAddresses as any).feeJuicePortalAddress?.toString()
+    if (!feeJuiceAddress || !feeJuicePortalAddress) {
+      throw new Error('Missing feeJuiceAddress or feeJuicePortalAddress from node info')
     }
 
-    logger.info('Deploying MockFuelSwap contract...')
-    const mockFuelSwapAddress = await deployL1Contract(
+    // 1. Deploy UniswapFuelSwap (L1)
+    logger.info('Deploying UniswapFuelSwap contract...')
+    const uniswapFuelSwapAddress = await deployL1Contract(
       l1Client,
-      MockFuelSwapAbi,
-      MockFuelSwapBytecode,
-      [feeJuiceAddress, feeAssetHandlerAddress, BigInt(1e18)], // 1:1 rate
+      UniswapFuelSwapAbi,
+      UniswapFuelSwapBytecode,
+      [V4_POOL_MANAGER, feeJuiceAddress, WETH_ADDRESS],
     ).then(({ address }) => address)
-    logger.info(`MockFuelSwap deployed at ${mockFuelSwapAddress.toString()}`)
+    logger.info(`✅ UniswapFuelSwap deployed at ${uniswapFuelSwapAddress.toString()}`)
 
-    // Whitelist MockFuelSwap as an allowed swap target
-    logger.info('Whitelisting MockFuelSwap as allowed swap target...')
-    const setSwapTargetHash = await l1Client.sendTransaction({
-      to: bridgeAndFuelAddress.toString() as `0x${string}`,
-      data: encodeFunctionData({
-        abi: BridgeAndFuelAbi,
-        functionName: 'setSwapTarget',
-        args: [mockFuelSwapAddress.toString(), true],
-      }),
-    })
-    await l1Client.waitForTransactionReceipt({ hash: setSwapTargetHash })
-    logger.info(`MockFuelSwap whitelisted on BridgeAndFuel`)
+    // 2. Deploy SwapBridgeRouter (L1)
+    logger.info('Deploying SwapBridgeRouter contract...')
+    const swapBridgeRouterAddress = await deployL1Contract(
+      l1Client,
+      SwapBridgeRouterAbi,
+      SwapBridgeRouterBytecode,
+      [PERMIT2_ADDRESS, feeJuicePortalAddress, uniswapFuelSwapAddress.toString()],
+    ).then(({ address }) => address)
+    logger.info(`✅ SwapBridgeRouter deployed at ${swapBridgeRouterAddress.toString()}`)
 
-    saveFuelInfraToDeployment({
-      bridgeAndFuelAddress: bridgeAndFuelAddress.toString(),
-      mockFuelSwapAddress: mockFuelSwapAddress.toString(),
+    // 3. Register BridgedFPC (L2) — fully private contract, no deploy tx needed
+    logger.info('Registering BridgedFPC contract...')
+    const bridgedFpc = await registerBridgedContract(wallet)
+    logger.info(`✅ BridgedFPC registered at ${bridgedFpc.address.toString()}`)
+
+    saveFuelSwapInfraToDeployment({
+      uniswapFuelSwapAddress: uniswapFuelSwapAddress.toString(),
+      swapBridgeRouterAddress: swapBridgeRouterAddress.toString(),
+      bridgedFpcAddress: bridgedFpc.address.toString(),
     })
   } catch (error) {
-    logger.error(`Failed to deploy fuel infrastructure: ${error}`)
+    logger.error(`Failed to deploy fuel swap infrastructure: ${error}`)
   }
 
   // Sync active deployment to frontend

@@ -1,0 +1,131 @@
+{
+  "id": "4.0.0-devnet.2-patch.3_2026-03-24",
+  "deployedAt": "2026-03-24T11:40:26.547Z",
+  "network": {
+    "name": "devnet",
+    "nodeUrl": "https://v4-devnet-2.aztec-labs.com",
+    "l1RpcUrl": "https://eth-sepolia.g.alchemy.com/v2/wxieEGaCXu4vVoL3y2Sf31sJHcmlnppW/",
+    "l1ChainId": 11155111,
+    "l2ChainId": 604129785,
+    "aztecVersion": "4.0.0-devnet.2-patch.3",
+    "rollupVersion": 615022430
+  },
+  "l1ContractAddresses": {
+    "rollupAddress": "0xcd1a7be18501092f3ba8d80ce5629501ba178de0",
+    "registryAddress": "0x52945c29d2788ccb076e910509c0449bfcbe29e6",
+    "inboxAddress": "0xef5730d1e07b306aecbe01400630d61e3ccb68af",
+    "outboxAddress": "0x34fc558b6f97e50149bcc140060bbe3f7d04bc59"
+  },
+  "nodeInfo": {
+    "enr": "enr:-N24QH7xejlE24BrCddwyTdE4lTj5D0vL7c6wXnY1gT8RQpMUEQNmLsn4N-OxOd35LzR2hUWvNLi6s2STHiGgayUwtEHhWF6dGVjsDAwLTExMTU1MTExLWNkMWE3YmUxLTYxNTAyMjQzMC0yNjcyMzQwZC0xZTY0OTQwNYJpZIJ2NIJpcIQitjpMiXNlY3AyNTZrMaECK_IUT1FllKW-878j11EL5bOlGJ7_-2MrGBvIQHjXnveDdGNwgp4Sg3VkcIKeEoN2ZXKWNC4wLjAtZGV2bmV0LjItcGF0Y2guMw",
+    "nodeVersion": "4.0.0-devnet.2-patch.3",
+    "l1ChainId": 11155111,
+    "rollupVersion": 615022430,
+    "l1ContractAddresses": {
+      "rollupAddress": "0xcd1a7be18501092f3ba8d80ce5629501ba178de0",
+      "registryAddress": "0x52945c29d2788ccb076e910509c0449bfcbe29e6",
+      "inboxAddress": "0xef5730d1e07b306aecbe01400630d61e3ccb68af",
+      "outboxAddress": "0x34fc558b6f97e50149bcc140060bbe3f7d04bc59",
+      "feeJuiceAddress": "0x35d0186d1fd53b72996475d965c5ed171d52b986",
+      "stakingAssetAddress": "0x4263376b0d7d0ac46d38b76af4cf8bf93844bc14",
+      "feeJuicePortalAddress": "0x516e3f74fd1c19b24da0706d28b5a30578f054ab",
+      "coinIssuerAddress": "0xc0dcff65de33fe19a95f67ed1b7b9e7bd0a23f5f",
+      "rewardDistributorAddress": "0x51f13e2131d28c44f9df33a8d0ff0a897eb52eda",
+      "governanceProposerAddress": "0x17f54a1448387de40120f8a2f9949a68a9185c8b",
+      "governanceAddress": "0xfaa29a00987bb2d2ec703edac5ebb24f1ee9de97",
+      "slashFactoryAddress": "0xd4248cbb1fa7228f49b9d314237cde7b2d0f3470",
+      "feeAssetHandlerAddress": "0xed9c5557d2e0abcc7c7fca958ee4292199413494",
+      "gseAddress": "0x5f966c3cbbc12569690ca4250b37bf17fc1b3013"
+    },
+    "protocolContractAddresses": {
+      "classRegistry": "0x0000000000000000000000000000000000000000000000000000000000000003",
+      "feeJuice": "0x0000000000000000000000000000000000000000000000000000000000000005",
+      "instanceRegistry": "0x0000000000000000000000000000000000000000000000000000000000000002",
+      "multiCallEntrypoint": "0x0000000000000000000000000000000000000000000000000000000000000004"
+    },
+    "realProofs": false
+  },
+  "sponsoredFeeAddress": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+  "tokens": [
+    {
+      "symbol": "USDC",
+      "decimals": 6,
+      "logo": "/assets/tokens/usdc-xl.svg",
+      "l1TokenContract": "0xdb57b6dd629f1bc52541d4d774418e254a8c5ef0",
+      "l1PortalContract": "0x9d7eef07a1290850d36227a31ec177c744b13cc3",
+      "l2TokenContract": "0x0f33a5eb41dd24c603b31d7f8622b9f85abbdba0c8d4b1c998c836ab31189158",
+      "l2BridgeContract": "0x200f575372fbe756c0ea9129219bf8de0d620b050a7de129c2ab5c115b0a4d5a",
+      "feeAssetHandler": "0x9ae35c3fea8f5c640deca9c4121c0a5facfc8612",
+      "sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2"
+    },
+    {
+      "symbol": "USDT",
+      "decimals": 6,
+      "logo": "/assets/tokens/usdt-xl.svg",
+      "l1TokenContract": "0x0cde24058e93b5476417ca20fda99ae2c7247d6f",
+      "l1PortalContract": "0x4e8a11236de312894e6d019c1f5c688f1dd82ea2",
+      "l2TokenContract": "0x09f6ab18580e54abcc82bb3af14932292af74452437f55069a024a6b40bbc683",
+      "l2BridgeContract": "0x2e8ef2523986468051cf2cbb9161bf22e411e37ff42902edf3c7ea34468d4d71",
+      "feeAssetHandler": "0xf3c697ae8d40cac0bd90988d35edfdde1a081fe7",
+      "sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2"
+    },
+    {
+      "symbol": "DAI",
+      "decimals": 6,
+      "logo": "/assets/tokens/dai-xl.svg",
+      "l1TokenContract": "0xe76f90065862032f81f0b09613879aff2515fcc7",
+      "l1PortalContract": "0x1c848b108b2fcd5b5adb615897d358c381bbd528",
+      "l2TokenContract": "0x280fa81b04af3ad405ea087a516206872fb1f9130561b0f4cd4dbc853adac2c7",
+      "l2BridgeContract": "0x12579fc08216061b396b6b1b7971639dd93e1628d250a06ee5e32fd6bca231ce",
+      "feeAssetHandler": "0xde7d2d776c61bc70572317967d4d5785206799bc",
+      "sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2"
+    },
+    {
+      "symbol": "HUMN",
+      "decimals": 6,
+      "logo": "/assets/tokens/humn.jpg",
+      "l1TokenContract": "0xb17683dee826bd5daad7b9bcbae98369ddb810e5",
+      "l1PortalContract": "0x23a9d5ac592ee405b12e200152f08e1616c07c22",
+      "l2TokenContract": "0x0607e516b19357bc617be2fafe0f5ee09f7f8a02c6a6f9abbbb3f4c70b72ba89",
+      "l2BridgeContract": "0x1df2e7156212360110f1f6906c527dff01c4269d20875a0daea673c67457edca",
+      "feeAssetHandler": "0x8a2db717532453e4be6ac76ddc859f8a4d86eec2",
+      "sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2"
+    },
+    {
+      "symbol": "GOAT",
+      "decimals": 6,
+      "logo": "/assets/tokens/goat.png",
+      "l1TokenContract": "0x578224218e2d7f97cb2c2a38f04fb6093ca6b6b5",
+      "l1PortalContract": "0x097ab1715e60d7bec1ce14990f099d0191ff7807",
+      "l2TokenContract": "0x2cc9d048f647b0e83282eb5929eb8ba368a931d2a7153ab426134c62342da818",
+      "l2BridgeContract": "0x2ec8e303818f40024010793d66ba31bd0b93f789ac713d2d7f3c5cd096249aeb",
+      "feeAssetHandler": "0x4f9a88e2274ba5114181980c4a6ebdf79e76206d",
+      "sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2"
+    },
+    {
+      "symbol": "WBTC",
+      "decimals": 6,
+      "logo": "/assets/tokens/wbtc.png",
+      "l1TokenContract": "0x30114817ba7f03aaece74794f92acb68554efba0",
+      "l1PortalContract": "0xa22254432cbe17932e85765c3ea26d0dafb6734e",
+      "l2TokenContract": "0x3042ca08fa8b8511908efd19f58f56138f7ae3543648ef2d55a3f026610f5a98",
+      "l2BridgeContract": "0x1056c756bcc26fa59ab6e2f155badfbe5106524f57e7cf95ded2d25c07e6a589",
+      "feeAssetHandler": "0xa7af7bae81a5795edf83b14dc9c33d916b5d75ef",
+      "sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2"
+    },
+    {
+      "symbol": "WETH",
+      "decimals": 18,
+      "logo": "/assets/tokens/weth-xl.svg",
+      "l1TokenContract": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+      "l1PortalContract": "0xe167d885adead98ff804b5bad8572a6f17dddc61",
+      "l2TokenContract": "0x23c7e09169a1fb10c1a85812bb2b63bc277fcfe250af11266ee1c682ded0bbda",
+      "l2BridgeContract": "0x1695ecc684fe16d6ee52ba8f920b554c167cd7cfd39bde4f86a6c012750e21c2",
+      "feeAssetHandler": "0x85958ef4918480f9091804279b942c5b9c840b6b",
+      "sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2"
+    }
+  ],
+  "uniswapFuelSwapAddress": "0x346c8a2f96b9aebac6989ca4fede206e1ad5e010",
+  "swapBridgeRouterAddress": "0xd281eaae666091e8eab5e9a7f2152498f710d56e",
+  "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
+}

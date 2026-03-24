@@ -49,9 +49,11 @@ const CustomTokenPortalBytecode = CustomTokenPortalJson.bytecode.object as `0x${
 const L1_USDC_ADDRESS = '0x47e16bd8702bcef388085c0371ba0b87fa883f5e'
 const SWAP_BRIDGE_ROUTER = '0x88e272483B12Bd5A2701EcC1Bd6Ac2a8ca5199FF'
 
+const L1_PRIVATE_KEY = process.env.L1_PRIVATE_KEY
 const MNEMONIC =
   process.env.MNEMONIC ||
   'test test test test test test test test test test test junk'
+const L1_CREDENTIAL = L1_PRIVATE_KEY || MNEMONIC
 const L1_URL = process.env.L1_URL || getL1RpcUrl()
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -69,7 +71,7 @@ async function main() {
   const chain = createEthereumChain([L1_URL], nodeInfo.l1ChainId)
   const l1Client = createExtendedL1Client(
     chain.rpcUrls,
-    MNEMONIC,
+    L1_CREDENTIAL,
     chain.chainInfo,
   )
   const ownerEthAddress = l1Client.account.address

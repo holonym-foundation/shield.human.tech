@@ -884,7 +884,8 @@ export function useExportWithdrawalData() {
       }
 
       // Decrypt the nonce from the encrypted localStorage entry
-      const signingMessage = createSigningMessage(w.l1Address)
+      // Use stored domain so decryption works even after a domain migration
+      const signingMessage = createSigningMessage(w.l1Address, w.keyDerivationDomain)
       const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [
         signingMessage,
         w.l1Address,

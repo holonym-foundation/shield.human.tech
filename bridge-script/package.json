@@ -40,6 +40,7 @@
     "@aztec/pxe": "4.0.0-devnet.2-patch.2",
     "@aztec/stdlib": "4.0.0-devnet.2-patch.2",
     "@aztec/wallets": "4.0.0-devnet.2-patch.2",
+    "@defi-wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-b6315f1/defi-wonderland-aztec-fee-payment-4.0.0-devnet.2-patch.1-prerelease.b6315f1.tgz",
     "@defi-wonderland/aztec-standards": "4.0.0-devnet.2-patch.1",
     "@types/node": "^22.13.10",
     "dotenv": "^16.5.0",

@@ -43,6 +43,10 @@ export interface DeploymentFile {
   nodeInfo: Record<string, unknown>;
   sponsoredFeeAddress: string;
   tokens: DeployedToken[];
+  // Fuel swap infrastructure
+  uniswapFuelSwapAddress?: string;
+  swapBridgeRouterAddress?: string;
+  bridgedFpcAddress?: string;
 }
 
 export interface RegistryEntry {
@@ -159,6 +163,10 @@ export function createDeployment(params: {
     nodeInfo: params.nodeInfo,
     sponsoredFeeAddress: params.sponsoredFeeAddress,
     tokens: existingTokens,
+    // Preserve fuel swap infra addresses across re-runs
+    ...(existing?.uniswapFuelSwapAddress && { uniswapFuelSwapAddress: existing.uniswapFuelSwapAddress }),
+    ...(existing?.swapBridgeRouterAddress && { swapBridgeRouterAddress: existing.swapBridgeRouterAddress }),
+    ...(existing?.bridgedFpcAddress && { bridgedFpcAddress: existing.bridgedFpcAddress }),
   };
 
   writeJson(filePath, deployment);
@@ -249,9 +257,17 @@ export function copyToFrontend(): void {
   console.log(`📋 Synced ${allDeployments.length} deployment(s) to frontend: ${FRONTEND_DEPLOYMENTS}`);
 }
 
-export function saveFuelInfraToDeployment(params: {
-  bridgeAndFuelAddress: string;
-  mockFuelSwapAddress: string;
+/**
+ * Save fuel swap infrastructure addresses to the active deployment.
+ * These contracts are deployed via Forge scripts (not the TS deployer):
+ *   - UniswapFuelSwap: Uniswap V4 swap contract for token→FeeJuice
+ *   - SwapBridgeRouter: Permit2-enabled bridge + fuel router
+ *   - BridgedFPC: L2 private fee payment contract
+ */
+export function saveFuelSwapInfraToDeployment(params: {
+  uniswapFuelSwapAddress?: string;
+  swapBridgeRouterAddress?: string;
+  bridgedFpcAddress?: string;
 }, deploymentId?: string): void {
   const registry = loadRegistry();
   if (!registry) throw new Error('No registry found');
@@ -259,10 +275,11 @@ export function saveFuelInfraToDeployment(params: {
   const deployment = loadDeploymentById(id);
   if (!deployment) throw new Error(`Deployment ${id} not found`);
 
-  (deployment as any).bridgeAndFuelAddress = params.bridgeAndFuelAddress;
-  (deployment as any).mockFuelSwapAddress = params.mockFuelSwapAddress;
+  if (params.uniswapFuelSwapAddress) deployment.uniswapFuelSwapAddress = params.uniswapFuelSwapAddress;
+  if (params.swapBridgeRouterAddress) deployment.swapBridgeRouterAddress = params.swapBridgeRouterAddress;
+  if (params.bridgedFpcAddress) deployment.bridgedFpcAddress = params.bridgedFpcAddress;
 
   const filePath = join(DEPLOYMENTS_DIR, `${id}.json`);
   writeJson(filePath, deployment);
-  console.log(`✅ Saved fuel infra to deployment ${id}`);
+  console.log(`✅ Saved fuel swap infra to deployment ${id}`);
 }
