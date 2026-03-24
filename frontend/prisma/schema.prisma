@@ -130,7 +130,8 @@ model BridgeActivity {
   messageHash     String? // L1→L2 message key (from portal event); used for sync check and claim
   messageLeafIndex String? // L1→L2 leaf index; required for claim_public/claim_private on L2
 
-  // --- L1→L2 fuel secret hashes (plaintext for querying; actual secrets are in encrypted blob) ---
+  // --- L1→L2 secret hashes (plaintext for querying; actual secrets are in encrypted blob) ---
+  claimSecretHash       String? // Hash of the claim secret; allows server-assisted deposit recovery
   fuelSecretHash        String? // Hash of the public fuel secret (poseidon2); set at creation
   privateFuelSecretHash String? // Hash of the BridgedFPC-derived fuel secret; set at creation
 

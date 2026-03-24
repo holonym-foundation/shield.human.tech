@@ -435,16 +435,21 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
         const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
 
         console.log('[Resume L1→L2] Building BridgedMintAndPayFeePaymentMethod (private fuel)')
+        // Convert string secrets to Fr field elements for the Noir contract
+        const fuelSecretFr = FieldFr.fromString(privateFuelSecret)
+        const fuelSaltFr = FieldFr.fromString(privateFuelSalt)
         const paymentMethod = new BridgedMintAndPayFeePaymentMethod(
           AztecAddress.fromString(BRIDGED_FPC_ADDRESS),
           BigInt(fuelAmount),
-          privateFuelSecret,
-          privateFuelSalt,
+          fuelSecretFr,
+          fuelSaltFr,
           new FieldFr(BigInt(fuelMessageLeafIndex)),
         )
         feeOption = { fee: { paymentMethod, gasSettings: { gasLimits, teardownGasLimits, maxFeesPerGas, maxPriorityFeesPerGas: GasFees.empty() } } }
       } catch (err) {
-        console.warn('[Resume L1→L2] Failed to create BridgedMintAndPayFeePaymentMethod, falling back to default:', err)
+        // Payment method construction failure is not recoverable — re-throw so the user
+        // sees a clear error instead of a confusing "insufficient fee" later.
+        throw new Error(`[Resume L1→L2] Failed to create BridgedMintAndPayFeePaymentMethod: ${err}`)
       }
     } else if (fuelSecret && fuelMessageLeafIndex && fuelAmount) {
       // Public fuel path: FeeJuicePaymentMethodWithClaim
@@ -458,7 +463,7 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
         })
         feeOption = { fee: { paymentMethod } }
       } catch (err) {
-        console.warn('[Resume L1→L2] Failed to create FeeJuicePaymentMethodWithClaim, falling back to default:', err)
+        throw new Error(`[Resume L1→L2] Failed to create FeeJuicePaymentMethodWithClaim: ${err}`)
       }
     }
 

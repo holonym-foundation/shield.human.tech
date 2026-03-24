@@ -96,6 +96,7 @@ export async function PATCH(
       'amountL2',
       'direction',
       'l1BlockNumberBeforeTx',
+      'l2BlockNumberBeforeTx',
       'keyDerivationMessage',
       'keyDerivationDomain',
       'rollupVersion',
@@ -105,6 +106,9 @@ export async function PATCH(
       'bridgeAddressL2',
       'tokenAddressL1',
       'tokenAddressL2',
+      'claimSecretHash',
+      'fuelSecretHash',
+      'privateFuelSecretHash',
     ] as const
 
     const blockedFields: string[] = []
@@ -188,7 +192,20 @@ export async function PATCH(
     if (l2ToL1MessageIndex) updateData.l2ToL1MessageIndex = l2ToL1MessageIndex
     if (siblingPath) updateData.siblingPath = siblingPath
     if (recipientL1Address) updateData.recipientL1Address = recipientL1Address
-    if (currentStep != null) updateData.currentStep = currentStep
+    if (currentStep != null) {
+      // Forward-only guard: currentStep must not regress
+      if (operation.currentStep != null && currentStep <= operation.currentStep) {
+        // Allow same step (idempotent retry) but not backward
+        if (currentStep < operation.currentStep) {
+          return NextResponse.json(
+            { error: `Cannot regress currentStep from ${operation.currentStep} to ${currentStep}` },
+            { status: 400 },
+          )
+        }
+      } else {
+        updateData.currentStep = currentStep
+      }
+    }
     // L1→L2 receipt + fuel fields
     if (claimAmount) updateData.claimAmount = claimAmount
     if (fuelMessageHash) updateData.fuelMessageHash = fuelMessageHash

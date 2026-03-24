@@ -92,7 +92,8 @@ const ALLOWED_URL_PREFIXES = [
   'https://holesky.etherscan.io/',
   'https://aztec.network/',
   'https://aztecscan.io/',
-  'https://aztec-connect.com/',
+  'https://aztecscan.xyz/',
+  'https://devnet.aztecscan.xyz/',
 ]
 
 /** Sanitize a URL string. Only allows known explorer hosts. Returns trimmed URL or undefined. */

@@ -179,7 +179,7 @@ export async function POST(request: NextRequest) {
     const recipientL1Address = sanitizeEthAddress(body.recipientL1Address)
     const nodeInfo = sanitizeNodeInfo(body.nodeInfo)
     // Recovery-critical contract & version snapshot
-    const rollupVersion = sanitizeInt(body.rollupVersion, 0, 1_000_000)
+    const rollupVersion = sanitizeInt(body.rollupVersion, 0, 2_000_000_000)
     const chainIdL1 = sanitizeInt(body.chainIdL1, 1, 1_000_000_000)
     const chainIdL2 = sanitizeInt(body.chainIdL2, 1, 1_000_000_000)
     const portalAddressL1 = sanitizeEthAddress(body.portalAddressL1)
@@ -199,7 +199,8 @@ export async function POST(request: NextRequest) {
     const tokenDecimalsL1 = sanitizeInt(body.tokenDecimalsL1, 0, 77)
     const tokenDecimalsL2 = sanitizeInt(body.tokenDecimalsL2, 0, 77)
     const currentStep = sanitizeInt(body.currentStep, 0, 10)
-    // Fuel secret hashes (plaintext for querying; actual secrets are in encrypted blob)
+    // Secret hashes (plaintext for querying; actual secrets are in encrypted blob)
+    const claimSecretHash = sanitizeHexString(body.claimSecretHash, 130)
     const fuelSecretHash = sanitizeHexString(body.fuelSecretHash, 130)
     const privateFuelSecretHash = sanitizeHexString(body.privateFuelSecretHash, 130)
 
@@ -317,7 +318,8 @@ export async function POST(request: NextRequest) {
         tokenDecimalsL1: tokenDecimalsL1 ?? undefined,
         tokenDecimalsL2: tokenDecimalsL2 ?? undefined,
         currentStep: currentStep ?? 1,
-        // Fuel secret hashes (plaintext for querying; actual secrets in encrypted blob)
+        // Secret hashes (plaintext for querying; actual secrets in encrypted blob)
+        claimSecretHash: claimSecretHash ?? undefined,
         fuelSecretHash: fuelSecretHash ?? undefined,
         privateFuelSecretHash: privateFuelSecretHash ?? undefined,
         // Client IP for audit trail

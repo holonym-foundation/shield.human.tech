@@ -252,12 +252,15 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Set public authwit: allow bridge to burn_public on behalf of user
+    // Set public authwit: allow TokenMinterProxy to burn_public on behalf of user.
+    // Call chain: Bridge → TokenMinterProxy → Token.burn_public, so Token sees
+    // msg_sender = TokenMinterProxy. The authwit caller must match that.
+    const proxyAddr = AztecAddress.fromString(this.proxyAddress)
     const authwit = await SetPublicAuthwitContractInteraction.create(
       this.wallet,
       this.account,
       {
-        caller: bridgeAddr,
+        caller: proxyAddr,
         action: token.methods.burn_public(user, amount, nonce),
       },
       true,
@@ -305,25 +308,28 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Create private auth witness: allow bridge to burn_private on behalf of user
-    // Pre-compute the inner hash locally to avoid FunctionCall serialization issues over RPC
+    // Create private auth witness: allow TokenMinterProxy to burn_private on behalf of user.
+    // Call chain: Bridge → TokenMinterProxy → Token.burn_private, so Token sees
+    // msg_sender = TokenMinterProxy. The authwit consumer must match that.
+    const proxyAddr = AztecAddress.fromString(this.proxyAddress)
     const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
-    const innerHash = await computeInnerAuthWitHashFromAction(bridgeAddr, burnCall)
+    const innerHash = await computeInnerAuthWitHashFromAction(proxyAddr, burnCall)
     await this.wallet.createAuthWit(
       this.account,
       {
-        consumer: bridgeAddr,
+        consumer: proxyAddr,
         innerHash,
       }
     )
 
-    // Send exit transaction — pass attestation data if available
+    // Send exit transaction — bridge contract params: (recipient, amount, caller_on_l1, nonce, ...)
+    // No tokenAddr prefix — the bridge already knows its token from its config.
     const exitArgs = cleanHandsData && passportData
-      ? [tokenAddr, EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce, cleanHandsData, passportData]
-      : [tokenAddr, EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce]
+      ? [EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce, cleanHandsData, passportData]
+      : [EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce]
     const exitMethod = cleanHandsData && passportData
       ? 'exit_to_l1_private'
-      : 'exit_to_l1_private'
+      : 'exit_to_l1_public'
     const receipt = await bridge.methods[exitMethod](...exitArgs)
       .send({ from: this.account })
 

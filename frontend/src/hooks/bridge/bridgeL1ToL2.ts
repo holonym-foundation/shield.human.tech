@@ -723,7 +723,8 @@ export async function generateAndBackupClaimSecret(params: {
     tokenNameL2: `Clean ${selectedToken?.symbol ?? 'USDC'}`,
     tokenAddressL1: selectedToken?.l1TokenContract ?? '',
     tokenAddressL2: selectedToken?.l2TokenContract ?? '',
-    // Fuel secret hashes (plaintext for querying; actual secrets in encrypted blob)
+    // Secret hashes (plaintext for querying; actual secrets in encrypted blob)
+    claimSecretHash: claimSecretHash.toString(),
     fuelSecretHash: fuelSecretHash?.toString(),
     privateFuelSecretHash: privateFuelSecretHash?.toString(),
     tokenDecimalsL1: selectedToken?.decimals ?? 6,
@@ -1164,7 +1165,11 @@ export async function waitForReceiptAndExtractEvent(params: {
     if (portalEventFound) break
   }
   if (!portalEventFound) {
-    console.warn('[L1→L2] TokenPortal event not found — using pre-fee amount as fallback')
+    throw new Error(
+      `[L1→L2] TokenPortal ${portalEventName} event not found in receipt. ` +
+      `Cannot determine post-fee claim amount. L1 tx succeeded — tokens are safe in the portal. ` +
+      `Resume the operation to retry event extraction.`
+    )
   }
 
   if (fuel) {

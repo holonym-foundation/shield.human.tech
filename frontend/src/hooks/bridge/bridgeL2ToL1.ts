@@ -550,6 +550,7 @@ export async function encryptAndBackupWithdrawalNonce(params: {
 
   const nonce = Fr.random()
   const l2BridgeAddress = selectedToken?.l2BridgeContract ?? ''
+  const portalAddressL1 = selectedToken?.l1PortalContract ?? ''
 
   // Deterministic encryption: same wallet + same message = same key
   const signingMessage = createSigningMessage(l1Address)
@@ -567,6 +568,7 @@ export async function encryptAndBackupWithdrawalNonce(params: {
     l1Address,
     l2Address: aztecAddress,
     l2BridgeAddress,
+    portalAddressL1,
     isPrivacyModeEnabled,
   })
   const encrypted = await encryptData(secretsPayload, encryptionKey)
@@ -575,8 +577,6 @@ export async function encryptAndBackupWithdrawalNonce(params: {
   const snapshotRollupVersion = nodeInfoSnapshot?.rollupVersion as number | undefined
   const snapshotL1ChainId = nodeInfoSnapshot?.l1ChainId as number | undefined
   const snapshotL1Addresses = nodeInfoSnapshot?.l1ContractAddresses as Record<string, string> | undefined
-
-  const portalAddressL1 = selectedToken?.l1PortalContract ?? ''
 
   console.log('[L2→L1] POST /api/bridge/operations →', {
     direction: 'L2_TO_L1',
@@ -642,6 +642,7 @@ export async function encryptAndBackupWithdrawalNonce(params: {
     id: operationId,
     operationId,
     l2BridgeAddress,
+    portalAddressL1,
     timestamp: Date.now(),
     amount: amountL2,
     l1Address,

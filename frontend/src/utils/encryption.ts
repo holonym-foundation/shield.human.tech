@@ -124,7 +124,7 @@ export async function deriveEncryptionKey(
 export async function encryptData(
   plaintext: string,
   key: Uint8Array
-): Promise<{ ciphertext: string; iv: string; tag: string }> {
+): Promise<{ ciphertext: string; iv: string; tag: string; version: number }> {
   // Generate random IV (Initialization Vector)
   // 12 bytes is standard for GCM mode
   const iv = crypto.getRandomValues(new Uint8Array(12))
@@ -147,6 +147,7 @@ export async function encryptData(
     ciphertext: toHex(ciphertext),
     iv: toHex(iv),
     tag: toHex(tag),
+    version: ENCRYPTION_VERSION,
   }
 }
 
@@ -196,10 +197,17 @@ export async function decryptData(
 /**
  * Type definitions for encrypted data
  */
+/** Current encryption format version. Increment when changing KDF, cipher, or payload structure. */
+export const ENCRYPTION_VERSION = 1
+
 export interface EncryptedData {
   ciphertext: string
   iv: string
   tag: string
+  /** Encryption format version — allows future migration to different schemes. */
+  version?: number
+  /** Domain used for key derivation — needed to decrypt if domain changes. */
+  keyDerivationDomain?: string
 }
 
 export interface BridgeActivityData {
@@ -221,6 +229,7 @@ export interface BridgeActivityData {
   // L2→L1: authwit nonce (encrypted blob only — needed to re-attempt interrupted burn)
   nonce?: string
   l2BridgeAddress?: string
+  portalAddressL1?: string
 
   // Common (present in both L1→L2 and L2→L1 blobs)
   amount?: string

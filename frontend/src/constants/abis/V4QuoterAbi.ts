@@ -32,6 +32,6 @@ export const V4QuoterAbi = [
       { name: 'amountOut', type: 'uint256' },
       { name: 'gasEstimate', type: 'uint256' },
     ],
-    stateMutability: 'nonpayable',
+    stateMutability: 'view',
   },
 ] as const

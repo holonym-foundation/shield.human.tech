@@ -7,6 +7,7 @@ import {
   copyToClipboard,
 } from '@/utils'
 import axios from 'axios'
+import { api } from '@/lib/api'
 import { logError, logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { useWalletAdapter } from './useWalletAdapter'
@@ -396,7 +397,7 @@ export function useL1Faucet() {
             // await wait(30000) // 30 seconds
 
             // Call our mint-tokens API endpoint with the first token address
-            const { data: mintResult } = await axios.post<{ txHash?: string }>(
+            const { data: mintResult } = await api.post<{ txHash?: string }>(
               '/api/mint-tokens',
               { address: l1Address, tokenAddress: L1_TOKENS[0]?.l1TokenContract },
             )
