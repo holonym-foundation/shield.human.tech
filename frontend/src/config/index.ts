@@ -65,14 +65,37 @@ export const getAztecscanUrl = (chainId: number): string => {
   return AZTECSCAN_URLS[chainId] || 'https://aztecscan.xyz'
 }
 
-export const BRIDGE_AND_FUEL_ADDRESS: `0x${string}` =
-  ((activeDeployment as any).bridgeAndFuelAddress ?? '') as `0x${string}`
-export const MOCK_FUEL_SWAP_ADDRESS: `0x${string}` =
-  ((activeDeployment as any).mockFuelSwapAddress ?? '') as `0x${string}`
 export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuicePortalAddress ?? '') as `0x${string}`
 export const FEE_JUICE_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
+export const BRIDGED_FPC_ADDRESS: string =
+  ((activeDeployment as any).bridgedFpcAddress ?? '') as string
+
+// ─── Permit2 + SwapBridgeRouter ──────────────────────────────────────
+export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
+export const SWAP_BRIDGE_ROUTER_ADDRESS: `0x${string}` =
+  ((activeDeployment as any).swapBridgeRouterAddress ?? '') as `0x${string}`
+
+// ─── Uniswap V4 Sepolia Constants ───────────────────────────────────
+export const V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as const
+export const V4_QUOTER = '0x61b3f2011a92d183c7dbadbda940a7555ccf9227' as const
+export const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as const
+export const NATIVE_ETH = '0x0000000000000000000000000000000000000000' as const
+
+// UniswapFuelSwap — deployed swap contract (set after running DeployUniswapFuelSwap)
+export const UNISWAP_FUEL_SWAP_ADDRESS: `0x${string}` =
+  ((activeDeployment as any).uniswapFuelSwapAddress ?? '') as `0x${string}`
+
+// Pool parameters for route building
+// Intermediate hops (e.g. USDC/WETH) — 0.3% fee, 60 tick spacing
+export const INTERMEDIATE_POOL_FEE = 3000 as const
+export const INTERMEDIATE_POOL_TICK_SPACING = 60 as const
+// Final hop (ETH/AZTEC pool) — 0.3% fee, 60 tick spacing
+export const FEE_POOL_FEE = 3000 as const
+export const FEE_POOL_TICK_SPACING = 60 as const
+// Native ETH pool: mainnet uses native ETH (address(0)), Sepolia too
+export const FEE_POOL_USES_NATIVE_ETH = true as const
 
 // Non-token protocol addresses (SBT)
 export const ADDRESS = {

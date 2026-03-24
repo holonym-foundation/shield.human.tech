@@ -42,8 +42,6 @@ export interface DeploymentFile {
   l1ContractAddresses: L1ContractAddresses;
   nodeInfo: Record<string, unknown>;
   sponsoredFeeAddress: string;
-  bridgeAndFuelAddress?: string;
-  mockFuelSwapAddress?: string;
   tokens: DeployedToken[];
 }
 
@@ -218,31 +216,6 @@ export function saveTokenToDeployment(token: DeployedToken, deploymentId?: strin
 }
 
 /**
- * Save BridgeAndFuel / MockFuelSwap addresses to the active deployment.
- */
-export function saveFuelInfraToDeployment(params: {
-  bridgeAndFuelAddress: string;
-  mockFuelSwapAddress: string;
-}, deploymentId?: string): void {
-  const id = deploymentId ?? loadRegistry()?.activeDeploymentId;
-  if (!id) throw new Error('No active deployment to save fuel infra to');
-
-  const registry = loadRegistry();
-  const entry = registry?.deployments.find(d => d.id === id);
-  if (!entry) throw new Error(`Deployment ${id} not found in registry`);
-
-  const filePath = join(DEPLOYMENTS_DIR, entry.file);
-  const deployment = readJson<DeploymentFile>(filePath);
-  if (!deployment) throw new Error(`Deployment file not found: ${filePath}`);
-
-  deployment.bridgeAndFuelAddress = params.bridgeAndFuelAddress;
-  deployment.mockFuelSwapAddress = params.mockFuelSwapAddress;
-
-  writeJson(filePath, deployment);
-  console.log(`✅ Saved fuel infra to deployment ${id}`);
-}
-
-/**
  * Load existing tokens from the active deployment (for skip-if-deployed checks).
  */
 export function loadExistingTokens(): DeployedToken[] {
@@ -274,4 +247,22 @@ export function copyToFrontend(): void {
 
   writeJson(FRONTEND_DEPLOYMENTS, bundle);
   console.log(`📋 Synced ${allDeployments.length} deployment(s) to frontend: ${FRONTEND_DEPLOYMENTS}`);
+}
+
+export function saveFuelInfraToDeployment(params: {
+  bridgeAndFuelAddress: string;
+  mockFuelSwapAddress: string;
+}, deploymentId?: string): void {
+  const registry = loadRegistry();
+  if (!registry) throw new Error('No registry found');
+  const id = deploymentId ?? registry.activeDeploymentId;
+  const deployment = loadDeploymentById(id);
+  if (!deployment) throw new Error(`Deployment ${id} not found`);
+
+  (deployment as any).bridgeAndFuelAddress = params.bridgeAndFuelAddress;
+  (deployment as any).mockFuelSwapAddress = params.mockFuelSwapAddress;
+
+  const filePath = join(DEPLOYMENTS_DIR, `${id}.json`);
+  writeJson(filePath, deployment);
+  console.log(`✅ Saved fuel infra to deployment ${id}`);
 }

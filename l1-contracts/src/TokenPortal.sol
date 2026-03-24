@@ -31,6 +31,7 @@ error InvalidPassportSignature();
 error AmountExceedsLimit();
 error Unauthorized();
 error NoPendingOwner();
+error NotTrustedForwarder();
 
 /**
  * @title TokenPortal
@@ -78,6 +79,9 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     mapping(address => mapping(uint256 => bool)) public passportNonces;
     mapping(address => mapping(uint256 => bool)) public cleanHandsNonces;
 
+    // Trusted Forwarders (for relaying private deposits)
+    mapping(address => bool) public trustedForwarders;
+
     // Fee Management
     uint256 public feeBasisPoints;
     uint256 public constant MAX_FEE_BASIS_POINTS = 1000; // 10%
@@ -98,6 +102,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     event FeesWithdrawn(address indexed recipient, uint256 amount);
     event TokensRescued(address indexed token, address indexed to, uint256 amount);
     event AttestationConfigUpdated(address indexed attester, uint256 circuitId, address indexed signer);
+    event TrustedForwarderUpdated(address indexed forwarder, bool trusted);
     event OwnershipTransferProposed(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferCancelled(address indexed currentOwner);
     // =============================================================
@@ -179,7 +184,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         PassportData calldata _passport
     ) external whenNotPaused nonReentrant returns (bytes32, uint256) {
         require(_amount > 0, "Amount must be greater than zero");
-        _validatePrivateAttestations(_amount, _cleanHands, _passport);
+        _validatePrivateAttestations(_msgSender(), _amount, _cleanHands, _passport);
 
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
@@ -188,6 +193,32 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         bytes32 contentHash = Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256)", amountAfterFee));
 
         underlying.safeTransferFrom(_msgSender(), address(this), _amount);
+        collectedFees += fee;
+
+        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHashForL2MessageConsumption);
+
+        emit DepositToAztecPrivate(amountAfterFee, fee, _secretHashForL2MessageConsumption, key, index);
+        return (key, index);
+    }
+
+    function depositToAztecPrivateFor(
+        address _depositor,
+        uint256 _amount,
+        bytes32 _secretHashForL2MessageConsumption,
+        CleanHandsData calldata _cleanHands,
+        PassportData calldata _passport
+    ) external whenNotPaused nonReentrant returns (bytes32, uint256) {
+        if (!trustedForwarders[msg.sender]) revert NotTrustedForwarder();
+        require(_amount > 0, "Amount must be greater than zero");
+        _validatePrivateAttestations(_depositor, _amount, _cleanHands, _passport);
+
+        uint256 fee = calculateFee(_amount);
+        uint256 amountAfterFee = _amount - fee;
+
+        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+        bytes32 contentHash = Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256)", amountAfterFee));
+
+        underlying.safeTransferFrom(msg.sender, address(this), _amount);
         collectedFees += fee;
 
         (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHashForL2MessageConsumption);
@@ -236,6 +267,12 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         _unpause();
     }
 
+    function setTrustedForwarder(address _forwarder, bool _trusted) external onlyOwner {
+        if (_forwarder == address(0)) revert InvalidAddress();
+        trustedForwarders[_forwarder] = _trusted;
+        emit TrustedForwarderUpdated(_forwarder, _trusted);
+    }
+
     function updateAttestationConfig(address _attester, uint256 _circuitId, address _signer) external onlyOwner {
         if (_attester == address(0)) revert InvalidAddress();
         if (_signer == address(0)) revert InvalidAddress();
@@ -277,6 +314,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     // =============================================================
 
     function _validatePrivateAttestations(
+        address _depositor,
         uint256 _amount,
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
@@ -285,28 +323,31 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
         // 1. Try Clean Hands Verification
         if (_cleanHands.signature.length > 0) {
-            if (cleanHandsNonces[_msgSender()][_cleanHands.nonce]) {
+            if (cleanHandsNonces[_depositor][_cleanHands.nonce]) {
                 revert CleanHandsNonceUsed();
             }
             verified = verifyCleanHandsSignature(
-                _cleanHands.nonce, cleanHandsCircuitId, _cleanHands.actionId, _msgSender(), _cleanHands.signature
+                _cleanHands.nonce, cleanHandsCircuitId, _cleanHands.actionId, _depositor, _cleanHands.signature
             );
-            cleanHandsNonces[_msgSender()][_cleanHands.nonce] = true;
+            cleanHandsNonces[_depositor][_cleanHands.nonce] = true;
         }
 
         // 2. Fallback to Passport Verification
         if (!verified) {
             if (_passport.signature.length == 0) revert InvalidVerification();
-            if (passportNonces[_msgSender()][_passport.nonce]) {
+            if (passportNonces[_depositor][_passport.nonce]) {
                 revert PassportNonceUsed();
             }
-            if (!verifyPassportSignature(_passport.maxAmount, _passport.nonce, _passport.deadline, _passport.signature))
-            {
+            if (
+                !_verifyPassportSignatureFor(
+                    _depositor, _passport.maxAmount, _passport.nonce, _passport.deadline, _passport.signature
+                )
+            ) {
                 revert InvalidPassportSignature();
             }
             if (_amount > _passport.maxAmount) revert AmountExceedsLimit();
 
-            passportNonces[_msgSender()][_passport.nonce] = true;
+            passportNonces[_depositor][_passport.nonce] = true;
         }
     }
 
@@ -329,8 +370,18 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         view
         returns (bool)
     {
+        return _verifyPassportSignatureFor(_msgSender(), maxAmount, nonce, deadline, signature);
+    }
+
+    function _verifyPassportSignatureFor(
+        address _depositor,
+        uint256 maxAmount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes memory signature
+    ) internal view returns (bool) {
         if (block.timestamp > deadline) return false;
-        bytes32 messageHash = keccak256(abi.encodePacked(_msgSender(), maxAmount, nonce, deadline, address(this)));
+        bytes32 messageHash = keccak256(abi.encodePacked(_depositor, maxAmount, nonce, deadline, address(this)));
         bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
 
         address recovered = ECDSA.recover(ethSignedMessageHash, signature);

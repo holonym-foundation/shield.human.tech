@@ -2,9 +2,9 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
-import type { Wallet } from '@aztec/aztec.js/wallet'
 import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
-import { L1_TOKENS } from '@/config'
+import type { Wallet } from '@aztec/aztec.js/wallet'
+import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
 import { aztecNode } from '@/aztec'
 
 export interface WalletContext {
@@ -22,41 +22,37 @@ export interface ExecuteCallResult {
   blockNumber?: number
 }
 
-const FEE_JUICE_ADDRESS_STR =
-  '0x0000000000000000000000000000000000000000000000000000000000000005'
+type ContractType = 'token' | 'bridge' | 'bridged_fpc' | 'fee_juice'
 
-type ArtifactType = 'token' | 'bridge' | 'proxy' | 'feeJuice'
-
-async function getContractArtifact(type: ArtifactType) {
-  const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
+async function getContractArtifact(type: ContractType) {
   if (type === 'bridge') {
     const bridgeJson = await import('../../../aztec-contracts/token_bridge/target/token_bridge_contract-TokenBridge.json')
+    const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
     // @ts-ignore — JSON import from local build output
     return loadContractArtifact(bridgeJson.default ?? bridgeJson)
   }
-  if (type === 'proxy') {
-    const proxyJson = await import('../../../aztec-contracts/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json')
-    // @ts-ignore — JSON import from local build output
-    return loadContractArtifact(proxyJson.default ?? proxyJson)
+  if (type === 'bridged_fpc') {
+    const { BridgedFPCContractArtifact } = await import('@defi-wonderland/aztec-fee-payment')
+    return BridgedFPCContractArtifact
   }
-  if (type === 'feeJuice') {
+  if (type === 'fee_juice') {
     const { FeeJuiceContractArtifact } = await import('@aztec/noir-contracts.js/FeeJuice')
     return FeeJuiceContractArtifact
   }
-  // @ts-ignore — JSON import from package target directory
-  const tokenJson = await import('@defi-wonderland/aztec-standards/target/token_contract-Token.json')
-  // @ts-ignore
-  return loadContractArtifact(tokenJson.default ?? tokenJson)
+  const { TokenContract } = await import('@aztec/noir-contracts.js/Token')
+  return TokenContract.artifact
 }
+
+const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
 
 function resolveArtifactType(
   contractAddress: string,
   bridgeAddress: string
-): ArtifactType {
-  if (contractAddress.toLowerCase() === FEE_JUICE_ADDRESS_STR.toLowerCase()) return 'feeJuice'
-  return contractAddress.toLowerCase() === bridgeAddress.toLowerCase()
-    ? 'bridge'
-    : 'token'
+): ContractType {
+  if (contractAddress.toLowerCase() === bridgeAddress.toLowerCase()) return 'bridge'
+  if (BRIDGED_FPC_ADDRESS && contractAddress.toLowerCase() === BRIDGED_FPC_ADDRESS.toLowerCase()) return 'bridged_fpc'
+  if (contractAddress.toLowerCase() === FEE_JUICE_L2_ADDRESS.toLowerCase()) return 'fee_juice'
+  return 'token'
 }
 
 class WalletAdapter {
@@ -77,14 +73,17 @@ class WalletAdapter {
   }
 
   async initializeContracts(): Promise<void> {
-    const addresses = [
-      { addr: this.tokenAddress, type: 'token' as const },
-      { addr: this.bridgeAddress, type: 'bridge' as const },
-      { addr: this.proxyAddress, type: 'proxy' as const },
-    ].filter(({ addr }) => !!addr)
+    // Register ALL tokens and bridges from config, not just the default
+    const deployedContracts: { addr: string; type: 'token' | 'bridge' }[] = L1_TOKENS.flatMap(
+      (t) => [
+        { addr: t.l2TokenContract ?? '', type: 'token' as const },
+        { addr: t.l2BridgeContract ?? '', type: 'bridge' as const },
+      ],
+    ).filter(({ addr }) => !!addr)
 
+    // Register deployed contracts (token, bridge) via node lookup
     await Promise.all(
-      addresses.map(async ({ addr, type }) => {
+      deployedContracts.map(async ({ addr, type }) => {
         try {
           const address = AztecAddress.fromString(addr)
           const [instance, artifact] = await Promise.all([
@@ -99,6 +98,18 @@ class WalletAdapter {
         }
       })
     )
+
+    // Register BridgedFPC separately — it's a registered-not-deployed contract,
+    // so the node doesn't know about it. We compute the deterministic instance
+    // locally and register it with the wallet's PXE.
+    if (BRIDGED_FPC_ADDRESS) {
+      try {
+        const { registerBridgedContract } = await import('@defi-wonderland/aztec-fee-payment')
+        await registerBridgedContract(this.wallet)
+      } catch {
+        // May already be registered
+      }
+    }
   }
 
   async simulateView(
@@ -123,11 +134,47 @@ class WalletAdapter {
     return results
   }
 
+  /**
+   * Pre-simulate a contract call via the wallet's PXE without triggering a popup.
+   * Returns true if simulation passes, throws if it fails.
+   * Useful for polling until the wallet's node has synced L1→L2 messages.
+   */
+  async preSimulateCall(
+    contract: AztecAddress | string,
+    method: string,
+    args: any[],
+    options?: { contractType?: ContractType; fee?: { paymentMethod: any } }
+  ): Promise<void> {
+    const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
+    const type = options?.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
+    const artifact = await getContractArtifact(type)
+    const instance = await Contract.at(addr, artifact, this.wallet)
+    const interaction = instance.methods[method](...args)
+    const executionPayload = await interaction.request()
+    await this.wallet.simulateTx(executionPayload, {
+      from: this.account,
+      skipTxValidation: true,
+      skipFeeEnforcement: true,
+    } as any)
+  }
+
+  /**
+   * Get chain info from the wallet (chainId + rollup version).
+   * Useful for verifying the wallet is on the same network.
+   */
+  async getWalletChainInfo(): Promise<{ chainId: string; version: string }> {
+    const info = await this.wallet.getChainInfo()
+    return {
+      chainId: info.chainId.toString(),
+      version: info.version.toString(),
+    }
+  }
+
   async executeCall(
     contract: AztecAddress | string,
     method: string,
     args: any[],
-    options?: { contractType?: 'token' | 'bridge'; fee?: { paymentMethod: any } }
+    options?: { contractType?: ContractType; fee?: { paymentMethod: any } }
   ): Promise<ExecuteCallResult> {
     const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
     const type = options?.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
@@ -143,15 +190,46 @@ class WalletAdapter {
     }
   }
 
+  /**
+   * Execute multiple contract calls as a single L2 transaction.
+   * Each call is built into an interaction, then batched and sent atomically.
+   */
+  async executeBatch(
+    calls: { contract: AztecAddress | string; method: string; args: any[]; contractType?: ContractType }[],
+    options?: { fee?: { paymentMethod: any } }
+  ): Promise<ExecuteCallResult> {
+    const interactions = await Promise.all(
+      calls.map(async (call) => {
+        const addr = typeof call.contract === 'string' ? AztecAddress.fromString(call.contract) : call.contract
+        const type = call.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
+        const artifact = await getContractArtifact(type)
+        const instance = await Contract.at(addr, artifact, this.wallet)
+        return instance.methods[call.method](...call.args)
+      })
+    )
+
+    const batch = new BatchCall(this.wallet, interactions)
+    const sendOpts: any = { from: this.account }
+    if (options?.fee) sendOpts.fee = options.fee
+    const receipt = await batch.send(sendOpts)
+    return {
+      txHash: receipt.txHash.toString(),
+      blockNumber: receipt.blockNumber,
+    }
+  }
+
   /** Expose the underlying SDK wallet (needed for FeeJuicePaymentMethodWithClaim) */
   get sdkWallet(): Wallet {
     return this.wallet
   }
 
   /**
-   * Public withdrawal to L1:
-   * 1. Create public authwit for bridge to call token.burn_public
-   * 2. Send bridge.exit_to_l1_public
+   * Public withdrawal to L1 — batched into a single transaction:
+   * 1. Set public authwit in AuthRegistry (set_authorized)
+   * 2. Bridge exit_to_l1_public (which calls token.burn_public)
+   *
+   * Both are public calls batched via BatchCall, so they execute in enqueue
+   * order within one tx — the authwit is visible when burn_public checks it.
    */
   async executeWithdrawToL1Public(
     l1Address: string,
@@ -165,7 +243,6 @@ class WalletAdapter {
 
     const bridgeAddr = AztecAddress.fromString(this.bridgeAddress)
     const tokenAddr = AztecAddress.fromString(this.tokenAddress)
-    const proxyAddr = AztecAddress.fromString(this.proxyAddress)
 
     const [tokenArtifact, bridgeArtifact] = await Promise.all([
       getContractArtifact('token'),
@@ -175,13 +252,12 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Set public authwit: allow proxy to burn_public on behalf of user
-    // Bridge calls proxy, proxy calls token.burn_public — msg_sender at token is the proxy
+    // Set public authwit: allow bridge to burn_public on behalf of user
     const authwit = await SetPublicAuthwitContractInteraction.create(
       this.wallet,
       this.account,
       {
-        caller: proxyAddr,
+        caller: bridgeAddr,
         action: token.methods.burn_public(user, amount, nonce),
       },
       true,
@@ -203,15 +279,13 @@ class WalletAdapter {
 
   /**
    * Private withdrawal to L1:
-   * 1. Create private authwit for proxy to call token.burn_private
-   * 2. Send bridge.exit_to_l1_private with attestation data + witness
+   * 1. Create private authwit for bridge to call token.burn_private
+   * 2. Send bridge.exit_to_l1_private
    */
   async executeWithdrawToL1Private(
     l1Address: string,
     amount: bigint,
     nonce: Fr,
-    cleanHandsData: { nonce: bigint; action_id: bigint; signature: number[] },
-    passportData: { max_amount: bigint; nonce: bigint; deadline: bigint; signature: number[] },
     userAddress?: AztecAddress | string
   ): Promise<ExecuteCallResult> {
     const user = userAddress
@@ -220,7 +294,6 @@ class WalletAdapter {
 
     const bridgeAddr = AztecAddress.fromString(this.bridgeAddress)
     const tokenAddr = AztecAddress.fromString(this.tokenAddress)
-    const proxyAddr = AztecAddress.fromString(this.proxyAddress)
 
     const [tokenArtifact, bridgeArtifact] = await Promise.all([
       getContractArtifact('token'),
@@ -230,22 +303,22 @@ class WalletAdapter {
     const token = await Contract.at(tokenAddr, tokenArtifact, this.wallet)
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
-    // Create private authwit: allow proxy to call token.burn_private on behalf of user.
-    // burn_private uses assert_current_call_valid_authwit (private PXE check), not the
-    // public auth registry — so we need a private witness, not SetPublicAuthwitContractInteraction.
-    const burnAction = token.methods.burn_private(user, amount, nonce)
-    const innerHash = await computeInnerAuthWitHashFromAction(proxyAddr, burnAction)
-    const authWitness = await this.wallet.createAuthWit(this.account, { consumer: tokenAddr, innerHash })
+    // Create private auth witness: allow bridge to burn_private on behalf of user
+    // Pre-compute the inner hash locally to avoid FunctionCall serialization issues over RPC
+    const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
+    const innerHash = await computeInnerAuthWitHashFromAction(bridgeAddr, burnCall)
+    await this.wallet.createAuthWit(
+      this.account,
+      {
+        consumer: tokenAddr,
+        innerHash,
+      }
+    )
 
-    // Attach the witness explicitly to the exit call so the PXE finds it during simulation
-    const receipt = await bridge.methods.exit_to_l1_private(
-      EthAddress.fromString(l1Address),
-      amount,
-      EthAddress.ZERO,
-      nonce,
-      cleanHandsData,
-      passportData,
-    ).with({ authWitnesses: [authWitness] }).send({ from: this.account })
+    // Send exit transaction
+    const receipt = await bridge.methods
+      .exit_to_l1_private(tokenAddr, EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
+      .send({ from: this.account })
 
     return {
       txHash: receipt.txHash.toString(),

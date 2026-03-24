@@ -20,7 +20,7 @@ import {
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { formatUnits, parseUnits, encodeFunctionData } from 'viem'
+import { formatUnits, encodeFunctionData } from 'viem'
 import PortalSBTJson from '../constants/PortalSBT.json'
 import { useToast, useToastMutation, useToastQuery } from './useToast'
 import {
@@ -56,14 +56,17 @@ import {
   fetchPochAttestation,
   fetchPassportAttestation,
   type FuelParams,
+  type PrivateFuelParams,
   type PochAttestationData,
   type PassportAttestationData,
 } from './bridge/bridgeL1ToL2'
 import {
-  BRIDGE_AND_FUEL_ADDRESS,
-  MOCK_FUEL_SWAP_ADDRESS,
+  BRIDGED_FPC_ADDRESS,
+  SWAP_BRIDGE_ROUTER_ADDRESS,
+  UNISWAP_FUEL_SWAP_ADDRESS,
 } from '@/config'
-import { getMockFuelQuote } from '@/utils/fuelQuote'
+import { getUniswapFuelQuote, type FuelQuote } from '@/utils/fuelQuote'
+import { buildSwapRoute, getV4Quote } from '@/utils/fuelPricing'
 import {
   createSigningMessage,
   deriveEncryptionKey,
@@ -72,6 +75,32 @@ import {
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
+
+/**
+ * Build a fuel swap quote via Uniswap V4.
+ */
+async function buildFuelQuote(params: {
+  bridgeTokenAddress: `0x${string}`
+  fuelAmount: bigint
+  inputDecimals: number
+}): Promise<FuelQuote> {
+  const { bridgeTokenAddress, fuelAmount } = params
+  const { poolKeys, zeroForOnes } = buildSwapRoute(bridgeTokenAddress)
+
+  const expectedOutput = await getV4Quote({
+    poolKeys,
+    zeroForOnes,
+    inputAmount: fuelAmount,
+    l1RpcUrl: process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL ?? '',
+  })
+
+  return getUniswapFuelQuote({
+    expectedOutput,
+    slippageBps: 300, // 3% slippage for testnet
+    poolKeys,
+    zeroForOnes,
+  })
+}
 
 export function useL1NativeBalance() {
   const { waapAddress: l1Address } = useWalletStore()
@@ -573,7 +602,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
   } = useWalletStore()
 
   const queryClient = useQueryClient()
-  const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled, bridgeConfig, fuelEnabled, fuelAmount: fuelAmountStr } =
+  const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled, bridgeConfig, fuelEnabled, fuelAmount: fuelAmountStr, fuelType } =
     useBridgeStore()
   const notify = useToast()
 
@@ -591,17 +620,33 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
     // Build fuel params if fuel is enabled (public L1→L2 only)
     let fuel: FuelParams | undefined
-    if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr && BRIDGE_AND_FUEL_ADDRESS && MOCK_FUEL_SWAP_ADDRESS) {
-      const fuelAmountTokenUnits = parseUnits(fuelAmountStr, selectedToken?.decimals ?? 6)
+    let privateFuel: PrivateFuelParams | undefined
+    if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr) {
+      const fuelAmountTokenUnits = BigInt(
+        Math.floor(Number(fuelAmountStr) * 10 ** (selectedToken?.decimals ?? 6))
+      )
+      const hasSwapTarget = UNISWAP_FUEL_SWAP_ADDRESS
       if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amount) {
-        const fuelQuote = getMockFuelQuote({
-          mockFuelSwapAddress: MOCK_FUEL_SWAP_ADDRESS,
-          bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
-          fuelAmount: fuelAmountTokenUnits,
-          inputDecimals: selectedToken?.decimals ?? 6,
-        })
-        fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
-        console.log('[L1→L2] Fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), expectedOutput: fuelQuote.expectedOutput.toString() })
+        if (fuelType === 'private' && BRIDGED_FPC_ADDRESS && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
+          // Private fuel (BridgedFPC): swap via SwapBridgeRouter, FJ deposited to FPC, then claim+mint on L2
+          const fuelQuote = await buildFuelQuote({
+            bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
+            fuelAmount: fuelAmountTokenUnits,
+            inputDecimals: selectedToken?.decimals ?? 6,
+          })
+          fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
+          privateFuel = { fuelAmount: fuelAmountTokenUnits, fpcAddress: BRIDGED_FPC_ADDRESS }
+          console.log('[L1→L2] Private fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), fpcAddress: BRIDGED_FPC_ADDRESS, expectedOutput: fuelQuote.expectedOutput.toString() })
+        } else if (fuelType === 'public' && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
+          // Public fuel: swap tokens → FJ via SwapBridgeRouter
+          const fuelQuote = await buildFuelQuote({
+            bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
+            fuelAmount: fuelAmountTokenUnits,
+            inputDecimals: selectedToken?.decimals ?? 6,
+          })
+          fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
+          console.log('[L1→L2] Public fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), expectedOutput: fuelQuote.expectedOutput.toString() })
+        }
       }
     }
     if (!l1Address) {
@@ -650,11 +695,12 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         signWaapMessage,
         selectedToken,
         fuel,
+        privateFuel,
       })
       operationId = backup.operationId
 
-      // ─── Step 3: Check allowance and approve ────────────────────────
-      await checkAndApproveAllowance(l1Address, amount, selectedToken, fuel)
+      // ─── Step 3: Check allowance and approve (+ Permit2 sign) ────────
+      await checkAndApproveAllowance(l1Address, amount, selectedToken)
 
       // ─── Step 3b: Fetch attestation for private deposits (POCH → Passport fallback) ──
       let attestation: PochAttestationData | undefined
@@ -684,6 +730,14 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         message: 'Your deposit is in progress. Please do not reload or close this page until it completes, or it may be difficult to recover your funds.',
       }, { autoClose: false })
 
+      console.log('[L1→L2] Pre-deposit params:', {
+        hasFuel: !!fuel,
+        hasPrivateFuel: !!privateFuel,
+        fuelAmount: fuel?.fuelAmount?.toString(),
+        privateFuelFpcAddress: privateFuel?.fpcAddress,
+        hasFuelSecretHash: !!backup.fuelSecretHash,
+        hasPrivateFuelSecretHash: !!backup.privateFuelSecretHash,
+      })
       const deposit = await sendL1DepositTransaction({
         l1Address,
         aztecAddress,
@@ -693,7 +747,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
         operationId: backup.operationId,
         selectedToken,
-        fuel: fuel && backup.fuelSecretHash ? { ...fuel, fuelSecretHash: backup.fuelSecretHash } : undefined,
+        // Public fuel: needs fuelSecretHash from backup (random secret).
+        // Private fuel: fuel is passed for the swap quote, but fuelSecretHash is a dummy
+        // (overridden by privateFuel.secretHash in sendL1DepositTransaction).
+        fuel: fuel ? {
+          ...fuel,
+          fuelSecretHash: backup.fuelSecretHash ?? backup.privateFuelSecretHash!,
+        } : undefined,
+        privateFuel: privateFuel && backup.privateFuelSecretHash ? {
+          ...privateFuel,
+          secretHash: backup.privateFuelSecretHash,
+        } : undefined,
         attestation,
         passportAttestation,
       })
@@ -734,7 +798,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       const { updatedClaim, wasExisting } = finalizeLocalStorageAfterDeposit({
         claimSecret: backup.claimSecret,
         claimSecretHash: backup.claimSecretHash,
-        claimAmount: amount,
+        claimAmount: receipt.claimAmount,
         l1Address,
         aztecAddress,
         messageHashStr: receipt.messageHashStr,
@@ -767,11 +831,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       setProgressStep(1, 'completed')
       setProgressStep(2, 'active')
 
-      // Poll for both messages in parallel when fuel is enabled
+      // Poll for all messages in parallel (token + fuel + private fuel)
       const syncPromises: Promise<any>[] = [
         pollL1ToL2MessageSync(receipt.messageHash.toString()),
       ]
-      if (fuel && receipt.fuelMessageHash) {
+      if (receipt.fuelMessageHash) {
         syncPromises.push(pollL1ToL2MessageSync(receipt.fuelMessageHash.toString()))
       }
       const syncResults = await Promise.all(syncPromises)
@@ -799,8 +863,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         throw new Error(errorMessage)
       }
 
-      // Extra buffer so the message is visible on the wallet's node
-      console.log('[L1→L2] Final wait before claiming (2 min)...')
+      // Buffer wait: give the sequencer time to include the message in a block.
+      // The wallet's sendTx → proveTx path skips local public simulation,
+      // but the sequencer still needs the message in the L2 tree.
+      console.log('[L1→L2] Waiting 2 min for message propagation before claiming...')
       await wait(120_000)
 
       // ─── Step 9: Claim on L2 ───────────────────────────────────────
@@ -815,9 +881,56 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           )
         }
 
-        // Build fee payment method if fuel is enabled
-        let feeOption: { fee: { paymentMethod: any } } | undefined
-        if (fuel && backup.fuelSecret && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
+        // Build fee payment method for the L2 claim transaction:
+        // - Public fuel: FeeJuicePaymentMethodWithClaim (claim FJ to user, pay gas)
+        // - Private fuel: BridgedMintAndPayFeePaymentMethod (FeeJuice.claim + mint_and_pay_fee, all private)
+        let feeOption: { fee: { paymentMethod: any; gasSettings?: any } } | undefined
+        console.log('[L1→L2] Private fuel check:', {
+          hasPrivateFuel: !!privateFuel,
+          hasSecret: !!backup.privateFuelSecret,
+          hasSalt: !!backup.privateFuelSalt,
+          fuelMessageLeafIndex: receipt.fuelMessageLeafIndex,
+          fuelAmount: receipt.fuelAmount?.toString(),
+        })
+        if (privateFuel && backup.privateFuelSecret && backup.privateFuelSalt && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
+          try {
+            const { BridgedMintAndPayFeePaymentMethod, REASONABLE_GAS_LIMITS, maxFeesPerGasFromBaseFees, maxGasCostFor } =
+              await import('@defi-wonderland/aztec-fee-payment')
+            const { Fr: FieldFr } = await import('@aztec/aztec.js/fields')
+            const { Gas, GasFees } = await import('@aztec/stdlib/gas')
+            const { aztecNode } = await import('@/aztec')
+
+            // Query current base fees and compute gas settings
+            // (mirrors getGasSetup in aztec-fee-payment tests)
+            const baseFees = await aztecNode.getCurrentMinFees()
+            const maxFeesPerGas = maxFeesPerGasFromBaseFees(baseFees)
+            const gasLimits = REASONABLE_GAS_LIMITS
+            const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 }) // no teardown for pay_fee
+
+            const estimatedMaxGasCost = maxGasCostFor(maxFeesPerGas, gasLimits)
+            console.log('[L1→L2] Gas diagnostics:', {
+              baseFees: { feePerDaGas: baseFees.feePerDaGas.toString(), feePerL2Gas: baseFees.feePerL2Gas.toString() },
+              maxFeesPerGas: { feePerDaGas: maxFeesPerGas.feePerDaGas.toString(), feePerL2Gas: maxFeesPerGas.feePerL2Gas.toString() },
+              gasLimits: { daGas: gasLimits.daGas.toString(), l2Gas: gasLimits.l2Gas.toString() },
+              teardownGasLimits: { daGas: teardownGasLimits.daGas.toString(), l2Gas: teardownGasLimits.l2Gas.toString() },
+              estimatedMaxGasCost: estimatedMaxGasCost.toString(),
+              fuelAmount: receipt.fuelAmount.toString(),
+              sufficient: receipt.fuelAmount >= estimatedMaxGasCost,
+            })
+
+            const paymentMethod = new BridgedMintAndPayFeePaymentMethod(
+              AztecAddress.fromString(privateFuel.fpcAddress),
+              receipt.fuelAmount,
+              backup.privateFuelSecret,
+              backup.privateFuelSalt,
+              new FieldFr(BigInt(receipt.fuelMessageLeafIndexStr!)),
+            )
+            feeOption = { fee: { paymentMethod, gasSettings: { gasLimits, teardownGasLimits, maxFeesPerGas, maxPriorityFeesPerGas: GasFees.empty() } } }
+            console.log('[L1→L2] Using BridgedMintAndPayFeePaymentMethod with explicit gasSettings (private fuel)')
+          } catch (err) {
+            console.warn('[L1→L2] Failed to create BridgedMintAndPayFeePaymentMethod, falling back to default:', err)
+          }
+        } else if (fuel && !privateFuel && backup.fuelSecret && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
           try {
             const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
             const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
@@ -826,17 +939,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               messageLeafIndex: BigInt(receipt.fuelMessageLeafIndexStr!),
             })
             feeOption = { fee: { paymentMethod } }
-            console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim')
+            console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim (public fuel)')
           } catch (err) {
             console.warn('[L1→L2] Failed to create FeeJuicePaymentMethodWithClaim, falling back to default:', err)
           }
         }
 
         // Portal deducts fees before creating the L1→L2 message — claim must use the post-fee amount
-        if (!receipt.amountAfterFee) {
-          throw new Error('amountAfterFee missing from deposit event — cannot determine correct claim amount')
+        if (!receipt.claimAmount) {
+          throw new Error('claimAmount missing from deposit event — cannot determine correct claim amount')
         }
-        const claimAmount = receipt.amountAfterFee
+        const claimAmount = receipt.claimAmount
         console.log('[L1→L2] Claim amount (after fee):', claimAmount.toString())
 
         const claimResult = await executeL2Claim(

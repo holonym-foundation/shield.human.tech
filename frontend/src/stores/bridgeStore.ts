@@ -99,8 +99,10 @@ interface BridgeStoreState
   // Fuel (gas funding) state
   fuelEnabled: boolean
   fuelAmount: string
+  fuelType: 'public' | 'private'
   setFuelEnabled: (enabled: boolean) => void
   setFuelAmount: (amount: string) => void
+  setFuelType: (type: 'public' | 'private') => void
 
   // Step actions
   setHeaderStep: (
@@ -225,6 +227,7 @@ const initialState = {
   isPrivacyModeEnabled: getInitialPrivacyMode(),
   fuelEnabled: false,
   fuelAmount: '',
+  fuelType: 'public' as const,
 } as const
 
 const bridgeStore = create<BridgeStoreState>((set, get) => ({
@@ -247,8 +250,10 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   // Fuel (gas funding) actions
   fuelEnabled: false,
   fuelAmount: '',
+  fuelType: 'public' as const,
   setFuelEnabled: (enabled: boolean) => set({ fuelEnabled: enabled, fuelAmount: '' }),
   setFuelAmount: (amount: string) => set({ fuelAmount: amount }),
+  setFuelType: (type: 'public' | 'private') => set({ fuelType: type }),
 
   // Step actions
   setHeaderStep: (
@@ -386,6 +391,7 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
     recoveryWithdrawalData: null,
     fuelEnabled: false,
     fuelAmount: '',
+    fuelType: 'public' as const,
   })),
 }))
 
@@ -435,8 +441,10 @@ export const useBridgeStore = () =>
       // Fuel (gas funding)
       fuelEnabled: state.fuelEnabled,
       fuelAmount: state.fuelAmount,
+      fuelType: state.fuelType,
       setFuelEnabled: state.setFuelEnabled,
       setFuelAmount: state.setFuelAmount,
+      setFuelType: state.setFuelType,
 
       // Recovery
       recoveryOperationId: state.recoveryOperationId,
