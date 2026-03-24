@@ -148,6 +148,7 @@ model BridgeActivity {
 
   // --- L1→L2 recovery hint ---
   l1BlockNumberBeforeTx String? // L1 block number captured before sending deposit tx; starting point if receipt lost
+  claimAmount           String? // Post-fee token amount from DepositToAztec event; must match L2 content hash exactly
 
   // --- Progress tracking (for resume from activity page) ---
   // L1→L2: 1=deposit sent, 2=waiting for sync, 3=claiming on L2, 4=complete

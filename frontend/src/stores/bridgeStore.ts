@@ -37,6 +37,7 @@ export interface RecoveryClaimData {
   messageHash: string | null
   messageLeafIndex: string | null
   amount: string
+  claimAmount: string | null // Post-fee amount from deposit event; must match L2 content hash
   l1Address: string
   l2Address: string
   l1TxHash: string | null

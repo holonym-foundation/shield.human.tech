@@ -77,6 +77,8 @@ export async function PATCH(
     const currentStep = sanitizeInt(body.currentStep, 0, 10)
     // L2→L1 witness epoch
     const epoch = sanitizeInt(body.epoch, 0, 1_000_000_000)
+    // L1→L2 receipt fields
+    const claimAmount = sanitizeNumericString(body.claimAmount)
     // L1→L2 fuel recovery fields
     const fuelMessageHash = sanitizeHexString(body.fuelMessageHash, 130)
     const fuelMessageLeafIndex = sanitizeNumericString(body.fuelMessageLeafIndex)
@@ -187,7 +189,8 @@ export async function PATCH(
     if (siblingPath) updateData.siblingPath = siblingPath
     if (recipientL1Address) updateData.recipientL1Address = recipientL1Address
     if (currentStep != null) updateData.currentStep = currentStep
-    // L1→L2 fuel fields
+    // L1→L2 receipt + fuel fields
+    if (claimAmount) updateData.claimAmount = claimAmount
     if (fuelMessageHash) updateData.fuelMessageHash = fuelMessageHash
     if (fuelMessageLeafIndex) updateData.fuelMessageLeafIndex = fuelMessageLeafIndex
     if (fuelAmount) updateData.fuelAmount = fuelAmount

@@ -411,8 +411,11 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     const claimSecretFr = Fr.fromString(claimSecret)
     // TokenPortal deducts fees before computing the L1→L2 content hash.
     // The L2 claim must use the post-fee amount to match the content hash.
+    // Prefer the stored claimAmount (from the deposit event) over re-deriving from current fee rate.
     const preFeeBridgeAmount = BigInt(amount)
-    const claimAmountPostFee = await getPostFeeClaimAmount(portalAddress, preFeeBridgeAmount)
+    const claimAmountPostFee = claimData.claimAmount
+      ? BigInt(claimData.claimAmount)
+      : await getPostFeeClaimAmount(portalAddress, preFeeBridgeAmount)
 
     // ── Build fuel fee payment method (if fuel data is available) ──
     // Same logic as useL1Operations.ts:883-945 — atomically claim FeeJuice and pay gas

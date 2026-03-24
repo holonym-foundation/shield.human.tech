@@ -1323,6 +1323,7 @@ export async function persistReceiptToBackend(
     messageLeafIndexStr: string
     l1TxHash: string
     l1TxUrl: string
+    claimAmount?: bigint
     fuelMessageHashStr?: string
     fuelMessageLeafIndexStr?: string
     fuelAmount?: bigint
@@ -1336,6 +1337,8 @@ export async function persistReceiptToBackend(
     l1TxUrl: receiptData.l1TxUrl,
     currentStep: 2,
   }
+  // Include post-fee claim amount from deposit event (critical for L2 claim content hash)
+  if (receiptData.claimAmount != null) patchData.claimAmount = receiptData.claimAmount.toString()
   // Include fuel recovery data if present
   if (receiptData.fuelMessageHashStr) patchData.fuelMessageHash = receiptData.fuelMessageHashStr
   if (receiptData.fuelMessageLeafIndexStr) patchData.fuelMessageLeafIndex = receiptData.fuelMessageLeafIndexStr

@@ -29,6 +29,7 @@ export interface BridgeOperation {
   messageHash: string | null
   messageLeafIndex: string | null
   l1BlockNumberBeforeTx: string | null
+  claimAmount: string | null
   // L1→L2 fuel recovery fields
   fuelMessageHash: string | null
   fuelMessageLeafIndex: string | null

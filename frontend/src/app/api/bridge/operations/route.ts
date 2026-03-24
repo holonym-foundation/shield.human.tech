@@ -68,6 +68,7 @@ export async function GET(request: NextRequest) {
         messageHash: true,
         messageLeafIndex: true,
         l1BlockNumberBeforeTx: true,
+        claimAmount: true,
         // L1→L2 fuel recovery fields
         fuelMessageHash: true,
         fuelMessageLeafIndex: true,
