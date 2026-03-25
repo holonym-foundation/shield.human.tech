@@ -15,6 +15,7 @@
     "profile-devnet:compliant": "PROFILE=true RUN_TESTS_ONLY=true node --import tsx index-devnet-compliant.ts",
     "seed-pools": "LOG_LEVEL='silent;info:seed-pools' node --import tsx seed-pools.ts",
     "check-pools": "LOG_LEVEL='silent;info:check-pools' node --import tsx check-pool-liquidity.ts",
+    "test-fuel-swap": "LOG_LEVEL='silent;info:test-fuel-swap' node --import tsx test-fuel-swap.ts",
     "set-trusted-forwarders": "LOG_LEVEL='silent;info:set-forwarders' node --import tsx set-trusted-forwarders.ts",
     "deploy-fuel-swap": "LOG_LEVEL='silent;info:deploy-fuel-swap' node --import tsx deploy-fuel-swap.ts",
     "deploy-swap-router": "LOG_LEVEL='silent;info:deploy-swap-router' node --import tsx deploy-swap-router.ts",

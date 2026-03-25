@@ -16,11 +16,11 @@
  *   - L1_URL (optional): L1 RPC URL (uses config default if not set)
  *   - ERC20_TOKEN (optional): Seed only this token's ERC20/WETH pool
  *   - SKIP_ETH_AZTEC (optional): Set to "true" to skip the ETH/AZTEC pool
- *   - FEE_MINT_COUNT (optional): Number of FeeJuice mints, each 1000 FJ (default: 15)
+ *   - FEE_MINT_COUNT (optional): Number of FeeJuice mints, each 1000 FJ (default: 1)
  *   - ETH_SEED (optional): ETH for ETH/AZTEC pool in wei (default: 0.05 ETH)
- *   - WETH_SEED (optional): ETH to wrap for ERC20/WETH pool in wei (default: 0.15 ETH)
+ *   - WETH_SEED (optional): ETH to wrap for ERC20/WETH pool in wei (default: 0.02 ETH)
  *   - ERC20_AMOUNT (optional): Raw ERC20 amount to seed (default: 100 * 10^decimals)
- *   - FORCE_SEED (optional): Set to "true" to seed even if pools already have liquidity
+ *   - FORCE_SEED: Removed — pools are now always seeded (PoolSeeder.setup is idempotent)
  */
 
 import { createLogger } from '@aztec/aztec.js/log'
@@ -45,14 +45,19 @@ const FEE_ASSET_HANDLER = '0xED9c5557d2E0abCc7c7FCA958eE4292199413494' as `0x${s
 const AZTEC_TOKEN = '0x35d0186d1FD53b72996475D965C5Ed171D52b986' as `0x${string}`
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
 
-// Pool seed amounts (kept small — testnet faucets give ~0.05 ETH):
-//   Pool 1 (ETH/FeeJuice): 0.005 ETH + 3,000 FeeJuice (minted)
-//   Pool 2 (USDC/WETH):    100 USDC (minted) + 0.01 WETH (wrapped from ETH)
-//   Deployer wallet needs: ~0.02 ETH for seeding + gas
+// Pool seed amounts — minimized for devnet ETH budget (~0.03 ETH total):
 //
-//   Note: Liquidity CANNOT be withdrawn — PoolSeeder is a one-shot helper with no
-//   remove-liquidity function. V4 withdrawal requires a PositionManager, which we don't use.
-//   Keep seed amounts small on testnet.
+//   Pool 1 (ETH/AZTEC): L=1e18 consumes 0.00684 ETH + 68.4 FJ.
+//     Tradeable depth: ~0.022 ETH / ~68.4 FJ — plenty for 0.02 USDC fuel swaps.
+//     ETH_SEED=0.05 ETH (covers liquidity + price drift on re-seed; excess swept back).
+//     FEE_MINT_COUNT=1 (1000 FJ >> 68.4 needed).
+//
+//   Pool 2 (USDC/WETH): L=1e12 consumes 35.59 USDC + 0.017 WETH.
+//     Tradeable depth: ~159 USDC / ~0.017 WETH — 100x headroom for fuel swaps.
+//     WETH_SEED=0.02 ETH. ERC20 minted free.
+//
+//   Liquidity CANNOT be withdrawn — PoolSeeder has no remove-liquidity function.
+//   Pools are ALWAYS seeded (no skip logic). PoolSeeder.setup() is idempotent.
 
 // ETH/AZTEC pool params (~10,000 FeeJuice per ETH)
 const ETH_AZTEC_SQRT_PRICE = 7922816251426433759354395033600n
@@ -60,7 +65,7 @@ const ETH_AZTEC_TICK_LOWER = 69060
 const ETH_AZTEC_TICK_UPPER = 115140
 const ETH_AZTEC_FEE = 3000
 const ETH_AZTEC_TICK_SPACING = 60
-const ETH_AZTEC_LIQUIDITY = 10n ** 18n
+const ETH_AZTEC_LIQUIDITY = 1n * 10n ** 18n // 1e18 — consumes 0.00684 ETH + 68.4 FJ
 
 // ERC20/WETH pool params (~2,100 USDC per WETH)
 const ERC20_WETH_SQRT_PRICE = 1728916962386276374966316084832192n
@@ -68,7 +73,7 @@ const ERC20_WETH_TICK_LOWER = 169800
 const ERC20_WETH_TICK_UPPER = 229800
 const ERC20_WETH_FEE = 3000
 const ERC20_WETH_TICK_SPACING = 60
-const ERC20_WETH_LIQUIDITY = 3000000000000n // 3e12 (scaled for 100 USDC + 0.1 WETH — needs ~33 USDC + ~0.075 WETH)
+const ERC20_WETH_LIQUIDITY = 1000000000000n // 1e12 — consumes 35.59 USDC + 0.017 WETH
 
 const ERC20_ABI = [
   { type: 'function', name: 'balanceOf', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view' },
@@ -145,11 +150,10 @@ async function main() {
   const deployer = l1Client.account.address
 
   // Config from env
-  const feeMintCount = Number(process.env.FEE_MINT_COUNT || '3')
-  const ethSeed = BigInt(process.env.ETH_SEED || '5000000000000000') // 0.005 ETH
-  const wethSeed = BigInt(process.env.WETH_SEED || '100000000000000000') // 0.1 ETH
+  const feeMintCount = Number(process.env.FEE_MINT_COUNT || '1')
+  const ethSeed = BigInt(process.env.ETH_SEED || '50000000000000000') // 0.05 ETH (covers price drift; excess swept back)
+  const wethSeed = BigInt(process.env.WETH_SEED || '20000000000000000') // 0.02 ETH
   const skipEthAztec = process.env.SKIP_ETH_AZTEC === 'true'
-  const forceSeed = process.env.FORCE_SEED === 'true'
   const specificToken = process.env.ERC20_TOKEN?.toLowerCase()
 
   // Load tokens from active deployment
@@ -178,30 +182,12 @@ async function main() {
   // Log balances BEFORE seeding
   await logPoolBalances(L1_URL, erc20Tokens, 'BEFORE seeding', logger)
 
-  // ── Check if pools already have liquidity → skip seeding ─────────
-  const l1Public = createPublicClient({ transport: http(L1_URL) })
-  const aztecTokenCheck = getContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, client: l1Public as any }) as any
-  const pmFjBalance = await aztecTokenCheck.read.balanceOf([POOL_MANAGER]) as bigint
-
-  let allPoolsSeeded = pmFjBalance > 0n
-  if (allPoolsSeeded) {
-    for (const token of erc20Tokens) {
-      const erc20 = getContract({ address: token.l1TokenContract as `0x${string}`, abi: ERC20_ABI, client: l1Public as any }) as any
-      const bal = await erc20.read.balanceOf([POOL_MANAGER]) as bigint
-      if (bal === 0n) { allPoolsSeeded = false; break }
-    }
-  }
-
-  if (allPoolsSeeded && !forceSeed) {
-    logger.info('✅ All pools already have liquidity in PoolManager — skipping seeding (use FORCE_SEED=true to add more)')
-    return
-  }
-
   // ── 1. Seed ETH/AZTEC pool ─────────────────────────────────────────
+  // Always seed — PoolManager FJ balance is shared across ALL V4 pools on the
+  // network, so checking it is unreliable. PoolSeeder.setup() is idempotent
+  // (initializes pool if new, adds liquidity if it already exists).
   if (skipEthAztec) {
     logger.info('Skipping ETH/AZTEC pool (SKIP_ETH_AZTEC=true)')
-  } else if (pmFjBalance > 0n && !forceSeed) {
-    logger.info('\n--- ETH/AZTEC pool — already has FJ liquidity, skipping ---')
   } else {
     try {
       logger.info('\n--- ETH/AZTEC pool ---')
@@ -224,7 +210,7 @@ async function main() {
       for (let i = 0; i < feeMintCount; i++) {
         const tx = await feeHandler.write.mint([seederAddr])
         await l1Client.waitForTransactionReceipt({ hash: tx, timeout: 120_000 })
-        if ((i + 1) % 20 === 0) logger.info(`  ... minted ${i + 1}/${feeMintCount}`)
+        if ((i + 1) % 10 === 0) logger.info(`  ... minted ${i + 1}/${feeMintCount}`)
       }
 
       // Transfer any deployer FJ to seeder
@@ -234,13 +220,24 @@ async function main() {
         await sendAndWait(l1Client, tx, `Transferred ${deployerFj} FJ to seeder`, logger)
       }
 
-      // Seed pool
+      // Seed pool — dry-run first to catch errors without spending gas
       const [c0, c1] = sortCurrencies(ZERO_ADDRESS, AZTEC_TOKEN)
       const poolKey = { currency0: c0, currency1: c1, fee: ETH_AZTEC_FEE, tickSpacing: ETH_AZTEC_TICK_SPACING, hooks: ZERO_ADDRESS }
-      const tx = await seeder.write.setup(
-        [poolKey, ETH_AZTEC_SQRT_PRICE, ETH_AZTEC_TICK_LOWER, ETH_AZTEC_TICK_UPPER, ETH_AZTEC_LIQUIDITY],
-        { value: ethSeed },
-      )
+      const setupArgs = [poolKey, ETH_AZTEC_SQRT_PRICE, ETH_AZTEC_TICK_LOWER, ETH_AZTEC_TICK_UPPER, ETH_AZTEC_LIQUIDITY] as const
+      try {
+        await seeder.simulate.setup(setupArgs, { value: ethSeed })
+        logger.info('  Dry-run passed — sending seed tx...')
+      } catch (simError) {
+        const simMsg = String(simError)
+        if (simMsg.includes('0xe450d38c')) {
+          logger.error('  ❌ Dry-run failed: ERC20InsufficientBalance — seeder doesn\'t have enough FeeJuice for liquidity.')
+          logger.error(`     Minted ${feeMintCount} x 1000 FJ but liquidity ${ETH_AZTEC_LIQUIDITY} needs more. Increase FEE_MINT_COUNT.`)
+        } else {
+          logger.error(`  ❌ Dry-run failed: ${simError}`)
+        }
+        throw simError
+      }
+      const tx = await seeder.write.setup(setupArgs, { value: ethSeed })
       await sendAndWait(l1Client, tx, 'ETH/AZTEC pool seeded', logger)
 
       // Sweep
@@ -248,7 +245,13 @@ async function main() {
       await sendAndWait(l1Client, await seeder.write.sweep([AZTEC_TOKEN]), 'Swept AZTEC', logger)
       logger.info('✅ ETH/AZTEC pool done')
     } catch (error) {
-      logger.error(`Failed to seed ETH/AZTEC pool: ${error}`)
+      const errMsg = String(error)
+      if (errMsg.includes('0xe450d38c')) {
+        logger.error('❌ ETH/AZTEC pool seeding failed: ERC20InsufficientBalance — not enough FeeJuice for the liquidity delta.')
+        logger.error(`   Minted ${feeMintCount} x 1000 FJ but liquidity ${ETH_AZTEC_LIQUIDITY} needs more. Increase FEE_MINT_COUNT or reduce ETH_AZTEC_LIQUIDITY.`)
+      } else {
+        logger.error(`❌ ETH/AZTEC pool seeding failed: ${error}`)
+      }
     }
   }
 
@@ -257,14 +260,8 @@ async function main() {
     const token = erc20Tokens[i]
     const tokenAddr = token.l1TokenContract as `0x${string}`
 
-    // Check if this token already has liquidity in PoolManager
-    const tokenCheck = getContract({ address: tokenAddr, abi: ERC20_ABI, client: l1Public as any }) as any
-    const tokenPmBal = await tokenCheck.read.balanceOf([POOL_MANAGER]) as bigint
-    if (tokenPmBal > 0n && !forceSeed) {
-      logger.info(`\n--- [${i + 1}/${erc20Tokens.length}] ${token.symbol}/WETH pool — already has liquidity, skipping ---`)
-      continue
-    }
-
+    // Always seed — each deployment creates a fresh ERC20, so the pool is always new.
+    // PoolSeeder.setup() is idempotent (initializes if new, adds liquidity if exists).
     try {
       logger.info(`\n--- [${i + 1}/${erc20Tokens.length}] ${token.symbol}/WETH pool ---`)
 
@@ -284,7 +281,7 @@ async function main() {
       const decimals = await erc20.read.decimals() as number
       const erc20Amount = process.env.ERC20_AMOUNT
         ? BigInt(process.env.ERC20_AMOUNT)
-        : BigInt(100) * (10n ** BigInt(decimals))
+        : BigInt(100) * (10n ** BigInt(decimals)) // 100 tokens — 1e12 liquidity needs ~36 USDC
 
       // Mint ERC20
       const mintTx = await erc20.write.mint([deployer, erc20Amount])
@@ -301,12 +298,24 @@ async function main() {
       const txWeth = await weth.write.transfer([seederAddr, wethSeed])
       await sendAndWait(l1Client, txWeth, 'Transferred WETH to seeder', logger)
 
-      // Seed pool
+      // Seed pool — dry-run first to catch errors without spending gas
       const [c0, c1] = sortCurrencies(tokenAddr, WETH_ADDRESS)
       const poolKey = { currency0: c0, currency1: c1, fee: ERC20_WETH_FEE, tickSpacing: ERC20_WETH_TICK_SPACING, hooks: ZERO_ADDRESS }
-      const seedTx = await seeder.write.setup(
-        [poolKey, ERC20_WETH_SQRT_PRICE, ERC20_WETH_TICK_LOWER, ERC20_WETH_TICK_UPPER, ERC20_WETH_LIQUIDITY],
-      )
+      const setupArgs = [poolKey, ERC20_WETH_SQRT_PRICE, ERC20_WETH_TICK_LOWER, ERC20_WETH_TICK_UPPER, ERC20_WETH_LIQUIDITY] as const
+      try {
+        await seeder.simulate.setup(setupArgs)
+        logger.info(`  Dry-run passed — sending seed tx...`)
+      } catch (simError) {
+        const simMsg = String(simError)
+        if (simMsg.includes('0xe450d38c')) {
+          logger.error(`  ❌ Dry-run failed: ERC20InsufficientBalance — seeder doesn't have enough tokens for liquidity delta ${ERC20_WETH_LIQUIDITY}.`)
+          logger.error(`     Seeder has ${erc20Amount} ${token.symbol} + ${wethSeed} wei WETH. Increase ERC20 mint or reduce liquidity.`)
+        } else {
+          logger.error(`  ❌ Dry-run failed: ${simError}`)
+        }
+        throw simError
+      }
+      const seedTx = await seeder.write.setup(setupArgs)
       await sendAndWait(l1Client, seedTx, `${token.symbol}/WETH pool seeded`, logger)
 
       // Sweep
@@ -314,7 +323,13 @@ async function main() {
       await sendAndWait(l1Client, await seeder.write.sweep([WETH_ADDRESS]), 'Swept WETH', logger)
       logger.info(`✅ ${token.symbol}/WETH pool done`)
     } catch (error) {
-      logger.error(`Failed to seed ${token.symbol}/WETH pool: ${error}`)
+      const errMsg = String(error)
+      if (errMsg.includes('0xe450d38c')) {
+        logger.error(`❌ ${token.symbol}/WETH pool seeding failed: ERC20InsufficientBalance — seeder doesn't have enough tokens for liquidity delta ${ERC20_WETH_LIQUIDITY}.`)
+        logger.error(`   Increase ERC20 mint amount or reduce ERC20_WETH_LIQUIDITY.`)
+      } else {
+        logger.error(`❌ ${token.symbol}/WETH pool seeding failed: ${error}`)
+      }
     }
   }
 

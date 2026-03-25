@@ -461,6 +461,140 @@ contract UniswapFuelSwapTest is Test {
     }
 
     // ═════════════════════════════════════════════════════════════════
+    // PARTIAL FILL / INSUFFICIENT LIQUIDITY
+    // ═════════════════════════════════════════════════════════════════
+
+    function test_revertOnPartialFillInsufficientLiquidity() public {
+        // Attempt to swap more than the pool can handle
+        uint256 hugeAmount = 50 ether; // pool only has ~10e18 liquidity
+        deal(WETH, user, hugeAmount);
+
+        (PoolKey[] memory path, bool[] memory dirs) = _singlePath(poolKey, zeroForOne);
+
+        vm.startPrank(user);
+        IERC20(WETH).approve(address(swapper), hugeAmount);
+        vm.expectRevert("UniswapFuelSwap: partial fill (insufficient liquidity)");
+        swapper.swap(WETH, hugeAmount, 0, path, dirs);
+        vm.stopPrank();
+    }
+
+    function test_revertOnPartialFillNativeEth() public {
+        uint256 hugeAmount = 50 ether;
+        deal(WETH, user, hugeAmount);
+
+        (PoolKey[] memory path, bool[] memory dirs) = _singlePath(ethFeeKey, ethFeeZeroForOne);
+
+        vm.startPrank(user);
+        IERC20(WETH).approve(address(swapper), hugeAmount);
+        vm.expectRevert("UniswapFuelSwap: partial fill (insufficient liquidity)");
+        swapper.swap(WETH, hugeAmount, 0, path, dirs);
+        vm.stopPrank();
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // ROUTE VALIDATION
+    // ═════════════════════════════════════════════════════════════════
+
+    function test_revertOnFirstHopInputMismatch() public {
+        MockERC20 wrongToken = new MockERC20("Wrong", "WRONG");
+        uint256 amount = 0.001 ether;
+        wrongToken.mint(user, amount);
+
+        // Try to swap WRONG through AZTEC/WETH pool (first hop expects WETH, not WRONG)
+        (PoolKey[] memory path, bool[] memory dirs) = _singlePath(poolKey, zeroForOne);
+
+        vm.startPrank(user);
+        wrongToken.approve(address(swapper), amount);
+        vm.expectRevert("UniswapFuelSwap: first hop input mismatch");
+        swapper.swap(address(wrongToken), amount, 0, path, dirs);
+        vm.stopPrank();
+    }
+
+    function test_revertOnLastHopNotFeeJuice() public {
+        // Build a pool where the output is WETH, not FeeJuice
+        MockERC20 otherToken = new MockERC20("Other", "OTHER");
+        (PoolKey memory badKey,) = _buildPoolKey(address(otherToken), WETH);
+        IPoolManager(POOL_MANAGER).initialize(badKey, INIT_SQRT_PRICE);
+
+        uint256 seed = 100 ether;
+        otherToken.mint(address(seeder), seed);
+        deal(WETH, address(seeder), seed);
+        seeder.seedLiquidity(badKey, -600, 600, 10e18);
+
+        uint256 amount = 0.001 ether;
+        otherToken.mint(user, amount);
+
+        // Single-hop path where output is WETH, not AZTEC
+        PoolKey[] memory path = new PoolKey[](1);
+        path[0] = badKey;
+        bool[] memory dirs = new bool[](1);
+        dirs[0] = address(otherToken) < WETH;
+
+        vm.startPrank(user);
+        otherToken.approve(address(swapper), amount);
+        vm.expectRevert("UniswapFuelSwap: last hop must output feeJuice");
+        swapper.swap(address(otherToken), amount, 0, path, dirs);
+        vm.stopPrank();
+    }
+
+    function test_revertOnNativeRouteWithNonWethInput() public {
+        MockERC20 notWeth = new MockERC20("NotWETH", "NW");
+        uint256 amount = 0.001 ether;
+        notWeth.mint(user, amount);
+
+        // ethFeeKey has currency0=address(0), so firstInput=address(0) which maps to WETH
+        // but we're passing notWeth as inputToken
+        (PoolKey[] memory path, bool[] memory dirs) = _singlePath(ethFeeKey, ethFeeZeroForOne);
+
+        vm.startPrank(user);
+        notWeth.approve(address(swapper), amount);
+        vm.expectRevert("UniswapFuelSwap: native route requires WETH input");
+        swapper.swap(address(notWeth), amount, 0, path, dirs);
+        vm.stopPrank();
+    }
+
+    function test_revertOnInputOverflow() public {
+        uint256 overflow = uint256(type(int256).max) + 1;
+
+        (PoolKey[] memory path, bool[] memory dirs) = _singlePath(poolKey, zeroForOne);
+
+        vm.prank(user);
+        vm.expectRevert("UniswapFuelSwap: input overflow");
+        swapper.swap(WETH, overflow, 0, path, dirs);
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // MULTIPLE SWAPS (state consistency)
+    // ═════════════════════════════════════════════════════════════════
+
+    function test_multipleSequentialSwaps() public {
+        uint256 inputAmount = 0.001 ether;
+        deal(WETH, user, inputAmount * 3);
+
+        (PoolKey[] memory path, bool[] memory dirs) = _singlePath(poolKey, zeroForOne);
+
+        vm.startPrank(user);
+        IERC20(WETH).approve(address(swapper), inputAmount * 3);
+
+        uint256 output1 = swapper.swap(WETH, inputAmount, 0, path, dirs);
+        uint256 output2 = swapper.swap(WETH, inputAmount, 0, path, dirs);
+        uint256 output3 = swapper.swap(WETH, inputAmount, 0, path, dirs);
+        vm.stopPrank();
+
+        assertGt(output1, 0, "First swap should produce output");
+        assertGt(output2, 0, "Second swap should produce output");
+        assertGt(output3, 0, "Third swap should produce output");
+
+        // Each subsequent swap should get slightly less due to price impact
+        assertGe(output1, output2, "Price impact: later swaps get less");
+        assertGe(output2, output3, "Price impact: later swaps get less");
+
+        // Swapper should be clean after all swaps
+        assertEq(IERC20(WETH).balanceOf(address(swapper)), 0, "No leftover WETH");
+        assertEq(IERC20(AZTEC).balanceOf(address(swapper)), 0, "No leftover AZTEC");
+    }
+
+    // ═════════════════════════════════════════════════════════════════
     // HELPERS
     // ═════════════════════════════════════════════════════════════════
 

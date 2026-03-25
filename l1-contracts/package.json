@@ -5,6 +5,8 @@
   "scripts": {
     "build": "forge build",
     "test": "forge test -vvv",
+    "test:e2e": "forge test --match-contract E2EPoolSeedAndSwapTest -vvv",
+    "test:fuel-swap": "forge test --match-path src/test/UniswapFuelSwap.t.sol -vvv",
     "test:gas": "forge test --gas-report",
     "clean": "forge clean",
     "fmt": "forge fmt",

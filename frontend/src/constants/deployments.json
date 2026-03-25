@@ -3,7 +3,7 @@
   "deployments": [
     {
       "id": "4.0.0-devnet.2-patch.3_2026-03-25",
-      "deployedAt": "2026-03-25T12:16:39.102Z",
+      "deployedAt": "2026-03-25T16:55:26.789Z",
       "network": {
         "name": "devnet",
         "nodeUrl": "https://v4-devnet-2.aztec-labs.com",
@@ -54,16 +54,16 @@
           "symbol": "USDC",
           "decimals": 6,
           "logo": "/assets/tokens/usdc-xl.svg",
-          "l1TokenContract": "0x921a795afa63154ec3703a0cc75f0755811292fb",
-          "l1PortalContract": "0x67fb42350e09a7f9cac6b40712fc0b38f48d45aa",
-          "l2TokenContract": "0x0c690b90701881c36ad8b2c8828634380896f116bda0b2bafacd0f8e36d89911",
-          "l2BridgeContract": "0x08c6ddef3d0ec608df31123da80d85f285e8b6d5e5b7abefd930bfac85ac3db1",
-          "feeAssetHandler": "0xfefee32297b3ed8fd2659a64982cbbbfaef7ce26",
+          "l1TokenContract": "0x49fdc2e6e6fda759e90a3eab5edfe2038bcde4c6",
+          "l1PortalContract": "0x95439220c046279eb4b2ddf141a12b4d4134ff67",
+          "l2TokenContract": "0x2cf05130820799ba558128a20a5f9a8f3a3d317d09263c0ad6ed90795a4b9716",
+          "l2BridgeContract": "0x0b39ca3b70efac337627e5ae3ae4835a3703d54c7a39fe9f2ec4e5aae59cb68b",
+          "feeAssetHandler": "0xdbb850b91ff0cfdcfe543158e65342cd885c8b51",
           "sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2"
         }
       ],
-      "uniswapFuelSwapAddress": "0xa2002dd12f184a5cc6f283170e581ccb4377a0ce",
-      "swapBridgeRouterAddress": "0x27293a9009a6112eba42021b0b3e708a2bfed00b",
+      "uniswapFuelSwapAddress": "0x6840b6af8504d6b31f7b480bb6d94161aae5636d",
+      "swapBridgeRouterAddress": "0xd775335db9822def6cbbf501a3972ebe34d56b75",
       "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
     }
   ]

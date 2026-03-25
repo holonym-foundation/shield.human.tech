@@ -88,6 +88,126 @@ import { createPublicClient, encodeFunctionData, encodeAbiParameters, getContrac
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * Decode a fuel swap / bridge revert into a human-readable diagnostic.
+ * Covers UniswapFuelSwap, SwapBridgeRouter, PoolManager, and ERC-20 errors.
+ */
+function decodeFuelSwapError(error: unknown): { summary: string; detail: string; fix?: string } {
+  const msg = String(error)
+
+  // ── UniswapFuelSwap contract errors ──
+  if (msg.includes('partial fill') || msg.includes('insufficient liquidity')) {
+    return {
+      summary: 'Partial fill — pool liquidity insufficient for the exact input amount',
+      detail: 'UniswapFuelSwap could not fill the entire swap. The V4 pool partially filled the order.',
+      fix: 'Reduce fuelAmount or add more liquidity: FORCE_SEED=true SKIP_TO_FUEL_TESTS=true pn start-devnet',
+    }
+  }
+  if (msg.includes('insufficient output')) {
+    return {
+      summary: 'Slippage protection triggered — swap output below minFuelOutput',
+      detail: 'The swap produced less FeeJuice than the minFuelOutput threshold.',
+      fix: 'Lower minFuelOutput or add more liquidity to reduce price impact.',
+    }
+  }
+  if (msg.includes('non-positive output')) {
+    return {
+      summary: 'Swap produced zero output — pool may be empty or tick range exhausted',
+      detail: 'UniswapFuelSwap got a non-positive output delta from the pool.',
+      fix: 'Check pool liquidity and tick range. Re-seed pools with FORCE_SEED=true.',
+    }
+  }
+  if (msg.includes('first hop input mismatch')) {
+    return {
+      summary: 'Route misconfiguration — first pool does not accept the input token',
+      detail: 'The first PoolKey\'s currency doesn\'t match the bridgeToken being swapped.',
+      fix: 'Check that the swap route (poolKeys + zeroForOnes) matches the token address.',
+    }
+  }
+  if (msg.includes('last hop must output feeJuice')) {
+    return {
+      summary: 'Route misconfiguration — last pool does not output FeeJuice',
+      detail: 'The final PoolKey\'s output currency is not the FeeJuice token.',
+      fix: 'Ensure the swap route ends with a pool that outputs FeeJuice (AZTEC token).',
+    }
+  }
+  if (msg.includes('native route requires WETH input')) {
+    return {
+      summary: 'Route misconfiguration — native ETH pool requires WETH as inputToken',
+      detail: 'Single-hop native ETH pool expects inputToken to be WETH (auto-unwrapped).',
+      fix: 'Set inputToken to WETH address for native ETH pool routes.',
+    }
+  }
+  if (msg.includes('path/direction mismatch')) {
+    return {
+      summary: 'Route misconfiguration — path and zeroForOnes arrays have different lengths',
+      detail: 'The poolKeys and zeroForOnes arrays must be the same length.',
+      fix: 'Check the swap route construction — each pool needs a corresponding direction.',
+    }
+  }
+  if (msg.includes('empty path')) {
+    return {
+      summary: 'Route misconfiguration — empty swap path provided',
+      detail: 'At least one PoolKey is required for the swap route.',
+      fix: 'Provide a valid swap route with at least one pool.',
+    }
+  }
+
+  // ── SwapBridgeRouter contract errors ──
+  if (msg.includes('invalid fuelAmount')) {
+    return {
+      summary: 'Invalid fuelAmount — must be > 0 and < totalAmount',
+      detail: 'SwapBridgeRouter requires 0 < fuelAmount < totalAmount.',
+      fix: 'Adjust fuelAmount to be between 1 and totalAmount - 1.',
+    }
+  }
+  if (msg.includes('balance mismatch')) {
+    return {
+      summary: 'Balance mismatch — swap output doesn\'t match actual balance change',
+      detail: 'SwapBridgeRouter defense-in-depth check failed: reported swap output differs from actual FeeJuice balance delta.',
+      fix: 'This indicates a bug in UniswapFuelSwap. Check contract state.',
+    }
+  }
+  if (msg.includes('zero tokenPortal')) {
+    return {
+      summary: 'Missing tokenPortal — address(0) passed as portal',
+      detail: 'SwapBridgeRouter requires a non-zero tokenPortal address.',
+      fix: 'Check deployment — the TokenPortal address may not be set.',
+    }
+  }
+
+  // ── PoolManager / ERC-20 errors (by selector) ──
+  if (msg.includes('0x5212cba1') || msg.includes('CurrencyNotSettled')) {
+    return {
+      summary: 'CurrencyNotSettled — V4 PoolManager settlement failed',
+      detail: 'A currency was not fully settled within the PoolManager unlock context. This usually means the pool lacks liquidity for one or more hops in the route.',
+      fix: 'Re-seed pools: SKIP_ETH_AZTEC=true FORCE_SEED=true SKIP_TO_FUEL_TESTS=true pn start-devnet',
+    }
+  }
+  if (msg.includes('0xe450d38c')) {
+    return {
+      summary: 'ERC20InsufficientBalance — a token transfer exceeded available balance',
+      detail: 'An ERC-20 transferFrom failed because the sender lacks sufficient tokens.',
+      fix: 'Ensure the deployer has enough tokens. Check Permit2 approval and token minting.',
+    }
+  }
+
+  // ── Permit2 errors ──
+  if (msg.includes('InvalidSigner') || msg.includes('InvalidSignature')) {
+    return {
+      summary: 'Permit2 signature invalid — witness hash may not match on-chain expectation',
+      detail: 'The Permit2 SignatureTransfer witness didn\'t verify. This means the signed data doesn\'t match what the contract reconstructed.',
+      fix: 'Check that the witness fields (tokenPortal, amounts, recipients, secretHashes, routeHash, isPrivate) exactly match the bridgeWithFuel call.',
+    }
+  }
+
+  // ── Fallback ──
+  return {
+    summary: `Unexpected error`,
+    detail: msg.slice(0, 500),
+  }
+}
+
 import {
   SponsoredFPCContract,
   SponsoredFPCContractArtifact,
@@ -125,11 +245,9 @@ const L1_URL = process.env.L1_URL || getL1RpcUrl()
 // Force redeployment flags (set via env vars)
 // FORCE_REDEPLOY_TOKENS=true  — redeploy all tokens even if they exist
 // FORCE_REDEPLOY_SWAPS=true   — redeploy fuel swap infra even if it exists
-// FORCE_SEED=true             — seed pools even if they already have liquidity
-// SKIP_ETH_AZTEC=true         — skip ETH/AZTEC pool seeding (useful with FORCE_SEED when only ERC20 pools need more liquidity)
+// SKIP_ETH_AZTEC=true         — skip ETH/AZTEC pool seeding
 const FORCE_REDEPLOY_TOKENS = process.env.FORCE_REDEPLOY_TOKENS === 'true'
 const FORCE_REDEPLOY_SWAPS = process.env.FORCE_REDEPLOY_SWAPS === 'true'
-const FORCE_SEED = process.env.FORCE_SEED === 'true'
 const SKIP_ETH_AZTEC = process.env.SKIP_ETH_AZTEC === 'true'
 // const SKIP_TO_FUEL_TESTS = process.env.SKIP_TO_FUEL_TESTS === 'true'
 const SKIP_TO_FUEL_TESTS = true
@@ -458,14 +576,10 @@ const FEE_ASSET_HANDLER = '0xED9c5557d2E0abCc7c7FCA958eE4292199413494' as `0x${s
 const AZTEC_TOKEN = '0x35d0186d1FD53b72996475D965C5Ed171D52b986' as `0x${string}`
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
 
-// Pool seed amounts:
-//   Pool 1 (ETH/FeeJuice): 0.005 ETH + 3,000 FeeJuice (minted)
-//   Pool 2 (USDC/WETH):    100 USDC (minted) + 0.1 WETH (wrapped from ETH)
-//   Deployer wallet needs: ~0.15 ETH for seeding + gas
-//
-//   Note: Liquidity CANNOT be withdrawn — PoolSeeder is a one-shot helper with no
-//   remove-liquidity function. V4 withdrawal requires a PositionManager, which we don't use.
-//   Keep seed amounts small on testnet.
+// Pool seed amounts — minimized for devnet ETH budget (~0.07 ETH total):
+//   Pool 1 (ETH/AZTEC): L=1e18 consumes 0.00684 ETH + 68.4 FJ. ETH_SEED=0.05 (excess swept).
+//   Pool 2 (USDC/WETH): L=1e12 consumes 35.59 USDC + 0.017 WETH. WETH_SEED=0.02.
+//   Pools are ALWAYS seeded (no skip logic). PoolSeeder.setup() is idempotent.
 
 // ETH/AZTEC pool params (~10,000 FeeJuice per ETH)
 const ETH_AZTEC_SQRT_PRICE = 7922816251426433759354395033600n
@@ -473,9 +587,9 @@ const ETH_AZTEC_TICK_LOWER = 69060
 const ETH_AZTEC_TICK_UPPER = 115140
 const ETH_AZTEC_FEE = 3000
 const ETH_AZTEC_TICK_SPACING = 60
-const ETH_AZTEC_LIQUIDITY = 10n ** 18n
-const ETH_SEED = 5000000000000000n // 0.005 ETH
-const FEE_MINT_COUNT = 3 // 3 x 1000 FJ = 3k FJ
+const ETH_AZTEC_LIQUIDITY = 1n * 10n ** 18n // 1e18 — consumes 0.00684 ETH + 68.4 FJ
+const ETH_SEED = 50000000000000000n // 0.05 ETH (covers price drift on re-seed; excess swept back)
+const FEE_MINT_COUNT = 1 // 1 x 1000 FJ (1e18 liquidity only needs 68.4 FJ; excess swept back)
 
 // ERC20/WETH pool params (~2,100 USDC per WETH)
 const ERC20_WETH_SQRT_PRICE = 1728916962386276374966316084832192n
@@ -483,8 +597,8 @@ const ERC20_WETH_TICK_LOWER = 169800
 const ERC20_WETH_TICK_UPPER = 229800
 const ERC20_WETH_FEE = 3000
 const ERC20_WETH_TICK_SPACING = 60
-const ERC20_WETH_LIQUIDITY = 3000000000000n // 3e12 (scaled for 100 USDC + 0.1 WETH — needs ~33 USDC + ~0.075 WETH)
-const WETH_SEED = 100000000000000000n // 0.1 ETH
+const ERC20_WETH_LIQUIDITY = 1000000000000n // 1e12 — consumes 35.59 USDC + 0.017 WETH
+const WETH_SEED = 20000000000000000n // 0.02 ETH
 
 // Minimal ERC20 ABI for pool seeding interactions
 const ERC20_ABI = [
@@ -791,35 +905,17 @@ async function seedAllTokenPools(
   logger.info('\n=== Seeding Uniswap V4 Pools (via viem) ===')
 
   const deployer = l1Client.account.address
-  const l1Public = createPublicClient({ transport: http(L1_URL) })
-
-  // ── Check if pools already have liquidity → skip seeding ─────────
-  // Note: PoolManager ETH/WETH balances are shared across ALL V4 pools on the network,
-  // so we only check FeeJuice (for ETH/AZTEC pool) and each ERC20 token balance.
-  const aztecTokenCheck = getContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, client: l1Public as any }) as any
-  const pmFjBalance = await aztecTokenCheck.read.balanceOf([POOL_MANAGER]) as bigint
 
   const erc20Tokens = deployedContracts.filter(
     (t) => t.l1TokenContract.toLowerCase() !== WETH_ADDRESS.toLowerCase(),
   )
 
-  let allPoolsSeeded = pmFjBalance > 0n // FJ in PoolManager means ETH/AZTEC pool exists
-  if (allPoolsSeeded) {
-    for (const token of erc20Tokens) {
-      const erc20 = getContract({ address: token.l1TokenContract as `0x${string}`, abi: ERC20_ABI, client: l1Public as any }) as any
-      const bal = await erc20.read.balanceOf([POOL_MANAGER]) as bigint
-      if (bal === 0n) { allPoolsSeeded = false; break }
-    }
-  }
-
-  if (allPoolsSeeded && !FORCE_SEED) {
-    logger.info('✅ All pools already have liquidity in PoolManager — skipping seeding (use FORCE_SEED=true to add more)')
-    return
-  }
-
   // ── 1. Seed ETH/AZTEC pool ───────────────────────────────────────
-  if (SKIP_ETH_AZTEC || (pmFjBalance > 0n && !FORCE_SEED)) {
-    logger.info('\n--- ETH/AZTEC pool — already has FJ liquidity, skipping ---')
+  // Always seed this pool — PoolManager FJ balance is shared across ALL V4 pools
+  // on the network, so checking it is unreliable. PoolSeeder.setup() is idempotent
+  // (initializes pool if new, adds liquidity if it already exists).
+  if (SKIP_ETH_AZTEC) {
+    logger.info('\n--- ETH/AZTEC pool — skipping (SKIP_ETH_AZTEC=true) ---')
   } else try {
     logger.info('\n--- ETH/AZTEC pool ---')
 
@@ -837,12 +933,12 @@ async function seedAllTokenPools(
     const feeHandler = getContract({ address: FEE_ASSET_HANDLER, abi: FEE_HANDLER_ABI, client: l1Client as any }) as any
     const aztecToken = getContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, client: l1Client as any }) as any
 
-    // Mint FeeJuice to seeder (100 x 1000 FJ)
+    // Mint FeeJuice to seeder
     logger.info(`  Minting FeeJuice: ${FEE_MINT_COUNT} x 1000 FJ`)
     for (let i = 0; i < FEE_MINT_COUNT; i++) {
       const tx = await feeHandler.write.mint([seederAddr])
       await l1Client.waitForTransactionReceipt({ hash: tx, timeout: 120_000 })
-      logger.info(`  ... minted ${i + 1}/${FEE_MINT_COUNT}`)
+      if ((i + 1) % 10 === 0 || i === FEE_MINT_COUNT - 1) logger.info(`  ... minted ${i + 1}/${FEE_MINT_COUNT}`)
     }
 
     // Transfer any deployer FJ to seeder
@@ -852,13 +948,18 @@ async function seedAllTokenPools(
       await sendAndWait(l1Client, tx, `Transferred ${deployerFj} FJ to seeder`, logger)
     }
 
-    // Seed pool
+    // Seed pool — dry-run first via eth_call to catch errors without spending gas
     const [c0, c1] = sortCurrencies(ZERO_ADDRESS, AZTEC_TOKEN)
     const poolKey = { currency0: c0, currency1: c1, fee: ETH_AZTEC_FEE, tickSpacing: ETH_AZTEC_TICK_SPACING, hooks: ZERO_ADDRESS }
-    const tx = await seeder.write.setup(
-      [poolKey, ETH_AZTEC_SQRT_PRICE, ETH_AZTEC_TICK_LOWER, ETH_AZTEC_TICK_UPPER, ETH_AZTEC_LIQUIDITY],
-      { value: ETH_SEED },
-    )
+    const setupArgs = [poolKey, ETH_AZTEC_SQRT_PRICE, ETH_AZTEC_TICK_LOWER, ETH_AZTEC_TICK_UPPER, ETH_AZTEC_LIQUIDITY] as const
+    try {
+      await seeder.simulate.setup(setupArgs, { value: ETH_SEED })
+      logger.info('  Dry-run passed — sending seed tx...')
+    } catch (simError) {
+      logger.error(`  ❌ Dry-run failed: ${simError}`)
+      throw simError
+    }
+    const tx = await seeder.write.setup(setupArgs, { value: ETH_SEED })
     await sendAndWait(l1Client, tx, 'ETH/AZTEC pool seeded', logger)
 
     // Sweep leftovers
@@ -867,7 +968,13 @@ async function seedAllTokenPools(
 
     logger.info('✅ ETH/AZTEC pool done')
   } catch (error) {
-    logger.error(`Failed to seed ETH/AZTEC pool: ${error}`)
+    const errMsg = String(error)
+    if (errMsg.includes('0xe450d38c')) {
+      logger.error('❌ ETH/AZTEC pool seeding failed: ERC20InsufficientBalance — not enough FeeJuice for the liquidity delta.')
+      logger.error(`   Minted ${FEE_MINT_COUNT} x 1000 FJ but liquidity ${ETH_AZTEC_LIQUIDITY} needs more. Increase FEE_MINT_COUNT or reduce ETH_AZTEC_LIQUIDITY.`)
+    } else {
+      logger.error(`❌ ETH/AZTEC pool seeding failed: ${error}`)
+    }
   }
 
   // ── 2. Seed ERC20/WETH pool for each non-WETH token ─────────────
@@ -875,14 +982,8 @@ async function seedAllTokenPools(
     const token = erc20Tokens[i]
     const tokenAddr = token.l1TokenContract as `0x${string}`
 
-    // Check if this token already has liquidity in PoolManager
-    const tokenCheck = getContract({ address: tokenAddr, abi: ERC20_ABI, client: l1Public as any }) as any
-    const tokenPmBal = await tokenCheck.read.balanceOf([POOL_MANAGER]) as bigint
-    if (tokenPmBal > 0n && !FORCE_SEED) {
-      logger.info(`\n--- [${i + 1}/${erc20Tokens.length}] ${token.symbol}/WETH pool — already has liquidity, skipping ---`)
-      continue
-    }
-
+    // Always seed — each deployment creates a fresh ERC20, so the pool is always new.
+    // PoolSeeder.setup() is idempotent (initializes if new, adds liquidity if exists).
     try {
       logger.info(`\n--- [${i + 1}/${erc20Tokens.length}] ${token.symbol}/WETH pool ---`)
 
@@ -902,7 +1003,7 @@ async function seedAllTokenPools(
 
       // Read token decimals
       const decimals = await erc20.read.decimals() as number
-      const erc20Amount = BigInt(100) * (10n ** BigInt(decimals))
+      const erc20Amount = BigInt(100) * (10n ** BigInt(decimals)) // 100 tokens — 1e12 liquidity needs ~36 USDC
 
       // Mint ERC20 tokens to deployer
       const mintTx = await erc20.write.mint([deployer, erc20Amount])
@@ -919,12 +1020,24 @@ async function seedAllTokenPools(
       const txWeth = await weth.write.transfer([seederAddr, WETH_SEED])
       await sendAndWait(l1Client, txWeth, 'Transferred WETH to seeder', logger)
 
-      // Seed pool
+      // Seed pool — dry-run first via eth_call to catch errors without spending gas
       const [c0, c1] = sortCurrencies(tokenAddr, WETH_ADDRESS)
       const poolKey = { currency0: c0, currency1: c1, fee: ERC20_WETH_FEE, tickSpacing: ERC20_WETH_TICK_SPACING, hooks: ZERO_ADDRESS }
-      const seedTx = await seeder.write.setup(
-        [poolKey, ERC20_WETH_SQRT_PRICE, ERC20_WETH_TICK_LOWER, ERC20_WETH_TICK_UPPER, ERC20_WETH_LIQUIDITY],
-      )
+      const setupArgs = [poolKey, ERC20_WETH_SQRT_PRICE, ERC20_WETH_TICK_LOWER, ERC20_WETH_TICK_UPPER, ERC20_WETH_LIQUIDITY] as const
+      try {
+        await seeder.simulate.setup(setupArgs)
+        logger.info(`  Dry-run passed — sending seed tx...`)
+      } catch (simError) {
+        const simMsg = String(simError)
+        if (simMsg.includes('0xe450d38c')) {
+          logger.error(`  ❌ Dry-run failed: ERC20InsufficientBalance — seeder doesn't have enough tokens for liquidity delta ${ERC20_WETH_LIQUIDITY}.`)
+          logger.error(`     Seeder has ${erc20Amount} ${token.symbol} + ${WETH_SEED} wei WETH. Increase ERC20 mint or reduce liquidity.`)
+        } else {
+          logger.error(`  ❌ Dry-run failed: ${simError}`)
+        }
+        throw simError
+      }
+      const seedTx = await seeder.write.setup(setupArgs)
       await sendAndWait(l1Client, seedTx, `${token.symbol}/WETH pool seeded`, logger)
 
       // Sweep leftovers
@@ -933,7 +1046,13 @@ async function seedAllTokenPools(
 
       logger.info(`✅ ${token.symbol}/WETH pool done`)
     } catch (error) {
-      logger.error(`Failed to seed ${token.symbol}/WETH pool: ${error}`)
+      const errMsg = String(error)
+      if (errMsg.includes('0xe450d38c')) {
+        logger.error(`❌ ${token.symbol}/WETH pool seeding failed: ERC20InsufficientBalance — seeder doesn't have enough tokens for liquidity delta ${ERC20_WETH_LIQUIDITY}.`)
+        logger.error(`   Increase ERC20 mint amount or reduce ERC20_WETH_LIQUIDITY.`)
+      } else {
+        logger.error(`❌ ${token.symbol}/WETH pool seeding failed: ${error}`)
+      }
       // Continue with other tokens
     }
   }
@@ -1608,6 +1727,39 @@ async function main() {
       logger.info(`   Pool 1: ${c0Pool1.slice(0, 10)}.../${c1Pool1.slice(0, 10)}... (zeroForOne=${zeroForOnes[0]})`)
       logger.info(`   Pool 2: ${c0Pool2.slice(0, 10)}.../${c1Pool2.slice(0, 10)}... (zeroForOne=${zeroForOnes[1]})`)
 
+      // ── Pool health check — verify both pools have liquidity before spending gas ──
+      {
+        const l1Public = createPublicClient({ transport: http(L1_URL) })
+        const tokenContract = getContract({ address: tokenAddr, abi: ERC20_ABI, client: l1Public as any }) as any
+        const wethContract = getContract({ address: WETH_ADDRESS, abi: ERC20_ABI, client: l1Public as any }) as any
+        const fjContract = getContract({ address: feeJuiceAddr, abi: ERC20_ABI, client: l1Public as any }) as any
+
+        const pmToken = await tokenContract.read.balanceOf([POOL_MANAGER]) as bigint
+        const pmWeth = await wethContract.read.balanceOf([POOL_MANAGER]) as bigint
+        const pmFj = await fjContract.read.balanceOf([POOL_MANAGER]) as bigint
+        const pmEth = await l1Public.getBalance({ address: POOL_MANAGER })
+
+        logger.info(`\n🔍 Pool health check:`)
+        logger.info(`   PoolManager ${firstToken.symbol}: ${pmToken} (raw)`)
+        logger.info(`   PoolManager WETH:  ${(Number(pmWeth) / 1e18).toFixed(6)}`)
+        logger.info(`   PoolManager FJ:    ${(Number(pmFj) / 1e18).toFixed(4)}`)
+        logger.info(`   PoolManager ETH:   ${(Number(pmEth) / 1e18).toFixed(4)}`)
+
+        const issues: string[] = []
+        if (pmToken === 0n) issues.push(`${firstToken.symbol}/WETH pool has no ${firstToken.symbol} liquidity`)
+        if (pmWeth === 0n) issues.push(`${firstToken.symbol}/WETH pool has no WETH liquidity`)
+        if (pmFj === 0n && pmEth === 0n) issues.push('ETH/FeeJuice pool has no liquidity (both FJ and ETH are 0)')
+
+        if (issues.length > 0) {
+          logger.error('❌ Pool health check FAILED — fuel tests will fail:')
+          for (const issue of issues) logger.error(`   - ${issue}`)
+          logger.error('   Fix: run `SKIP_ETH_AZTEC=true FORCE_SEED=true pn seed-pools` to add liquidity.')
+          logger.warn('⚠️  Continuing with fuel tests anyway (they will dry-run and fail safely)...')
+        } else {
+          logger.info('   ✅ All pools have liquidity')
+        }
+      }
+
       // Approve ERC20 → Permit2 (one-time, max approval)
       const erc20 = getContract({ address: tokenAddr, abi: [...ERC20_ABI, ...APPROVE_ABI], client: l1Client as any }) as any
       const currentAllowance = await erc20.read.allowance([l1Client.account.address, PERMIT2_CANONICAL]) as bigint
@@ -1629,8 +1781,8 @@ async function main() {
         const pfFuelSecret = Fr.random()
         const pfFuelSecretHash = await computeSecretHash(pfFuelSecret)
 
-        const pfTotalAmount = BigInt(5e6)  // 5 USDC total (pool has ~10 USDC of liquidity)
-        const pfFuelAmount = BigInt(2e6)   // 2 USDC swapped to FeeJuice
+        const pfTotalAmount = BigInt(1e5)  // 0.1 USDC total
+        const pfFuelAmount = BigInt(2e4)   // 0.02 USDC swapped to FeeJuice (~0.095 FJ output)
         const pfMinFuelOutput = 0n // testnet — accept any output
 
         // Mint ERC20 for this test
@@ -1656,9 +1808,9 @@ async function main() {
         })
         logger.info('✅ Permit2 witness signed')
 
-        // Call SwapBridgeRouter.bridgeWithFuel
+        // Call SwapBridgeRouter.bridgeWithFuel — dry-run first to catch errors without spending ETH
         const router = getContract({ address: swapRouterAddress, abi: SwapBridgeRouterAbiLocal, client: l1Client as any }) as any
-        const bridgeTx = await router.write.bridgeWithFuel([
+        const pfBridgeArgs = [
           {
             tokenPortal: portalAddr,
             bridgeToken: tokenAddr,
@@ -1676,7 +1828,18 @@ async function main() {
             passport: { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` },
           },
           { nonce: pfPermit.nonce, deadline: pfPermit.deadline, signature: pfPermit.signature },
-        ])
+        ] as const
+        try {
+          await router.simulate.bridgeWithFuel(pfBridgeArgs, { account: l1Client.account })
+          logger.info('✅ Dry-run passed — sending bridgeWithFuel tx...')
+        } catch (simError) {
+          const { summary, detail, fix } = decodeFuelSwapError(simError)
+          logger.error(`❌ Dry-run failed (no ETH spent): ${summary}`)
+          logger.error(`   ${detail}`)
+          if (fix) logger.error(`   Fix: ${fix}`)
+          throw simError
+        }
+        const bridgeTx = await router.write.bridgeWithFuel(pfBridgeArgs)
         const bridgeReceipt = await sendAndWait(l1Client, bridgeTx, 'SwapBridgeRouter.bridgeWithFuel (public fuel)', logger)
 
         // Parse BridgeWithFuel event
@@ -1736,14 +1899,10 @@ async function main() {
         await logFuelTestBalances('AFTER public fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
         logger.info('✅ Public fuel (FeeJuicePaymentMethodWithClaim) test PASSED')
       } catch (error) {
-        const errMsg = String(error)
-        if (errMsg.includes('0x5212cba1') || errMsg.includes('CurrencyNotSettled')) {
-          logger.error('❌ Public fuel test failed: CurrencyNotSettled — pool liquidity too low for the swap amount.')
-          logger.error('   The fuelAmount exceeds what the USDC→WETH→FeeJuice pools can fill.')
-          logger.error('   Fix: run `SKIP_ETH_AZTEC=true FORCE_SEED=true SKIP_TO_FUEL_TESTS=true pn start-devnet` to add more liquidity and re-test.')
-        } else {
-          logger.error(`❌ Public fuel test failed: ${error}`)
-        }
+        const { summary, detail, fix } = decodeFuelSwapError(error)
+        logger.error(`❌ Public fuel test failed: ${summary}`)
+        logger.error(`   ${detail}`)
+        if (fix) logger.error(`   Fix: ${fix}`)
       }
 
       // ── Test 2: Private fuel (Wonderland BridgedMintAndPayFeePaymentMethod) via SwapBridgeRouter ──
@@ -1774,8 +1933,8 @@ async function main() {
           // 2. Generate token claim secret
           const [pvClaimSecret, pvClaimSecretHash] = await generateClaimSecret()
 
-          const pvTotalAmount = BigInt(5e6)  // 5 USDC total (pool has ~10 USDC of liquidity)
-          const pvFuelAmount = BigInt(2e6)   // 2 USDC swapped to FeeJuice
+          const pvTotalAmount = BigInt(1e5)  // 0.1 USDC total
+          const pvFuelAmount = BigInt(2e4)   // 0.02 USDC swapped to FeeJuice (pool depth ~0.19 FJ)
           const pvMinFuelOutput = 0n
 
           // Mint ERC20
@@ -1801,9 +1960,9 @@ async function main() {
           })
           logger.info('✅ Permit2 witness signed (private fuel)')
 
-          // Call SwapBridgeRouter.bridgeWithFuel
+          // Call SwapBridgeRouter.bridgeWithFuel — dry-run first to catch errors without spending ETH
           const router = getContract({ address: swapRouterAddress, abi: SwapBridgeRouterAbiLocal, client: l1Client as any }) as any
-          const bridgeTx = await router.write.bridgeWithFuel([
+          const pvBridgeArgs = [
             {
               tokenPortal: portalAddr,
               bridgeToken: tokenAddr,
@@ -1821,7 +1980,18 @@ async function main() {
               passport: { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` },
             },
             { nonce: pvPermit.nonce, deadline: pvPermit.deadline, signature: pvPermit.signature },
-          ])
+          ] as const
+          try {
+            await router.simulate.bridgeWithFuel(pvBridgeArgs, { account: l1Client.account })
+            logger.info('✅ Dry-run passed — sending bridgeWithFuel tx (private fuel)...')
+          } catch (simError) {
+            const { summary, detail, fix } = decodeFuelSwapError(simError)
+            logger.error(`❌ Dry-run failed (no ETH spent): ${summary}`)
+            logger.error(`   ${detail}`)
+            if (fix) logger.error(`   Fix: ${fix}`)
+            throw simError
+          }
+          const bridgeTx = await router.write.bridgeWithFuel(pvBridgeArgs)
           const bridgeReceipt = await sendAndWait(l1Client, bridgeTx, 'SwapBridgeRouter.bridgeWithFuel (private fuel)', logger)
 
           // Parse BridgeWithFuel event
@@ -1900,14 +2070,10 @@ async function main() {
           await logFuelTestBalances('AFTER private fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
           logger.info('✅ Wonderland BridgedFPC (private fuel) test PASSED')
         } catch (error) {
-          const errMsg = String(error)
-          if (errMsg.includes('0x5212cba1') || errMsg.includes('CurrencyNotSettled')) {
-            logger.error('❌ Private fuel test failed: CurrencyNotSettled — pool liquidity too low for the swap amount.')
-            logger.error('   The fuelAmount exceeds what the USDC→WETH→FeeJuice pools can fill.')
-            logger.error('   Fix: run `SKIP_ETH_AZTEC=true FORCE_SEED=true SKIP_TO_FUEL_TESTS=true pn start-devnet` to add more liquidity and re-test.')
-          } else {
-            logger.error(`❌ Wonderland BridgedFPC private fuel test failed: ${error}`)
-          }
+          const { summary, detail, fix } = decodeFuelSwapError(error)
+          logger.error(`❌ Private fuel test failed: ${summary}`)
+          logger.error(`   ${detail}`)
+          if (fix) logger.error(`   Fix: ${fix}`)
         }
       }
     }
