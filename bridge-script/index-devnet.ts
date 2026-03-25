@@ -20,6 +20,7 @@ import { Fr } from '@aztec/aztec.js/fields'
 import { Logger, createLogger } from '@aztec/aztec.js/log'
 import {
   generateClaimSecret,
+  L1FeeJuicePortalManager,
   L1TokenManager,
   L1TokenPortalManager,
 } from '@aztec/aztec.js/ethereum'
@@ -37,8 +38,6 @@ import {
   FeeAssetHandlerAbi,
   FeeAssetHandlerBytecode,
   RollupAbi,
-  TokenPortalAbi,
-  TokenPortalBytecode,
 } from '@aztec/l1-artifacts'
 import { TokenContract } from '@aztec/noir-contracts.js/Token'
 // import { TokenContract } from '@defi-wonderland/aztec-standards/artifacts/Token.js'
@@ -59,19 +58,25 @@ import TestERC20Json from './constants/TestERC20.json'
 import UniswapFuelSwapJson from '../l1-contracts/out/UniswapFuelSwap.sol/UniswapFuelSwap.json'
 // @ts-ignore
 import SwapBridgeRouterJson from '../l1-contracts/out/SwapBridgeRouter.sol/SwapBridgeRouter.json'
-import { registerBridgedContract } from '@defi-wonderland/aztec-fee-payment'
+// @ts-ignore
+import PoolSeederJson from '../l1-contracts/out/SeedUniswapPools.s.sol/PoolSeeder.json'
+// @ts-ignore
+import CustomTokenPortalJson from '../l1-contracts/out/TokenPortal.sol/TokenPortal.json'
+import { registerBridgedContract, BridgedMintAndPayFeePaymentMethod, BridgedFPCContract } from '@defi-wonderland/aztec-fee-payment'
 
 // Fix the bytecode format
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
+const CustomTokenPortalAbi = CustomTokenPortalJson.abi
+const CustomTokenPortalBytecode = CustomTokenPortalJson.bytecode.object as `0x${string}`
 const UniswapFuelSwapAbi = UniswapFuelSwapJson.abi
 const UniswapFuelSwapBytecode = UniswapFuelSwapJson.bytecode.object as `0x${string}`
 const SwapBridgeRouterAbi = SwapBridgeRouterJson.abi
 const SwapBridgeRouterBytecode = SwapBridgeRouterJson.bytecode.object as `0x${string}`
+const PoolSeederAbi = PoolSeederJson.abi
+const PoolSeederBytecode = PoolSeederJson.bytecode.object as `0x${string}`
 
 import { createPublicClient, encodeFunctionData, getContract, http, toFunctionSelector } from 'viem'
-import { execFileSync } from 'child_process'
-import path from 'path'
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -88,6 +93,7 @@ import {
   saveTokenToDeployment,
   saveFuelSwapInfraToDeployment,
   loadExistingTokens,
+  loadActiveDeployment,
   copyToFrontend,
   type DeployedToken,
   type L1ContractAddresses,
@@ -107,6 +113,12 @@ const MNEMONIC =
   'test test test test test test test test test test test junk'
 const L1_CREDENTIAL = L1_PRIVATE_KEY || MNEMONIC
 const L1_URL = process.env.L1_URL || getL1RpcUrl()
+
+// Force redeployment flags (set via env vars)
+// FORCE_REDEPLOY_TOKENS=true  — redeploy all tokens even if they exist
+// FORCE_REDEPLOY_SWAPS=true   — redeploy fuel swap infra even if it exists
+const FORCE_REDEPLOY_TOKENS = process.env.FORCE_REDEPLOY_TOKENS === 'true'
+const FORCE_REDEPLOY_SWAPS = process.env.FORCE_REDEPLOY_SWAPS === 'true'
 
 const MINT_AMOUNT = BigInt(1e15)
 
@@ -148,8 +160,8 @@ async function deployTokenPortal(
 ): Promise<EthAddress> {
   return await deployL1Contract(
     l1Client,
-    TokenPortalAbi,
-    TokenPortalBytecode,
+    CustomTokenPortalAbi,
+    CustomTokenPortalBytecode,
     [],
   ).then(({ address }) => address)
 }
@@ -379,7 +391,7 @@ async function deployCompleteTokenSetup(
   logger.info(`🔧 Initializing L1 portal contract for ${tokenConfig.symbol}`)
   const l1Portal = getContract({
     address: l1PortalContractAddress.toString(),
-    abi: TokenPortalAbi,
+    abi: CustomTokenPortalAbi,
     client: l1Client as any,
   }) as any
 
@@ -416,6 +428,251 @@ async function deployCompleteTokenSetup(
 }
 
 // *************************************
+
+// ── Sepolia constants for pool seeding ──────────────────────────────
+const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as `0x${string}`
+const POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as `0x${string}`
+const FEE_ASSET_HANDLER = '0xED9c5557d2E0abCc7c7FCA958eE4292199413494' as `0x${string}`
+const AZTEC_TOKEN = '0x35d0186d1FD53b72996475D965C5Ed171D52b986' as `0x${string}`
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
+
+// Pool seed amounts:
+//   Pool 1 (ETH/FeeJuice): 0.05 ETH + 15,000 FeeJuice (minted)
+//   Pool 2 (USDC/WETH):    500 USDC (minted) + 0.15 WETH (wrapped from ETH)
+//   Deployer wallet needs: ~0.2 ETH for seeding + gas ≈ 0.5 ETH minimum on Sepolia
+//
+//   Note: Liquidity CANNOT be withdrawn — PoolSeeder is a one-shot helper with no
+//   remove-liquidity function. V4 withdrawal requires a PositionManager, which we don't use.
+//   Keep seed amounts small on testnet.
+
+// ETH/AZTEC pool params (~10,000 FeeJuice per ETH)
+const ETH_AZTEC_SQRT_PRICE = 7922816251426433759354395033600n
+const ETH_AZTEC_TICK_LOWER = 69060
+const ETH_AZTEC_TICK_UPPER = 115140
+const ETH_AZTEC_FEE = 3000
+const ETH_AZTEC_TICK_SPACING = 60
+const ETH_AZTEC_LIQUIDITY = 10n ** 18n
+const ETH_SEED = 50000000000000000n // 0.05 ETH
+const FEE_MINT_COUNT = 15 // 15 x 1000 FJ = 15k FJ
+
+// ERC20/WETH pool params (~2,100 USDC per WETH)
+const ERC20_WETH_SQRT_PRICE = 1728916962386276374966316084832192n
+const ERC20_WETH_TICK_LOWER = 169800
+const ERC20_WETH_TICK_UPPER = 229800
+const ERC20_WETH_FEE = 3000
+const ERC20_WETH_TICK_SPACING = 60
+const ERC20_WETH_LIQUIDITY = 6000000000000n // 6e12 (scaled down for 500 USDC + 0.15 WETH seed)
+const WETH_SEED = 150000000000000000n // 0.15 ETH
+
+// Minimal ERC20 ABI for pool seeding interactions
+const ERC20_ABI = [
+  { type: 'function', name: 'balanceOf', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view' },
+  { type: 'function', name: 'transfer', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }], stateMutability: 'nonpayable' },
+  { type: 'function', name: 'decimals', inputs: [], outputs: [{ name: '', type: 'uint8' }], stateMutability: 'view' },
+  { type: 'function', name: 'mint', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [], stateMutability: 'nonpayable' },
+] as const
+
+const WETH_ABI = [
+  { type: 'function', name: 'deposit', inputs: [], outputs: [], stateMutability: 'payable' },
+] as const
+
+const FEE_HANDLER_ABI = [
+  { type: 'function', name: 'mint', inputs: [{ name: 'to', type: 'address' }], outputs: [], stateMutability: 'nonpayable' },
+] as const
+
+/** Helper: send a tx and wait for receipt */
+async function sendAndWait(
+  l1Client: ExtendedViemWalletClient,
+  txHash: `0x${string}`,
+  label: string,
+  logger: Logger,
+) {
+  const receipt = await l1Client.waitForTransactionReceipt({ hash: txHash, timeout: 120_000 })
+  if (receipt.status === 'reverted') throw new Error(`${label} reverted (tx: ${txHash})`)
+  logger.info(`  ${label} confirmed (tx: ${txHash.slice(0, 10)}...)`)
+  return receipt
+}
+
+/** Sort two addresses for V4 pool key (currency0 < currency1) */
+function sortCurrencies(a: `0x${string}`, b: `0x${string}`): [`0x${string}`, `0x${string}`] {
+  return BigInt(a) < BigInt(b) ? [a, b] : [b, a]
+}
+
+/**
+ * Log PoolManager balances and deployer wallet balance.
+ */
+async function logPoolBalances(l1Client: ExtendedViemWalletClient, deployedContracts: DeployedToken[], label: string, logger: Logger) {
+  const l1Public = createPublicClient({ transport: http(L1_URL) })
+  const deployer = l1Client.account.address
+
+  logger.info(`\n--- Pool & Wallet Balances (${label}) ---`)
+
+  // Deployer ETH balance
+  const ethBalance = await l1Public.getBalance({ address: deployer })
+  logger.info(`  Deployer ETH:       ${(Number(ethBalance) / 1e18).toFixed(4)} ETH`)
+
+  // PoolManager ETH balance
+  const pmEthBalance = await l1Public.getBalance({ address: POOL_MANAGER })
+  logger.info(`  PoolManager ETH:    ${(Number(pmEthBalance) / 1e18).toFixed(4)} ETH`)
+
+  // PoolManager FeeJuice balance
+  const aztecToken = getContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, client: l1Public as any }) as any
+  const pmFjBalance = await aztecToken.read.balanceOf([POOL_MANAGER]) as bigint
+  logger.info(`  PoolManager FJ:     ${(Number(pmFjBalance) / 1e18).toFixed(2)} FeeJuice`)
+
+  // PoolManager WETH balance
+  const weth = getContract({ address: WETH_ADDRESS, abi: ERC20_ABI, client: l1Public as any }) as any
+  const pmWethBalance = await weth.read.balanceOf([POOL_MANAGER]) as bigint
+  logger.info(`  PoolManager WETH:   ${(Number(pmWethBalance) / 1e18).toFixed(4)} WETH`)
+
+  // Each token balance in PoolManager
+  for (const token of deployedContracts) {
+    const tokenAddr = token.l1TokenContract as `0x${string}`
+    if (tokenAddr.toLowerCase() === WETH_ADDRESS.toLowerCase()) continue
+    try {
+      const erc20 = getContract({ address: tokenAddr, abi: ERC20_ABI, client: l1Public as any }) as any
+      const decimals = await erc20.read.decimals() as number
+      const balance = await erc20.read.balanceOf([POOL_MANAGER]) as bigint
+      const humanBalance = Number(balance) / (10 ** Number(decimals))
+      logger.info(`  PoolManager ${token.symbol.padEnd(6)}: ${humanBalance.toFixed(2)} ${balance > 0n ? '✅' : '❌'}`)
+    } catch {
+      logger.info(`  PoolManager ${token.symbol.padEnd(6)}: (failed to read)`)
+    }
+  }
+}
+
+/**
+ * Seed Uniswap V4 liquidity pools for all deployed tokens using viem.
+ *
+ * - Seeds the ETH/AZTEC (FeeJuice) pool once
+ * - Seeds an ERC20/WETH pool for each non-WETH token
+ * - WETH is skipped (it swaps directly through the ETH/AZTEC pool)
+ */
+async function seedAllTokenPools(
+  deployedContracts: DeployedToken[],
+  l1Client: ExtendedViemWalletClient,
+  logger: Logger,
+) {
+  logger.info('\n=== Seeding Uniswap V4 Pools (via viem) ===')
+
+  const deployer = l1Client.account.address
+
+  // ── 1. Seed ETH/AZTEC pool ───────────────────────────────────────
+  try {
+    logger.info('\n--- ETH/AZTEC pool ---')
+
+    // Deploy PoolSeeder
+    const deployHash = await l1Client.deployContract({
+      abi: PoolSeederAbi,
+      bytecode: PoolSeederBytecode,
+      args: [POOL_MANAGER],
+    })
+    const deployReceipt = await l1Client.waitForTransactionReceipt({ hash: deployHash, timeout: 120_000 })
+    const seederAddr = deployReceipt.contractAddress as `0x${string}`
+    logger.info(`  PoolSeeder deployed at ${seederAddr}`)
+
+    const seeder = getContract({ address: seederAddr, abi: PoolSeederAbi, client: l1Client as any }) as any
+    const feeHandler = getContract({ address: FEE_ASSET_HANDLER, abi: FEE_HANDLER_ABI, client: l1Client as any }) as any
+    const aztecToken = getContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, client: l1Client as any }) as any
+
+    // Mint FeeJuice to seeder (100 x 1000 FJ)
+    logger.info(`  Minting FeeJuice: ${FEE_MINT_COUNT} x 1000 FJ`)
+    for (let i = 0; i < FEE_MINT_COUNT; i++) {
+      const tx = await feeHandler.write.mint([seederAddr])
+      await l1Client.waitForTransactionReceipt({ hash: tx, timeout: 120_000 })
+      logger.info(`  ... minted ${i + 1}/${FEE_MINT_COUNT}`)
+    }
+
+    // Transfer any deployer FJ to seeder
+    const deployerFj = await aztecToken.read.balanceOf([deployer]) as bigint
+    if (deployerFj > 0n) {
+      const tx = await aztecToken.write.transfer([seederAddr, deployerFj])
+      await sendAndWait(l1Client, tx, `Transferred ${deployerFj} FJ to seeder`, logger)
+    }
+
+    // Seed pool
+    const [c0, c1] = sortCurrencies(ZERO_ADDRESS, AZTEC_TOKEN)
+    const poolKey = { currency0: c0, currency1: c1, fee: ETH_AZTEC_FEE, tickSpacing: ETH_AZTEC_TICK_SPACING, hooks: ZERO_ADDRESS }
+    const tx = await seeder.write.setup(
+      [poolKey, ETH_AZTEC_SQRT_PRICE, ETH_AZTEC_TICK_LOWER, ETH_AZTEC_TICK_UPPER, ETH_AZTEC_LIQUIDITY],
+      { value: ETH_SEED },
+    )
+    await sendAndWait(l1Client, tx, 'ETH/AZTEC pool seeded', logger)
+
+    // Sweep leftovers
+    await sendAndWait(l1Client, await seeder.write.sweep([ZERO_ADDRESS]), 'Swept ETH', logger)
+    await sendAndWait(l1Client, await seeder.write.sweep([AZTEC_TOKEN]), 'Swept AZTEC', logger)
+
+    logger.info('✅ ETH/AZTEC pool done')
+  } catch (error) {
+    logger.error(`Failed to seed ETH/AZTEC pool: ${error}`)
+  }
+
+  // ── 2. Seed ERC20/WETH pool for each non-WETH token ─────────────
+  const erc20Tokens = deployedContracts.filter(
+    (t) => t.l1TokenContract.toLowerCase() !== WETH_ADDRESS.toLowerCase(),
+  )
+
+  for (let i = 0; i < erc20Tokens.length; i++) {
+    const token = erc20Tokens[i]
+    const tokenAddr = token.l1TokenContract as `0x${string}`
+    try {
+      logger.info(`\n--- [${i + 1}/${erc20Tokens.length}] ${token.symbol}/WETH pool ---`)
+
+      // Deploy a fresh PoolSeeder for this token
+      const deployHash = await l1Client.deployContract({
+        abi: PoolSeederAbi,
+        bytecode: PoolSeederBytecode,
+        args: [POOL_MANAGER],
+      })
+      const deployReceipt = await l1Client.waitForTransactionReceipt({ hash: deployHash, timeout: 120_000 })
+      const seederAddr = deployReceipt.contractAddress as `0x${string}`
+      logger.info(`  PoolSeeder deployed at ${seederAddr}`)
+
+      const seeder = getContract({ address: seederAddr, abi: PoolSeederAbi, client: l1Client as any }) as any
+      const erc20 = getContract({ address: tokenAddr, abi: ERC20_ABI, client: l1Client as any }) as any
+      const weth = getContract({ address: WETH_ADDRESS, abi: [...ERC20_ABI, ...WETH_ABI], client: l1Client as any }) as any
+
+      // Read token decimals
+      const decimals = await erc20.read.decimals() as number
+      const erc20Amount = BigInt(500) * (10n ** BigInt(decimals))
+
+      // Mint ERC20 tokens to deployer
+      const mintTx = await erc20.write.mint([deployer, erc20Amount])
+      await sendAndWait(l1Client, mintTx, `Minted ${erc20Amount} ${token.symbol}`, logger)
+
+      // Wrap ETH -> WETH
+      const wrapTx = await weth.write.deposit([], { value: WETH_SEED })
+      await sendAndWait(l1Client, wrapTx, `Wrapped ${WETH_SEED} wei to WETH`, logger)
+
+      // Transfer ERC20 + WETH to seeder
+      const txErc20 = await erc20.write.transfer([seederAddr, erc20Amount])
+      await sendAndWait(l1Client, txErc20, `Transferred ${token.symbol} to seeder`, logger)
+
+      const txWeth = await weth.write.transfer([seederAddr, WETH_SEED])
+      await sendAndWait(l1Client, txWeth, 'Transferred WETH to seeder', logger)
+
+      // Seed pool
+      const [c0, c1] = sortCurrencies(tokenAddr, WETH_ADDRESS)
+      const poolKey = { currency0: c0, currency1: c1, fee: ERC20_WETH_FEE, tickSpacing: ERC20_WETH_TICK_SPACING, hooks: ZERO_ADDRESS }
+      const seedTx = await seeder.write.setup(
+        [poolKey, ERC20_WETH_SQRT_PRICE, ERC20_WETH_TICK_LOWER, ERC20_WETH_TICK_UPPER, ERC20_WETH_LIQUIDITY],
+      )
+      await sendAndWait(l1Client, seedTx, `${token.symbol}/WETH pool seeded`, logger)
+
+      // Sweep leftovers
+      await sendAndWait(l1Client, await seeder.write.sweep([tokenAddr]), `Swept ${token.symbol}`, logger)
+      await sendAndWait(l1Client, await seeder.write.sweep([WETH_ADDRESS]), 'Swept WETH', logger)
+
+      logger.info(`✅ ${token.symbol}/WETH pool done`)
+    } catch (error) {
+      logger.error(`Failed to seed ${token.symbol}/WETH pool: ${error}`)
+      // Continue with other tokens
+    }
+  }
+
+  logger.info(`\n✅ Pool seeding complete — ${erc20Tokens.length} ERC20/WETH pools + 1 ETH/AZTEC pool`)
+}
 
 async function main() {
   let wallet: EmbeddedWallet
@@ -560,12 +817,12 @@ async function main() {
     const existingToken = existingTokens.find(
       (t) => t.symbol === tokenConfig.symbol,
     )
-    if (existingToken && !tokenConfig.forceDeploy) {
+    if (existingToken && !tokenConfig.forceDeploy && !FORCE_REDEPLOY_TOKENS) {
       logger.info(`⏭️  ${tokenConfig.symbol} already deployed, skipping...`)
       deployedContracts.push(existingToken)
       continue
     }
-    if (existingToken && tokenConfig.forceDeploy) {
+    if (existingToken && (tokenConfig.forceDeploy || FORCE_REDEPLOY_TOKENS)) {
       logger.info(
         `🔄 ${tokenConfig.symbol} already deployed but forceDeploy is set, redeploying...`,
       )
@@ -599,92 +856,100 @@ async function main() {
   }
 
   // Deploy fuel swap infrastructure (UniswapFuelSwap + SwapBridgeRouter + BridgedFPC)
-  try {
-    logger.info('\n=== Deploying Fuel Swap Infrastructure ===')
+  // Skip if already deployed (addresses exist in deployment file)
+  const existingDeployment = loadActiveDeployment()
+  const fuelSwapAlreadyDeployed = existingDeployment?.uniswapFuelSwapAddress
+    && existingDeployment?.swapBridgeRouterAddress
+    && existingDeployment?.bridgedFpcAddress
 
-    // Known Sepolia constants
-    const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3'
-    const V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543'
-    const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'
+  if (fuelSwapAlreadyDeployed && !FORCE_REDEPLOY_SWAPS) {
+    logger.info('\n=== Fuel Swap Infrastructure ===')
+    logger.info(`⏭️  Already deployed, skipping...`)
+    logger.info(`   UniswapFuelSwap: ${existingDeployment.uniswapFuelSwapAddress}`)
+    logger.info(`   SwapBridgeRouter: ${existingDeployment.swapBridgeRouterAddress}`)
+    logger.info(`   BridgedFPC: ${existingDeployment.bridgedFpcAddress}`)
+  } else {
+    try {
+      logger.info('\n=== Deploying Fuel Swap Infrastructure ===')
 
-    const feeJuiceAddress = (l1ContractAddresses as any).feeJuiceAddress?.toString()
-    const feeJuicePortalAddress = (l1ContractAddresses as any).feeJuicePortalAddress?.toString()
-    if (!feeJuiceAddress || !feeJuicePortalAddress) {
-      throw new Error('Missing feeJuiceAddress or feeJuicePortalAddress from node info')
+      // Known Sepolia constants
+      const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3'
+      const V4_POOL_MANAGER = POOL_MANAGER
+
+      const feeJuiceAddress = (l1ContractAddresses as any).feeJuiceAddress?.toString()
+      const feeJuicePortalAddress = (l1ContractAddresses as any).feeJuicePortalAddress?.toString()
+      if (!feeJuiceAddress || !feeJuicePortalAddress) {
+        throw new Error('Missing feeJuiceAddress or feeJuicePortalAddress from node info')
+      }
+
+      // 1. Deploy UniswapFuelSwap (L1)
+      logger.info('Deploying UniswapFuelSwap contract...')
+      const uniswapFuelSwapAddress = await deployL1Contract(
+        l1Client,
+        UniswapFuelSwapAbi,
+        UniswapFuelSwapBytecode,
+        [V4_POOL_MANAGER, feeJuiceAddress, WETH_ADDRESS],
+      ).then(({ address }) => address)
+      logger.info(`✅ UniswapFuelSwap deployed at ${uniswapFuelSwapAddress.toString()}`)
+
+      // 2. Deploy SwapBridgeRouter (L1)
+      logger.info('Deploying SwapBridgeRouter contract...')
+      const swapBridgeRouterAddress = await deployL1Contract(
+        l1Client,
+        SwapBridgeRouterAbi,
+        SwapBridgeRouterBytecode,
+        [PERMIT2_ADDRESS, feeJuicePortalAddress, uniswapFuelSwapAddress.toString()],
+      ).then(({ address }) => address)
+      logger.info(`✅ SwapBridgeRouter deployed at ${swapBridgeRouterAddress.toString()}`)
+
+      // 3. Register BridgedFPC (L2) — fully private contract, no deploy tx needed
+      logger.info('Registering BridgedFPC contract...')
+      const bridgedFpc = await registerBridgedContract(wallet)
+      logger.info(`✅ BridgedFPC registered at ${bridgedFpc.address.toString()}`)
+
+      saveFuelSwapInfraToDeployment({
+        uniswapFuelSwapAddress: uniswapFuelSwapAddress.toString(),
+        swapBridgeRouterAddress: swapBridgeRouterAddress.toString(),
+        bridgedFpcAddress: bridgedFpc.address.toString(),
+      })
+    } catch (error) {
+      logger.error(`Failed to deploy fuel swap infrastructure: ${error}`)
     }
-
-    // 1. Deploy UniswapFuelSwap (L1)
-    logger.info('Deploying UniswapFuelSwap contract...')
-    const uniswapFuelSwapAddress = await deployL1Contract(
-      l1Client,
-      UniswapFuelSwapAbi,
-      UniswapFuelSwapBytecode,
-      [V4_POOL_MANAGER, feeJuiceAddress, WETH_ADDRESS],
-    ).then(({ address }) => address)
-    logger.info(`✅ UniswapFuelSwap deployed at ${uniswapFuelSwapAddress.toString()}`)
-
-    // 2. Deploy SwapBridgeRouter (L1)
-    logger.info('Deploying SwapBridgeRouter contract...')
-    const swapBridgeRouterAddress = await deployL1Contract(
-      l1Client,
-      SwapBridgeRouterAbi,
-      SwapBridgeRouterBytecode,
-      [PERMIT2_ADDRESS, feeJuicePortalAddress, uniswapFuelSwapAddress.toString()],
-    ).then(({ address }) => address)
-    logger.info(`✅ SwapBridgeRouter deployed at ${swapBridgeRouterAddress.toString()}`)
-
-    // 3. Register BridgedFPC (L2) — fully private contract, no deploy tx needed
-    logger.info('Registering BridgedFPC contract...')
-    const bridgedFpc = await registerBridgedContract(wallet)
-    logger.info(`✅ BridgedFPC registered at ${bridgedFpc.address.toString()}`)
-
-    saveFuelSwapInfraToDeployment({
-      uniswapFuelSwapAddress: uniswapFuelSwapAddress.toString(),
-      swapBridgeRouterAddress: swapBridgeRouterAddress.toString(),
-      bridgedFpcAddress: bridgedFpc.address.toString(),
-    })
-  } catch (error) {
-    logger.error(`Failed to deploy fuel swap infrastructure: ${error}`)
   }
 
-  // Seed Uniswap V4 pools (ETH/AZTEC + ERC20/WETH) so the fuel swap quoter works
-  try {
-    logger.info('\n=== Seeding Uniswap V4 Pools ===')
-    const l1PrivateKey = L1_PRIVATE_KEY || ''
-    if (!l1PrivateKey) {
-      logger.warn('Skipping pool seeding: L1_PRIVATE_KEY not set (required for forge script)')
-    } else {
-      const l1ContractsDir = path.resolve(__dirname, '../l1-contracts')
-      // Use the first deployed ERC20 token (e.g. USDC) for the ERC20/WETH pool
-      const erc20Token = deployedContracts[0]?.l1TokenContract ?? ''
+  // Check balances BEFORE seeding
+  await logPoolBalances(l1Client, deployedContracts, 'BEFORE pool seeding', logger)
 
-      const forgeArgs = [
-        'script',
-        'script/SeedUniswapPools.s.sol:SeedUniswapPools',
-        '--rpc-url', L1_URL,
-        '--broadcast',
-        '-vvv',
-      ]
+  // Seed Uniswap V4 pools for ALL deployed tokens so the fuel swap quoter works
+  await seedAllTokenPools(deployedContracts, l1Client, logger)
 
-      logger.info(`Running: forge ${forgeArgs.join(' ')}`)
-      logger.info(`  ERC20_TOKEN=${erc20Token || '(none)'}`)
+  // Check balances AFTER seeding
+  await logPoolBalances(l1Client, deployedContracts, 'AFTER pool seeding', logger)
 
-      execFileSync('forge', forgeArgs, {
-        cwd: l1ContractsDir,
-        stdio: 'inherit',
-        timeout: 300_000, // 5 min timeout
-        env: {
-          ...process.env,
-          PRIVATE_KEY: l1PrivateKey,
-          ...(erc20Token ? { ERC20_TOKEN: erc20Token } : {}),
-        },
-      })
-      logger.info('Uniswap V4 pools seeded successfully')
+  // Set SwapBridgeRouter as trusted forwarder on all token portals
+  const deployment = loadActiveDeployment()
+  const swapRouterAddr = deployment?.swapBridgeRouterAddress as `0x${string}` | undefined
+  if (swapRouterAddr && deployedContracts.length > 0) {
+    logger.info('\n=== Setting Trusted Forwarders on All Portals ===')
+    for (const token of deployedContracts) {
+      const portalAddr = token.l1PortalContract as `0x${string}`
+      try {
+        const portal = getContract({ address: portalAddr, abi: CustomTokenPortalAbi, client: l1Client as any }) as any
+        const tx = await portal.write.setTrustedForwarder([swapRouterAddr, true])
+        await l1Client.waitForTransactionReceipt({ hash: tx, timeout: 120_000 })
+        logger.info(`✅ ${token.symbol} portal (${portalAddr.slice(0, 10)}...) — SwapBridgeRouter set as trusted forwarder`)
+      } catch (error: any) {
+        // If already set or caller is already owner, log and continue
+        if (error?.message?.includes('already') || error?.message?.includes('execution reverted')) {
+          logger.warn(`⚠️  ${token.symbol} portal — forwarder may already be set, skipping: ${error.message?.slice(0, 80)}`)
+        } else {
+          logger.error(`❌ ${token.symbol} portal — failed to set forwarder: ${error}`)
+        }
+      }
     }
-  } catch (error) {
-    logger.error(`Failed to seed Uniswap pools: ${error}`)
-    logger.warn('Fuel swap quotes will fail until pools are seeded manually.')
-    logger.warn('Run: cd l1-contracts && PRIVATE_KEY=0x... ERC20_TOKEN=<addr> forge script script/SeedUniswapPools.s.sol:SeedUniswapPools --rpc-url <rpc> --broadcast -vvv')
+    logger.info('✅ Trusted forwarder setup complete')
+  } else {
+    logger.warn('⚠️  Skipping trusted forwarder setup — no SwapBridgeRouter address or no deployed tokens')
   }
 
   // Sync active deployment to frontend
@@ -979,7 +1244,7 @@ async function main() {
     // Withdraw on L1 (same pattern as Aztec NFT example: direct contract call with siblingPathHex)
     const l1Portal = getContract({
       address: firstToken.l1PortalContract as `0x${string}`,
-      abi: TokenPortalAbi,
+      abi: CustomTokenPortalAbi,
       client: l1Client as any,
     }) as any
     const withdrawTx = await l1Portal.write.withdraw([
@@ -996,6 +1261,131 @@ async function main() {
     })
     const newL1Balance = await l1TokenManager.getL1TokenBalance(ownerEthAddress)
     logger.info(`💰 New L1 balance of ${ownerEthAddress} is ${newL1Balance}`)
+
+    // ── Test BridgedFPC ("top-up") fee payment ───────────────────────
+    // Instead of sponsored fees, this bridges FeeJuice from L1→L2 and uses
+    // BridgedMintAndPayFeePaymentMethod to pay gas from the bridged amount.
+    logger.info('\n🧪 Testing BridgedFPC (top-up) fee payment...')
+
+    const finalDeployment = loadActiveDeployment()
+    const bridgedFpcAddress = finalDeployment?.bridgedFpcAddress
+    if (!bridgedFpcAddress) {
+      logger.warn('⚠️  No BridgedFPC address found in deployment. Skipping BridgedFPC test.')
+    } else {
+      try {
+        // 1. Bridge FeeJuice from L1 → L2 for the BridgedFPC
+        logger.info('📤 Step 1: Bridge FeeJuice from L1 → L2')
+        const feeJuicePortalManager = await L1FeeJuicePortalManager.new(node, l1Client, logger)
+        const FEE_JUICE_AMOUNT = BigInt(1e18) // 1 FeeJuice (enough for several txs)
+        const feeJuiceClaim = await feeJuicePortalManager.bridgeTokensPublic(
+          ownerAztecAddress,
+          FEE_JUICE_AMOUNT,
+          true, // mint on testnet
+        )
+        logger.info(`✅ FeeJuice bridged (amount=${FEE_JUICE_AMOUNT}, leafIndex=${feeJuiceClaim.messageLeafIndex})`)
+
+        // 2. Wait for the L1→L2 FeeJuice message to sync
+        const fjMessageHash = feeJuiceClaim.messageHash
+        if (fjMessageHash) {
+          const fjPollInterval = 120_000
+          const fjMaxWait = 20 * 60 * 1000
+          const fjStart = Date.now()
+          let fjSynced = false
+          const fjMessageHashFr = Fr.fromString(fjMessageHash)
+          logger.info(`⏳ Polling for FeeJuice L1→L2 message sync (hash=${fjMessageHash.slice(0, 18)}...)...`)
+          while (Date.now() - fjStart < fjMaxWait) {
+            try {
+              const msgBlock = await node.getL1ToL2MessageBlock(fjMessageHashFr)
+              fjSynced = msgBlock !== undefined
+              if (fjSynced) {
+                logger.info(`✅ FeeJuice message ready (block=${msgBlock})`)
+                break
+              }
+              logger.info(`   FeeJuice message not yet synced. Waiting ${fjPollInterval / 1000}s...`)
+            } catch (e) {
+              logger.warn(`   Poll check failed: ${e}`)
+            }
+            await wait(fjPollInterval)
+          }
+          if (!fjSynced) {
+            logger.warn('⚠️ FeeJuice message sync timeout; attempting claim anyway.')
+          }
+          await wait(120_000) // Final buffer for message availability
+        }
+
+        // 3. Create BridgedMintAndPayFeePaymentMethod
+        const bridgedFpcAztecAddr = AztecAddress.fromString(bridgedFpcAddress)
+
+        // Register BridgedFPC contract instance with the wallet so it can be used
+        const bridgedFpcInstance = await registerBridgedContract(wallet)
+        logger.info(`✅ BridgedFPC registered at ${bridgedFpcInstance.address.toString()}`)
+
+        const bridgedSalt = Fr.random()
+        const bridgedFeeMethod = new BridgedMintAndPayFeePaymentMethod(
+          bridgedFpcAztecAddr,
+          feeJuiceClaim.claimAmount,
+          feeJuiceClaim.claimSecret,
+          bridgedSalt,
+          new Fr(feeJuiceClaim.messageLeafIndex),
+        )
+        logger.info('✅ BridgedMintAndPayFeePaymentMethod created')
+
+        // 4. Test: bridge tokens using BridgedFPC fees (top-up gas)
+        logger.info('🌉 Bridge tokens using BridgedFPC (top-up) fees')
+        const topUpBridgeAmount = BigInt(1e14) // small test amount
+        const topUpClaim = await l1PortalManager.bridgeTokensPublic(
+          ownerAztecAddress,
+          topUpBridgeAmount,
+          true,
+        )
+        logger.info(`✅ L1 bridge tx done (amount=${topUpBridgeAmount})`)
+
+        // Wait for this token bridge message too
+        const topUpMsgHash = (topUpClaim as { messageHash?: string }).messageHash ?? (topUpClaim as { key?: string }).key
+        if (topUpMsgHash) {
+          const topUpMsgFr = Fr.fromString(topUpMsgHash)
+          logger.info(`⏳ Polling for token bridge message sync...`)
+          const topUpStart = Date.now()
+          while (Date.now() - topUpStart < 20 * 60 * 1000) {
+            try {
+              const msgBlock = await node.getL1ToL2MessageBlock(topUpMsgFr)
+              if (msgBlock !== undefined) {
+                logger.info(`✅ Token bridge message ready (block=${msgBlock})`)
+                break
+              }
+              logger.info(`   Token message not yet synced. Waiting 120s...`)
+            } catch (e) {
+              logger.warn(`   Poll check failed: ${e}`)
+            }
+            await wait(120_000)
+          }
+          await wait(120_000)
+        }
+
+        // Claim tokens on L2 using BridgedFPC fee payment
+        logger.info('📥 Claiming tokens on L2 with BridgedFPC fees...')
+        await l2BridgeContract.methods
+          .claim_public(
+            ownerAztecAddress,
+            topUpBridgeAmount,
+            topUpClaim.claimSecret,
+            topUpClaim.messageLeafIndex,
+          )
+          .send({
+            from: ownerAztecAddress,
+            fee: { paymentMethod: bridgedFeeMethod },
+            wait: { timeout: getTimeouts().txTimeout },
+          })
+
+        const topUpBalance = await l2TokenContract.methods
+          .balance_of_public(ownerAztecAddress)
+          .simulate({ from: ownerAztecAddress })
+        logger.info(`💰 L2 balance after BridgedFPC claim: ${topUpBalance}`)
+        logger.info('✅ BridgedFPC (top-up) fee payment test PASSED')
+      } catch (error) {
+        logger.error(`❌ BridgedFPC fee payment test failed: ${error}`)
+      }
+    }
   } else {
     logger.warn(
       '⚠️  No tokens were deployed successfully. Skipping bridge test.',

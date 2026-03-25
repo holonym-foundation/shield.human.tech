@@ -10,6 +10,11 @@
     "fmt": "forge fmt",
     "fmt:check": "forge fmt --check",
     "snapshot": "forge snapshot",
-    "coverage": "forge coverage"
+    "coverage": "forge coverage",
+    "deploy:fuel-swap": "forge script script/DeployUniswapFuelSwap.s.sol:DeployUniswapFuelSwap --rpc-url $L1_URL --broadcast --slow -vvv",
+    "deploy:swap-router": "forge script script/DeploySwapBridgeRouter.s.sol:DeploySwapBridgeRouter --rpc-url $L1_URL --broadcast --slow --verify -vvv",
+    "deploy:token-portal": "forge script script/DeployTokenPortalWithForwarder.s.sol:DeployTokenPortalWithForwarder --rpc-url $L1_URL --broadcast --slow --verify -vvv",
+    "seed-pools": "forge script script/SeedUniswapPools.s.sol:SeedUniswapPools --rpc-url $L1_URL --broadcast --slow -vvv",
+    "set-trusted-forwarders": "forge script script/SetTrustedForwarderAllPortals.s.sol:SetTrustedForwarderAllPortals --rpc-url $L1_URL --broadcast --slow -vvv"
   }
 }

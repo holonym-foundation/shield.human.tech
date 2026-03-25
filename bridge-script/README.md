@@ -188,6 +188,68 @@ Deployments are saved to `deployments/<version>_<date>.json` and tracked via `de
 
 Both the standard and compliant scripts write to the **same** deployment file, matched by token symbol. If both scripts deploy the same symbol (e.g. USDC), the later one overwrites the earlier entry.
 
+## Topping Up Pool Liquidity
+
+If you see **"Swap amount exceeds pool liquidity — try a smaller amount"** in the fuel toggle, the V4 pools are drained or were never seeded for your token. You need to add more liquidity to both pools (USDC swaps go through two hops: `USDC → WETH → ETH → FeeJuice`).
+
+### Quick command (uses defaults)
+
+```bash
+cd l1-contracts
+
+PRIVATE_KEY=0x<your_deployer_key> \
+ERC20_TOKEN=<your_USDC_L1_address> \
+  forge script script/SeedUniswapPools.s.sol:SeedUniswapPools \
+  --rpc-url <your_sepolia_rpc> --broadcast -vvv
+```
+
+This seeds both pools with defaults: 5,000 USDC + 1.5 WETH + 0.3 ETH + 100k FeeJuice.
+
+Find your USDC L1 address in `bridge-script/deployments/<active>.json` under `tokens[0].l1TokenContract`.
+
+### With more liquidity
+
+```bash
+cd l1-contracts
+
+PRIVATE_KEY=0x<your_deployer_key> \
+ERC20_TOKEN=<your_USDC_L1_address> \
+ERC20_AMOUNT=50000000000 \
+WETH_SEED=5000000000000000000 \
+ETH_SEED=1000000000000000000 \
+FEE_MINT_COUNT=500 \
+  forge script script/SeedUniswapPools.s.sol:SeedUniswapPools \
+  --rpc-url <your_sepolia_rpc> --broadcast -vvv
+```
+
+| Env var | What it does | Value above |
+|---|---|---|
+| `ERC20_AMOUNT` | USDC to seed (raw units, 6 decimals) | 50,000 USDC |
+| `WETH_SEED` | ETH to wrap into WETH (wei) | 5 ETH |
+| `ETH_SEED` | ETH for the ETH/FeeJuice pool (wei) | 1 ETH |
+| `FEE_MINT_COUNT` | FeeJuice mints (1,000 FJ each) | 500k FJ |
+
+### Seed only one pool
+
+```bash
+# Only ETH/FeeJuice pool (skip ERC20/WETH)
+PRIVATE_KEY=0x... \
+  forge script script/SeedUniswapPools.s.sol:SeedUniswapPools \
+  --rpc-url <rpc> --broadcast -vvv
+# (omitting ERC20_TOKEN skips pool 2)
+
+# Only ERC20/WETH pool (skip ETH/FeeJuice)
+PRIVATE_KEY=0x... ERC20_TOKEN=<addr> SKIP_ETH_AZTEC=true \
+  forge script script/SeedUniswapPools.s.sol:SeedUniswapPools \
+  --rpc-url <rpc> --broadcast -vvv
+```
+
+### Requirements
+
+- Your deployer wallet needs **Sepolia ETH** (at least ~2 ETH for WETH wrap + ETH seed + gas)
+- Pool initialization is idempotent — if the pool already exists, only liquidity is added
+- The script deploys a temporary `PoolSeeder` helper contract each run (it sweeps leftover tokens back to you)
+
 ## Common Errors
 
 **`NotMinter(address caller)`** — The faucet private key doesn't match the deployer. Either redeploy or call `addMinter()` on the token contract.
