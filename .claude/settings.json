@@ -1,6 +1,0 @@
-{
-  "enabledPlugins": {
-    "aztec@aztec-plugins": true,
-    "security-guidance@claude-plugins-official": true
-  }
-}
