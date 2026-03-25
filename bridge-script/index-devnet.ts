@@ -1132,7 +1132,7 @@ async function main() {
     logger.info(`⏭️  Already deployed, skipping...`)
     logger.info(`   UniswapFuelSwap: ${existingDeployment.uniswapFuelSwapAddress}`)
     logger.info(`   SwapBridgeRouter: ${existingDeployment.swapBridgeRouterAddress}`)
-    logger.info(`   BridgedFPC: ${existingDeployment.bridgedFpcAddress}`)
+    logger.info(`   Wonderland BridgedFPC: ${existingDeployment.bridgedFpcAddress}`)
   } else {
     try {
       logger.info('\n=== Deploying Fuel Swap Infrastructure ===')
@@ -1167,10 +1167,10 @@ async function main() {
       ).then(({ address }) => address)
       logger.info(`✅ SwapBridgeRouter deployed at ${swapBridgeRouterAddress.toString()}`)
 
-      // 3. Register BridgedFPC (L2) — fully private contract, no deploy tx needed
-      logger.info('Registering BridgedFPC contract...')
+      // 3. Register BridgedFPC (L2) — Wonderland's fee payment contract, no deploy tx needed
+      logger.info('Registering Wonderland BridgedFPC contract...')
       const bridgedFpc = await registerBridgedContract(wallet)
-      logger.info(`✅ BridgedFPC registered at ${bridgedFpc.address.toString()}`)
+      logger.info(`✅ Wonderland BridgedFPC registered at ${bridgedFpc.address.toString()}`)
 
       saveFuelSwapInfraToDeployment({
         uniswapFuelSwapAddress: uniswapFuelSwapAddress.toString(),
@@ -1737,10 +1737,10 @@ async function main() {
         logger.error(`❌ Public fuel test failed: ${error}`)
       }
 
-      // ── Test 2: Private fuel (BridgedMintAndPayFeePaymentMethod) via SwapBridgeRouter ──
-      logger.info('\n🧪 Testing private fuel (BridgedFPC) via SwapBridgeRouter.bridgeWithFuel...')
+      // ── Test 2: Private fuel (Wonderland BridgedMintAndPayFeePaymentMethod) via SwapBridgeRouter ──
+      logger.info('\n🧪 Testing private fuel (Wonderland BridgedFPC) via SwapBridgeRouter.bridgeWithFuel...')
       if (!bridgedFpcAddress) {
-        logger.warn('⚠️  No BridgedFPC address. Skipping private fuel test.')
+        logger.warn('⚠️  No Wonderland BridgedFPC address. Skipping private fuel test.')
       } else {
         await logFuelTestBalances('BEFORE private fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
         try {
@@ -1748,7 +1748,7 @@ async function main() {
 
           // Register BridgedFPC
           const bridgedFpcInstance = await registerBridgedContract(wallet)
-          logger.info(`✅ BridgedFPC registered at ${bridgedFpcInstance.address.toString()}`)
+          logger.info(`✅ Wonderland BridgedFPC registered at ${bridgedFpcInstance.address.toString()}`)
 
           // 1. Generate private fuel secret (poseidon2 derivation — same as frontend)
           const DOM_SEP_FPC_BRIDGE_SECRET = 3952304070
@@ -1876,10 +1876,10 @@ async function main() {
               gasSettings: { gasLimits, teardownGasLimits, maxFeesPerGas, maxPriorityFeesPerGas: GasFees.empty() },
             },
           }
-          logger.info('✅ BridgedMintAndPayFeePaymentMethod created with gasSettings')
+          logger.info('✅ Wonderland BridgedMintAndPayFeePaymentMethod created with gasSettings')
 
           // 5. Claim tokens on L2 with BridgedFPC fees
-          logger.info('📥 Claiming tokens on L2 with BridgedFPC (private fuel)...')
+          logger.info('📥 Claiming tokens on L2 with Wonderland BridgedFPC (private fuel)...')
           await l2BridgeContract.methods
             .claim_public(ownerAztecAddress, pvTokenAmount, pvClaimSecret, pvTokenIndex)
             .send({
@@ -1889,9 +1889,9 @@ async function main() {
             })
 
           await logFuelTestBalances('AFTER private fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
-          logger.info('✅ BridgedFPC (private fuel) test PASSED')
+          logger.info('✅ Wonderland BridgedFPC (private fuel) test PASSED')
         } catch (error) {
-          logger.error(`❌ BridgedFPC private fuel test failed: ${error}`)
+          logger.error(`❌ Wonderland BridgedFPC private fuel test failed: ${error}`)
         }
       }
     }

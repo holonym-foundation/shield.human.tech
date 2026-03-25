@@ -1846,7 +1846,87 @@ These are security-relevant differences where the local codebase is correct and 
 
 | File | What it does |
 |------|-------------|
-| `bridge-script/index-devnet.ts` | Full deployment: portals, swap infra, pool seeding, BridgedFPC. |
+| `bridge-script/index-devnet.ts` | Full deployment: portals, swap infra, pool seeding, BridgedFPC, E2E fuel tests. |
+| `bridge-script/seed-pools.ts` | Standalone pool seeding script with balance logging and skip logic. |
 | `l1-contracts/script/DeploySwapBridgeRouter.s.sol` | Deploys the router contract. |
 | `l1-contracts/script/DeployUniswapFuelSwap.s.sol` | Deploys the swap executor. |
 | `l1-contracts/script/SeedUniswapPools.s.sol` | Creates and seeds V4 liquidity pools. |
+
+---
+
+## Fuel Swap E2E Tests
+
+The devnet bridge script (`index-devnet.ts`) includes full end-to-end tests for both fuel swap paths.
+
+### Test 1: Public fuel (FeeJuicePaymentMethodWithClaim)
+
+1. Mints ERC20 → approves Permit2 → signs Permit2 witness typed data
+2. Calls `SwapBridgeRouter.bridgeWithFuel()` with `fuelRecipient = ownerAztecAddress` (user)
+3. Router swaps part of ERC20 → WETH → FeeJuice on Uniswap V4 (2-hop: ERC20/WETH pool → ETH/AZTEC pool), bridges both to L2
+4. Parses `BridgeWithFuel` event for token + fuel claim data
+5. Polls for L1→L2 message sync (both token and fuel messages)
+6. Waits 2 min buffer for message availability
+7. Creates `FeeJuicePaymentMethodWithClaim` and claims tokens on L2 (gas paid from swapped FeeJuice)
+
+### Test 2: Private fuel (BridgedMintAndPayFeePaymentMethod)
+
+1. Same L1 flow but with `fuelRecipient = bridgedFpcAddress` (BridgedFPC, not user)
+2. Derives secret via `poseidon2([salt, userAddress], DOM_SEP=3952304070)`
+3. Polls for L1→L2 message sync (both token and fuel messages)
+4. Queries `node.getCurrentMinFees()` → builds explicit `gasSettings` with `REASONABLE_GAS_LIMITS`
+5. Creates `BridgedMintAndPayFeePaymentMethod` and claims tokens on L2
+
+### Balance logging
+
+Before/after each test: L2 token balance, L2 FeeJuice balance (remaining gas credit), L1 deployer ETH.
+
+### Pool seeding
+
+- Pools live in the **Uniswap V4 PoolManager singleton** on Sepolia, not in our contracts.
+- Skip logic checks per-pool token balances in PoolManager — skips if already seeded.
+- `FORCE_SEED=true` overrides and adds more liquidity (idempotent — `PoolSeeder.setup()` uses try/catch on initialize, works on both new and existing pools).
+- Redeploying portals, router, or fuel swap → **no re-seeding needed**, pools are unaffected.
+- Redeploying ERC20 tokens (new address) → **new pools are seeded automatically** (skip logic detects 0 balance for the new token address).
+- ETH/AZTEC (FeeJuice) pool → **never needs re-seeding** (FeeJuice and WETH addresses are fixed on Sepolia).
+
+### Seed amounts (kept small for testnet faucets ~0.05 ETH)
+
+| Pool | Token A | Token B | Liquidity |
+|------|---------|---------|-----------|
+| ETH/AZTEC | 0.005 ETH | 3,000 FeeJuice (minted) | 1e18 |
+| ERC20/WETH | 100 USDC (minted) | 0.01 WETH (wrapped) | 3e11 |
+
+### Env vars
+
+| Variable | Description |
+|----------|-------------|
+| `SKIP_TO_FUEL_TESTS=true` | Skip bridge+withdrawal tests, jump straight to fuel swap tests |
+| `FORCE_SEED=true` | Re-seed pools even if they already have liquidity |
+| `FORCE_REDEPLOY_TOKENS=true` | Redeploy all tokens even if they exist |
+| `FORCE_REDEPLOY_SWAPS=true` | Redeploy fuel swap infra even if it exists |
+
+### User interactions (real frontend flow)
+
+Both public and private fuel have the **same UX** — the only difference is internal (where FeeJuice is sent on L2).
+
+| Step | Action | Type | Notes |
+|------|--------|------|-------|
+| 1 | Approve ERC20 → Permit2 | MetaMask tx | One-time per token. Skipped if already approved. |
+| 2 | Sign Permit2 witness | MetaMask signature (EIP-712) | No gas cost. Locks in all bridge params (amounts, recipients, swap route). |
+| 3 | `bridgeWithFuel` | MetaMask tx | Single L1 tx does everything: pull tokens via Permit2, swap portion to FeeJuice on Uniswap V4, bridge both to L2. |
+| 4 | Wait for L1→L2 sync | No user action | ~20 min for Aztec to process the L1→L2 messages. |
+| 5 | Claim on L2 | Aztec wallet tx | Gas paid automatically from the swapped FeeJuice. |
+
+**Returning user (Permit2 already approved): 1 signature + 1 L1 tx + 1 L2 claim.**
+
+This is the same number of interactions as a bridge without fuel — the swap adds zero extra clicks.
+
+### Fee payment SDKs
+
+| Fuel mode | Payment method | SDK | Package |
+|-----------|---------------|-----|---------|
+| Public fuel | `FeeJuicePaymentMethodWithClaim` | Aztec SDK | `@aztec/aztec.js/fee` |
+| Private fuel | `BridgedMintAndPayFeePaymentMethod` | Wonderland SDK | `@defi-wonderland/aztec-fee-payment` |
+
+- **Public fuel**: FeeJuice is sent directly to the user's L2 address. Uses Aztec's built-in `FeeJuicePaymentMethodWithClaim` to claim and pay gas in one step.
+- **Private fuel**: FeeJuice is sent to a `BridgedFPC` (Fee Payment Contract) on L2, deployed via Wonderland's SDK. The `BridgedMintAndPayFeePaymentMethod` claims FeeJuice from the BridgedFPC and pays gas on behalf of the user — keeping the user's balance private.
