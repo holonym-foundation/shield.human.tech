@@ -1889,12 +1889,14 @@ Before/after each test: L2 token balance, L2 FeeJuice balance (remaining gas cre
 - Redeploying ERC20 tokens (new address) → **new pools are seeded automatically** (skip logic detects 0 balance for the new token address).
 - ETH/AZTEC (FeeJuice) pool → **never needs re-seeding** (FeeJuice and WETH addresses are fixed on Sepolia).
 
-### Seed amounts (kept small for testnet faucets ~0.05 ETH)
+### Seed amounts
 
 | Pool | Token A | Token B | Liquidity |
 |------|---------|---------|-----------|
 | ETH/AZTEC | 0.005 ETH | 3,000 FeeJuice (minted) | 1e18 |
-| ERC20/WETH | 100 USDC (minted) | 0.01 WETH (wrapped) | 3e11 |
+| ERC20/WETH | 100 USDC (minted) | 0.1 WETH (wrapped) | 3e12 |
+
+> **Why 3e12 and not 3e11?** The fuel swap is a two-hop route (USDC → WETH → FeeJuice). With 3e11 liquidity, the USDC/WETH pool only had ~10.68 USDC of effective depth. Even a 2 USDC swap produced a WETH amount that pushed the second pool (WETH → FeeJuice) past its tick range, causing Uniswap V4's flash accounting to fail with `CurrencyNotSettled()` (selector `0x5212cba1`). Increasing to 3e12 (10x) with 0.1 WETH gives both pools enough depth for the test amounts. The deployer wallet needs ~0.15 ETH for seeding + gas.
 
 ### Env vars
 

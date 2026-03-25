@@ -134,6 +134,7 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
         bool lastPoolNative = _hasNativeEth(path[path.length - 1]);
         uint256 currentAmount = inputAmount;
         uint256 ethBridgeAmount;
+        uint256 actualInputConsumed;
 
         // ── Execute each hop ─────────────────────────────────────────
         for (uint256 i = 0; i < path.length; i++) {
@@ -154,6 +155,14 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
                 }),
                 ""
             );
+
+            // Track actual input consumed from the first hop (V4 may partial-fill)
+            if (i == 0) {
+                int128 inputDelta = zeroForOnes[i] ? delta.amount0() : delta.amount1();
+                require(inputDelta < 0, "UniswapFuelSwap: non-negative input delta");
+                actualInputConsumed = uint256(uint128(-inputDelta));
+                require(actualInputConsumed == inputAmount, "UniswapFuelSwap: partial fill (insufficient liquidity)");
+            }
 
             // Output is the positive delta (token we receive from the pool)
             int128 outputDelta = zeroForOnes[i] ? delta.amount1() : delta.amount0();

@@ -68,7 +68,7 @@ const ERC20_WETH_TICK_LOWER = 169800
 const ERC20_WETH_TICK_UPPER = 229800
 const ERC20_WETH_FEE = 3000
 const ERC20_WETH_TICK_SPACING = 60
-const ERC20_WETH_LIQUIDITY = 300000000000n // 3e11 (scaled for 100 USDC + 0.01 WETH — needs ~33 USDC + ~0.0075 WETH)
+const ERC20_WETH_LIQUIDITY = 3000000000000n // 3e12 (scaled for 100 USDC + 0.1 WETH — needs ~33 USDC + ~0.075 WETH)
 
 const ERC20_ABI = [
   { type: 'function', name: 'balanceOf', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view' },
@@ -147,7 +147,7 @@ async function main() {
   // Config from env
   const feeMintCount = Number(process.env.FEE_MINT_COUNT || '3')
   const ethSeed = BigInt(process.env.ETH_SEED || '5000000000000000') // 0.005 ETH
-  const wethSeed = BigInt(process.env.WETH_SEED || '10000000000000000') // 0.01 ETH
+  const wethSeed = BigInt(process.env.WETH_SEED || '100000000000000000') // 0.1 ETH
   const skipEthAztec = process.env.SKIP_ETH_AZTEC === 'true'
   const forceSeed = process.env.FORCE_SEED === 'true'
   const specificToken = process.env.ERC20_TOKEN?.toLowerCase()

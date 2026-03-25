@@ -126,11 +126,13 @@ const L1_URL = process.env.L1_URL || getL1RpcUrl()
 // FORCE_REDEPLOY_TOKENS=true  — redeploy all tokens even if they exist
 // FORCE_REDEPLOY_SWAPS=true   — redeploy fuel swap infra even if it exists
 // FORCE_SEED=true             — seed pools even if they already have liquidity
+// SKIP_ETH_AZTEC=true         — skip ETH/AZTEC pool seeding (useful with FORCE_SEED when only ERC20 pools need more liquidity)
 const FORCE_REDEPLOY_TOKENS = process.env.FORCE_REDEPLOY_TOKENS === 'true'
 const FORCE_REDEPLOY_SWAPS = process.env.FORCE_REDEPLOY_SWAPS === 'true'
 const FORCE_SEED = process.env.FORCE_SEED === 'true'
-const SKIP_TO_FUEL_TESTS = process.env.SKIP_TO_FUEL_TESTS === 'true'
-// const SKIP_TO_FUEL_TESTS = true
+const SKIP_ETH_AZTEC = process.env.SKIP_ETH_AZTEC === 'true'
+// const SKIP_TO_FUEL_TESTS = process.env.SKIP_TO_FUEL_TESTS === 'true'
+const SKIP_TO_FUEL_TESTS = true
 
 const MINT_AMOUNT = BigInt(1e15)
 
@@ -456,10 +458,10 @@ const FEE_ASSET_HANDLER = '0xED9c5557d2E0abCc7c7FCA958eE4292199413494' as `0x${s
 const AZTEC_TOKEN = '0x35d0186d1FD53b72996475D965C5Ed171D52b986' as `0x${string}`
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
 
-// Pool seed amounts (kept small — testnet faucets give ~0.05 ETH):
+// Pool seed amounts:
 //   Pool 1 (ETH/FeeJuice): 0.005 ETH + 3,000 FeeJuice (minted)
-//   Pool 2 (USDC/WETH):    100 USDC (minted) + 0.01 WETH (wrapped from ETH)
-//   Deployer wallet needs: ~0.02 ETH for seeding + gas
+//   Pool 2 (USDC/WETH):    100 USDC (minted) + 0.1 WETH (wrapped from ETH)
+//   Deployer wallet needs: ~0.15 ETH for seeding + gas
 //
 //   Note: Liquidity CANNOT be withdrawn — PoolSeeder is a one-shot helper with no
 //   remove-liquidity function. V4 withdrawal requires a PositionManager, which we don't use.
@@ -481,8 +483,8 @@ const ERC20_WETH_TICK_LOWER = 169800
 const ERC20_WETH_TICK_UPPER = 229800
 const ERC20_WETH_FEE = 3000
 const ERC20_WETH_TICK_SPACING = 60
-const ERC20_WETH_LIQUIDITY = 300000000000n // 3e11 (scaled for 100 USDC + 0.01 WETH — needs ~33 USDC + ~0.0075 WETH)
-const WETH_SEED = 10000000000000000n // 0.01 ETH
+const ERC20_WETH_LIQUIDITY = 3000000000000n // 3e12 (scaled for 100 USDC + 0.1 WETH — needs ~33 USDC + ~0.075 WETH)
+const WETH_SEED = 100000000000000000n // 0.1 ETH
 
 // Minimal ERC20 ABI for pool seeding interactions
 const ERC20_ABI = [
@@ -816,7 +818,7 @@ async function seedAllTokenPools(
   }
 
   // ── 1. Seed ETH/AZTEC pool ───────────────────────────────────────
-  if (pmFjBalance > 0n && !FORCE_SEED) {
+  if (SKIP_ETH_AZTEC || (pmFjBalance > 0n && !FORCE_SEED)) {
     logger.info('\n--- ETH/AZTEC pool — already has FJ liquidity, skipping ---')
   } else try {
     logger.info('\n--- ETH/AZTEC pool ---')
@@ -1734,7 +1736,14 @@ async function main() {
         await logFuelTestBalances('AFTER public fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
         logger.info('✅ Public fuel (FeeJuicePaymentMethodWithClaim) test PASSED')
       } catch (error) {
-        logger.error(`❌ Public fuel test failed: ${error}`)
+        const errMsg = String(error)
+        if (errMsg.includes('0x5212cba1') || errMsg.includes('CurrencyNotSettled')) {
+          logger.error('❌ Public fuel test failed: CurrencyNotSettled — pool liquidity too low for the swap amount.')
+          logger.error('   The fuelAmount exceeds what the USDC→WETH→FeeJuice pools can fill.')
+          logger.error('   Fix: run `SKIP_ETH_AZTEC=true FORCE_SEED=true SKIP_TO_FUEL_TESTS=true pn start-devnet` to add more liquidity and re-test.')
+        } else {
+          logger.error(`❌ Public fuel test failed: ${error}`)
+        }
       }
 
       // ── Test 2: Private fuel (Wonderland BridgedMintAndPayFeePaymentMethod) via SwapBridgeRouter ──
@@ -1891,7 +1900,14 @@ async function main() {
           await logFuelTestBalances('AFTER private fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
           logger.info('✅ Wonderland BridgedFPC (private fuel) test PASSED')
         } catch (error) {
-          logger.error(`❌ Wonderland BridgedFPC private fuel test failed: ${error}`)
+          const errMsg = String(error)
+          if (errMsg.includes('0x5212cba1') || errMsg.includes('CurrencyNotSettled')) {
+            logger.error('❌ Private fuel test failed: CurrencyNotSettled — pool liquidity too low for the swap amount.')
+            logger.error('   The fuelAmount exceeds what the USDC→WETH→FeeJuice pools can fill.')
+            logger.error('   Fix: run `SKIP_ETH_AZTEC=true FORCE_SEED=true SKIP_TO_FUEL_TESTS=true pn start-devnet` to add more liquidity and re-test.')
+          } else {
+            logger.error(`❌ Wonderland BridgedFPC private fuel test failed: ${error}`)
+          }
         }
       }
     }
