@@ -1,5 +1,5 @@
 {
-  "activeDeploymentId": "4.0.0-devnet.2-patch.3_2026-03-25",
+  "activeDeploymentId": "4.0.0-devnet.2-patch.3_2026-03-26",
   "deployments": [
     {
       "id": "4.0.0-devnet.2-patch.3_2026-03-25",
@@ -64,6 +64,74 @@
       ],
       "uniswapFuelSwapAddress": "0x6840b6af8504d6b31f7b480bb6d94161aae5636d",
       "swapBridgeRouterAddress": "0xd775335db9822def6cbbf501a3972ebe34d56b75",
+      "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
+    },
+    {
+      "id": "4.0.0-devnet.2-patch.3_2026-03-26",
+      "deployedAt": "2026-03-26T15:18:26.504Z",
+      "network": {
+        "name": "devnet",
+        "nodeUrl": "https://v4-devnet-2.aztec-labs.com",
+        "l1RpcUrl": "https://eth-sepolia.g.alchemy.com/v2/wxieEGaCXu4vVoL3y2Sf31sJHcmlnppW/",
+        "l1ChainId": 11155111,
+        "l2ChainId": 604129785,
+        "aztecVersion": "4.0.0-devnet.2-patch.3",
+        "rollupVersion": 615022430
+      },
+      "l1ContractAddresses": {
+        "rollupAddress": "0xcd1a7be18501092f3ba8d80ce5629501ba178de0",
+        "registryAddress": "0x52945c29d2788ccb076e910509c0449bfcbe29e6",
+        "inboxAddress": "0xef5730d1e07b306aecbe01400630d61e3ccb68af",
+        "outboxAddress": "0x34fc558b6f97e50149bcc140060bbe3f7d04bc59"
+      },
+      "nodeInfo": {
+        "enr": "enr:-N24QH7xejlE24BrCddwyTdE4lTj5D0vL7c6wXnY1gT8RQpMUEQNmLsn4N-OxOd35LzR2hUWvNLi6s2STHiGgayUwtEHhWF6dGVjsDAwLTExMTU1MTExLWNkMWE3YmUxLTYxNTAyMjQzMC0yNjcyMzQwZC0xZTY0OTQwNYJpZIJ2NIJpcIQitjpMiXNlY3AyNTZrMaECK_IUT1FllKW-878j11EL5bOlGJ7_-2MrGBvIQHjXnveDdGNwgp4Sg3VkcIKeEoN2ZXKWNC4wLjAtZGV2bmV0LjItcGF0Y2guMw",
+        "nodeVersion": "4.0.0-devnet.2-patch.3",
+        "l1ChainId": 11155111,
+        "rollupVersion": 615022430,
+        "l1ContractAddresses": {
+          "rollupAddress": "0xcd1a7be18501092f3ba8d80ce5629501ba178de0",
+          "registryAddress": "0x52945c29d2788ccb076e910509c0449bfcbe29e6",
+          "inboxAddress": "0xef5730d1e07b306aecbe01400630d61e3ccb68af",
+          "outboxAddress": "0x34fc558b6f97e50149bcc140060bbe3f7d04bc59",
+          "feeJuiceAddress": "0x35d0186d1fd53b72996475d965c5ed171d52b986",
+          "stakingAssetAddress": "0x4263376b0d7d0ac46d38b76af4cf8bf93844bc14",
+          "feeJuicePortalAddress": "0x516e3f74fd1c19b24da0706d28b5a30578f054ab",
+          "coinIssuerAddress": "0xc0dcff65de33fe19a95f67ed1b7b9e7bd0a23f5f",
+          "rewardDistributorAddress": "0x51f13e2131d28c44f9df33a8d0ff0a897eb52eda",
+          "governanceProposerAddress": "0x17f54a1448387de40120f8a2f9949a68a9185c8b",
+          "governanceAddress": "0xfaa29a00987bb2d2ec703edac5ebb24f1ee9de97",
+          "slashFactoryAddress": "0xd4248cbb1fa7228f49b9d314237cde7b2d0f3470",
+          "feeAssetHandlerAddress": "0xed9c5557d2e0abcc7c7fca958ee4292199413494",
+          "gseAddress": "0x5f966c3cbbc12569690ca4250b37bf17fc1b3013"
+        },
+        "protocolContractAddresses": {
+          "classRegistry": "0x0000000000000000000000000000000000000000000000000000000000000003",
+          "feeJuice": "0x0000000000000000000000000000000000000000000000000000000000000005",
+          "instanceRegistry": "0x0000000000000000000000000000000000000000000000000000000000000002",
+          "multiCallEntrypoint": "0x0000000000000000000000000000000000000000000000000000000000000004"
+        },
+        "realProofs": false
+      },
+      "sponsoredFeeAddress": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+      "tokens": [
+        {
+          "symbol": "USDC",
+          "decimals": 6,
+          "logo": "/assets/tokens/usdc-xl.svg",
+          "l1TokenContract": "0x014f3d6e950004391ce478d6e9f8917b04cb5dfa",
+          "l1PortalContract": "0x2b6cda41145096aaec419ce3a43d6abc70a75299",
+          "l2TokenContract": "0x10e68280d299ebbd2eae45b284a54fc6a393ce549c6e53ce49cd973b24dd7d33",
+          "l2BridgeContract": "0x1dc61ad60f1cecba55ab91e57b7ce34cf12f62b5cede0417ee10abe8def0dc48",
+          "l2ProxyContract": "0x1ba6d05233764a4fb6ace70f2798ed4dafdc523f1a77ef9a68d26dcc5e681977",
+          "feeAssetHandler": "0x0dc56bfba09ee80c1d50206a720b7109d38745b5",
+          "sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+          "humanIdAttester": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+          "passportSigner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+        }
+      ],
+      "uniswapFuelSwapAddress": "0x6c5553dd9294186655fbb822ea3c8402a1618be0",
+      "swapBridgeRouterAddress": "0xde8d8a6dc45d85636525167965dcb58a7d17bc7a",
       "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
     }
   ]

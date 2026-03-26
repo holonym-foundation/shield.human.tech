@@ -31,7 +31,7 @@ interface ITokenPortalPrivate {
         bytes32 _secretHashForL2MessageConsumption,
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
-    ) external returns (bytes32, uint256);
+    ) external returns (bytes32, uint256, uint256);
 
     function depositToAztecPrivateFor(
         address _depositor,
@@ -39,7 +39,7 @@ interface ITokenPortalPrivate {
         bytes32 _secretHashForL2MessageConsumption,
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
-    ) external returns (bytes32, uint256);
+    ) external returns (bytes32, uint256, uint256);
 }
 
 // ─── Minimal UniswapFuelSwap Interface ───────────────────────────────
@@ -273,9 +273,10 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         // 4. Deposit remaining tokens to L2 via TokenPortal
         bytes32 tokenKey;
         uint256 tokenIndex;
+        uint256 tokenAmountAfterFee;
         token.forceApprove(p.tokenPortal, bridgeAmount);
         if (p.isPrivate) {
-            (tokenKey, tokenIndex) = ITokenPortalPrivate(p.tokenPortal).depositToAztecPrivateFor(
+            (tokenKey, tokenIndex, tokenAmountAfterFee) = ITokenPortalPrivate(p.tokenPortal).depositToAztecPrivateFor(
                 msg.sender,
                 bridgeAmount,
                 p.tokenSecretHash,
@@ -283,7 +284,7 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
                 p.passport
             );
         } else {
-            (tokenKey, tokenIndex) = ITokenPortal(p.tokenPortal).depositToAztecPublic(
+            (tokenKey, tokenIndex, tokenAmountAfterFee) = ITokenPortal(p.tokenPortal).depositToAztecPublic(
                 p.aztecRecipient,
                 bridgeAmount,
                 p.tokenSecretHash
@@ -291,12 +292,12 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         }
         token.forceApprove(p.tokenPortal, 0);
 
-        // 5. Emit composite event
+        // 5. Emit composite event (tokenAmount is post-portal-fee)
         emit BridgeWithFuel(
             p.aztecRecipient,
             tokenKey,
             tokenIndex,
-            bridgeAmount,
+            tokenAmountAfterFee,
             p.tokenSecretHash,
             fuelKey,
             fuelIndex,
@@ -347,8 +348,9 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
 
         bytes32 key;
         uint256 index;
+        uint256 amountAfterFee;
         if (p.isPrivate) {
-            (key, index) = ITokenPortalPrivate(p.tokenPortal).depositToAztecPrivateFor(
+            (key, index, amountAfterFee) = ITokenPortalPrivate(p.tokenPortal).depositToAztecPrivateFor(
                 msg.sender,
                 p.amount,
                 p.secretHash,
@@ -356,7 +358,7 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
                 p.passport
             );
         } else {
-            (key, index) = ITokenPortal(p.tokenPortal).depositToAztecPublic(
+            (key, index, amountAfterFee) = ITokenPortal(p.tokenPortal).depositToAztecPublic(
                 p.aztecRecipient,
                 p.amount,
                 p.secretHash
@@ -366,8 +368,8 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         // 3. Clear approval
         IERC20(p.bridgeToken).forceApprove(p.tokenPortal, 0);
 
-        // 4. Emit event
-        emit Bridge(p.aztecRecipient, key, index, p.amount, p.secretHash);
+        // 4. Emit event (amount is post-portal-fee)
+        emit Bridge(p.aztecRecipient, key, index, amountAfterFee, p.secretHash);
     }
 
     // ─── Emergency Sweep ─────────────────────────────────────────────

@@ -158,7 +158,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         external
         whenNotPaused
         nonReentrant
-        returns (bytes32, uint256)
+        returns (bytes32, uint256, uint256)
     {
         require(_amount > 0, "Amount must be greater than zero");
         uint256 fee = calculateFee(_amount);
@@ -174,7 +174,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHash);
 
         emit DepositToAztecPublic(_to, amountAfterFee, fee, _secretHash, key, index);
-        return (key, index);
+        return (key, index, amountAfterFee);
     }
 
     function depositToAztecPrivate(
@@ -182,7 +182,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         bytes32 _secretHashForL2MessageConsumption,
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
-    ) external whenNotPaused nonReentrant returns (bytes32, uint256) {
+    ) external whenNotPaused nonReentrant returns (bytes32, uint256, uint256) {
         require(_amount > 0, "Amount must be greater than zero");
         _validatePrivateAttestations(_msgSender(), _amount, _cleanHands, _passport);
 
@@ -198,7 +198,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHashForL2MessageConsumption);
 
         emit DepositToAztecPrivate(amountAfterFee, fee, _secretHashForL2MessageConsumption, key, index);
-        return (key, index);
+        return (key, index, amountAfterFee);
     }
 
     function depositToAztecPrivateFor(
@@ -207,7 +207,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         bytes32 _secretHashForL2MessageConsumption,
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
-    ) external whenNotPaused nonReentrant returns (bytes32, uint256) {
+    ) external whenNotPaused nonReentrant returns (bytes32, uint256, uint256) {
         if (!trustedForwarders[msg.sender]) revert NotTrustedForwarder();
         require(_amount > 0, "Amount must be greater than zero");
         _validatePrivateAttestations(_depositor, _amount, _cleanHands, _passport);
@@ -224,7 +224,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHashForL2MessageConsumption);
 
         emit DepositToAztecPrivate(amountAfterFee, fee, _secretHashForL2MessageConsumption, key, index);
-        return (key, index);
+        return (key, index, amountAfterFee);
     }
 
     function withdraw(
@@ -326,8 +326,8 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
             if (cleanHandsNonces[_depositor][_cleanHands.nonce]) {
                 revert CleanHandsNonceUsed();
             }
-            verified = verifyCleanHandsSignature(
-                _cleanHands.nonce, cleanHandsCircuitId, _cleanHands.actionId, _depositor, _cleanHands.signature
+            verified = _verifyCleanHandsSignatureFor(
+                _depositor, _cleanHands.nonce, cleanHandsCircuitId, _cleanHands.actionId, _cleanHands.signature
             );
             cleanHandsNonces[_depositor][_cleanHands.nonce] = true;
         }
@@ -355,10 +355,19 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         uint256 nonce,
         uint256 circuitId,
         uint256 actionId,
-        address userAddress,
         bytes memory signature
     ) public view returns (bool) {
-        bytes32 digest = keccak256(abi.encodePacked(nonce, circuitId, actionId, userAddress));
+        return _verifyCleanHandsSignatureFor(_msgSender(), nonce, circuitId, actionId, signature);
+    }
+
+    function _verifyCleanHandsSignatureFor(
+        address _depositor,
+        uint256 nonce,
+        uint256 circuitId,
+        uint256 actionId,
+        bytes memory signature
+    ) internal view returns (bool) {
+        bytes32 digest = keccak256(abi.encodePacked(nonce, circuitId, actionId, _depositor));
         bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
         address recovered = ECDSA.recover(personalSignPreimage, signature);
 

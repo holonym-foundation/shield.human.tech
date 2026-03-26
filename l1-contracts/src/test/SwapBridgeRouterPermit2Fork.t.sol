@@ -14,18 +14,18 @@ contract ForkMintableToken is ERC20 {
 contract ForkFeeJuicePortal {
     IERC20 public immutable UNDERLYING;
     constructor(address underlying) { UNDERLYING = IERC20(underlying); }
-    function depositToAztecPublic(bytes32, uint256 amount, bytes32) external returns (bytes32, uint256) {
+    function depositToAztecPublic(bytes32, uint256 amount, bytes32) external returns (bytes32, uint256, uint256) {
         UNDERLYING.transferFrom(msg.sender, address(this), amount);
-        return (bytes32(uint256(1)), 1);
+        return (bytes32(uint256(1)), 1, amount);
     }
 }
 
 contract ForkTokenPortal {
     IERC20 public immutable token;
     constructor(address underlying) { token = IERC20(underlying); }
-    function depositToAztecPublic(bytes32, uint256 amount, bytes32) external returns (bytes32, uint256) {
+    function depositToAztecPublic(bytes32, uint256 amount, bytes32) external returns (bytes32, uint256, uint256) {
         token.transferFrom(msg.sender, address(this), amount);
-        return (bytes32(uint256(2)), 2);
+        return (bytes32(uint256(2)), 2, amount);
     }
 }
 
