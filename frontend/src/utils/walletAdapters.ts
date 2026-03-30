@@ -182,7 +182,13 @@ class WalletAdapter {
     const artifact = await getContractArtifact(type)
     const instance = await Contract.at(addr, artifact, this.wallet)
     const sendOpts: any = { from: this.account }
-    if (options?.fee) sendOpts.fee = options.fee
+    if (options?.fee) {
+      sendOpts.fee = options.fee
+      // Skip fee enforcement during simulation — the sequencer validates against
+      // the real L1→L2 message tree. The wallet's PXE may lag behind, causing
+      // "No L1 to L2 message found" for BridgedFPC claims that ARE in the tree.
+      sendOpts.skipFeeEnforcement = true
+    }
     const { receipt } = await instance.methods[method](...args)
       .send(sendOpts)
     return {
