@@ -434,7 +434,13 @@ export async function executeL2Claim(
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         options?.onAttempt?.(attempt, maxAttempts)
-        console.log(`[L1→L2] Sending claim transaction via wallet (attempt ${attempt}/${maxAttempts})...`)
+        console.log(`[L1→L2] DEBUG CLAIM TX — attempt ${attempt}/${maxAttempts}`, {
+          method,
+          bridgeAddress: walletAdapter.bridgeAddress,
+          claimArgs: claimArgs.map(a => a?.toString?.() ?? String(a)),
+          hasFeeOption: !!options?.feeOption,
+          feeOptionKeys: options?.feeOption ? Object.keys(options.feeOption.fee) : [],
+        })
 
         const result = await callWithTimeout(
           walletAdapter.executeCall(
@@ -791,7 +797,12 @@ export async function generateAndBackupClaimSecret(params: {
     const { secret: pfSecret, secretHash: pfSecretHash } = await pfHashRes.json()
     privateFuelSecret = Fr.fromString(pfSecret)
     privateFuelSecretHash = Fr.fromString(pfSecretHash)
-    console.log('[L1→L2] Private fuel (BridgedFPC) secret generated')
+    console.log('[L1→L2] DEBUG PRIVATE FUEL SECRET:', {
+      privateFuelSalt: privateFuelSalt.toString(),
+      privateFuelSecret: privateFuelSecret.toString(),
+      privateFuelSecretHash: privateFuelSecretHash.toString(),
+      claimer: params.aztecAddress,
+    })
   }
 
   return {
@@ -1059,7 +1070,17 @@ export async function sendL1DepositTransaction(params: {
       ],
     })
 
-    console.log('[L1→L2] Sending SwapBridgeRouter.bridgeWithFuel tx, totalAmount:', amount.toString(), 'fuelAmount:', fuel.fuelAmount.toString(), 'fuelRecipient:', privateFuel ? privateFuel.fpcAddress : aztecAddress)
+    console.log('[L1→L2] DEBUG DEPOSIT — SwapBridgeRouter.bridgeWithFuel params:', {
+      totalAmount: amount.toString(),
+      fuelAmount: fuel.fuelAmount.toString(),
+      fuelRecipient: privateFuel ? privateFuel.fpcAddress : aztecAddress,
+      fuelSecretHash: fuelSecretHashHex,
+      tokenSecretHash: claimSecretHash.toString(),
+      aztecRecipient: aztecAddress,
+      isPrivate: isPrivacyModeEnabled,
+      isPrivateFuel: !!privateFuel,
+      minFuelOutput: fuel.fuelQuote.minOutput.toString(),
+    })
     txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
       { from: l1Address as `0x${string}`, to: SWAP_BRIDGE_ROUTER_ADDRESS, data: bridgeData },
     ])
