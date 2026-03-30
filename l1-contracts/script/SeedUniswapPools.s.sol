@@ -146,8 +146,8 @@ contract SeedUniswapPools is Script {
     // ── Sepolia constants ──────────────────────────────────────────
     address constant POOL_MANAGER      = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
     address constant WETH              = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
-    address constant AZTEC             = 0x35d0186d1FD53b72996475D965C5Ed171D52b986;
-    address constant FEE_ASSET_HANDLER = 0xED9c5557d2E0abCc7c7FCA958eE4292199413494;
+    address constant AZTEC             = 0x762C132040fdA6183066Fa3B14d985ee55aA3C18;
+    address constant FEE_ASSET_HANDLER = 0x5602c39A6E9C5AcE589F64F754927bcDa4f4BFc9;
 
     // ── ETH/AZTEC pool params (~10,000 FeeJuice per ETH) ───────────
     uint24  constant ETH_AZTEC_FEE         = 3000;

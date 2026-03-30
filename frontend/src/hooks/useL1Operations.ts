@@ -699,7 +699,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       operationId = backup.operationId
 
       // ─── Step 3: Check allowance and approve (+ Permit2 sign) ────────
+      console.log('[L1→L2] DEBUG: Starting checkAndApproveAllowance...')
       await checkAndApproveAllowance(l1Address, amount, selectedToken)
+      console.log('[L1→L2] DEBUG: checkAndApproveAllowance done')
 
       // ─── Step 3b: Fetch attestation for private deposits (POCH → Passport fallback) ──
       let attestation: PochAttestationData | undefined

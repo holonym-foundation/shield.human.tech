@@ -57,7 +57,7 @@ export const L1_CONTRACT_ADDRESSES = activeDeployment.l1ContractAddresses
 
 // Aztecscan URLs for different networks
 export const AZTECSCAN_URLS: Record<number, string> = {
-  [L2_CHAIN_ID]: 'https://devnet.aztecscan.xyz', // Aztec Devnet
+  [L2_CHAIN_ID]: 'https://testnet.aztecscan.xyz', // Aztec Testnet
 }
 
 

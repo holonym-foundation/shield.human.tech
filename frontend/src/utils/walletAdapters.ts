@@ -39,8 +39,8 @@ async function getContractArtifact(type: ContractType) {
     const { FeeJuiceContractArtifact } = await import('@aztec/noir-contracts.js/FeeJuice')
     return FeeJuiceContractArtifact
   }
-  const { TokenContract } = await import('@aztec/noir-contracts.js/Token')
-  return TokenContract.artifact
+  const { TokenContractArtifact } = await import('@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js')
+  return TokenContractArtifact
 }
 
 const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
@@ -105,7 +105,8 @@ class WalletAdapter {
     if (BRIDGED_FPC_ADDRESS) {
       try {
         const { registerBridgedContract } = await import('@defi-wonderland/aztec-fee-payment')
-        await registerBridgedContract(this.wallet)
+        const { Fr } = await import('@aztec/aztec.js/fields')
+        await registerBridgedContract(this.wallet, Fr.ZERO)
       } catch {
         // May already be registered
       }
@@ -121,7 +122,7 @@ class WalletAdapter {
     const type = resolveArtifactType(addr.toString(), this.bridgeAddress)
     const artifact = await getContractArtifact(type)
     const instance = await Contract.at(addr, artifact, this.wallet)
-    const result = await instance.methods[method](...args).simulate({ from: this.account })
+    const { result } = await instance.methods[method](...args).simulate({ from: this.account })
     return { result }
   }
 
@@ -182,7 +183,7 @@ class WalletAdapter {
     const instance = await Contract.at(addr, artifact, this.wallet)
     const sendOpts: any = { from: this.account }
     if (options?.fee) sendOpts.fee = options.fee
-    const receipt = await instance.methods[method](...args)
+    const { receipt } = await instance.methods[method](...args)
       .send(sendOpts)
     return {
       txHash: receipt.txHash.toString(),
@@ -211,7 +212,7 @@ class WalletAdapter {
     const batch = new BatchCall(this.wallet, interactions)
     const sendOpts: any = { from: this.account }
     if (options?.fee) sendOpts.fee = options.fee
-    const receipt = await batch.send(sendOpts)
+    const { receipt } = await batch.send(sendOpts)
     return {
       txHash: receipt.txHash.toString(),
       blockNumber: receipt.blockNumber,
@@ -269,7 +270,7 @@ class WalletAdapter {
       EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce,
     )
     const batch = new BatchCall(this.wallet, [authwit, exitCall])
-    const receipt = await batch.send({ from: this.account })
+    const { receipt } = await batch.send({ from: this.account })
 
     return {
       txHash: receipt.txHash.toString(),
@@ -316,7 +317,7 @@ class WalletAdapter {
     )
 
     // Send exit transaction
-    const receipt = await bridge.methods
+    const { receipt } = await bridge.methods
       .exit_to_l1_private(tokenAddr, EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
       .send({ from: this.account })
 

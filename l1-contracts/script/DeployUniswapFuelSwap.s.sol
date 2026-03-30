@@ -164,9 +164,9 @@ contract DeployUniswapFuelSwap is Script {
     // ── Sepolia addresses ────────────────────────────────────────────
     address constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
     address constant WETH         = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
-    address constant AZTEC        = 0x35d0186d1FD53b72996475D965C5Ed171D52b986;
-    address constant FEE_ASSET_HANDLER = 0xED9c5557d2E0abCc7c7FCA958eE4292199413494;
-    address constant USDC         = 0x47E16BD8702BCef388085c0371Ba0B87fA883f5e;
+    address constant AZTEC        = 0x762C132040fdA6183066Fa3B14d985ee55aA3C18;
+    address constant FEE_ASSET_HANDLER = 0x5602c39A6E9C5AcE589F64F754927bcDa4f4BFc9;
+    address constant USDC         = 0x926867a660297F778157d81BE1308aeA45C6517D;
 
     // ── ETH/AZTEC pool parameters ────────────────────────────────────
     // Native ETH/AZTEC pool at ~10,000 FEE per ETH

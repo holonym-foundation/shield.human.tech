@@ -197,7 +197,7 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
         chainId: chainIdL1,
       })
 
-      const witnessResult = await computeWitness(blockNum, msgLeaf, l1RollupAddress)
+      const witnessResult = await computeWitness(l2TxHash!, msgLeaf)
       l2ToL1MessageIndex = witnessResult.leafIndex
       siblingPath = witnessResult.siblingPath
       withdrawEpoch = witnessResult.epoch

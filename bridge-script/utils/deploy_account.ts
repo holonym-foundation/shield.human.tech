@@ -38,7 +38,7 @@ export async function deploySchnorrAccount(wallet?: EmbeddedWallet): Promise<Acc
 
     // Deploy account
     const timeouts = getTimeouts();
-    await deployMethod.send({ from: AztecAddress.ZERO, fee: { paymentMethod: sponsoredPaymentMethod }, wait: { timeout: timeouts.deployTimeout } });
+    await deployMethod.send({ from: account.address, fee: { paymentMethod: sponsoredPaymentMethod }, wait: { timeout: timeouts.deployTimeout } });
 
     logger.info('🎉 Schnorr account deployment completed successfully!');
     logger.info(`📋 Account Summary:`);

@@ -18,13 +18,8 @@ import {TokenPortal} from "../src/TokenPortal.sol";
  */
 contract SetTrustedForwarderAllPortals is Script {
     address[] internal portals = [
-        0xf962427701dc060b5998D92E381f7D96460DAA6c, // USDC
-        0xdE49BDf98F4E14708b290CccCBCEeDBb78fb142d, // USDT
-        0x495c925b4bD47A9443d2Faf03cf9FD7c2dB74A42, // DAI
-        0xaF50C186E6FdE800C6Fb00adaD8D9926eBF77b78, // HUMN
-        0x0f6E44De5Aa708A7D8BA324E8cfe1b46aDc0e4A1, // GOAT
-        0x0c25a4412a657954155443588b851e98536978F1, // WBTC
-        0x82a3A1966998550869a8A43A7a8107f59FE9c8E6  // WETH
+        0xEFd30BD613EFefd2Cea9D1A6D6Aa57D0d622E87A, // WBTC
+        0x1fe1b5fD55689A656d4b16Ee8A4c6130D9f908ef  // WETH
     ];
 
     function run() external {

@@ -470,6 +470,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         l2BridgeAddress: backup.l2BridgeAddress,
         blockNumberForProof: receiptResult.blockNumberForProof,
         portalAddress: selectedToken?.l1PortalContract,
+        txHash: l2TxHash,
       })
       if (!witnessResult.witnessPatchOk) {
         notify(
@@ -774,7 +775,7 @@ export function useL2RecoverWithdrawal() {
       chainId: L1_CHAIN_ID,
     })
 
-    const witnessResult = await computeWitness(Number(blockNumber), msgLeaf, rollupAddress)
+    const witnessResult = await computeWitness(l2TxHash, msgLeaf)
     const leafIndexStr = witnessResult.leafIndex
     const siblingPathArr = witnessResult.siblingPath
     const updatedWithdrawals = list.map((x: any) =>

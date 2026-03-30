@@ -334,15 +334,15 @@ export async function pollL1ToL2MessageSync(
     pollCount++
     const elapsedSec = Math.round((Date.now() - startWait) / 1000)
     try {
-      const messageBlock = await aztecNode.getL1ToL2MessageBlock(messageHashFr)
-      if (messageBlock !== undefined) {
-        console.log(`[L1→L2] Message ready after ${pollCount} polls (${elapsedSec}s), block=${messageBlock}`)
+      const messageCheckpoint = await aztecNode.getL1ToL2MessageCheckpoint(messageHashFr)
+      if (messageCheckpoint !== undefined) {
+        console.log(`[L1→L2] Message ready after ${pollCount} polls (${elapsedSec}s), checkpoint=${messageCheckpoint}`)
         return {
           synced: true,
           elapsedMinutes: (Date.now() - startWait) / 60_000,
         }
       }
-      console.log(`[L1→L2] Poll #${pollCount} (${elapsedSec}s): not yet synced, response:`, messageBlock)
+      console.log(`[L1→L2] Poll #${pollCount} (${elapsedSec}s): not yet synced, response:`, messageCheckpoint)
     } catch (error) {
       console.warn(`[L1→L2] Poll #${pollCount} (${elapsedSec}s) failed:`, error)
     }
@@ -818,35 +818,39 @@ export async function checkAndApproveAllowance(
   amount: bigint,
   selectedToken?: Token,
 ): Promise<void> {
+  console.log('[L1→L2] DEBUG: checkAndApproveAllowance called, SWAP_BRIDGE_ROUTER:', SWAP_BRIDGE_ROUTER_ADDRESS)
   if (!SWAP_BRIDGE_ROUTER_ADDRESS) {
     throw new Error('SwapBridgeRouter is not configured for this deployment')
   }
 
   const l1TokenAddress = selectedToken?.l1TokenContract ?? ''
   const spender = PERMIT2_ADDRESS
+  console.log('[L1→L2] DEBUG: checking allowance for token:', l1TokenAddress, 'spender:', spender)
 
-  const allowanceData = encodeFunctionData({
+  // Read allowance directly via publicClient (avoids WAAP eth_call which can hang)
+  console.log('[L1→L2] DEBUG: reading allowance via publicClient...')
+  const allowance = await publicClient.readContract({
+    address: l1TokenAddress as `0x${string}`,
     abi: TestERC20Abi,
     functionName: 'allowance',
     args: [l1Address as `0x${string}`, spender as `0x${string}`],
   })
-
-  const allowance = await requestWaapWallet(WAAP_METHOD.eth_call, [
-    { to: l1TokenAddress, data: allowanceData },
-  ])
+  console.log('[L1→L2] DEBUG: allowance response:', allowance)
 
   console.log('[L1→L2] Permit2 allowance:', allowance, 'needed:', amount.toString(), 'spender:', spender)
-  if (BigInt(allowance as string) < amount) {
+  if (BigInt(allowance) < amount) {
     const approveData = encodeFunctionData({
       abi: TestERC20Abi,
       functionName: 'approve',
       args: [spender as `0x${string}`, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')],
     })
 
+    console.log('[L1→L2] DEBUG: requesting WAAP eth_sendTransaction for Permit2 approve...', { from: l1Address, to: l1TokenAddress })
     const approveTxHash = await requestWaapWallet(
       WAAP_METHOD.eth_sendTransaction,
       [{ from: l1Address as `0x${string}`, to: l1TokenAddress, data: approveData }],
     )
+    console.log('[L1→L2] DEBUG: WAAP responded with approveTxHash:', approveTxHash)
 
     console.log('[L1→L2] Permit2 approve tx sent:', approveTxHash, '— waiting for confirmation...')
     await publicClient.waitForTransactionReceipt({ hash: approveTxHash })

@@ -1,0 +1,150 @@
+{
+"id": "4.1.0-rc.4_2026-03-20",
+"deployedAt": "2026-03-20T14:25:20.543Z",
+"network": {
+"name": "testnet",
+"nodeUrl": "https://rpc.testnet.aztec-labs.com",
+"l1RpcUrl": "https://eth-sepolia.g.alchemy.com/v2/kJbQ5Ia0j8V_9HDRmnTBKpFjq_G73oTN",
+"l1ChainId": 11155111,
+"l2ChainId": -156673111,
+"aztecVersion": "4.1.0-rc.4",
+"rollupVersion": 4127419662
+},
+"l1ContractAddresses": {
+"rollupAddress": "0xf6d0d42ace06829becb78c74f49879528fc632c1",
+"registryAddress": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba",
+"inboxAddress": "0xf1bb424ac888aa239f1e658b5bddabc65a1c94e6",
+"outboxAddress": "0x5fe63c32b7ca20445e813bdb1019f1ffc5f52376"
+},
+"nodeInfo": {
+"enr": "enr:-NK4QKuLJdvqjt5xQiQ0ASxsnnJk7WwswapF_hT2FSKP5L0gdmMLRwLzgCOGqo5sL1c4vwD73KJZ-YTmOyyBn2KdG0sHhWF6dGVjsTAwLTExMTU1MTExLWY2ZDBkNDJhLTQxMjc0MTk2NjItMjY3MjM0MGQtMWRkMjY0NGGCaWSCdjSCaXCEIpEFrIlzZWNwMjU2azGhAkj0cNg4q_1-73tJ5SHnVcgHmddUg59kMyRa2qsu46P3g3RjcIKd34N1ZHCCnd-DdmVyijQuMS4wLXJjLjQ",
+"nodeVersion": "4.1.0-rc.4",
+"l1ChainId": 11155111,
+"rollupVersion": 4127419662,
+"l1ContractAddresses": {
+"rollupAddress": "0xf6d0d42ace06829becb78c74f49879528fc632c1",
+"registryAddress": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba",
+"inboxAddress": "0xf1bb424ac888aa239f1e658b5bddabc65a1c94e6",
+"outboxAddress": "0x5fe63c32b7ca20445e813bdb1019f1ffc5f52376",
+"feeJuiceAddress": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
+"stakingAssetAddress": "0x5595cb9ed193cac2c0bc5393313bc6115817954b",
+"feeJuicePortalAddress": "0xd3361019e40026ce8a9745c19e67fd3acc10d596",
+"coinIssuerAddress": "0xe05d0a62045b4237556c1ec423e59eea9a24eaee",
+"rewardDistributorAddress": "0x030d2780e70f085c31d490268d3900d4cea16606",
+"governanceProposerAddress": "0x01c7d4ca153748d2377968fef22894cb162e9480",
+"governanceAddress": "0xcaf7447721447b22cd0076ac7c63877c3afd329f",
+"feeAssetHandlerAddress": "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
+"gseAddress": "0xb6a38a51a6c1de9012f9d8ea9745ef957212eaac"
+},
+"protocolContractAddresses": {
+"classRegistry": "0x0000000000000000000000000000000000000000000000000000000000000003",
+"feeJuice": "0x0000000000000000000000000000000000000000000000000000000000000005",
+"instanceRegistry": "0x0000000000000000000000000000000000000000000000000000000000000002",
+"multiCallEntrypoint": "0x0000000000000000000000000000000000000000000000000000000000000004"
+},
+"realProofs": true
+},
+"sponsoredFeeAddress": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+"tokens": [
+{
+"symbol": "USDC",
+"decimals": 6,
+"logo": "/assets/tokens/usdc-xl.svg",
+"l1TokenContract": "0x926867a660297f778157d81be1308aea45c6517d",
+"l1PortalContract": "0x40596774f0304b05cd0634bf702eae191b8eb6ba",
+"l2TokenContract": "0x260a15cce7364a67d838a94a493891b71465d632c847a8d221bae6324a10bd65",
+"l2BridgeContract": "0x1267d6a6c3109c388335ada53259b439b61815dc952fb25b5d65362547edde8e",
+"l2ProxyContract": "0x2e0028e9ab0533ccfedada460aabf282d669f9da75a15d5dbcd9a701a8db0159",
+"feeAssetHandler": "0xe61f6d5263875a6d1d4a575b685815fa331cf5e9",
+"sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+"humanIdAttester": "0xC93a574A980ce38f603042e981979EeB1Fc8302E",
+"passportSigner": "0x231B8253ba65091efBd0C903A314712B88585C23"
+},
+{
+"symbol": "USDT",
+"decimals": 6,
+"logo": "/assets/tokens/usdt-xl.svg",
+"l1TokenContract": "0xf59ade4ef4070274d4e5d85115e7470db88fa8a1",
+"l1PortalContract": "0x9cf6cdf669c3d960cdb0f29fa79a2a331340952b",
+"l2TokenContract": "0x0ca21144cd9225f325f211c80569be02b5c19ed4828ec70b26f524b109bc8052",
+"l2BridgeContract": "0x23b04aa3d074f9b7102a725f63b4afc506efea14756bd852a648e134cbf6ff91",
+"l2ProxyContract": "0x1a621ec27e43b91ed33c1b927652da086e3d37b48a7e76996a64db52f633a213",
+"feeAssetHandler": "0x96f37c7e3a69508d1aeb80cda4066c227b85e35c",
+"sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+"humanIdAttester": "0xC93a574A980ce38f603042e981979EeB1Fc8302E",
+"passportSigner": "0x231B8253ba65091efBd0C903A314712B88585C23"
+},
+{
+"symbol": "DAI",
+"decimals": 6,
+"logo": "/assets/tokens/dai-xl.svg",
+"l1TokenContract": "0xf18105dc9e634fb873fb1820e8f1d143318515e7",
+"l1PortalContract": "0x0014512db4591a08487d4e4d46ed15bbd08d9203",
+"l2TokenContract": "0x1dd9ced525351e5d6b7a12249569914debd66d384f7b35c8967c71654b19c228",
+"l2BridgeContract": "0x21303d3144dbb0af93d9152ee3fc4a6b76bb9c51f8845f44e4c7e949d9b1bdc7",
+"l2ProxyContract": "0x147e50c48c1ccef1b6f757256187f2fbdef37f62d0f2836903efd690018b0439",
+"feeAssetHandler": "0xd0a869c8edf5ed7c2a1d907c66ab79a153526c88",
+"sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+"humanIdAttester": "0xC93a574A980ce38f603042e981979EeB1Fc8302E",
+"passportSigner": "0x231B8253ba65091efBd0C903A314712B88585C23"
+},
+{
+"symbol": "HUMN",
+"decimals": 6,
+"logo": "/assets/tokens/humn.jpg",
+"l1TokenContract": "0x76494a842cdefd25851f590325c96cc6715025de",
+"l1PortalContract": "0xf4cdd242384021169e3e4208303149858fb67a10",
+"l2TokenContract": "0x0398389c5e6934f818a0eaa7ce91c2dcdd19c16d40d8bacdb91e18ad409a2002",
+"l2BridgeContract": "0x13010d2ba8844230d0f00028f6550d512b2e49a266b8ff1e97752be8e1514fa2",
+"l2ProxyContract": "0x2006d0e345b34d60edd97ec98921fa74af14392e51b2d06f288f265d860c38bd",
+"feeAssetHandler": "0xec2f532deb650fe557feabe2c54119c86ff6c78d",
+"sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+"humanIdAttester": "0xC93a574A980ce38f603042e981979EeB1Fc8302E",
+"passportSigner": "0x231B8253ba65091efBd0C903A314712B88585C23"
+},
+{
+"symbol": "GOAT",
+"decimals": 6,
+"logo": "/assets/tokens/goat.png",
+"l1TokenContract": "0x82b3035acc17438460a9af719fff1bee9b56335a",
+"l1PortalContract": "0x35da62cc13e13b4dd8ff123a34fd670110717390",
+"l2TokenContract": "0x21d324a180e4cf082efb46f90320b6c362292d5190a45a99f3141e4e8cedd16e",
+"l2BridgeContract": "0x0064250c688b0a4071ef003bf059d2d59962170b10209c5162193d09af43e474",
+"l2ProxyContract": "0x0029a05ab20b0358b91c1d8a2f545ac9aadb7997792c9d9a7e4faedc1d394403",
+"feeAssetHandler": "0xf4b0654892bf3df88004426a8e7670eb486b8987",
+"sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+"humanIdAttester": "0xC93a574A980ce38f603042e981979EeB1Fc8302E",
+"passportSigner": "0x231B8253ba65091efBd0C903A314712B88585C23"
+},
+{
+"symbol": "WBTC",
+"decimals": 6,
+"logo": "/assets/tokens/wbtc.png",
+"l1TokenContract": "0x035dd3af0ddb9deeb74fdf9fab56752a0a2a0c05",
+"l1PortalContract": "0x9888f443ee68c605f04c9d26232fe9a89349381d",
+"l2TokenContract": "0x1284aae2979c4f5c6cebc4e687e427894ce415f9b6e4aa44ab2271b52cd15e8a",
+"l2BridgeContract": "0x1cc5a62820fd0243af1968897c037711ac81fcb2d55e20bc4e60a4a6a3ae9e70",
+"l2ProxyContract": "0x257def6cccc6af4e1e8312ea81b10b7d66db6fd0b642dbc63096a4e3bb66057e",
+"feeAssetHandler": "0x004da4d7e3eaf84734accf294de6ef61d0113f99",
+"sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+"humanIdAttester": "0xC93a574A980ce38f603042e981979EeB1Fc8302E",
+"passportSigner": "0x231B8253ba65091efBd0C903A314712B88585C23"
+},
+{
+"symbol": "WETH",
+"decimals": 18,
+"logo": "/assets/tokens/weth-xl.svg",
+"l1TokenContract": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+"l1PortalContract": "0x714b0b9fa8b9091187f0ebb8815b45e5088c7b68",
+"l2TokenContract": "0x16b10fdf09c3021fdbd78abf898f87e5d611afb8242044ae799bac0c87b0a843",
+"l2BridgeContract": "0x0fdc293f0576984973b4cccdac321facffb17ae04dc4bfd07dbb89919672663e",
+"l2ProxyContract": "0x13f4589c0dbd7c4f4eac28833ae1000d46a49697366fade80a29ecbd7014f20a",
+"feeAssetHandler": "0x66b3bbdc46fdf9a3f980241d2c5b1bd73d1f5d3d",
+"sponsoredFee": "0x09a4df73aa47f82531a038d1d51abfc85b27665c4b7ca751e2d4fa9f19caffb2",
+"humanIdAttester": "0xC93a574A980ce38f603042e981979EeB1Fc8302E",
+"passportSigner": "0x231B8253ba65091efBd0C903A314712B88585C23"
+}
+],
+"swapBridgeRouterAddress": "0x2b89cD3D060202f1f03334dd55039c5955C708aA",
+"uniswapFuelSwapAddress": "0x37977330d4C2EFD3ff0244785F21F6ea3a2c64bc"
+}

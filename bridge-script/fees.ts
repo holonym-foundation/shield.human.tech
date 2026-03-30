@@ -1,9 +1,9 @@
 import { createLogger, FeeJuicePaymentMethodWithClaim, Fr, L1FeeJuicePortalManager, PXE, waitForPXE , createPXEClient, Logger, FeeJuicePaymentMethod, PrivateFeePaymentMethod, PublicFeePaymentMethod } from "@aztec/aztec.js";
 import {
-    Chain,
-    createPublicClient,
-    createWalletClient,
-    http,
+Chain,
+createPublicClient,
+createWalletClient,
+http,
 } from 'viem';
 import { getSchnorrAccount } from '@aztec/accounts/schnorr';
 import { deriveSigningKey } from '@aztec/stdlib/keys';
@@ -23,10 +23,10 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 const setupPXE = async () => {
-    const { PXE_URL = 'http://localhost:8081' } = process.env;
-    const pxe = await createPXEClient(PXE_URL);
-    await waitForPXE(pxe);
-    return pxe;
+const { PXE_URL = 'http://localhost:8081' } = process.env;
+const pxe = await createPXEClient(PXE_URL);
+await waitForPXE(pxe);
+return pxe;
 };
 
 const MNEMONIC = 'test test test test test test test test test test test junk';
@@ -35,127 +35,127 @@ const FEE_FUNDING_FOR_TESTER_ACCOUNT = 1000000000000000000n;
 let walletClient = getL1WalletClient(process.env.L1_URL!, 0);
 
 const publicClient = createPublicClient({
-    chain: foundry,
-    transport: http(process.env.L1_URL),
+chain: foundry,
+transport: http(process.env.L1_URL),
 });
 
 async function main() {
 
-    let pxe: PXE;
-    let logger: Logger;
+let pxe: PXE;
+let logger: Logger;
 
-    logger = createLogger('aztec');
+logger = createLogger('aztec');
 
-    pxe = await setupPXE();
-    const nodeInfo = (await pxe.getNodeInfo())
+pxe = await setupPXE();
+const nodeInfo = (await pxe.getNodeInfo())
 
-    // Setup Schnorr AccountManager
+// Setup Schnorr AccountManager
 
-    let secretKey = Fr.random();
-    let salt = Fr.random();
-    let schnorrAccount = await getSchnorrAccount(pxe, secretKey, deriveSigningKey(secretKey), salt);
-    
-    const wallet1 = await deploySchnorrAccount()
-    const newWallet = await schnorrAccount.getWallet()
-    const feeJuiceReceipient = schnorrAccount.getAddress()
+let secretKey = Fr.random();
+let salt = Fr.random();
+let schnorrAccount = await getSchnorrAccount(pxe, secretKey, deriveSigningKey(secretKey), salt);
 
-    // Setup and bridge fee asset to L2 to get fee juice
+const wallet1 = await deploySchnorrAccount()
+const newWallet = await schnorrAccount.getWallet()
+const feeJuiceReceipient = schnorrAccount.getAddress()
 
-    const feeJuicePortalManager = await L1FeeJuicePortalManager.new(
-        pxe,
-        //@ts-ignore
-        publicClient,
-        walletClient,
-        logger,
-    );
+// Setup and bridge fee asset to L2 to get fee juice
 
-    const claim = await feeJuicePortalManager.bridgeTokensPublic(feeJuiceReceipient, FEE_FUNDING_FOR_TESTER_ACCOUNT, true);
+const feeJuicePortalManager = await L1FeeJuicePortalManager.new(
+pxe,
+//@ts-ignore
+publicClient,
+walletClient,
+logger,
+);
 
-    logger.info(`Fee Juice minted to ${feeJuiceReceipient} on L2.`)
+const claim = await feeJuicePortalManager.bridgeTokensPublic(feeJuiceReceipient, FEE_FUNDING_FOR_TESTER_ACCOUNT, true);
 
-    // set up sponsored fee payments
-    const sponseredFPC = await getSponsoredFPCInstance();
-    await pxe.registerContract({instance: sponseredFPC, artifact: SponsoredFPCContract.artifact});
-    const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
-    // Two arbitraty txs to make the L1 message available on L2
-    const votingContract = await EasyPrivateVotingContract.deploy(wallet1, wallet1.getAddress()).send({from: wallet1.getAddress(), fee: {paymentMethod}}).deployed();
-    const bananaCoin = await TokenContract.deploy(wallet1, wallet1.getAddress(), "bananaCoin", "BNC", 18).send({from: wallet1.getAddress(), fee: {paymentMethod}}).deployed()
+logger.info(`Fee Juice minted to ${feeJuiceReceipient} on L2.`)
 
-    // Claim Fee Juice & Pay Fees yourself
+// set up sponsored fee payments
+const sponseredFPC = await getSponsoredFPCInstance();
+await pxe.registerContract({instance: sponseredFPC, artifact: SponsoredFPCContract.artifact});
+const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
+// Two arbitraty txs to make the L1 message available on L2
+const { contract: votingContract } = await EasyPrivateVotingContract.deploy(wallet1, wallet1.getAddress()).send({from: wallet1.getAddress(), fee: {paymentMethod}});
+const { contract: bananaCoin } = await TokenContract.deploy(wallet1, wallet1.getAddress(), "bananaCoin", "BNC", 18).send({from: wallet1.getAddress(), fee: {paymentMethod}})
 
-    const claimAndPay = new FeeJuicePaymentMethodWithClaim(newWallet, claim)
-    await schnorrAccount.deploy({ fee: { paymentMethod: claimAndPay } }).wait()
-    logger.info(`New account at ${newWallet.getAddress()} deployed using claimed funds for fees.`)
+// Claim Fee Juice & Pay Fees yourself
 
-    // Pay fees yourself
+const claimAndPay = new FeeJuicePaymentMethodWithClaim(newWallet, claim)
+await schnorrAccount.deploy({ fee: { paymentMethod: claimAndPay } })
+logger.info(`New account at ${newWallet.getAddress()} deployed using claimed funds for fees.`)
 
-    // Create a new voting contract instance, interacting from the newWallet
-    const useFeeJuice = new FeeJuicePaymentMethod(newWallet.getAddress())
-    await votingContract.withWallet(newWallet).methods.cast_vote(wallet1.getAddress()).send({ from: newWallet.getAddress(), fee: { paymentMethod: useFeeJuice }}).wait()
-    logger.info(`Vote cast from new account, paying fees via newWallet.`)
+// Pay fees yourself
 
-    // Private Fee Payments via FPC
+// Create a new voting contract instance, interacting from the newWallet
+const useFeeJuice = new FeeJuicePaymentMethod(newWallet.getAddress())
+await votingContract.withWallet(newWallet).methods.cast_vote(wallet1.getAddress()).send({ from: newWallet.getAddress(), fee: { paymentMethod: useFeeJuice }})
+logger.info(`Vote cast from new account, paying fees via newWallet.`)
 
-    // Must use a Fee Paying Contract (FPC) to pay fees privately
-    // Need to deploy an FPC to use Private Fee payment methods
+// Private Fee Payments via FPC
 
-    // This uses bananaCoin as the fee paying asset that will be exchanged for fee juice
-    const fpc = await FPCContract.deploy(wallet1, bananaCoin.address, wallet1.getAddress()).send({from: wallet1.getAddress(), fee: {paymentMethod}}).deployed()
-    const fpcClaim = await feeJuicePortalManager.bridgeTokensPublic(fpc.address, FEE_FUNDING_FOR_TESTER_ACCOUNT, true);
-    // 2 public txs to make the bridged fee juice available
-    // Mint some bananaCoin and send to the newWallet to pay fees privately
-    await bananaCoin.methods.mint_to_private(wallet1.getAddress(), newWallet.getAddress(), FEE_FUNDING_FOR_TESTER_ACCOUNT).send({from: wallet1.getAddress(), fee: {paymentMethod}}).wait()
-    // mint some public bananaCoin to the newWallet to pay fees publicly
-    await bananaCoin.methods.mint_to_public(newWallet.getAddress(), FEE_FUNDING_FOR_TESTER_ACCOUNT).send({from: wallet1.getAddress(), fee: {paymentMethod}}).wait()
-    const bananaBalance = await bananaCoin.withWallet(newWallet).methods.balance_of_private(newWallet.getAddress()).simulate()
+// Must use a Fee Paying Contract (FPC) to pay fees privately
+// Need to deploy an FPC to use Private Fee payment methods
 
-    logger.info(`BananaCoin balance of newWallet is ${bananaBalance}`)
+// This uses bananaCoin as the fee paying asset that will be exchanged for fee juice
+const { contract: fpc } = await FPCContract.deploy(wallet1, bananaCoin.address, wallet1.getAddress()).send({from: wallet1.getAddress(), fee: {paymentMethod}})
+const fpcClaim = await feeJuicePortalManager.bridgeTokensPublic(fpc.address, FEE_FUNDING_FOR_TESTER_ACCOUNT, true);
+// 2 public txs to make the bridged fee juice available
+// Mint some bananaCoin and send to the newWallet to pay fees privately
+await bananaCoin.methods.mint_to_private(wallet1.getAddress(), newWallet.getAddress(), FEE_FUNDING_FOR_TESTER_ACCOUNT).send({from: wallet1.getAddress(), fee: {paymentMethod}})
+// mint some public bananaCoin to the newWallet to pay fees publicly
+await bananaCoin.methods.mint_to_public(newWallet.getAddress(), FEE_FUNDING_FOR_TESTER_ACCOUNT).send({from: wallet1.getAddress(), fee: {paymentMethod}})
+const { result: bananaBalance } = await bananaCoin.withWallet(newWallet).methods.balance_of_private(newWallet.getAddress()).simulate()
 
-    const feeJuiceInstance = await getCanonicalFeeJuice();
-    // await pxe.registerContract({instance: feeJuiceInstance.instance, artifact: })
-    const feeJuice = await FeeJuiceContract.at(feeJuiceInstance.address, newWallet)
-    await feeJuice.methods.claim(fpc.address, fpcClaim.claimAmount, fpcClaim.claimSecret, fpcClaim.messageLeafIndex).send().wait()
+logger.info(`BananaCoin balance of newWallet is ${bananaBalance}`)
 
-    logger.info(`Fpc fee juice balance ${await feeJuice.methods.balance_of_public(fpc.address).simulate()}`)
+const feeJuiceInstance = await getCanonicalFeeJuice();
+// await pxe.registerContract({instance: feeJuiceInstance.instance, artifact: })
+const feeJuice = await FeeJuiceContract.at(feeJuiceInstance.address, newWallet)
+await feeJuice.methods.claim(fpc.address, fpcClaim.claimAmount, fpcClaim.claimSecret, fpcClaim.messageLeafIndex).send()
 
-    const privateFee = new PrivateFeePaymentMethod(fpc.address, newWallet)    
-    await bananaCoin.withWallet(newWallet).methods.transfer_in_private(newWallet.getAddress(), wallet1.getAddress(), 10, 0).send({ from: newWallet.getAddress(), fee: { paymentMethod: privateFee }}).wait()
-    
-    logger.info(`Transfer paid with fees via the FPC, privately.`)
+logger.info(`Fpc fee juice balance ${(await feeJuice.methods.balance_of_public(fpc.address).simulate()).result}`)
 
-    // Public Fee Payments via FPC
+const privateFee = new PrivateFeePaymentMethod(fpc.address, newWallet)
+await bananaCoin.withWallet(newWallet).methods.transfer_in_private(newWallet.getAddress(), wallet1.getAddress(), 10, 0).send({ from: newWallet.getAddress(), fee: { paymentMethod: privateFee }})
 
-    const publicFee = new PublicFeePaymentMethod(fpc.address, newWallet)
-    await bananaCoin.withWallet(newWallet).methods.transfer_in_private(newWallet.getAddress(), wallet1.getAddress(), 10, 0).send({ from: newWallet.getAddress(), fee: { paymentMethod: publicFee }}).wait()
-    logger.info(`Transfer paid with fees via the FPC, publicly.`)
+logger.info(`Transfer paid with fees via the FPC, privately.`)
 
-    // Sponsored Fee Payment
+// Public Fee Payments via FPC
 
-    // This method will only work in environments where there is a sponsored fee contract deployed 
-    const deployedSponseredFPC = await getDeployedSponsoredFPCAddress(pxe);
-    const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(deployedSponseredFPC);
-    await bananaCoin.withWallet(newWallet).methods.transfer_in_private(newWallet.getAddress(), wallet1.getAddress(), 10, 0).send({ from: newWallet.getAddress(), fee: { paymentMethod: sponsoredPaymentMethod }}).wait()
-    logger.info(`Transfer paid with fees from Sponsored FPC.`)
+const publicFee = new PublicFeePaymentMethod(fpc.address, newWallet)
+await bananaCoin.withWallet(newWallet).methods.transfer_in_private(newWallet.getAddress(), wallet1.getAddress(), 10, 0).send({ from: newWallet.getAddress(), fee: { paymentMethod: publicFee }})
+logger.info(`Transfer paid with fees via the FPC, publicly.`)
+
+// Sponsored Fee Payment
+
+// This method will only work in environments where there is a sponsored fee contract deployed 
+const deployedSponseredFPC = await getDeployedSponsoredFPCAddress(pxe);
+const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(deployedSponseredFPC);
+await bananaCoin.withWallet(newWallet).methods.transfer_in_private(newWallet.getAddress(), wallet1.getAddress(), 10, 0).send({ from: newWallet.getAddress(), fee: { paymentMethod: sponsoredPaymentMethod }})
+logger.info(`Transfer paid with fees from Sponsored FPC.`)
 }
 
 main();
 
 // from here: https://github.com/AztecProtocol/aztec-packages/blob/ecbd59e58006533c8885a8b2fadbd9507489300c/yarn-project/end-to-end/src/fixtures/utils.ts#L534
 function getL1WalletClient(rpcUrl: string, index: number) {
-    const hdAccount = mnemonicToAccount(MNEMONIC, { addressIndex: index });
-    const chain: Chain = {
-        id: Number(process.env.L1_CHAIN_ID!),
-        name: "test",
-        nativeCurrency: {
-            name: "ETH",
-            symbol: "ETH",
-            decimals: 18
-        },
-        rpcUrls: {default: {http: [process.env.L1_URL!]}}
-    }
-    return createWalletClient({
-        account: hdAccount,
-        chain,
-        transport: http(rpcUrl),
-    });
+const hdAccount = mnemonicToAccount(MNEMONIC, { addressIndex: index });
+const chain: Chain = {
+id: Number(process.env.L1_CHAIN_ID!),
+name: "test",
+nativeCurrency: {
+name: "ETH",
+symbol: "ETH",
+decimals: 18
+},
+rpcUrls: {default: {http: [process.env.L1_URL!]}}
+}
+return createWalletClient({
+account: hdAccount,
+chain,
+transport: http(rpcUrl),
+});
 }

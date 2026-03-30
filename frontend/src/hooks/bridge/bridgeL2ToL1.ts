@@ -21,6 +21,7 @@ import { EthAddress } from '@aztec/foundation/eth-address'
 import { sha256ToField } from '@aztec/foundation/crypto/sha256'
 import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
 import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
+import { TxHash } from '@aztec/stdlib/tx'
 import { TokenPortalAbi, RollupAbi } from '@aztec/l1-artifacts'
 import { toFunctionSelector, encodeFunctionData } from 'viem'
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
@@ -159,56 +160,30 @@ export function computeL2ToL1MessageLeaf(params: {
 // ═════════════════════════════════════════════════════════════════════
 
 /**
- * Compute L2-to-L1 membership witness (leaf index + sibling path) for a block.
+ * Compute L2-to-L1 membership witness (leaf index + sibling path) for a transaction.
  *
- * Converts blockNumber → epoch via the L1 Rollup's `getEpochForCheckpoint`,
- * then calls `computeL2ToL1MembershipWitness(node, epoch, msgLeaf)`.
+ * In 4.1.0+, `computeL2ToL1MembershipWitness` takes the txHash directly
+ * and internally resolves the epoch/block/tx structure.
  */
 export async function computeWitness(
-  blockNumber: number,
+  txHash: string,
   msgLeaf: Fr,
-  rollupAddress: string,
 ): Promise<WitnessResult> {
-  console.log('[L2→L1] Computing L2→L1 membership witness (block=', blockNumber, ')...')
-
-  // Convert block number → epoch via L1 Rollup contract
-  // Retry on any error — checkpoint may not exist yet if the block was just proven
-  let epoch!: bigint
-  const maxRetries = 5
-  const retryDelayMs = 30_000
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const epochRaw = await publicClient.readContract({
-        address: rollupAddress as `0x${string}`,
-        abi: RollupAbi,
-        functionName: 'getEpochForCheckpoint',
-        args: [BigInt(blockNumber)],
-      })
-      epoch = typeof epochRaw === 'bigint' ? epochRaw : BigInt(epochRaw as number)
-      console.log('[L2→L1] Block', blockNumber, '→ Epoch', epoch.toString())
-      break
-    } catch (err) {
-      if (attempt < maxRetries) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.warn(`[L2→L1] getEpochForCheckpoint failed (attempt ${attempt}/${maxRetries}), retrying in ${retryDelayMs / 1000}s...`, msg)
-        await wait(retryDelayMs)
-        continue
-      }
-      throw err
-    }
-  }
+  console.log('[L2→L1] Computing L2→L1 membership witness (txHash=', txHash, ')...')
 
   const witness = await computeL2ToL1MembershipWitness(
     aztecNode,
-    epoch as unknown as Parameters<typeof computeL2ToL1MembershipWitness>[1],
     msgLeaf,
+    TxHash.fromString(txHash),
   )
 
   if (!witness) {
     throw new Error(
-      `L2→L1 message not found in epoch ${epoch} (block ${blockNumber}). The block may not be finalized yet, or the message leaf does not match.`,
+      `L2→L1 message not found for txHash ${txHash}. The block may not be finalized yet, or the message leaf does not match.`,
     )
   }
+
+  const epoch = BigInt(witness.epochNumber)
 
   const leafIndex =
     typeof witness.leafIndex === 'bigint'
@@ -783,8 +758,9 @@ export async function fetchNodeInfoAndComputeWitness(params: {
   l2BridgeAddress: string
   blockNumberForProof: number
   portalAddress?: string
+  txHash: string
 }): Promise<WitnessComputeResult> {
-  const { operationId, l1Address, amount, l2BridgeAddress, blockNumberForProof, portalAddress } = params
+  const { operationId, l1Address, amount, l2BridgeAddress, blockNumberForProof, portalAddress, txHash } = params
 
   // Get L1 addresses and rollup version from node
   console.log('[L2→L1] Fetching node info (rollupVersion, L1 addresses)...')
@@ -803,10 +779,6 @@ export async function fetchNodeInfoAndComputeWitness(params: {
       ? l1Addresses.rollupAddress.toString()
       : L1_CONTRACT_ADDRESSES.rollupAddress || undefined
 
-  if (!rollupAddress) {
-    throw new Error('Rollup address not available. Cannot convert block number to epoch for L2→L1 witness.')
-  }
-
   // Compute L2→L1 message leaf + membership witness
   const msgLeaf = computeL2ToL1MessageLeaf({
     l1Recipient: l1Address,
@@ -817,7 +789,7 @@ export async function fetchNodeInfoAndComputeWitness(params: {
     chainId: L1_CHAIN_ID,
   })
 
-  const witnessResult = await computeWitness(blockNumberForProof, msgLeaf, rollupAddress)
+  const witnessResult = await computeWitness(txHash, msgLeaf)
   const leafIndex = witnessResult.leafIndex
   const siblingPath = witnessResult.siblingPath
   const epoch = witnessResult.epoch

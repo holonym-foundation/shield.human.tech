@@ -15,8 +15,8 @@ import {SwapBridgeRouter} from "../src/SwapBridgeRouter.sol";
 contract DeploySwapBridgeRouter is Script {
     // ── Sepolia addresses ────────────────────────────────────────────
     address constant PERMIT2          = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-    address constant FEE_JUICE_PORTAL = 0x516E3f74FD1C19B24da0706d28B5a30578f054AB;
-    address constant UNISWAP_FUEL_SWAP = 0x547BE2F85f371f85fFB7f5BA1a972EAd88D7dB42;
+    address constant FEE_JUICE_PORTAL = 0xd3361019E40026ce8a9745c19e67Fd3ACC10d596;
+    address constant UNISWAP_FUEL_SWAP = 0x37977330d4C2EFD3ff0244785F21F6ea3a2c64bc;
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
