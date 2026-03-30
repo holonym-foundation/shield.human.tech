@@ -153,15 +153,15 @@ contract SeedUniswapPools is Script {
     uint24  constant ETH_AZTEC_FEE         = 3000;
     int24   constant ETH_AZTEC_TICK_SPACING = 60;
     uint160 constant ETH_AZTEC_SQRT_PRICE  = 7922816251426433759354395033600;
-    int24   constant ETH_AZTEC_TICK_LOWER  = 69060;
-    int24   constant ETH_AZTEC_TICK_UPPER  = 115140;
+    int24   constant ETH_AZTEC_TICK_LOWER  = -887220;  // full range (tick spacing = 60)
+    int24   constant ETH_AZTEC_TICK_UPPER  = 887220;   // full range
 
     // ── ERC20/WETH pool params (~2,100 USDC per WETH) ──────────────
     uint24  constant ERC20_WETH_FEE         = 3000;
     int24   constant ERC20_WETH_TICK_SPACING = 60;
     uint160 constant ERC20_WETH_SQRT_PRICE  = 1728916962386276374966316084832192;
-    int24   constant ERC20_WETH_TICK_LOWER  = 169800;
-    int24   constant ERC20_WETH_TICK_UPPER  = 229800;
+    int24   constant ERC20_WETH_TICK_LOWER  = -887220;  // full range
+    int24   constant ERC20_WETH_TICK_UPPER  = 887220;   // full range
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
