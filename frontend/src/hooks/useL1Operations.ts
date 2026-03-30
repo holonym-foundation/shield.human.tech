@@ -699,9 +699,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       operationId = backup.operationId
 
       // ─── Step 3: Check allowance and approve (+ Permit2 sign) ────────
-      console.log('[L1→L2] DEBUG: Starting checkAndApproveAllowance...')
       await checkAndApproveAllowance(l1Address, amount, selectedToken)
-      console.log('[L1→L2] DEBUG: checkAndApproveAllowance done')
 
       // ─── Step 3b: Fetch attestation for private deposits (POCH → Passport fallback) ──
       let attestation: PochAttestationData | undefined
@@ -908,25 +906,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
 
             const estimatedMaxGasCost = maxGasCostFor(maxFeesPerGas, gasLimits)
-            console.log('[L1→L2] DEBUG PRIVATE FUEL — Gas diagnostics:', {
-              baseFees: { feePerDaGas: baseFees.feePerDaGas.toString(), feePerL2Gas: baseFees.feePerL2Gas.toString() },
-              maxFeesPerGas: { feePerDaGas: maxFeesPerGas.feePerDaGas.toString(), feePerL2Gas: maxFeesPerGas.feePerL2Gas.toString() },
-              gasLimits: { daGas: gasLimits.daGas.toString(), l2Gas: gasLimits.l2Gas.toString() },
-              teardownGasLimits: { daGas: teardownGasLimits.daGas.toString(), l2Gas: teardownGasLimits.l2Gas.toString() },
+            console.log('[L1→L2] Gas estimate:', {
               estimatedMaxGasCost: estimatedMaxGasCost.toString(),
               fuelAmount: receipt.fuelAmount.toString(),
               sufficient: receipt.fuelAmount >= estimatedMaxGasCost,
-            })
-
-            console.log('[L1→L2] DEBUG PRIVATE FUEL — BridgedMintAndPayFeePaymentMethod params:', {
-              fpcAddress: privateFuel.fpcAddress,
-              fuelAmount: receipt.fuelAmount.toString(),
-              privateFuelSecret: backup.privateFuelSecret.toString(),
-              privateFuelSalt: backup.privateFuelSalt.toString(),
-              fuelMessageLeafIndex: receipt.fuelMessageLeafIndexStr,
-              fuelSecretHash: backup.privateFuelSecretHash?.toString(),
-              aztecAddress,
-              claimAmount: receipt.claimAmount?.toString(),
             })
 
             const paymentMethod = new BridgedMintAndPayFeePaymentMethod(
@@ -937,7 +920,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               new FieldFr(BigInt(receipt.fuelMessageLeafIndexStr!)),
             )
             feeOption = { fee: { paymentMethod, gasSettings: { gasLimits, teardownGasLimits, maxFeesPerGas, maxPriorityFeesPerGas: GasFees.empty() } } }
-            console.log('[L1→L2] DEBUG PRIVATE FUEL — Using BridgedMintAndPayFeePaymentMethod with explicit gasSettings')
+            console.log('[L1→L2] Using BridgedMintAndPayFeePaymentMethod (private fuel)')
           } catch (err) {
             console.warn('[L1→L2] Failed to create BridgedMintAndPayFeePaymentMethod, falling back to default:', err)
           }
@@ -961,17 +944,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           throw new Error('claimAmount missing from deposit event — cannot determine correct claim amount')
         }
         const claimAmount = receipt.claimAmount
-        console.log('[L1→L2] DEBUG CLAIM — Full claim context:', {
-          claimAmount: claimAmount.toString(),
-          claimSecret: backup.claimSecret.toString(),
-          messageLeafIndex: receipt.messageLeafIndexStr,
-          fuelAmount: receipt.fuelAmount?.toString(),
-          fuelMessageLeafIndex: receipt.fuelMessageLeafIndexStr,
-          hasFeeOption: !!feeOption,
-          feeOptionType: feeOption ? 'BridgedMintAndPayFee' : 'none',
-          isPrivacyModeEnabled,
-          aztecAddress,
-        })
+        console.log('[L1→L2] Claim amount (after fee):', claimAmount.toString(), 'feeOption:', feeOption ? 'yes' : 'none')
 
         const claimResult = await executeL2Claim(
           { walletAdapter, aztecAddress, isPrivacyModeEnabled: isPrivacyModeEnabled ?? false },

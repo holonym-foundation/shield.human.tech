@@ -434,13 +434,7 @@ export async function executeL2Claim(
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         options?.onAttempt?.(attempt, maxAttempts)
-        console.log(`[L1→L2] DEBUG CLAIM TX — attempt ${attempt}/${maxAttempts}`, {
-          method,
-          bridgeAddress: walletAdapter.bridgeAddress,
-          claimArgs: claimArgs.map(a => a?.toString?.() ?? String(a)),
-          hasFeeOption: !!options?.feeOption,
-          feeOptionKeys: options?.feeOption ? Object.keys(options.feeOption.fee) : [],
-        })
+        console.log(`[L1→L2] Sending claim transaction (attempt ${attempt}/${maxAttempts})...`)
 
         const result = await callWithTimeout(
           walletAdapter.executeCall(
@@ -797,12 +791,7 @@ export async function generateAndBackupClaimSecret(params: {
     const { secret: pfSecret, secretHash: pfSecretHash } = await pfHashRes.json()
     privateFuelSecret = Fr.fromString(pfSecret)
     privateFuelSecretHash = Fr.fromString(pfSecretHash)
-    console.log('[L1→L2] DEBUG PRIVATE FUEL SECRET:', {
-      privateFuelSalt: privateFuelSalt.toString(),
-      privateFuelSecret: privateFuelSecret.toString(),
-      privateFuelSecretHash: privateFuelSecretHash.toString(),
-      claimer: params.aztecAddress,
-    })
+    console.log('[L1→L2] Private fuel (BridgedFPC) secret generated')
   }
 
   return {
@@ -829,26 +818,20 @@ export async function checkAndApproveAllowance(
   amount: bigint,
   selectedToken?: Token,
 ): Promise<void> {
-  console.log('[L1→L2] DEBUG: checkAndApproveAllowance called, SWAP_BRIDGE_ROUTER:', SWAP_BRIDGE_ROUTER_ADDRESS)
   if (!SWAP_BRIDGE_ROUTER_ADDRESS) {
     throw new Error('SwapBridgeRouter is not configured for this deployment')
   }
 
   const l1TokenAddress = selectedToken?.l1TokenContract ?? ''
   const spender = PERMIT2_ADDRESS
-  console.log('[L1→L2] DEBUG: checking allowance for token:', l1TokenAddress, 'spender:', spender)
-
   // Read allowance directly via publicClient (avoids WAAP eth_call which can hang)
-  console.log('[L1→L2] DEBUG: reading allowance via publicClient...')
   const allowance = await publicClient.readContract({
     address: l1TokenAddress as `0x${string}`,
     abi: TestERC20Abi,
     functionName: 'allowance',
     args: [l1Address as `0x${string}`, spender as `0x${string}`],
   })
-  console.log('[L1→L2] DEBUG: allowance response:', allowance)
-
-  console.log('[L1→L2] Permit2 allowance:', allowance, 'needed:', amount.toString(), 'spender:', spender)
+  console.log('[L1→L2] Permit2 allowance:', allowance, 'needed:', amount.toString())
   if (BigInt(allowance) < amount) {
     const approveData = encodeFunctionData({
       abi: TestERC20Abi,
@@ -856,12 +839,10 @@ export async function checkAndApproveAllowance(
       args: [spender as `0x${string}`, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')],
     })
 
-    console.log('[L1→L2] DEBUG: requesting WAAP eth_sendTransaction for Permit2 approve...', { from: l1Address, to: l1TokenAddress })
     const approveTxHash = await requestWaapWallet(
       WAAP_METHOD.eth_sendTransaction,
       [{ from: l1Address as `0x${string}`, to: l1TokenAddress, data: approveData }],
     )
-    console.log('[L1→L2] DEBUG: WAAP responded with approveTxHash:', approveTxHash)
 
     console.log('[L1→L2] Permit2 approve tx sent:', approveTxHash, '— waiting for confirmation...')
     await publicClient.waitForTransactionReceipt({ hash: approveTxHash })
@@ -1070,17 +1051,7 @@ export async function sendL1DepositTransaction(params: {
       ],
     })
 
-    console.log('[L1→L2] DEBUG DEPOSIT — SwapBridgeRouter.bridgeWithFuel params:', {
-      totalAmount: amount.toString(),
-      fuelAmount: fuel.fuelAmount.toString(),
-      fuelRecipient: privateFuel ? privateFuel.fpcAddress : aztecAddress,
-      fuelSecretHash: fuelSecretHashHex,
-      tokenSecretHash: claimSecretHash.toString(),
-      aztecRecipient: aztecAddress,
-      isPrivate: isPrivacyModeEnabled,
-      isPrivateFuel: !!privateFuel,
-      minFuelOutput: fuel.fuelQuote.minOutput.toString(),
-    })
+    console.log('[L1→L2] Sending SwapBridgeRouter.bridgeWithFuel tx')
     txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
       { from: l1Address as `0x${string}`, to: SWAP_BRIDGE_ROUTER_ADDRESS, data: bridgeData },
     ])
