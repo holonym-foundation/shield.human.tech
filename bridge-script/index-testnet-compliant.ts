@@ -1820,13 +1820,23 @@ async function main() {
   await pxe.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContractArtifact })
   const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address)
 
+  // Deploy account (skip if already deployed — "Existing nullifier" means it's already on-chain)
   const deployMethod = await accountManager.getDeployMethod()
   logger.info('Deploying account (NO_FROM + SponsoredFPC)...')
-  await deployMethod.send({
-    from: NO_FROM,
-    fee: { paymentMethod: sponsoredPaymentMethod },
-    wait: { timeout: getTimeouts().deployTimeout },
-  })
+  try {
+    await deployMethod.send({
+      from: NO_FROM,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+      wait: { timeout: getTimeouts().deployTimeout },
+    })
+    logger.info('Account deployed successfully')
+  } catch (e: any) {
+    if (e.message?.includes('Existing nullifier') || e.cause?.message?.includes('Existing nullifier')) {
+      logger.info(`Account already deployed at ${ownerAztecAddress}, skipping`)
+    } else {
+      throw e
+    }
+  }
   await wallet.registerSender(ownerAztecAddress, 'owner')
   logger.info(`Owner Aztec Address: ${ownerAztecAddress}`)
 

@@ -6,7 +6,7 @@
       "file": "4.1.2_2026-03-30.json",
       "deployedAt": "2026-03-30T16:38:04.004Z",
       "network": "testnet",
-      "aztecVersion": "4.2.0-aztecnr-rc.2",
+      "aztecVersion": "4.1.2",
       "active": true
     }
   ]
