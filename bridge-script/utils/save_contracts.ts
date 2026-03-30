@@ -43,6 +43,9 @@ l1ContractAddresses: L1ContractAddresses;
 nodeInfo: Record<string, unknown>;
 sponsoredFeeAddress: string;
 tokens: DeployedToken[];
+swapBridgeRouterAddress?: string;
+uniswapFuelSwapAddress?: string;
+bridgedFpcAddress?: string;
 }
 
 export interface RegistryEntry {
@@ -213,6 +216,30 @@ deployment.tokens.push(token);
 
 writeJson(filePath, deployment);
 console.log(`✅ Saved ${token.symbol} to deployment ${id}`);
+}
+
+/**
+ * Save fuel infrastructure addresses to the active deployment.
+ */
+export function saveFuelInfraToDeployment(infra: {
+swapBridgeRouterAddress: string;
+uniswapFuelSwapAddress: string;
+bridgedFpcAddress: string;
+}): void {
+const registry = loadRegistry();
+if (!registry) throw new Error('No registry found');
+const id = registry.activeDeploymentId;
+const entry = registry.deployments.find(d => d.id === id);
+if (!entry) throw new Error(`Deployment ${id} not found in registry`);
+const filePath = resolve(DEPLOYMENTS_DIR, entry.file);
+const deployment: DeploymentFile = JSON.parse(readFileSync(filePath, 'utf-8'));
+
+deployment.swapBridgeRouterAddress = infra.swapBridgeRouterAddress;
+deployment.uniswapFuelSwapAddress = infra.uniswapFuelSwapAddress;
+deployment.bridgedFpcAddress = infra.bridgedFpcAddress;
+
+writeJson(filePath, deployment);
+console.log(`✅ Saved fuel infrastructure to deployment ${id}`);
 }
 
 /**

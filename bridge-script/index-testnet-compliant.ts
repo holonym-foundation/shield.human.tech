@@ -62,6 +62,21 @@ import TestERC20Json from './constants/TestERC20.json'
 const TestERC20Abi = TestERC20Json.abi
 const TestERC20Bytecode = TestERC20Json.bytecode.object as `0x${string}`
 
+// Fuel infrastructure (UniswapFuelSwap + SwapBridgeRouter)
+// @ts-ignore
+import UniswapFuelSwapJson from '../l1-contracts/out/UniswapFuelSwap.sol/UniswapFuelSwap.json'
+const UniswapFuelSwapAbi = UniswapFuelSwapJson.abi
+const UniswapFuelSwapBytecode = UniswapFuelSwapJson.bytecode.object as `0x${string}`
+// @ts-ignore
+import SwapBridgeRouterJson from '../l1-contracts/out/SwapBridgeRouter.sol/SwapBridgeRouter.json'
+const SwapBridgeRouterAbi = SwapBridgeRouterJson.abi
+const SwapBridgeRouterBytecode = SwapBridgeRouterJson.bytecode.object as `0x${string}`
+
+// Well-known Sepolia addresses
+const UNISWAP_V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543'
+const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'
+const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3'
+
 import {
   createPublicClient,
   encodeFunctionData,
@@ -120,7 +135,9 @@ import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
   createDeployment,
   saveTokenToDeployment,
+  saveFuelInfraToDeployment,
   loadExistingTokens,
+  loadActiveDeployment,
   copyToFrontend,
   type DeployedToken,
   type L1ContractAddresses,
@@ -1772,7 +1789,7 @@ async function main() {
   logger.info(`Registry: ${l1ContractAddresses.registryAddress}`)
   logger.info(`Rollup:   ${l1ContractAddresses.rollupAddress}`)
   logger.info(`L1 Wallet: ${ownerEthAddress}`)
-  logger.info(`Environment: ${isDevnet() ? 'devnet' : 'local sandbox'}`)
+  logger.info(`Environment: ${process.env.AZTEC_ENV ?? 'sandbox'}`)
 
   // Check L1 balance
   const balance = await l1Client.getBalance({ address: ownerEthAddress as `0x${string}` })
@@ -1925,6 +1942,105 @@ async function main() {
       } catch (error) {
         logger.error(`❌ Failed to deploy ${tokenConfig.symbol}: ${error}`)
         // Continue with other tokens even if one fails
+      }
+    }
+
+    // ── Deploy Fuel Infrastructure (UniswapFuelSwap + SwapBridgeRouter) ──
+    logger.info('\n=== Deploying Fuel Infrastructure ===')
+    const existingDeployment = loadActiveDeployment()
+    let uniswapFuelSwapAddress = existingDeployment?.uniswapFuelSwapAddress
+    let swapBridgeRouterAddress = existingDeployment?.swapBridgeRouterAddress
+
+    const feeJuiceAddress = (l1ContractAddresses as any).feeJuiceAddress?.toString()
+    const feeJuicePortalAddress = (l1ContractAddresses as any).feeJuicePortalAddress?.toString()
+
+    if (!feeJuiceAddress || !feeJuicePortalAddress) {
+      logger.warn('FeeJuice or FeeJuicePortal address not available — skipping fuel infra')
+    } else {
+      // Step 1: Deploy UniswapFuelSwap (if not already deployed)
+      if (!uniswapFuelSwapAddress) {
+        logger.info('Deploying UniswapFuelSwap...')
+        try {
+          const swapResult = await deployL1Contract(
+            l1Client,
+            UniswapFuelSwapAbi,
+            UniswapFuelSwapBytecode,
+            [UNISWAP_V4_POOL_MANAGER, feeJuiceAddress, WETH_ADDRESS],
+          )
+          uniswapFuelSwapAddress = swapResult.address.toString()
+          logger.info(`UniswapFuelSwap deployed at ${uniswapFuelSwapAddress}`)
+        } catch (e: any) {
+          logger.error(`Failed to deploy UniswapFuelSwap: ${e.message}`)
+        }
+      } else {
+        logger.info(`UniswapFuelSwap already deployed at ${uniswapFuelSwapAddress}`)
+      }
+
+      // Step 2: Deploy SwapBridgeRouter (if not already deployed)
+      if (!swapBridgeRouterAddress && uniswapFuelSwapAddress) {
+        logger.info('Deploying SwapBridgeRouter...')
+        try {
+          const routerResult = await deployL1Contract(
+            l1Client,
+            SwapBridgeRouterAbi,
+            SwapBridgeRouterBytecode,
+            [PERMIT2_ADDRESS, feeJuicePortalAddress, uniswapFuelSwapAddress],
+          )
+          swapBridgeRouterAddress = routerResult.address.toString()
+          logger.info(`SwapBridgeRouter deployed at ${swapBridgeRouterAddress}`)
+        } catch (e: any) {
+          logger.error(`Failed to deploy SwapBridgeRouter: ${e.message}`)
+        }
+      } else if (swapBridgeRouterAddress) {
+        logger.info(`SwapBridgeRouter already deployed at ${swapBridgeRouterAddress}`)
+      }
+
+      // Step 3: Set trusted forwarder on ALL token portals
+      if (swapBridgeRouterAddress && deployedContracts.length > 0) {
+        logger.info(`Setting trusted forwarder (${swapBridgeRouterAddress}) on ${deployedContracts.length} portal(s)...`)
+        for (const deployed of deployedContracts) {
+          try {
+            const portal = getContract({
+              address: deployed.l1PortalContract as `0x${string}`,
+              abi: CustomTokenPortalAbi,
+              client: l1Client as any,
+            }) as any
+            const tx = await portal.write.setTrustedForwarder([swapBridgeRouterAddress, true])
+            await l1Client.waitForTransactionReceipt({ hash: tx, timeout: 60_000 })
+            logger.info(`  ✓ ${deployed.symbol} portal: forwarder set`)
+          } catch (e: any) {
+            logger.warn(`  ✗ ${deployed.symbol} portal: ${e.message?.slice(0, 80)}`)
+          }
+        }
+      }
+
+      // Step 4: Save fuel infra to deployment JSON
+      if (uniswapFuelSwapAddress && swapBridgeRouterAddress) {
+        // Compute BridgedFPC address (salt=0)
+        let bridgedFpcAddress = existingDeployment?.bridgedFpcAddress ?? ''
+        if (!bridgedFpcAddress) {
+          try {
+            const { getContractInstanceFromInstantiationParams } = await import('@aztec/aztec.js/contracts')
+            const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
+            const { readFileSync: readFs } = await import('fs')
+            const { resolve: resolvePath } = await import('path')
+            const targetPath = resolvePath(import.meta.dirname, '../frontend/node_modules/@defi-wonderland/aztec-fee-payment/target/bridged_contract-BridgedFPC.json')
+            const artifactJson = JSON.parse(readFs(targetPath, 'utf8'))
+            const artifact = loadContractArtifact(artifactJson)
+            const fpcInstance = await getContractInstanceFromInstantiationParams(artifact, { salt: new Fr(0n) })
+            bridgedFpcAddress = fpcInstance.address.toString()
+            logger.info(`BridgedFPC computed at ${bridgedFpcAddress}`)
+          } catch (e: any) {
+            logger.warn(`Could not compute BridgedFPC address: ${e.message?.slice(0, 80)}`)
+          }
+        }
+
+        saveFuelInfraToDeployment({
+          swapBridgeRouterAddress,
+          uniswapFuelSwapAddress,
+          bridgedFpcAddress,
+        })
+        logger.info('Fuel infrastructure saved to deployment')
       }
     }
 
