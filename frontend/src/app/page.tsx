@@ -559,6 +559,7 @@ export default function Home() {
                     passportMaxAmount={attestationData?.passportMaxAmount}
                   />
                   {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
+                    !isPrivacyModeEnabled &&
                     !!SWAP_BRIDGE_ROUTER_ADDRESS && (
                     <FuelToggle
                       fuelEnabled={fuelEnabled}
