@@ -43,6 +43,13 @@ const BRIDGE_TRANSACTION_METHODS = [
   'exit_to_l1_private',
 ] as const
 
+const PROXY_TRANSACTION_METHODS = [
+  'mint_to_public',
+  'mint_to_private',
+  'burn_public',
+  'burn_private',
+] as const
+
 const FEE_JUICE_SIMULATION_METHODS = [
   'balance_of_public',
 ] as const
@@ -111,6 +118,9 @@ export function buildCapabilityManifest() {
     ),
     ...bridgeAddresses.flatMap((addr) =>
       patternsFor(addr, [...BRIDGE_TRANSACTION_METHODS]),
+    ),
+    ...proxyAddresses.flatMap((addr) =>
+      patternsFor(addr, [...PROXY_TRANSACTION_METHODS]),
     ),
     ...patternsFor(FEE_JUICE_ADDRESS, [...FEE_JUICE_TRANSACTION_METHODS]),
     ...(fpcAddress
