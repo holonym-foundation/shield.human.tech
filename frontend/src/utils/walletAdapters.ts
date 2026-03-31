@@ -32,8 +32,8 @@ async function getContractArtifact(type: ContractType) {
     return loadContractArtifact(bridgeJson.default ?? bridgeJson)
   }
   if (type === 'bridged_fpc') {
-    const { BridgedFPCContractArtifact } = await import('@defi-wonderland/aztec-fee-payment')
-    return BridgedFPCContractArtifact
+    const { PrivateFPCContractArtifact } = await import('@wonderland/aztec-fee-payment')
+    return PrivateFPCContractArtifact
   }
   if (type === 'fee_juice') {
     const { FeeJuiceContractArtifact } = await import('@aztec/noir-contracts.js/FeeJuice')
@@ -104,9 +104,9 @@ class WalletAdapter {
     // locally and register it with the wallet's PXE.
     if (BRIDGED_FPC_ADDRESS) {
       try {
-        const { registerBridgedContract } = await import('@defi-wonderland/aztec-fee-payment')
+        const { registerPrivateContract } = await import('@wonderland/aztec-fee-payment')
         const { Fr } = await import('@aztec/aztec.js/fields')
-        await registerBridgedContract(this.wallet, Fr.ZERO)
+        await registerPrivateContract(this.wallet, Fr.ZERO)
       } catch {
         // May already be registered
       }

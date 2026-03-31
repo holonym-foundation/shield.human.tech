@@ -891,8 +891,8 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         })
         if (privateFuel && backup.privateFuelSecret && backup.privateFuelSalt && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
           try {
-            const { BridgedMintAndPayFeePaymentMethod, REASONABLE_GAS_LIMITS, maxFeesPerGasFromBaseFees, maxGasCostFor } =
-              await import('@defi-wonderland/aztec-fee-payment')
+            const { PrivateMintAndPayFeePaymentMethod, REASONABLE_GAS_LIMITS, maxFeesPerGasFromBaseFees, maxGasCostFor } =
+              await import('@wonderland/aztec-fee-payment')
             const { Fr: FieldFr } = await import('@aztec/aztec.js/fields')
             const { Gas, GasFees } = await import('@aztec/stdlib/gas')
             const { aztecNode } = await import('@/aztec')
@@ -910,7 +910,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               sufficient: receipt.fuelAmount >= estimatedMaxGasCost,
             })
 
-            const paymentMethod = new BridgedMintAndPayFeePaymentMethod(
+            const paymentMethod = new PrivateMintAndPayFeePaymentMethod(
               AztecAddress.fromString(privateFuel.fpcAddress),
               receipt.fuelAmount,
               backup.privateFuelSecret,
