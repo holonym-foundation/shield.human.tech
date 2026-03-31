@@ -208,6 +208,10 @@ export async function checkCleanHands(userAddress: string, actionId?: bigint): P
   signature?: string
   circuitId?: string
 }> {
+  if (process.env.NEXT_PUBLIC_DEV_ATTESTATION === 'true') {
+    console.log('[DEV] Mocking Holonym clean hands check for', userAddress)
+    return { isUnique: true }
+  }
   const aid = actionId ?? getDefaultActionId()
   const url = `${HOLONYM_API_BASE}/sandbox/attestation/sbts/clean-hands?action-id=${aid}&address=${userAddress}`
   const resp = await fetch(url)
@@ -223,6 +227,10 @@ export async function fetchPassportScore(address: string): Promise<{
   score: number
   passing: boolean
 }> {
+  if (process.env.NEXT_PUBLIC_DEV_ATTESTATION === 'true') {
+    console.log('[DEV] Mocking Gitcoin Passport score for', address)
+    return { score: 50, passing: true }
+  }
   const apiKey = process.env.PASSPORT_API_KEY
   const scorerId = process.env.PASSPORT_SCORER_ID
   if (!apiKey || !scorerId) {
