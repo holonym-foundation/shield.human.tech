@@ -9,11 +9,11 @@
  * 2. Passport flow — passport signer signs amount-limited attestation
  *
  * Environment Variables:
- * - AZTEC_ENV: Set to 'devnet' for devnet, or 'sandbox' for local (default: sandbox)
+ * - AZTEC_ENV: Set to 'testnet' for testnet, or 'sandbox' for local (default: sandbox)
  * - L1_URL: L1 RPC URL (optional, uses config if not set)
- * - MNEMONIC: Wallet mnemonic (required for devnet, defaults to test mnemonic for sandbox)
+ * - MNEMONIC: Wallet mnemonic (required for testnet, defaults to test mnemonic for sandbox)
  *
- * Run: node --import tsx index-devnet-compliant.ts
+ * Run: node --import tsx index-testnet-compliant.ts
  */
 
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
@@ -22,8 +22,6 @@ import { Fr } from '@aztec/aztec.js/fields'
 import { Logger, createLogger } from '@aztec/aztec.js/log'
 import { generateClaimSecret, L1TokenManager } from '@aztec/aztec.js/ethereum'
 import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { RollupContract } from '@aztec/ethereum/contracts'
-import { CheckpointNumber } from '@aztec/foundation/branded-types'
 import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
 import { createEthereumChain } from '@aztec/ethereum/chain'
 import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
@@ -33,11 +31,12 @@ import {
   RollupAbi,
 } from '@aztec/l1-artifacts'
 import { TokenContract, TokenContractArtifact } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js'
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee/testing'
+import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee'
 import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
 import { EmbeddedWallet } from '@aztec/wallets/embedded'
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
 import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
+import { TxHash } from '@aztec/stdlib/tx'
 import { sha256ToField } from '@aztec/foundation/crypto/sha256'
 import { computeL2ToL1MessageHash, computeSecretHash } from '@aztec/stdlib/hash'
 import { Schnorr } from '@aztec/foundation/crypto/schnorr'
@@ -70,12 +69,12 @@ import SwapBridgeRouterJson from '../l1-contracts/out/SwapBridgeRouter.sol/SwapB
 // @ts-ignore
 import PoolSeederJson from '../l1-contracts/out/SeedUniswapPools.s.sol/PoolSeeder.json'
 import {
-  registerBridgedContract,
-  BridgedMintAndPayFeePaymentMethod,
+  registerPrivateContract,
+  PrivateMintAndPayFeePaymentMethod,
   REASONABLE_GAS_LIMITS,
   maxFeesPerGasFromBaseFees,
   maxGasCostFor,
-} from '@defi-wonderland/aztec-fee-payment'
+} from '@wonderland/aztec-fee-payment'
 const UniswapFuelSwapAbi = UniswapFuelSwapJson.abi
 const UniswapFuelSwapBytecode = UniswapFuelSwapJson.bytecode.object as `0x${string}`
 const SwapBridgeRouterAbi = SwapBridgeRouterJson.abi
@@ -168,10 +167,11 @@ async function sendPrivateWithRetry<T>(
   sendOpts: any,
   logger: Logger,
   maxRetries = 2,
-): Promise<T> {
+): Promise<any> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await buildTx().send(sendOpts)
+      const { receipt } = await buildTx().send(sendOpts) as any
+      return receipt
     } catch (e: any) {
       const msg = e?.message || ''
       const isRetryable = RETRYABLE_PATTERNS.some(p => msg.includes(p))
@@ -683,24 +683,27 @@ const FEE_ASSET_HANDLER_ADDR = '0xED9c5557d2E0abCc7c7FCA958eE4292199413494' as `
 const AZTEC_TOKEN = '0x35d0186d1FD53b72996475D965C5Ed171D52b986' as `0x${string}`
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
 
-// ETH/AZTEC pool params (~10,000 FeeJuice per ETH)
-const ETH_AZTEC_SQRT_PRICE = 7922816251426433759354395033600n
-const ETH_AZTEC_TICK_LOWER = 69060
-const ETH_AZTEC_TICK_UPPER = 115140
-const ETH_AZTEC_FEE = 3000
-const ETH_AZTEC_TICK_SPACING = 60
-const ETH_AZTEC_LIQUIDITY = 1n * 10n ** 18n // 1e18 — consumes 0.00684 ETH + 68.4 FJ
-const ETH_SEED = 50000000000000000n // 0.05 ETH (covers price drift on re-seed; excess swept back)
-const FEE_MINT_COUNT = 1 // 1 x 1000 FJ (1e18 liquidity only needs 68.4 FJ; excess swept back)
+// ETH/FeeJuice pool params (~10,500,000,000 FeeJuice per ETH)
+// Chosen so that 0.02 USDC → ~100 FJ (2x buffer over ~48 FJ gas at current testnet fees)
+// sqrtPriceX96 = sqrt(10_500_000_000) * 2^96
+// NOTE: fee=500/tickSpacing=10 creates a FRESH pool (the fee=3000 pool exists at the wrong price ~287 FJ/ETH)
+const ETH_AZTEC_SQRT_PRICE = 8117513676449874804987252736000000n
+const ETH_AZTEC_TICK_LOWER = 229020  // divisible by 10 ✓
+const ETH_AZTEC_TICK_UPPER = 231480  // divisible by 10 ✓
+const ETH_AZTEC_FEE = 500
+const ETH_AZTEC_TICK_SPACING = 10
+const ETH_AZTEC_LIQUIDITY = 2n * 10n ** 17n  // Virtual FJ ≈ L×8470 ticks ≈ 1694 FJ — enough for 6+ fuel tests
+const ETH_SEED = 1000000000000000n  // 0.001 ETH — sufficient for 7e10 ETH_units virtual reserve
+const FEE_MINT_COUNT = 2            // 2000 FJ > 1694 FJ virtual needed
 
-// ERC20/WETH pool params (~2,100 USDC per WETH)
+// ERC20/WETH pool — unchanged
 const ERC20_WETH_SQRT_PRICE = 1728916962386276374966316084832192n
 const ERC20_WETH_TICK_LOWER = 169800
 const ERC20_WETH_TICK_UPPER = 229800
 const ERC20_WETH_FEE = 3000
 const ERC20_WETH_TICK_SPACING = 60
-const ERC20_WETH_LIQUIDITY = 1000000000000n // 1e12 — consumes 35.59 USDC + 0.017 WETH
-const WETH_SEED = 20000000000000000n // 0.02 ETH
+const ERC20_WETH_LIQUIDITY = 1000000000000n
+const WETH_SEED = 20000000000000000n
 
 // Minimal ABIs for pool seeding / fuel test interactions
 const ERC20_ABI = [
@@ -840,7 +843,7 @@ async function logFuelTestBalances(
 ) {
   logger.info(`\n--- Fuel Test Balances (${label}) ---`)
   try {
-    const l2TokenBal = await l2TokenContract.methods
+    const { result: l2TokenBal } = await l2TokenContract.methods
       .balance_of_public(ownerAztecAddress)
       .simulate({ from: ownerAztecAddress })
     logger.info(`  L2 token balance: ${l2TokenBal}`)
@@ -853,7 +856,7 @@ async function logFuelTestBalances(
         AztecAddress.fromString(FEE_JUICE_L2_ADDRESS),
         wallet,
       )
-      const fjBal = await fjContract.methods
+      const { result: fjBal } = await fjContract.methods
         .balance_of_public(ownerAztecAddress)
         .simulate({ from: ownerAztecAddress })
       logger.info(`  L2 FeeJuice:      ${(Number(fjBal) / 1e18).toFixed(6)} FJ`)
@@ -978,6 +981,8 @@ async function seedAllTokenPools(
   deployedContracts: DeployedCompliantToken[],
   l1Client: ExtendedViemWalletClient,
   logger: Logger,
+  feeJuiceAddr: `0x${string}` = AZTEC_TOKEN,
+  feeAssetHandlerAddr: `0x${string}` = FEE_ASSET_HANDLER_ADDR,
 ) {
   logger.info('\n=== Seeding Uniswap V4 Pools ===')
 
@@ -1005,24 +1010,41 @@ async function seedAllTokenPools(
     logger.info(`  PoolSeeder deployed at ${seederAddr}`)
 
     const seeder = getContract({ address: seederAddr, abi: PoolSeederAbi, client: l1Client as any }) as any
-    const feeHandler = getContract({ address: FEE_ASSET_HANDLER_ADDR, abi: FEE_HANDLER_ABI, client: l1Client as any }) as any
-    const aztecToken = getContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, client: l1Client as any }) as any
+    const feeHandler = getContract({ address: feeAssetHandlerAddr, abi: FEE_HANDLER_ABI, client: l1Client as any }) as any
+    const feeJuiceToken = getContract({ address: feeJuiceAddr, abi: ERC20_ABI, client: l1Client as any }) as any
 
-    logger.info(`  Minting FeeJuice: ${FEE_MINT_COUNT} x 1000 FJ`)
+    logger.info(`  Minting FeeJuice to seeder (${seederAddr}) via FeeAssetHandler (${feeAssetHandlerAddr}): ${FEE_MINT_COUNT} x 1000 FJ`)
+    logger.info(`  FeeJuice token address: ${feeJuiceAddr}`)
     for (let i = 0; i < FEE_MINT_COUNT; i++) {
       const tx = await feeHandler.write.mint([seederAddr])
       await l1Client.waitForTransactionReceipt({ hash: tx, timeout: 120_000 })
       if ((i + 1) % 10 === 0 || i === FEE_MINT_COUNT - 1) logger.info(`  ... minted ${i + 1}/${FEE_MINT_COUNT}`)
     }
 
-    const deployerFj = await aztecToken.read.balanceOf([deployer]) as bigint
+    // Fallback: if FeeAssetHandler mints to a different token, try direct mint on feeJuiceAddr
+    const seederFjAfterHandler = await feeJuiceToken.read.balanceOf([seederAddr]) as bigint
+    if (seederFjAfterHandler === 0n) {
+      logger.warn(`  FeeAssetHandler did not fund feeJuiceAddr (${feeJuiceAddr}) — trying direct mint...`)
+      try {
+        const MINT_ABI = [{ type: 'function', name: 'mint', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [], stateMutability: 'nonpayable' }] as const
+        const feeJuiceMintable = getContract({ address: feeJuiceAddr, abi: MINT_ABI, client: l1Client as any }) as any
+        const mintAmount = BigInt(FEE_MINT_COUNT) * 1000n * 10n ** 18n
+        const mintTx = await feeJuiceMintable.write.mint([seederAddr, mintAmount])
+        await l1Client.waitForTransactionReceipt({ hash: mintTx, timeout: 120_000 })
+        logger.info(`  Direct mint succeeded: ${mintAmount} FJ to seeder`)
+      } catch (mintErr) {
+        logger.error(`  Direct mint also failed: ${mintErr}`)
+      }
+    }
+
+    const deployerFj = await feeJuiceToken.read.balanceOf([deployer]) as bigint
     if (deployerFj > 0n) {
-      const tx = await aztecToken.write.transfer([seederAddr, deployerFj])
+      const tx = await feeJuiceToken.write.transfer([seederAddr, deployerFj])
       await sendAndWait(l1Client, tx, `Transferred ${deployerFj} FJ to seeder`, logger)
     }
 
     // Seed pool — dry-run first via eth_call to catch errors without spending gas
-    const [c0, c1] = sortCurrencies(ZERO_ADDRESS, AZTEC_TOKEN)
+    const [c0, c1] = sortCurrencies(ZERO_ADDRESS, feeJuiceAddr)
     const poolKey = { currency0: c0, currency1: c1, fee: ETH_AZTEC_FEE, tickSpacing: ETH_AZTEC_TICK_SPACING, hooks: ZERO_ADDRESS }
     const setupArgs = [poolKey, ETH_AZTEC_SQRT_PRICE, ETH_AZTEC_TICK_LOWER, ETH_AZTEC_TICK_UPPER, ETH_AZTEC_LIQUIDITY] as const
     try {
@@ -1033,18 +1055,18 @@ async function seedAllTokenPools(
       throw simError
     }
     const tx = await seeder.write.setup(setupArgs, { value: ETH_SEED })
-    await sendAndWait(l1Client, tx, 'ETH/AZTEC pool seeded', logger)
+    await sendAndWait(l1Client, tx, 'ETH/FeeJuice pool seeded', logger)
 
     await sendAndWait(l1Client, await seeder.write.sweep([ZERO_ADDRESS]), 'Swept ETH', logger)
-    await sendAndWait(l1Client, await seeder.write.sweep([AZTEC_TOKEN]), 'Swept AZTEC', logger)
-    logger.info('✅ ETH/AZTEC pool done')
+    await sendAndWait(l1Client, await seeder.write.sweep([feeJuiceAddr]), 'Swept FeeJuice', logger)
+    logger.info('✅ ETH/FeeJuice pool done')
   } catch (error) {
     const errMsg = String(error)
     if (errMsg.includes('0xe450d38c')) {
-      logger.error('❌ ETH/AZTEC pool seeding failed: ERC20InsufficientBalance — not enough FeeJuice for the liquidity delta.')
+      logger.error('❌ ETH/FeeJuice pool seeding failed: ERC20InsufficientBalance — not enough FeeJuice for the liquidity delta.')
       logger.error(`   Minted ${FEE_MINT_COUNT} x 1000 FJ but liquidity ${ETH_AZTEC_LIQUIDITY} needs more. Increase FEE_MINT_COUNT or reduce ETH_AZTEC_LIQUIDITY.`)
     } else {
-      logger.error(`❌ ETH/AZTEC pool seeding failed: ${error}`)
+      logger.error(`❌ ETH/FeeJuice pool seeding failed: ${error}`)
     }
   }
 
@@ -1187,7 +1209,7 @@ async function deployCompliantTokenSetup(
 
   // ── Step 4: Deploy L2 TokenMinterProxy ──
   logger.info(`[L2] Deploying TokenMinterProxy`)
-  const l2ProxyContract = await TokenMinterProxyContract.deploy(wallet).send({
+  const { contract: l2ProxyContract } = await TokenMinterProxyContract.deploy(wallet).send({
     from: ownerAztecAddress,
     contractAddressSalt: proxySalt,
     fee: { paymentMethod: sponsoredPaymentMethod },
@@ -1197,13 +1219,12 @@ async function deployCompliantTokenSetup(
 
   // ── Step 5: Deploy L2 Token (Wonderland token with minter) ──
   logger.info(`[L2] Deploying ${tokenConfig.symbol} Token (Wonderland, constructor_with_minter)`)
-  const l2TokenContract = await TokenContract.deployWithOpts(
+  const { contract: l2TokenContract } = await TokenContract.deployWithOpts(
     { wallet, method: 'constructor_with_minter' },
     tokenConfig.l2Name,
     tokenConfig.l2Symbol,
     tokenConfig.decimals,
     l2ProxyContract.address,    // minter = proxy
-    ownerAztecAddress,          // upgrade_authority = owner
   ).send({
     from: ownerAztecAddress,
     contractAddressSalt: tokenSalt,
@@ -1214,7 +1235,7 @@ async function deployCompliantTokenSetup(
 
   // ── Step 6: Deploy L2 Custom TokenBridge (7 args) ──
   logger.info(`[L2] Deploying Custom TokenBridge for ${tokenConfig.symbol}`)
-  const l2BridgeContract = await TokenBridgeContract.deploy(
+  const { contract: l2BridgeContract } = await TokenBridgeContract.deploy(
     wallet,
     l2ProxyContract.address,     // token_minter_proxy
     l1PortalContractAddress,     // portal
@@ -1351,8 +1372,8 @@ async function testPublicFuelFlow(
     const pfFuelSecret = Fr.random()
     const pfFuelSecretHash = await computeSecretHash(pfFuelSecret)
 
-    const pfTotalAmount = BigInt(1e5)  // 0.1 USDC total
-    const pfFuelAmount = BigInt(2e4)   // 0.02 USDC swapped to FeeJuice (~0.095 FJ output)
+    const pfTotalAmount = 120n  // 0.00012 USDC total (6-decimal token)
+    const pfFuelAmount = 20n   // 0.00002 USDC swapped to FeeJuice → ~114 FJ at 10.5B FJ/ETH pool
     const pfMinFuelOutput = 0n // testnet — accept any output
 
     // Mint ERC20 for this test
@@ -1489,6 +1510,26 @@ async function testPublicFuelFlow(
     logger.info(`  BridgeWithFuel event: tokenAmount=${pfTokenAmount}, fuelAmount=${pfFuelAmountReceived}`)
     logger.info(`  tokenIndex=${pfTokenIndex}, fuelIndex=${pfFuelIndex}`)
 
+    // ── Early sufficiency check — fail fast before any waiting ──────────────
+    const pfBaseFees = await node.getCurrentMinFees()
+    const pfMaxFeesPerGas = maxFeesPerGasFromBaseFees(pfBaseFees)
+    const pfGasLimits = REASONABLE_GAS_LIMITS
+    const pfTeardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
+    const pfEstimatedMaxGasCost = maxGasCostFor(pfMaxFeesPerGas, pfGasLimits)
+    logger.info(`  Gas diagnostics (public fuel):`)
+    logger.info(`    baseFees: feePerDaGas=${pfBaseFees.feePerDaGas}, feePerL2Gas=${pfBaseFees.feePerL2Gas}`)
+    logger.info(`    estimatedMaxGasCost: ${pfEstimatedMaxGasCost}`)
+    logger.info(`    fuelAmount: ${pfFuelAmountReceived}, sufficient: ${pfFuelAmountReceived >= pfEstimatedMaxGasCost}`)
+
+    if (pfFuelAmountReceived < pfEstimatedMaxGasCost) {
+      const ratePerUnit = pfFuelAmountReceived > 0n ? pfFuelAmountReceived / pfFuelAmount : 0n
+      const requiredUnits = ratePerUnit > 0n ? pfEstimatedMaxGasCost / ratePerUnit : 0n
+      logger.warn(`  ⚠️  Public fuel test skipped: swap yielded ${pfFuelAmountReceived} FJ but gas requires ≥${pfEstimatedMaxGasCost}.`)
+      logger.warn(`      The ETH/FJ pool needs more liquidity. Reseed pools and retry.`)
+      if (requiredUnits > 0n) logger.warn(`      Estimated USDC units needed for fuel: ${requiredUnits} (${Number(requiredUnits) / 1e6} USDC)`)
+      return
+    }
+
     // Wait for BOTH L1→L2 messages to sync
     for (const [label, msgHash] of [['token', pfTokenKey], ['fuel', pfFuelKey]] as const) {
       if (!msgHash || msgHash === '0x0') continue
@@ -1497,7 +1538,7 @@ async function testPublicFuelFlow(
       const start = Date.now()
       while (Date.now() - start < 20 * 60 * 1000) {
         try {
-          const blk = await node.getL1ToL2MessageBlock(msgFr)
+          const blk = await node.getL1ToL2MessageCheckpoint(msgFr)
           if (blk !== undefined) { logger.info(`${label} message ready (block=${blk})`); break }
           logger.info(`   ${label} message not yet synced. Waiting 2 min...`)
         } catch (e) { logger.warn(`   Poll failed: ${e}`) }
@@ -1521,7 +1562,10 @@ async function testPublicFuelFlow(
       .claim_public(ownerAztecAddress, pfTokenAmount, pfClaimSecret, pfTokenIndex)
       .send({
         from: ownerAztecAddress,
-        fee: { paymentMethod: publicFuelPayment },
+        fee: {
+          paymentMethod: publicFuelPayment,
+          gasSettings: { gasLimits: pfGasLimits, teardownGasLimits: pfTeardownGasLimits, maxFeesPerGas: pfMaxFeesPerGas, maxPriorityFeesPerGas: GasFees.empty() },
+        },
         wait: { timeout: getTimeouts().txTimeout },
       })
 
@@ -1533,7 +1577,7 @@ async function testPublicFuelFlow(
 }
 
 /**
- * Test 1c: Private fuel via SwapBridgeRouter + BridgedMintAndPayFeePaymentMethod.
+ * Test 1c: Private fuel via SwapBridgeRouter + PrivateMintAndPayFeePaymentMethod.
  * Same swap flow, but fuelRecipient is the BridgedFPC contract (not user).
  * Uses poseidon2 secret derivation + Wonderland BridgedFPC to pay for gas privately.
  */
@@ -1586,7 +1630,7 @@ async function testPrivateFuelFlow(
 
   try {
     // Register BridgedFPC
-    const bridgedFpcInstance = await registerBridgedContract(wallet)
+    const bridgedFpcInstance = await registerPrivateContract(wallet, new Fr(0n))
     logger.info(`BridgedFPC registered at ${bridgedFpcInstance.address.toString()}`)
 
     // 1. Generate private fuel secret (poseidon2 derivation — same as frontend)
@@ -1604,8 +1648,8 @@ async function testPrivateFuelFlow(
     // 2. Generate token claim secret
     const [pvClaimSecret, pvClaimSecretHash] = await generateClaimSecret()
 
-    const pvTotalAmount = BigInt(1e5)  // 0.1 USDC total
-    const pvFuelAmount = BigInt(2e4)   // 0.02 USDC swapped to FeeJuice (pool depth ~0.19 FJ)
+    const pvTotalAmount = 120n  // 0.00012 USDC total (6-decimal token)
+    const pvFuelAmount = 20n   // 0.00002 USDC swapped to FeeJuice → ~114 FJ at 10.5B FJ/ETH pool
     const pvMinFuelOutput = 0n
 
     // Approve ERC20 → Permit2
@@ -1688,7 +1732,7 @@ async function testPrivateFuelFlow(
       const start = Date.now()
       while (Date.now() - start < 20 * 60 * 1000) {
         try {
-          const blk = await node.getL1ToL2MessageBlock(msgFr)
+          const blk = await node.getL1ToL2MessageCheckpoint(msgFr)
           if (blk !== undefined) { logger.info(`${label} message ready (block=${blk})`); break }
           logger.info(`   ${label} message not yet synced. Waiting 2 min...`)
         } catch (e) { logger.warn(`   Poll failed: ${e}`) }
@@ -1709,8 +1753,8 @@ async function testPrivateFuelFlow(
     logger.info(`    estimatedMaxGasCost: ${estimatedMaxGasCost}`)
     logger.info(`    fuelAmount: ${pvFuelAmountReceived}, sufficient: ${pvFuelAmountReceived >= estimatedMaxGasCost}`)
 
-    // 4. Create BridgedMintAndPayFeePaymentMethod
-    const bridgedFeeMethod = new BridgedMintAndPayFeePaymentMethod(
+    // 4. Create PrivateMintAndPayFeePaymentMethod
+    const bridgedFeeMethod = new PrivateMintAndPayFeePaymentMethod(
       bridgedFpcAztecAddr,
       pvFuelAmountReceived,
       privateFuelSecret,
@@ -1723,7 +1767,7 @@ async function testPrivateFuelFlow(
         gasSettings: { gasLimits, teardownGasLimits, maxFeesPerGas, maxPriorityFeesPerGas: GasFees.empty() },
       },
     }
-    logger.info('BridgedMintAndPayFeePaymentMethod created with gasSettings')
+    logger.info('PrivateMintAndPayFeePaymentMethod created with gasSettings')
 
     // 5. Claim tokens on L2 with BridgedFPC fees
     logger.info('Claiming tokens on L2 with BridgedFPC (private fuel)...')
@@ -1736,7 +1780,7 @@ async function testPrivateFuelFlow(
       })
 
     await logFuelTestBalances('AFTER private fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
-    logger.info('Private fuel (BridgedMintAndPayFeePaymentMethod) test PASSED')
+    logger.info('Private fuel (PrivateMintAndPayFeePaymentMethod) test PASSED')
   } catch (error) {
     logger.error(`Private fuel test failed: ${error}`)
   }
@@ -1807,8 +1851,8 @@ async function testPrivateDepositFuelWithAttestation(
     const fuelSecret = Fr.random()
     const fuelSecretHash = await computeSecretHash(fuelSecret)
 
-    const totalAmount = BigInt(1e5)  // 0.1 USDC total
-    const fuelAmount = BigInt(2e4)   // 0.02 USDC swapped to FeeJuice
+    const totalAmount = 120n  // 0.00012 USDC total (6-decimal token)
+    const fuelAmount = 20n   // 0.00002 USDC swapped to FeeJuice → ~114 FJ at 10.5B FJ/ETH pool
     const minFuelOutput = 0n
 
     // Mint ERC20
@@ -1918,7 +1962,7 @@ async function testPrivateDepositFuelWithAttestation(
       const start = Date.now()
       while (Date.now() - start < 20 * 60 * 1000) {
         try {
-          const blk = await node.getL1ToL2MessageBlock(msgFr)
+          const blk = await node.getL1ToL2MessageCheckpoint(msgFr)
           if (blk !== undefined) { logger.info(`${msgLabel} message ready (block=${blk})`); break }
           logger.info(`   ${msgLabel} message not yet synced. Waiting 2 min...`)
         } catch (e) { logger.warn(`   Poll failed: ${e}`) }
@@ -1949,7 +1993,7 @@ async function testPrivateDepositFuelWithAttestation(
       logger,
     )
 
-    const privateBalance = await l2TokenContract.methods
+    const { result: privateBalance } = await l2TokenContract.methods
       .balance_of_private(ownerAztecAddress)
       .simulate({ from: ownerAztecAddress })
     logger.info(`[L2] Private balance after ${label} fuel claim: ${privateBalance}`)
@@ -2026,7 +2070,7 @@ async function testPublicBridgeFlow(
   const startWait = Date.now()
   while (Date.now() - startWait < maxWaitMs) {
     try {
-      const messageBlock = await node.getL1ToL2MessageBlock(messageHashFr)
+      const messageBlock = await node.getL1ToL2MessageCheckpoint(messageHashFr)
       if (messageBlock !== undefined) {
         logger.info(`[L1→L2] Message synced at block ${messageBlock}`)
         break
@@ -2064,7 +2108,7 @@ async function testPublicBridgeFlow(
     AztecAddress.fromString(deployed.l2TokenContract),
     wallet
   )
-  const balance = await l2TokenContract.methods
+  const { result: balance } = await l2TokenContract.methods
     .balance_of_public(ownerAztecAddress)
     .simulate({ from: ownerAztecAddress })
   logger.info(`[L2] Public balance: ${balance}`)
@@ -2147,7 +2191,7 @@ async function testPublicExitFlow(
       wait: { timeout: getTimeouts().txTimeout, returnReceipt: true },
     })
 
-  const newL2Balance = await l2TokenContract.methods
+  const { result: newL2Balance } = await l2TokenContract.methods
     .balance_of_public(ownerAztecAddress)
     .simulate({ from: ownerAztecAddress })
   logger.info(`[L2] Public balance after exit: ${newL2Balance}`)
@@ -2273,7 +2317,7 @@ async function testPrivateDepositAndClaimFlow(
   const startWait = Date.now()
   while (Date.now() - startWait < maxWaitMs) {
     try {
-      const messageBlock = await node.getL1ToL2MessageBlock(messageHashFr)
+      const messageBlock = await node.getL1ToL2MessageCheckpoint(messageHashFr)
       if (messageBlock !== undefined) {
         logger.info(`[L1→L2] Message synced at block ${messageBlock}`)
         break
@@ -2314,7 +2358,7 @@ async function testPrivateDepositAndClaimFlow(
     AztecAddress.fromString(deployed.l2TokenContract),
     wallet
   )
-  const privateBalance = await l2TokenContract.methods
+  const { result: privateBalance } = await l2TokenContract.methods
     .balance_of_private(ownerAztecAddress)
     .simulate({ from: ownerAztecAddress })
   logger.info(`[L2] Private balance after ${label} claim: ${privateBalance}`)
@@ -2437,7 +2481,7 @@ async function testPrivateExitFlow(
     logger,
   )
 
-  const newPrivateBalance = await l2TokenContract.methods
+  const { result: newPrivateBalance } = await l2TokenContract.methods
     .balance_of_private(ownerAztecAddress)
     .simulate({ from: ownerAztecAddress })
   logger.info(`[L2] Private balance after exit: ${newPrivateBalance}`)
@@ -2548,7 +2592,7 @@ async function testNegativeCrossClaim(
   const startWait = Date.now()
   while (Date.now() - startWait < maxWaitMs) {
     try {
-      const messageBlock = await node.getL1ToL2MessageBlock(messageHashFr)
+      const messageBlock = await node.getL1ToL2MessageCheckpoint(messageHashFr)
       if (messageBlock !== undefined) {
         logger.info(`[L1→L2] Message synced at block ${messageBlock}`)
         break
@@ -2657,7 +2701,7 @@ async function testWrongRecipientCantClaimPublic(
   const startWait = Date.now()
   while (Date.now() - startWait < maxWaitMs) {
     try {
-      const messageBlock = await node.getL1ToL2MessageBlock(messageHashFr)
+      const messageBlock = await node.getL1ToL2MessageCheckpoint(messageHashFr)
       if (messageBlock !== undefined) {
         logger.info(`[L1→L2] Message synced at block ${messageBlock}`)
         break
@@ -2770,7 +2814,7 @@ async function testWrongSecretCantClaimPrivate(
   const startWait = Date.now()
   while (Date.now() - startWait < maxWaitMs) {
     try {
-      const messageBlock = await node.getL1ToL2MessageBlock(messageHashFr)
+      const messageBlock = await node.getL1ToL2MessageCheckpoint(messageHashFr)
       if (messageBlock !== undefined) {
         logger.info(`[L1→L2] Message synced at block ${messageBlock}`)
         break
@@ -2915,14 +2959,13 @@ async function waitForProofAndWithdrawL1(
     await wait(40 * 60 * 1000)
   }
 
-  const rollup = new RollupContract(l1Client, rollupAddress as any)
-  const epoch = await rollup.getEpochNumberForCheckpoint(
-    CheckpointNumber.fromBlockNumber(blockNumber)
-  )
-  logger.info(`[L1] Block ${blockNumber} -> Epoch ${epoch}`)
+  const txHash = typeof l2TxReceipt.txHash === 'string'
+    ? TxHash.fromString(l2TxReceipt.txHash)
+    : l2TxReceipt.txHash
+  logger.info(`[L1] Computing witness for txHash=${txHash}`)
 
-  const witness = await computeL2ToL1MembershipWitness(node, epoch, msgLeaf)
-  if (!witness) throw new Error(`L2->L1 message not found in epoch ${epoch}`)
+  const witness = await computeL2ToL1MembershipWitness(node, msgLeaf, txHash)
+  if (!witness) throw new Error(`L2->L1 message not found for txHash ${txHash}`)
 
   const siblingPathHex = witness.siblingPath
     .toBufferArray()
@@ -2938,7 +2981,7 @@ async function waitForProofAndWithdrawL1(
     ownerEthAddress,
     withdrawAmount,
     false,
-    BigInt(epoch),
+    BigInt(witness.epochNumber),
     BigInt(witness.leafIndex),
     siblingPathHex,
   ])
@@ -2984,7 +3027,7 @@ async function main() {
   logger.info(`Registry: ${l1ContractAddresses.registryAddress}`)
   logger.info(`Rollup:   ${l1ContractAddresses.rollupAddress}`)
   logger.info(`L1 Wallet: ${ownerEthAddress}`)
-  logger.info(`Environment: ${isDevnet() ? 'devnet' : 'local sandbox'}`)
+  logger.info(`Environment: ${process.env.AZTEC_ENV ?? 'sandbox'}`)
 
   // Check L1 balance
   const balance = await l1Client.getBalance({ address: ownerEthAddress as `0x${string}` })
@@ -3166,7 +3209,7 @@ async function main() {
 
         // 3. Register BridgedFPC (L2) — fully private contract, no deploy tx needed
         logger.info('Registering BridgedFPC contract...')
-        const bridgedFpc = await registerBridgedContract(wallet)
+        const bridgedFpc = await registerPrivateContract(wallet, new Fr(0n))
         logger.info(`BridgedFPC registered at ${bridgedFpc.address.toString()}`)
 
         saveFuelSwapInfraToDeployment({
@@ -3183,7 +3226,9 @@ async function main() {
     await logPoolBalances(l1Client, deployedContracts, 'BEFORE pool seeding', logger)
 
     // Seed Uniswap V4 pools for all deployed tokens
-    await seedAllTokenPools(deployedContracts, l1Client, logger)
+    const feeJuiceAddrForSeed = ((l1ContractAddresses as any).feeJuiceAddress?.toString() || AZTEC_TOKEN) as `0x${string}`
+    const feeAssetHandlerAddrForSeed = ((l1ContractAddresses as any).feeAssetHandlerAddress?.toString() || FEE_ASSET_HANDLER_ADDR) as `0x${string}`
+    await seedAllTokenPools(deployedContracts, l1Client, logger, feeJuiceAddrForSeed, feeAssetHandlerAddrForSeed)
 
     // Check balances AFTER seeding
     await logPoolBalances(l1Client, deployedContracts, 'AFTER pool seeding', logger)
@@ -3279,7 +3324,7 @@ async function main() {
     
 
     // ════════════════════════════════════════════════════════════════════════════
-    // Test 1c: Private Fuel — SwapBridgeRouter + BridgedMintAndPayFeePaymentMethod
+    // Test 1c: Private Fuel — SwapBridgeRouter + PrivateMintAndPayFeePaymentMethod
     // ════════════════════════════════════════════════════════════════════════════
     await testPrivateFuelFlow(
       deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,

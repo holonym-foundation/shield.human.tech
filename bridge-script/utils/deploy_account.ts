@@ -1,10 +1,10 @@
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee/testing";
+import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee";
+import { NO_FROM } from "@aztec/aztec.js/account";
 import { getSponsoredFPCInstance } from "./sponsored_fpc.js";
 
 import { Fr, GrumpkinScalar } from "@aztec/aztec.js/fields";
 import { Logger, createLogger } from "@aztec/aztec.js/log";
 import { setupWallet } from "./setup_wallet.js";
-import { AztecAddress } from "@aztec/stdlib/aztec-address";
 import { AccountManager } from "@aztec/aztec.js/wallet";
 import { EmbeddedWallet } from "@aztec/wallets/embedded";
 import { getTimeouts } from "../config/config.js";
@@ -38,7 +38,7 @@ export async function deploySchnorrAccount(wallet?: EmbeddedWallet): Promise<Acc
 
     // Deploy account
     const timeouts = getTimeouts();
-    await deployMethod.send({ from: AztecAddress.ZERO, fee: { paymentMethod: sponsoredPaymentMethod }, wait: { timeout: timeouts.deployTimeout } });
+    await deployMethod.send({ from: NO_FROM, fee: { paymentMethod: sponsoredPaymentMethod }, wait: { timeout: timeouts.deployTimeout } });
 
     logger.info('🎉 Schnorr account deployment completed successfully!');
     logger.info(`📋 Account Summary:`);

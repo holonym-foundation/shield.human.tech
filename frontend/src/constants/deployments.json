@@ -1,5 +1,5 @@
 {
-  "activeDeploymentId": "4.0.0-devnet.2-patch.3_2026-03-26",
+  "activeDeploymentId": "4.1.2_2026-03-31",
   "deployments": [
     {
       "id": "4.0.0-devnet.2-patch.3_2026-03-25",
@@ -133,6 +133,73 @@
       "uniswapFuelSwapAddress": "0x6c5553dd9294186655fbb822ea3c8402a1618be0",
       "swapBridgeRouterAddress": "0xde8d8a6dc45d85636525167965dcb58a7d17bc7a",
       "bridgedFpcAddress": "0x2536e27c6187a18a0c23c7288efaf6dfcd020f6d7d4c63745f6870681f0064f7"
+    },
+    {
+      "id": "4.1.2_2026-03-31",
+      "deployedAt": "2026-03-31T07:47:14.823Z",
+      "network": {
+        "name": "testnet",
+        "nodeUrl": "https://rpc.testnet.aztec-labs.com",
+        "l1RpcUrl": "https://eth-sepolia.g.alchemy.com/v2/wxieEGaCXu4vVoL3y2Sf31sJHcmlnppW/",
+        "l1ChainId": 11155111,
+        "l2ChainId": -156673111,
+        "aztecVersion": "4.1.2",
+        "rollupVersion": 4127419662
+      },
+      "l1ContractAddresses": {
+        "rollupAddress": "0xf6d0d42ace06829becb78c74f49879528fc632c1",
+        "registryAddress": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba",
+        "inboxAddress": "0xf1bb424ac888aa239f1e658b5bddabc65a1c94e6",
+        "outboxAddress": "0x5fe63c32b7ca20445e813bdb1019f1ffc5f52376"
+      },
+      "nodeInfo": {
+        "enr": "enr:-M24QNlxzqEUl0GmRW3jBejzoIfXfZWAkQKZNy_LonwxQDtDPI4wCaJas5IYobQcJZh2_D9462RGGlDWq303Eb4zZzMHhWF6dGVjsTAwLTExMTU1MTExLWY2ZDBkNDJhLTQxMjc0MTk2NjItMjY3MjM0MGQtMWRkMjY0NGGCaWSCdjSCaXCEaMTze4lzZWNwMjU2azGhAkj0cNg4q_1-73tJ5SHnVcgHmddUg59kMyRa2qsu46P3g3RjcIKd34N1ZHCCnd-DdmVyhTQuMS4y",
+        "nodeVersion": "4.1.2",
+        "l1ChainId": 11155111,
+        "rollupVersion": 4127419662,
+        "l1ContractAddresses": {
+          "rollupAddress": "0xf6d0d42ace06829becb78c74f49879528fc632c1",
+          "registryAddress": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba",
+          "inboxAddress": "0xf1bb424ac888aa239f1e658b5bddabc65a1c94e6",
+          "outboxAddress": "0x5fe63c32b7ca20445e813bdb1019f1ffc5f52376",
+          "feeJuiceAddress": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
+          "stakingAssetAddress": "0x5595cb9ed193cac2c0bc5393313bc6115817954b",
+          "feeJuicePortalAddress": "0xd3361019e40026ce8a9745c19e67fd3acc10d596",
+          "coinIssuerAddress": "0xe05d0a62045b4237556c1ec423e59eea9a24eaee",
+          "rewardDistributorAddress": "0x030d2780e70f085c31d490268d3900d4cea16606",
+          "governanceProposerAddress": "0x01c7d4ca153748d2377968fef22894cb162e9480",
+          "governanceAddress": "0xcaf7447721447b22cd0076ac7c63877c3afd329f",
+          "feeAssetHandlerAddress": "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
+          "gseAddress": "0xb6a38a51a6c1de9012f9d8ea9745ef957212eaac"
+        },
+        "protocolContractAddresses": {
+          "classRegistry": "0x0000000000000000000000000000000000000000000000000000000000000003",
+          "feeJuice": "0x0000000000000000000000000000000000000000000000000000000000000005",
+          "instanceRegistry": "0x0000000000000000000000000000000000000000000000000000000000000002",
+          "multiCallEntrypoint": "0x0000000000000000000000000000000000000000000000000000000000000004"
+        },
+        "realProofs": true
+      },
+      "sponsoredFeeAddress": "0x2ae02a54fd254586fd628ff46b71071bd8db32b63dc5d083f844f2c208a3923c",
+      "tokens": [
+        {
+          "symbol": "USDC",
+          "decimals": 6,
+          "logo": "/assets/tokens/usdc-xl.svg",
+          "l1TokenContract": "0x5fba3ba778243137e2f56855ab1c0cc6c788f1c7",
+          "l1PortalContract": "0x75f4dce809636fa1835d25cfc9386a070d6908f9",
+          "l2TokenContract": "0x220ab55dc21d6c45680404068abdf4c413b5bed9c31133f072be5409357c56ef",
+          "l2BridgeContract": "0x2a7f40fbb8886473338a7291eb6604cf4b2864eee963f2c930b23c643e68ee1d",
+          "l2ProxyContract": "0x295632bb7de99101eaa8a2c4c1e85dd79a4e2910d97e948c00e0b9582396df8e",
+          "feeAssetHandler": "0xb0a2dac3b9042286f285adc2e435e2d80b7904ab",
+          "sponsoredFee": "0x2ae02a54fd254586fd628ff46b71071bd8db32b63dc5d083f844f2c208a3923c",
+          "humanIdAttester": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+          "passportSigner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+        }
+      ],
+      "uniswapFuelSwapAddress": "0x39ec0fe1861887aac40adb800d6e9bf49cfa26bc",
+      "swapBridgeRouterAddress": "0x5889760fd8f5e3c77b4b8dea56fd3f2faafc56f2",
+      "bridgedFpcAddress": "0x1d6d7973a39ebbac62ba7db6dd432ae138a1f210392c5202dbcd11c7a037bc14"
     }
   ]
 }
