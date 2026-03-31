@@ -96,6 +96,9 @@ export const FEE_POOL_FEE = 3000 as const
 export const FEE_POOL_TICK_SPACING = 60 as const
 // Native ETH pool: mainnet uses native ETH (address(0)), Sepolia too
 export const FEE_POOL_USES_NATIVE_ETH = true as const
+// Direct pool (e.g. USDC/FeeJuice) — same fee tier, used by smart routing
+export const DIRECT_POOL_FEE = 3000 as const
+export const DIRECT_POOL_TICK_SPACING = 60 as const
 
 // Non-token protocol addresses (SBT)
 export const ADDRESS = {

@@ -65,7 +65,7 @@ import {
   UNISWAP_FUEL_SWAP_ADDRESS,
 } from '@/config'
 import { getUniswapFuelQuote, type FuelQuote } from '@/utils/fuelQuote'
-import { buildSwapRoute, getV4Quote } from '@/utils/fuelPricing'
+import { buildCandidateRoutes, getBestRoute } from '@/utils/fuelPricing'
 import {
   createSigningMessage,
   deriveEncryptionKey,
@@ -84,11 +84,9 @@ async function buildFuelQuote(params: {
   inputDecimals: number
 }): Promise<FuelQuote> {
   const { bridgeTokenAddress, fuelAmount } = params
-  const { poolKeys, zeroForOnes } = buildSwapRoute(bridgeTokenAddress)
-
-  const expectedOutput = await getV4Quote({
-    poolKeys,
-    zeroForOnes,
+  const candidates = buildCandidateRoutes(bridgeTokenAddress)
+  const { route, expectedOutput } = await getBestRoute({
+    candidates,
     inputAmount: fuelAmount,
     l1RpcUrl: process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL ?? '',
   })
@@ -96,8 +94,8 @@ async function buildFuelQuote(params: {
   return getUniswapFuelQuote({
     expectedOutput,
     slippageBps: 300, // 3% slippage for testnet
-    poolKeys,
-    zeroForOnes,
+    poolKeys: route.poolKeys,
+    zeroForOnes: route.zeroForOnes,
   })
 }
 

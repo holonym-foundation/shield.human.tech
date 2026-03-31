@@ -18,6 +18,8 @@ import {
   FEE_POOL_FEE,
   FEE_POOL_TICK_SPACING,
   FEE_POOL_USES_NATIVE_ETH,
+  DIRECT_POOL_FEE,
+  DIRECT_POOL_TICK_SPACING,
 } from '@/config'
 
 export const FEE_JUICE_DECIMALS = 18
@@ -147,6 +149,107 @@ export function buildSwapRoute(inputToken: `0x${string}`): {
     ],
     zeroForOnes: [isZeroForOne(inputToken, weth), isZeroForOne(feePoolBase, aztec)],
   }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Smart Routing — Parallel Candidate Quoting
+// ═════════════════════════════════════════════════════════════════════
+
+export interface CandidateRoute {
+  label: string
+  poolKeys: PoolKeyParam[]
+  zeroForOnes: boolean[]
+}
+
+export interface RouteResult {
+  route: CandidateRoute
+  expectedOutput: bigint
+}
+
+/**
+ * Generate candidate routes for inputToken → FeeJuice.
+ * Returns 1-2 candidates that will be quoted in parallel.
+ */
+export function buildCandidateRoutes(inputToken: `0x${string}`): CandidateRoute[] {
+  const weth = WETH_ADDRESS
+  const aztec = FEE_JUICE_ADDRESS
+  const feePoolBase = FEE_POOL_USES_NATIVE_ETH ? NATIVE_ETH : weth
+  const candidates: CandidateRoute[] = []
+
+  if (inputToken.toLowerCase() === weth.toLowerCase()) {
+    // WETH only has one route: WETH → FeeJuice
+    candidates.push({
+      label: 'direct-weth',
+      poolKeys: [buildPoolKey(feePoolBase, aztec, FEE_POOL_FEE, FEE_POOL_TICK_SPACING)],
+      zeroForOnes: [isZeroForOne(feePoolBase, aztec)],
+    })
+    return candidates
+  }
+
+  // Route A: Direct (inputToken → FeeJuice) — pool may not exist
+  // Uses the actual FEE_JUICE_ADDRESS (ERC20), NOT NATIVE_ETH/feePoolBase
+  candidates.push({
+    label: 'direct',
+    poolKeys: [buildPoolKey(inputToken, aztec, DIRECT_POOL_FEE, DIRECT_POOL_TICK_SPACING)],
+    zeroForOnes: [isZeroForOne(inputToken, aztec)],
+  })
+
+  // Route B: Via WETH (inputToken → WETH → FeeJuice) — established route
+  candidates.push({
+    label: 'via-weth',
+    poolKeys: [
+      buildPoolKey(inputToken, weth, INTERMEDIATE_POOL_FEE, INTERMEDIATE_POOL_TICK_SPACING),
+      buildPoolKey(feePoolBase, aztec, FEE_POOL_FEE, FEE_POOL_TICK_SPACING),
+    ],
+    zeroForOnes: [isZeroForOne(inputToken, weth), isZeroForOne(feePoolBase, aztec)],
+  })
+
+  return candidates
+}
+
+/**
+ * Quote all candidate routes in parallel, return the best one.
+ * Non-existent pools revert during quoting and are skipped.
+ */
+export async function getBestRoute(params: {
+  candidates: CandidateRoute[]
+  inputAmount: bigint
+  l1RpcUrl: string
+}): Promise<RouteResult> {
+  const { candidates, inputAmount, l1RpcUrl } = params
+
+  const results = await Promise.allSettled(
+    candidates.map(async (route) => {
+      const output = await getV4Quote({
+        poolKeys: route.poolKeys,
+        zeroForOnes: route.zeroForOnes,
+        inputAmount,
+        l1RpcUrl,
+      })
+      return { route, expectedOutput: output }
+    })
+  )
+
+  const fulfilled: RouteResult[] = []
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value.expectedOutput > 0n) {
+      fulfilled.push(r.value)
+    }
+  }
+
+  if (fulfilled.length === 0) {
+    const reasons = results
+      .map((r, i) => r.status === 'rejected'
+        ? `${candidates[i].label}: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`
+        : null
+      )
+      .filter(Boolean)
+    throw new Error(`All swap routes failed: ${reasons.join('; ')}`)
+  }
+
+  fulfilled.sort((a, b) => (a.expectedOutput > b.expectedOutput ? -1 : 1))
+  console.log(`[FuelRouting] Best route: ${fulfilled[0].route.label} (${fulfilled.length} candidates succeeded)`)
+  return fulfilled[0]
 }
 
 // ═════════════════════════════════════════════════════════════════════

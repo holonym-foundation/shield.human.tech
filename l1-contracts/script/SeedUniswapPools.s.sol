@@ -156,6 +156,15 @@ contract SeedUniswapPools is Script {
     int24   constant ETH_AZTEC_TICK_LOWER  = -887220;  // full range (tick spacing = 60)
     int24   constant ETH_AZTEC_TICK_UPPER  = 887220;   // full range
 
+    // ── ERC20/AZTEC direct pool params (~10 FeeJuice per USDC) ──────
+    // USDC (0x1410...) < AZTEC (0x762C...) → USDC is currency0, AZTEC is currency1
+    // price = 10e18 / 1e6 = 1e13, sqrtPriceX96 = sqrt(1e13) * 2^96
+    uint24  constant ERC20_AZTEC_FEE         = 3000;
+    int24   constant ERC20_AZTEC_TICK_SPACING = 60;
+    uint160 constant ERC20_AZTEC_SQRT_PRICE  = 250541396071120286692299382636675072;
+    int24   constant ERC20_AZTEC_TICK_LOWER  = -887220;  // full range
+    int24   constant ERC20_AZTEC_TICK_UPPER  = 887220;   // full range
+
     // ── ERC20/WETH pool params (~2,100 USDC per WETH) ──────────────
     uint24  constant ERC20_WETH_FEE         = 3000;
     int24   constant ERC20_WETH_TICK_SPACING = 60;
@@ -219,7 +228,8 @@ contract SeedUniswapPools is Script {
         }
 
         // ── Pool 2: ERC20/WETH ─────────────────────────────────────
-        if (erc20Token != address(0)) {
+        bool skipErc20Weth = vm.envOr("SKIP_ERC20_WETH", false);
+        if (erc20Token != address(0) && !skipErc20Weth) {
             console.log("\n--- ERC20/WETH pool ---");
             console.log("  ERC20 token:", erc20Token);
 
@@ -263,6 +273,46 @@ contract SeedUniswapPools is Script {
             seeder.sweep(erc20Token);
         } else {
             console.log("\n--- Skipping ERC20/WETH pool (no ERC20_TOKEN set) ---");
+        }
+
+        // ── Pool 3: ERC20/AZTEC direct pool (testnet only) ──────────
+        bool seedDirectPool = vm.envOr("SEED_DIRECT_POOL", false);
+        if (seedDirectPool && erc20Token != address(0)) {
+            console.log("\n--- ERC20/AZTEC direct pool ---");
+
+            uint8 decimals = ITestERC20(erc20Token).decimals();
+            uint256 directErc20Amount = vm.envOr("DIRECT_ERC20_AMOUNT", uint256(50000 * 10 ** decimals));
+            uint256 directFjMintCount = vm.envOr("DIRECT_FJ_MINT_COUNT", uint256(100));
+
+            // Mint ERC20 for direct pool
+            ITestERC20(erc20Token).mint(address(seeder), directErc20Amount);
+            console.log("  Minted ERC20:", directErc20Amount);
+
+            // Mint FeeJuice for direct pool
+            for (uint256 i = 0; i < directFjMintCount; i++) {
+                IFeeAssetHandler(FEE_ASSET_HANDLER).mint(address(seeder));
+            }
+            console.log("  Minted FJ:", directFjMintCount, "x 1000 FJ");
+
+            int256 directLiquidity = int256(vm.envOr("DIRECT_LIQUIDITY", uint256(1e15)));
+            seeder.setup(
+                PoolKey({
+                    currency0: Currency.wrap(erc20Token < AZTEC ? erc20Token : AZTEC),
+                    currency1: Currency.wrap(erc20Token < AZTEC ? AZTEC : erc20Token),
+                    fee: ERC20_AZTEC_FEE,
+                    tickSpacing: ERC20_AZTEC_TICK_SPACING,
+                    hooks: IHooks(address(0))
+                }),
+                ERC20_AZTEC_SQRT_PRICE,
+                ERC20_AZTEC_TICK_LOWER,
+                ERC20_AZTEC_TICK_UPPER,
+                directLiquidity
+            );
+            console.log("  ERC20/AZTEC direct pool seeded");
+
+            seeder.sweep(erc20Token);
+        } else if (seedDirectPool) {
+            console.log("\n--- Skipping ERC20/AZTEC pool (no ERC20_TOKEN set) ---");
         }
 
         // ── Sweep leftovers ────────────────────────────────────────

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
-import { buildSwapRoute, getV4Quote } from '@/utils/fuelPricing'
+import { buildCandidateRoutes, getBestRoute } from '@/utils/fuelPricing'
 import { BRIDGED_FPC_ADDRESS } from '@/config'
 import { useTokenPrices } from '@/utils/coinGeckoPrice'
 
@@ -57,21 +57,21 @@ function useV4FuelQuote(
 
     const timeout = setTimeout(async () => {
       try {
-        const { poolKeys, zeroForOnes } = buildSwapRoute(tokenAddress as `0x${string}`)
-        const output = await getV4Quote({
-          poolKeys,
-          zeroForOnes,
+        const candidates = buildCandidateRoutes(tokenAddress as `0x${string}`)
+        const { expectedOutput } = await getBestRoute({
+          candidates,
           inputAmount: inputRaw,
           l1RpcUrl: process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL ?? '',
         })
-        setFjOutput(output)
+        setFjOutput(expectedOutput)
         setError(null)
       } catch (err) {
         console.error('[FuelToggle] V4 quote failed:', err)
         setFjOutput(null)
         const errMsg = err instanceof Error ? err.message : String(err)
+        const isAllFailed = errMsg.includes('All swap routes failed')
         const isRevert = errMsg.includes('reverted') || errMsg.includes('execution reverted')
-        setError(isRevert ? 'Swap amount exceeds pool liquidity — try a smaller amount' : 'Quote failed')
+        setError(isAllFailed ? 'No swap route available — try a smaller amount' : isRevert ? 'Swap amount exceeds pool liquidity' : 'Quote failed')
       } finally {
         setLoading(false)
       }
