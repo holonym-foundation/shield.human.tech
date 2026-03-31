@@ -22,7 +22,7 @@ export interface ExecuteCallResult {
   blockNumber?: number
 }
 
-type ContractType = 'token' | 'bridge' | 'private_fpc' | 'fee_juice'
+type ContractType = 'token' | 'bridge' | 'proxy' | 'private_fpc' | 'fee_juice'
 
 async function getContractArtifact(type: ContractType) {
   if (type === 'bridge') {
@@ -30,6 +30,12 @@ async function getContractArtifact(type: ContractType) {
     const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
     // @ts-ignore — JSON import from local build output
     return loadContractArtifact(bridgeJson.default ?? bridgeJson)
+  }
+  if (type === 'proxy') {
+    const proxyJson = await import('../../../aztec-contracts/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json')
+    const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
+    // @ts-ignore — JSON import from local build output
+    return loadContractArtifact(proxyJson.default ?? proxyJson)
   }
   if (type === 'private_fpc') {
     const { PrivateFPCContractArtifact } = await import('@wonderland/aztec-fee-payment')
@@ -74,10 +80,11 @@ class WalletAdapter {
 
   async initializeContracts(): Promise<void> {
     // Register ALL tokens and bridges from config, not just the default
-    const deployedContracts: { addr: string; type: 'token' | 'bridge' }[] = L1_TOKENS.flatMap(
+    const deployedContracts: { addr: string; type: 'token' | 'bridge' | 'proxy' }[] = L1_TOKENS.flatMap(
       (t) => [
         { addr: t.l2TokenContract ?? '', type: 'token' as const },
         { addr: t.l2BridgeContract ?? '', type: 'bridge' as const },
+        { addr: (t as any).l2ProxyContract ?? '', type: 'proxy' as const },
       ],
     ).filter(({ addr }) => !!addr)
 
