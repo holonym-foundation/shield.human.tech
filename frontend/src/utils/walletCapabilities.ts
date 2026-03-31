@@ -1,5 +1,5 @@
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
+import { PRIVATE_FPC_ADDRESS, L1_TOKENS } from '@/config'
 import type { ContractFunctionPattern } from '@aztec/aztec.js/wallet'
 
 /** Well-known Fee Juice contract on L2 */
@@ -51,11 +51,11 @@ const FEE_JUICE_TRANSACTION_METHODS = [
   'claim',
 ] as const
 
-const BRIDGED_FPC_SIMULATION_METHODS = [
+const PRIVATE_FPC_SIMULATION_METHODS = [
   'balance_of',
 ] as const
 
-const BRIDGED_FPC_TRANSACTION_METHODS = [
+const PRIVATE_FPC_TRANSACTION_METHODS = [
   'mint',
   'mint_and_pay_fee',
   'pay_fee',
@@ -77,8 +77,8 @@ export function buildCapabilityManifest() {
     .filter((addr): addr is string => !!addr)
     .map((addr) => AztecAddress.fromString(addr))
 
-  const fpcAddress = BRIDGED_FPC_ADDRESS
-    ? AztecAddress.fromString(BRIDGED_FPC_ADDRESS)
+  const fpcAddress = PRIVATE_FPC_ADDRESS
+    ? AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
     : null
 
   const allContracts = [
@@ -94,7 +94,7 @@ export function buildCapabilityManifest() {
       (addr) => patternsFor(addr, [...TOKEN_UTILITY_SIMULATION_METHODS]),
     ),
     ...(fpcAddress
-      ? patternsFor(fpcAddress, [...BRIDGED_FPC_SIMULATION_METHODS])
+      ? patternsFor(fpcAddress, [...PRIVATE_FPC_SIMULATION_METHODS])
       : []),
   ]
 
@@ -114,7 +114,7 @@ export function buildCapabilityManifest() {
     ),
     ...patternsFor(FEE_JUICE_ADDRESS, [...FEE_JUICE_TRANSACTION_METHODS]),
     ...(fpcAddress
-      ? patternsFor(fpcAddress, [...BRIDGED_FPC_TRANSACTION_METHODS])
+      ? patternsFor(fpcAddress, [...PRIVATE_FPC_TRANSACTION_METHODS])
       : []),
   ]
 

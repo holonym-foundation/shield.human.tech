@@ -1,7 +1,7 @@
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { aztecNode } from '@/aztec'
 import {
-  BRIDGED_FPC_ADDRESS,
+  PRIVATE_FPC_ADDRESS,
   L1_CHAIN_ID,
   L1_CONTRACT_ADDRESSES,
   L1_TOKENS,
@@ -195,7 +195,7 @@ export const useL2PrivateFeeJuiceBalance = () => {
           'Aztec wallet not connected or contracts not initialized',
         )
       }
-      if (!BRIDGED_FPC_ADDRESS) {
+      if (!PRIVATE_FPC_ADDRESS) {
         return '0'
       }
 
@@ -203,7 +203,7 @@ export const useL2PrivateFeeJuiceBalance = () => {
 
       const [balanceResult] = await walletAdapter.simulateViews([
         {
-          contract: BRIDGED_FPC_ADDRESS,
+          contract: PRIVATE_FPC_ADDRESS,
           method: 'balance_of',
           args: [userAddress],
         },
@@ -222,7 +222,7 @@ export const useL2PrivateFeeJuiceBalance = () => {
   return useQuery<string, Error>({
     queryKey,
     queryFn,
-    enabled: !!aztecAddress && !!walletAdapter && !!BRIDGED_FPC_ADDRESS,
+    enabled: !!aztecAddress && !!walletAdapter && !!PRIVATE_FPC_ADDRESS,
     refetchInterval: 30_000,
   })
 }

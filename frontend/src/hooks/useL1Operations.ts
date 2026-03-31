@@ -60,7 +60,7 @@ import {
   type PassportAttestationData,
 } from './bridge/bridgeL1ToL2'
 import {
-  BRIDGED_FPC_ADDRESS,
+  PRIVATE_FPC_ADDRESS,
   SWAP_BRIDGE_ROUTER_ADDRESS,
   UNISWAP_FUEL_SWAP_ADDRESS,
 } from '@/config'
@@ -624,16 +624,16 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       )
       const hasSwapTarget = UNISWAP_FUEL_SWAP_ADDRESS
       if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amount) {
-        if (fuelType === 'private' && BRIDGED_FPC_ADDRESS && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
-          // Private fuel (BridgedFPC): swap via SwapBridgeRouter, FJ deposited to FPC, then claim+mint on L2
+        if (fuelType === 'private' && PRIVATE_FPC_ADDRESS && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
+          // Private fuel (PrivateFPC): swap via SwapBridgeRouter, FJ deposited to FPC, then claim+mint on L2
           const fuelQuote = await buildFuelQuote({
             bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
             fuelAmount: fuelAmountTokenUnits,
             inputDecimals: selectedToken?.decimals ?? 6,
           })
           fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
-          privateFuel = { fuelAmount: fuelAmountTokenUnits, fpcAddress: BRIDGED_FPC_ADDRESS }
-          console.log('[L1→L2] Private fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), fpcAddress: BRIDGED_FPC_ADDRESS, expectedOutput: fuelQuote.expectedOutput.toString() })
+          privateFuel = { fuelAmount: fuelAmountTokenUnits, fpcAddress: PRIVATE_FPC_ADDRESS }
+          console.log('[L1→L2] Private fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), fpcAddress: PRIVATE_FPC_ADDRESS, expectedOutput: fuelQuote.expectedOutput.toString() })
         } else if (fuelType === 'public' && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
           // Public fuel: swap tokens → FJ via SwapBridgeRouter
           const fuelQuote = await buildFuelQuote({

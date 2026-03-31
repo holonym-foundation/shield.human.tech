@@ -4,7 +4,7 @@ import { Fr } from '@aztec/aztec.js/fields'
 import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
 import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
 import type { Wallet } from '@aztec/aztec.js/wallet'
-import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
+import { PRIVATE_FPC_ADDRESS, L1_TOKENS } from '@/config'
 import { aztecNode } from '@/aztec'
 
 export interface WalletContext {
@@ -22,7 +22,7 @@ export interface ExecuteCallResult {
   blockNumber?: number
 }
 
-type ContractType = 'token' | 'bridge' | 'bridged_fpc' | 'fee_juice'
+type ContractType = 'token' | 'bridge' | 'private_fpc' | 'fee_juice'
 
 async function getContractArtifact(type: ContractType) {
   if (type === 'bridge') {
@@ -31,7 +31,7 @@ async function getContractArtifact(type: ContractType) {
     // @ts-ignore — JSON import from local build output
     return loadContractArtifact(bridgeJson.default ?? bridgeJson)
   }
-  if (type === 'bridged_fpc') {
+  if (type === 'private_fpc') {
     const { PrivateFPCContractArtifact } = await import('@wonderland/aztec-fee-payment')
     return PrivateFPCContractArtifact
   }
@@ -50,7 +50,7 @@ function resolveArtifactType(
   bridgeAddress: string
 ): ContractType {
   if (contractAddress.toLowerCase() === bridgeAddress.toLowerCase()) return 'bridge'
-  if (BRIDGED_FPC_ADDRESS && contractAddress.toLowerCase() === BRIDGED_FPC_ADDRESS.toLowerCase()) return 'bridged_fpc'
+  if (PRIVATE_FPC_ADDRESS && contractAddress.toLowerCase() === PRIVATE_FPC_ADDRESS.toLowerCase()) return 'private_fpc'
   if (contractAddress.toLowerCase() === FEE_JUICE_L2_ADDRESS.toLowerCase()) return 'fee_juice'
   return 'token'
 }
@@ -99,10 +99,10 @@ class WalletAdapter {
       })
     )
 
-    // Register BridgedFPC separately — it's a registered-not-deployed contract,
+    // Register PrivateFPC separately — it's a registered-not-deployed contract,
     // so the node doesn't know about it. We compute the deterministic instance
     // locally and register it with the wallet's PXE.
-    if (BRIDGED_FPC_ADDRESS) {
+    if (PRIVATE_FPC_ADDRESS) {
       try {
         const { registerPrivateContract } = await import('@wonderland/aztec-fee-payment')
         const { Fr } = await import('@aztec/aztec.js/fields')

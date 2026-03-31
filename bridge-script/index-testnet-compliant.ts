@@ -2027,8 +2027,8 @@ async function main() {
       // Step 4: Save fuel infra to deployment JSON
       if (uniswapFuelSwapAddress && swapBridgeRouterAddress) {
         // Compute BridgedFPC address (salt=0)
-        let bridgedFpcAddress = existingDeployment?.bridgedFpcAddress ?? ''
-        if (!bridgedFpcAddress) {
+        let privateFpcAddress = existingDeployment?.privateFpcAddress ?? ''
+        if (!privateFpcAddress) {
           try {
             const { getContractInstanceFromInstantiationParams } = await import('@aztec/aztec.js/contracts')
             const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
@@ -2038,8 +2038,8 @@ async function main() {
             const artifactJson = JSON.parse(readFs(targetPath, 'utf8'))
             const artifact = loadContractArtifact(artifactJson)
             const fpcInstance = await getContractInstanceFromInstantiationParams(artifact, { salt: new Fr(0n) })
-            bridgedFpcAddress = fpcInstance.address.toString()
-            logger.info(`BridgedFPC computed at ${bridgedFpcAddress}`)
+            privateFpcAddress = fpcInstance.address.toString()
+            logger.info(`PrivateFPC computed at ${privateFpcAddress}`)
           } catch (e: any) {
             logger.warn(`Could not compute BridgedFPC address: ${e.message?.slice(0, 80)}`)
           }
@@ -2048,7 +2048,7 @@ async function main() {
         saveFuelInfraToDeployment({
           swapBridgeRouterAddress,
           uniswapFuelSwapAddress,
-          bridgedFpcAddress,
+          privateFpcAddress,
         })
         logger.info('Fuel infrastructure saved to deployment')
       }

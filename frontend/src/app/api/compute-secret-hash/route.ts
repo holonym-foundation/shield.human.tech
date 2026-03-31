@@ -17,7 +17,7 @@ import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon'
  *   Body: { type: 'fpc-bridge', salt: string, claimer: string }
  *   Returns: { secret: string, secretHash: string }
  *
- *   The BridgedFPC contract derives the bridge secret as:
+ *   The PrivateFPC contract derives the bridge secret as:
  *     secret = poseidon2HashWithSeparator([salt, claimer], DOM_SEP_FPC_BRIDGE_SECRET)
  *   where DOM_SEP_FPC_BRIDGE_SECRET = 3952304070 and claimer = user's Aztec address
  *   (the contract uses msg_sender() as the claimer in mint/mint_and_pay_fee).

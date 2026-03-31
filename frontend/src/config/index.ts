@@ -69,8 +69,8 @@ export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuicePortalAddress ?? '') as `0x${string}`
 export const FEE_JUICE_ADDRESS: `0x${string}` =
   (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
-export const BRIDGED_FPC_ADDRESS: string =
-  ((activeDeployment as any).bridgedFpcAddress ?? '') as string
+export const PRIVATE_FPC_ADDRESS: string =
+  ((activeDeployment as any).privateFpcAddress ?? '') as string
 
 // ─── Permit2 + SwapBridgeRouter ──────────────────────────────────────
 export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const

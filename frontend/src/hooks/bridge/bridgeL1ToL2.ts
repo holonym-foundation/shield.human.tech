@@ -127,7 +127,7 @@ export async function fetchPassportAttestation(
   return res.data as PassportAttestationData
 }
 
-/** Parameters for private fuel (BridgedFPC) flow. */
+/** Parameters for private fuel (PrivateFPC) flow. */
 export interface PrivateFuelParams {
   fuelAmount: bigint
   fpcAddress: string
@@ -205,11 +205,11 @@ export interface BackupResult {
   nodeInfoSnapshot: any
   fuelSecret?: Fr
   fuelSecretHash?: Fr
-  /** For private fuel (BridgedFPC): the random salt used in secret derivation */
+  /** For private fuel (PrivateFPC): the random salt used in secret derivation */
   privateFuelSalt?: Fr
-  /** For private fuel (BridgedFPC): the derived secret */
+  /** For private fuel (PrivateFPC): the derived secret */
   privateFuelSecret?: Fr
-  /** For private fuel (BridgedFPC): hash of the derived secret */
+  /** For private fuel (PrivateFPC): hash of the derived secret */
   privateFuelSecretHash?: Fr
 }
 
@@ -749,7 +749,7 @@ export async function generateAndBackupClaimSecret(params: {
   // Public fuel: random secret + hash → used with FeeJuicePaymentMethodWithClaim on L2.
   // Private fuel: derived secret (poseidon2([salt, userAddress], DOM_SEP)) + hash → FJ
   //   deposited to FPC on L1, then BridgedMintAndPayFeePaymentMethod on L2
-  //   (FeeJuice.claim + BridgedFPC.mint_and_pay_fee, all private, in one tx).
+  //   (FeeJuice.claim + PrivateFPC.mint_and_pay_fee, all private, in one tx).
   // When private fuel is active, fuel is also set (for the swap quote), but we skip
   // the public fuel secret since it would be unused — private fuel has its own secret.
   let fuelSecret: Fr | undefined
@@ -774,7 +774,7 @@ export async function generateAndBackupClaimSecret(params: {
   let privateFuelSecretHash: Fr | undefined
   if (params.privateFuel) {
     privateFuelSalt = Fr.random()
-    // Derive BridgedFPC secret: poseidon2([salt, claimer], DOM_SEP)
+    // Derive PrivateFPC secret: poseidon2([salt, claimer], DOM_SEP)
     // claimer = user's Aztec address (the contract uses msg_sender() as claimer)
     const pfHashRes = await fetch('/api/compute-secret-hash', {
       method: 'POST',
@@ -791,7 +791,7 @@ export async function generateAndBackupClaimSecret(params: {
     const { secret: pfSecret, secretHash: pfSecretHash } = await pfHashRes.json()
     privateFuelSecret = Fr.fromString(pfSecret)
     privateFuelSecretHash = Fr.fromString(pfSecretHash)
-    console.log('[L1→L2] Private fuel (BridgedFPC) secret generated')
+    console.log('[L1→L2] Private fuel (PrivateFPC) secret generated')
   }
 
   return {

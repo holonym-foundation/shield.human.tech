@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
 import { buildCandidateRoutes, getBestRoute } from '@/utils/fuelPricing'
-import { BRIDGED_FPC_ADDRESS } from '@/config'
+import { PRIVATE_FPC_ADDRESS } from '@/config'
 import { useTokenPrices } from '@/utils/coinGeckoPrice'
 
 interface FuelToggleProps {
@@ -112,7 +112,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   const fuelNum = Number(fuelAmount) || 0
   const isValid = fuelNum > 0 && fuelNum < bridgeNum
   const netBridge = bridgeNum - fuelNum
-  const hasBridgedFpc = !!BRIDGED_FPC_ADDRESS
+  const hasPrivateFpc = !!PRIVATE_FPC_ADDRESS
 
   const { prices, isLoading: pricesLoading, error: pricesError } = useTokenPrices()
 
@@ -156,7 +156,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
               : feeJuiceBalance ?? '--'}
           </span>
         </div>
-        {hasBridgedFpc && (
+        {hasPrivateFpc && (
           <div className='flex justify-between items-center h-4'>
             <span>Private Fee Juice:</span>
             <span className='font-semibold'>
@@ -182,7 +182,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                   Live prices unavailable — using fallback prices
                 </p>
               )}
-              {hasBridgedFpc && (
+              {hasPrivateFpc && (
                 <div className='flex rounded-md overflow-hidden border border-gray-200 text-xs'>
                   <button
                     onClick={() => onFuelTypeChange('public')}

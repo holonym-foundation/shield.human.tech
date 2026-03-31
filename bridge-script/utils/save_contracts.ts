@@ -45,7 +45,7 @@ sponsoredFeeAddress: string;
 tokens: DeployedToken[];
 swapBridgeRouterAddress?: string;
 uniswapFuelSwapAddress?: string;
-bridgedFpcAddress?: string;
+privateFpcAddress?: string;
 }
 
 export interface RegistryEntry {
@@ -224,7 +224,7 @@ console.log(`✅ Saved ${token.symbol} to deployment ${id}`);
 export function saveFuelInfraToDeployment(infra: {
 swapBridgeRouterAddress: string;
 uniswapFuelSwapAddress: string;
-bridgedFpcAddress: string;
+privateFpcAddress: string;
 }): void {
 const registry = loadRegistry();
 if (!registry) throw new Error('No registry found');
@@ -236,7 +236,7 @@ const deployment: DeploymentFile = JSON.parse(readFileSync(filePath, 'utf-8'));
 
 deployment.swapBridgeRouterAddress = infra.swapBridgeRouterAddress;
 deployment.uniswapFuelSwapAddress = infra.uniswapFuelSwapAddress;
-deployment.bridgedFpcAddress = infra.bridgedFpcAddress;
+deployment.privateFpcAddress = infra.privateFpcAddress;
 
 writeJson(filePath, deployment);
 console.log(`✅ Saved fuel infrastructure to deployment ${id}`);
