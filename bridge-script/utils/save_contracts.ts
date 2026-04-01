@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join, resolve } from 'path';
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
@@ -68,6 +68,17 @@ export interface DeploymentRegistry {
 const DEPLOYMENTS_DIR = join('deployments');
 const REGISTRY_FILE = join(DEPLOYMENTS_DIR, 'registry.json');
 const FRONTEND_DEPLOYMENTS = resolve('..', 'frontend', 'src', 'constants', 'deployments.json');
+const FRONTEND_ARTIFACTS_DIR = resolve('..', 'frontend', 'src', 'constants', 'aztec', 'artifacts');
+
+// Source artifact paths (compiled Noir contracts + codegen)
+const ARTIFACT_SOURCES = [
+  // Token artifact (Wonderland compliant token — from bridge-script codegen)
+  { src: resolve('constants', 'aztec', 'artifacts', 'token-Token.json'), dest: 'token-Token.json' },
+  // TokenBridge artifact (custom contract — from aztec-contracts build)
+  { src: resolve('..', 'aztec-contracts', 'token_bridge', 'target', 'token_bridge_contract-TokenBridge.json'), dest: 'token_bridge_contract-TokenBridge.json' },
+  // TokenMinterProxy artifact (custom contract — from aztec-contracts build)
+  { src: resolve('..', 'aztec-contracts', 'token_minter_proxy', 'target', 'token_minter_proxy-TokenMinterProxy.json'), dest: 'token_minter_proxy-TokenMinterProxy.json' },
+];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -153,7 +164,7 @@ export function createDeployment(params: {
     network: {
       name: params.networkName,
       nodeUrl: params.nodeUrl,
-      l1RpcUrl: params.l1RpcUrl,
+      l1RpcUrl: '', // not saved — frontend uses NEXT_PUBLIC_ETHEREUM_RPC_URL env var
       l1ChainId: params.l1ChainId,
       l2ChainId: params.l2ChainId,
       aztecVersion: params.aztecVersion,
@@ -255,6 +266,17 @@ export function copyToFrontend(): void {
 
   writeJson(FRONTEND_DEPLOYMENTS, bundle);
   console.log(`📋 Synced ${allDeployments.length} deployment(s) to frontend: ${FRONTEND_DEPLOYMENTS}`);
+
+  // Sync contract artifacts to frontend
+  ensureDir(FRONTEND_ARTIFACTS_DIR);
+  for (const { src, dest } of ARTIFACT_SOURCES) {
+    if (existsSync(src)) {
+      copyFileSync(src, join(FRONTEND_ARTIFACTS_DIR, dest));
+      console.log(`📦 Synced artifact: ${dest}`);
+    } else {
+      console.warn(`⚠️  Artifact not found, skipping: ${src}`);
+    }
+  }
 }
 
 /**

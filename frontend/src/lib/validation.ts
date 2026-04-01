@@ -43,10 +43,7 @@ export const NUMERIC_STRING_REGEX = /^\d+$/
 // ─── Sanitization helpers ───────────────────────────────────────────────
 
 /** Trim and limit a string field. Returns undefined if input is falsy. */
-export function sanitizeString(
-  value: unknown,
-  maxLength: number = MAX_STRING_LENGTH,
-): string | undefined {
+export function sanitizeString(value: unknown, maxLength: number = MAX_STRING_LENGTH): string | undefined {
   if (value == null || typeof value !== 'string') return undefined
   const trimmed = value.trim()
   if (!trimmed.length) return undefined
@@ -61,10 +58,7 @@ export function sanitizeEthAddress(value: unknown): string | undefined {
 }
 
 /** Sanitize and validate a hex string (0x-prefixed). Returns lowercase or undefined. */
-export function sanitizeHexString(
-  value: unknown,
-  maxLength: number = MAX_STRING_LENGTH,
-): string | undefined {
+export function sanitizeHexString(value: unknown, maxLength: number = MAX_STRING_LENGTH): string | undefined {
   const s = sanitizeString(value, maxLength)
   if (!s || !HEX_STRING_REGEX.test(s)) return undefined
   return s.toLowerCase()
@@ -94,6 +88,8 @@ const ALLOWED_URL_PREFIXES = [
   'https://aztecscan.io/',
   'https://aztecscan.xyz/',
   'https://devnet.aztecscan.xyz/',
+  'https://testnet.aztecscan.xyz/',
+  'https://aztecexplorer.xyz/',
 ]
 
 /** Sanitize a URL string. Only allows known explorer hosts. Returns trimmed URL or undefined. */
@@ -111,11 +107,7 @@ export function sanitizeUrl(value: unknown): string | undefined {
 }
 
 /** Validate an integer is within range. Returns the value or undefined if out of range. */
-export function sanitizeInt(
-  value: unknown,
-  min: number = 0,
-  max: number = 1000,
-): number | undefined {
+export function sanitizeInt(value: unknown, min: number = 0, max: number = 1000): number | undefined {
   if (value == null) return undefined
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined
@@ -133,10 +125,7 @@ export function sanitizeBoolean(value: unknown): boolean | undefined {
  * Sanitize ciphertext: reject (not truncate) if oversized, since truncation
  * would silently corrupt encrypted data and make it unrecoverable.
  */
-export function sanitizeCiphertext(
-  value: unknown,
-  maxLength: number = MAX_CIPHERTEXT_LENGTH,
-): string | undefined {
+export function sanitizeCiphertext(value: unknown, maxLength: number = MAX_CIPHERTEXT_LENGTH): string | undefined {
   if (value == null || typeof value !== 'string') return undefined
   const trimmed = value.trim()
   if (!trimmed.length) return undefined
@@ -149,11 +138,8 @@ export function sanitizeCiphertext(
  * Ensures it's a plain object, strips prototype chains via JSON round-trip,
  * and enforces serialized size limits.
  */
-export function sanitizeNodeInfo(
-  value: unknown,
-): Record<string, unknown> | undefined {
-  if (value == null || typeof value !== 'object' || Array.isArray(value))
-    return undefined
+export function sanitizeNodeInfo(value: unknown): Record<string, unknown> | undefined {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return undefined
   try {
     const serialized = JSON.stringify(value)
     if (serialized.length > MAX_NODE_INFO_LENGTH) return undefined

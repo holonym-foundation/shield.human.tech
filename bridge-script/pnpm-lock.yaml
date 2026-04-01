@@ -45,8 +45,8 @@ importers:
         specifier: 4.2.0-aztecnr-rc.2
         version: 4.2.0-aztecnr-rc.2(typescript@5.9.3)(zod@3.25.76)
       '@defi-wonderland/aztec-standards':
-        specifier: https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz
-        version: https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz
+        specifier: 4.2.0-aztecnr-rc.2
+        version: 4.2.0-aztecnr-rc.2
       '@types/node':
         specifier: ^22.13.10
         version: 22.19.15
@@ -599,12 +599,14 @@ packages:
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@crate-crypto/node-eth-kzg-linux-x64-gnu@0.10.0':
     resolution: {integrity: sha512-b4klE/jp98PBZ7PWuFE1OscWBILSS8jP+JMbIJ+qE7y42s/6ImWH5bWmVdFOfh6u0o95cb9hCS0xIECM80SqBg==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@crate-crypto/node-eth-kzg-win32-arm64-msvc@0.10.0':
     resolution: {integrity: sha512-tFKv02TG/JYsD4gvV0gTvjLqd09/4g/B37fCPXIuEFzq5LgIuWHu37hhQ6K8eIfoXZOTY3wqqkY1jTXYhs2sTA==}
@@ -626,9 +628,8 @@ packages:
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
 
-  '@defi-wonderland/aztec-standards@https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz':
-    resolution: {tarball: https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz}
-    version: 4.2.0-aztecnr-rc.2-prerelease.1ad0e28
+  '@defi-wonderland/aztec-standards@4.2.0-aztecnr-rc.2':
+    resolution: {integrity: sha512-IjT/5VwWDM/iKTlhVFLMpF92giwZXlV6GnOtfnrYYd/xd/9sipxPiqqUI2thBg6M7jCFNSn79Sg3movlCdGD0w==}
 
   '@esbuild/aix-ppc64@0.27.4':
     resolution: {integrity: sha512-cQPwL2mp2nSmHHJlCyoXgHGhbEPMrEEU5xhkcy3Hs/O7nGZqEpZ2sUtLaL9MORLtDfRvVl2/3PAuEkYZH0Ty8Q==}
@@ -4880,7 +4881,7 @@ snapshots:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
 
-  '@defi-wonderland/aztec-standards@https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz': {}
+  '@defi-wonderland/aztec-standards@4.2.0-aztecnr-rc.2': {}
 
   '@esbuild/aix-ppc64@0.27.4':
     optional: true

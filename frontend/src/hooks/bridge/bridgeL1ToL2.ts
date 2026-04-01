@@ -28,29 +28,15 @@ import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { aztecNode } from '@/aztec'
 import { api } from '@/lib/api'
 import axios from 'axios'
-import {
-  L1_CHAIN_ID,
-  L2_CHAIN_ID,
-  ROLLUP_VERSION,
-  PERMIT2_ADDRESS,
-  SWAP_BRIDGE_ROUTER_ADDRESS,
-} from '@/config'
+import { L1_CHAIN_ID, L2_CHAIN_ID, ROLLUP_VERSION, PERMIT2_ADDRESS, SWAP_BRIDGE_ROUTER_ADDRESS } from '@/config'
 import { SwapBridgeRouterAbi } from '@/constants/abis/SwapBridgeRouterAbi'
 import { type FuelQuote } from '@/utils/fuelQuote'
 import type { Token } from '@/types/bridge'
 import { serializeNodeInfo, wait } from '@/utils'
 import { logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
-import {
-  getKeyDerivationDomain,
-  createSigningMessage,
-  deriveEncryptionKey,
-  encryptData,
-} from '@/utils/encryption'
-import {
-  requestWaapWallet,
-  WAAP_METHOD,
-} from '@/stores/walletStore'
+import { getKeyDerivationDomain, createSigningMessage, deriveEncryptionKey, encryptData } from '@/utils/encryption'
+import { requestWaapWallet, WAAP_METHOD } from '@/stores/walletStore'
 import {
   type BridgeLogContext,
   LS_KEY_BRIDGE_DEPOSITS,
@@ -115,9 +101,7 @@ export interface PassportAttestationData {
  * Called before private deposits to get the L1 ECDSA signature
  * required by the custom TokenPortal's depositToAztecPrivate.
  */
-export async function fetchPochAttestation(
-  portalAddress: string,
-): Promise<PochAttestationData> {
+export async function fetchPochAttestation(portalAddress: string): Promise<PochAttestationData> {
   const res = await api.post('/api/attestation/poch', { portalAddress })
   return res.data as PochAttestationData
 }
@@ -126,9 +110,7 @@ export async function fetchPochAttestation(
  * Fetch a Passport attestation from the backend API.
  * Called as fallback when POCH is unavailable for private deposits.
  */
-export async function fetchPassportAttestation(
-  portalAddress: string,
-): Promise<PassportAttestationData> {
+export async function fetchPassportAttestation(portalAddress: string): Promise<PassportAttestationData> {
   const res = await api.post('/api/attestation/passport', { portalAddress })
   return res.data as PassportAttestationData
 }
@@ -255,13 +237,15 @@ export interface ReceiptResult {
  * @param amount The pre-fee amount (as passed to TokenPortal.depositToAztecPublic).
  * @returns The post-fee amount that the L2 bridge contract expects.
  */
-const calculateFeeAbi = [{
-  name: 'calculateFee',
-  type: 'function',
-  stateMutability: 'view',
-  inputs: [{ name: '_amount', type: 'uint256' }],
-  outputs: [{ name: '', type: 'uint256' }],
-}] as const
+const calculateFeeAbi = [
+  {
+    name: 'calculateFee',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '_amount', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
 
 // Our custom TokenPortal event ABIs — the upstream @aztec/l1-artifacts ABI doesn't
 // include the `fee` field, so it has a different topic hash and can't decode our events.
@@ -291,10 +275,7 @@ export const CustomTokenPortalEventAbi = [
   },
 ] as const
 
-export async function getPostFeeClaimAmount(
-  portalAddress: string,
-  amount: bigint,
-): Promise<bigint> {
+export async function getPostFeeClaimAmount(portalAddress: string, amount: bigint): Promise<bigint> {
   try {
     const fee = await publicClient.readContract({
       address: portalAddress as `0x${string}`,
@@ -303,13 +284,17 @@ export async function getPostFeeClaimAmount(
       args: [amount],
     })
     const claimAmount = amount - fee
-    console.log('[L1→L2] Post-fee claim amount:', { amount: amount.toString(), fee: fee.toString(), claimAmount: claimAmount.toString() })
+    console.log('[L1→L2] Post-fee claim amount:', {
+      amount: amount.toString(),
+      fee: fee.toString(),
+      claimAmount: claimAmount.toString(),
+    })
     return claimAmount
   } catch (err) {
     console.error('[L1→L2] Failed to query calculateFee — cannot determine post-fee amount:', err)
     throw new Error(
       'Failed to query portal fee. Cannot safely determine the claim amount. ' +
-      'Please check your RPC connection and try again.'
+        'Please check your RPC connection and try again.',
     )
   }
 }
@@ -343,15 +328,15 @@ export async function pollL1ToL2MessageSync(
     pollCount++
     const elapsedSec = Math.round((Date.now() - startWait) / 1000)
     try {
-      const messageBlock = await aztecNode.getL1ToL2MessageBlock(messageHashFr)
-      if (messageBlock !== undefined) {
-        console.log(`[L1→L2] Message ready after ${pollCount} polls (${elapsedSec}s), block=${messageBlock}`)
+      const messageCheckpoint = await aztecNode.getL1ToL2MessageCheckpoint(messageHashFr)
+      if (messageCheckpoint !== undefined) {
+        console.log(`[L1→L2] Message ready after ${pollCount} polls (${elapsedSec}s), checkpoint=${messageCheckpoint}`)
         return {
           synced: true,
           elapsedMinutes: (Date.now() - startWait) / 60_000,
         }
       }
-      console.log(`[L1→L2] Poll #${pollCount} (${elapsedSec}s): not yet synced, response:`, messageBlock)
+      console.log(`[L1→L2] Poll #${pollCount} (${elapsedSec}s): not yet synced, response:`, messageCheckpoint)
     } catch (error) {
       console.warn(`[L1→L2] Poll #${pollCount} (${elapsedSec}s) failed:`, error)
     }
@@ -412,9 +397,10 @@ export async function executeL2Claim(
       promise,
       new Promise<never>((_, reject) =>
         setTimeout(
-          () => reject(new Error(
-            'Wallet did not respond in time. Check for a hidden wallet popup behind your browser window.',
-          )),
+          () =>
+            reject(
+              new Error('Wallet did not respond in time. Check for a hidden wallet popup behind your browser window.'),
+            ),
           walletTimeoutMs,
         ),
       ),
@@ -431,12 +417,7 @@ export async function executeL2Claim(
     //     the public call and submits to the sequencer, which has the latest state
     //   - The sequencer executes consume_l1_to_l2_message against its own up-to-date tree
 
-    const claimArgs = [
-      AztecAddress.fromString(aztecAddress),
-      amount,
-      claimSecret,
-      messageLeafIndex,
-    ]
+    const claimArgs = [AztecAddress.fromString(aztecAddress), amount, claimSecret, messageLeafIndex]
 
     // Send the claim transaction directly (triggers wallet popup).
     // Retry on "nonexistent message" errors (sequencer might need more time).
@@ -445,14 +426,12 @@ export async function executeL2Claim(
         options?.onAttempt?.(attempt, maxAttempts)
         console.log(`[L1→L2] Sending claim transaction via wallet (attempt ${attempt}/${maxAttempts})...`)
 
-        const result = await callWithTimeout(
-          walletAdapter.executeCall(
-            walletAdapter.bridgeAddress,
-            method,
-            claimArgs,
-            { contractType: 'bridge', ...options?.feeOption },
-          ),
-        ) as { txHash: string }
+        const result = (await callWithTimeout(
+          walletAdapter.executeCall(walletAdapter.bridgeAddress, method, claimArgs, {
+            contractType: 'bridge',
+            ...options?.feeOption,
+          }),
+        )) as { txHash: string }
 
         console.log('[L1→L2] Claim succeeded')
         return { l2TxHash: result.txHash, usedBruteForce: false }
@@ -460,21 +439,33 @@ export async function executeL2Claim(
         const errMsg = err instanceof Error ? err.message : String(err)
         const errLower = errMsg.toLowerCase()
 
-        // Don't retry on user rejection or already-consumed messages — surface immediately
-        if (errLower.includes('user rejected') || errLower.includes('user denied') || errLower.includes('user cancelled')) {
+        // Don't retry on non-transient errors — surface immediately
+        if (
+          errLower.includes('user rejected') ||
+          errLower.includes('user denied') ||
+          errLower.includes('user cancelled')
+        ) {
           throw new Error('Transaction rejected by user.')
         }
         if (errLower.includes('message already consumed') || errLower.includes('already been consumed')) {
           throw new Error('This deposit has already been claimed.')
         }
+        if (
+          errLower.includes('capability scope') ||
+          errLower.includes('not in capability') ||
+          errLower.includes('permission denied')
+        ) {
+          console.error('[L1→L2] Wallet capability error (not retryable):', errMsg)
+          throw new Error(`Wallet permission error: ${errMsg}`)
+        }
+
+        // Log every failure — don't silently retry
+        console.error(`[L1→L2] Claim attempt ${attempt}/${maxAttempts} failed:`, errMsg)
 
         // Retry on transient errors (reorgs, block header not found, message not synced, PXE lag, etc.)
         if (attempt < maxAttempts) {
           options?.onRetry?.(attempt, maxAttempts, retryDelayMs)
-          console.warn(
-            `[L1→L2] Claim attempt ${attempt} failed, retrying in ${retryDelayMs / 1000}s...`,
-            errMsg,
-          )
+          console.warn(`[L1→L2] Retrying in ${retryDelayMs / 1000}s...`)
           await wait(retryDelayMs)
           continue
         }
@@ -488,19 +479,14 @@ export async function executeL2Claim(
     for (let idx = 0; idx < bruteForceMaxIndex; idx++) {
       try {
         console.log('[L1→L2] Trying leafIndex=', idx)
-        const res = await callWithTimeout(
+        const res = (await callWithTimeout(
           walletAdapter.executeCall(
             walletAdapter.bridgeAddress,
             method,
-            [
-              AztecAddress.fromString(aztecAddress),
-              amount,
-              claimSecret,
-              BigInt(idx),
-            ],
+            [AztecAddress.fromString(aztecAddress), amount, claimSecret, BigInt(idx)],
             { contractType: 'bridge' },
           ),
-        ) as { txHash: string }
+        )) as { txHash: string }
         console.log('[L1→L2] Claim succeeded with leafIndex=', idx)
         return {
           l2TxHash: res.txHash,
@@ -540,9 +526,7 @@ export async function validateAndCaptureBlocks(
   const l1Addresses = nodeInfo?.l1ContractAddresses ?? null
   console.log('[L1→L2] Node info fetched, outboxAddress:', l1Addresses.outboxAddress.toString())
   if (!l1Addresses?.outboxAddress.toString()) {
-    throw new Error(
-      'L1 contract addresses not initialized. Please wait for contract initialization to complete.',
-    )
+    throw new Error('L1 contract addresses not initialized. Please wait for contract initialization to complete.')
   }
 
   if (!walletAdapter) {
@@ -558,9 +542,7 @@ export async function validateAndCaptureBlocks(
     console.log('[L1→L2] Current L1 block before tx:', l1BlockNumberBeforeTx)
   } catch (e) {
     console.warn('[L1→L2] Could not get current L1 block number before tx:', e)
-    throw new Error(
-      'Could not get L1 block number. Please check your connection and try again. Required for recovery.',
-    )
+    throw new Error('Could not get L1 block number. Please check your connection and try again. Required for recovery.')
   }
 
   let l2BlockNumberBeforeTx: string
@@ -570,9 +552,7 @@ export async function validateAndCaptureBlocks(
     console.log('[L1→L2] Current L2 block before tx:', l2BlockNumberBeforeTx)
   } catch (e) {
     console.warn('[L1→L2] Could not get current L2 block number before tx:', e)
-    throw new Error(
-      'Could not get L2 block number. Please check your connection and try again. Required for recovery.',
-    )
+    throw new Error('Could not get L2 block number. Please check your connection and try again. Required for recovery.')
   }
 
   // Log "initiated" if context provided
@@ -591,7 +571,12 @@ export async function validateAndCaptureBlocks(
     })
   }
 
-  return { nodeInfo, l1Addresses, l1BlockNumberBeforeTx, l2BlockNumberBeforeTx }
+  return {
+    nodeInfo,
+    l1Addresses,
+    l1BlockNumberBeforeTx,
+    l2BlockNumberBeforeTx,
+  }
 }
 
 // ─── Step 2: Generate claim secret, encrypt, backup to server ────────
@@ -613,8 +598,17 @@ export async function generateAndBackupClaimSecret(params: {
   privateFuel?: PrivateFuelParams
 }): Promise<BackupResult> {
   const {
-    l1Address, aztecAddress, amountL1, amountL2, amountDisplayL1, amountDisplayL2,
-    isPrivacyModeEnabled, l1BlockNumberBeforeTx, l2BlockNumberBeforeTx, nodeInfo, signWaapMessage,
+    l1Address,
+    aztecAddress,
+    amountL1,
+    amountL2,
+    amountDisplayL1,
+    amountDisplayL2,
+    isPrivacyModeEnabled,
+    l1BlockNumberBeforeTx,
+    l2BlockNumberBeforeTx,
+    nodeInfo,
+    signWaapMessage,
     selectedToken,
   } = params
 
@@ -642,10 +636,7 @@ export async function generateAndBackupClaimSecret(params: {
     privateFuelSalt = Fr.random()
     const DOM_SEP_FPC_BRIDGE_SECRET = 3952304070
     const claimerFr = Fr.fromString(params.aztecAddress)
-    privateFuelSecret = await poseidon2HashWithSeparator(
-      [privateFuelSalt, claimerFr],
-      DOM_SEP_FPC_BRIDGE_SECRET,
-    )
+    privateFuelSecret = await poseidon2HashWithSeparator([privateFuelSalt, claimerFr], DOM_SEP_FPC_BRIDGE_SECRET)
     privateFuelSecretHash = await computeSecretHash(privateFuelSecret)
     console.log('[L1→L2] Private fuel (BridgedFPC) secret generated')
   }
@@ -752,13 +743,9 @@ export async function generateAndBackupClaimSecret(params: {
     operationId = res.data.operationId
   } catch (err) {
     const status = axios.isAxiosError(err) ? err.response?.status : null
-    const errBody = axios.isAxiosError(err)
-      ? JSON.stringify(err.response?.data)
-      : String(err)
+    const errBody = axios.isAxiosError(err) ? JSON.stringify(err.response?.data) : String(err)
     console.error('[L1→L2] Encrypted backup failed:', status, errBody)
-    throw new Error(
-      'Failed to backup claim secret to server. Bridge aborted to prevent fund loss.',
-    )
+    throw new Error('Failed to backup claim secret to server. Bridge aborted to prevent fund loss.')
   }
   console.log('Encrypted claim secret backed up (operationId:', operationId, ')')
 
@@ -783,16 +770,24 @@ export async function generateAndBackupClaimSecret(params: {
     nodeInfo: nodeInfoSnapshot,
     isPrivacyModeEnabled,
     status: BridgeOperationStatus.pending,
-    ...(params.fuel ? {
-      fuelAmount: params.fuel.fuelAmount.toString(),
-    } : {}),
+    ...(params.fuel
+      ? {
+          fuelAmount: params.fuel.fuelAmount.toString(),
+        }
+      : {}),
   })
   console.log('Encrypted claim data stored in localStorage')
 
   return {
-    operationId, claimSecret, claimSecretHash, nodeInfoSnapshot,
-    fuelSecret, fuelSecretHash,
-    privateFuelSalt, privateFuelSecret, privateFuelSecretHash,
+    operationId,
+    claimSecret,
+    claimSecretHash,
+    nodeInfoSnapshot,
+    fuelSecret,
+    fuelSecretHash,
+    privateFuelSalt,
+    privateFuelSecret,
+    privateFuelSecretHash,
   }
 }
 
@@ -826,9 +821,7 @@ export async function checkAndApproveAllowance(
     args: [l1Address as `0x${string}`, spender as `0x${string}`],
   })
 
-  const allowance = await requestWaapWallet(WAAP_METHOD.eth_call, [
-    { to: l1TokenAddress, data: allowanceData },
-  ])
+  const allowance = await requestWaapWallet(WAAP_METHOD.eth_call, [{ to: l1TokenAddress, data: allowanceData }])
 
   console.log('[L1→L2] Permit2 allowance:', allowance, 'needed:', amount.toString(), 'spender:', spender)
   if (BigInt(allowance as string) < amount) {
@@ -838,10 +831,13 @@ export async function checkAndApproveAllowance(
       args: [spender as `0x${string}`, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')],
     })
 
-    const approveTxHash = await requestWaapWallet(
-      WAAP_METHOD.eth_sendTransaction,
-      [{ from: l1Address as `0x${string}`, to: l1TokenAddress, data: approveData }],
-    )
+    const approveTxHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
+      {
+        from: l1Address as `0x${string}`,
+        to: l1TokenAddress,
+        data: approveData,
+      },
+    ])
 
     console.log('[L1→L2] Permit2 approve tx sent:', approveTxHash, '— waiting for confirmation...')
     await publicClient.waitForTransactionReceipt({ hash: approveTxHash })
@@ -854,9 +850,7 @@ export async function checkAndApproveAllowance(
 /**
  * Sign a Permit2 witness-bound SignatureTransfer via eth_signTypedData_v4.
  */
-async function signPermit2Transfer(
-  params: Permit2WitnessParams,
-): Promise<Permit2Params> {
+async function signPermit2Transfer(params: Permit2WitnessParams): Promise<Permit2Params> {
   const {
     l1Address,
     tokenPortal,
@@ -880,7 +874,12 @@ async function signPermit2Transfer(
   // Random unordered nonce — any unused uint256 works with Permit2
   const nonceBytes = new Uint8Array(32)
   crypto.getRandomValues(nonceBytes)
-  const nonce = BigInt('0x' + Array.from(nonceBytes).map(b => b.toString(16).padStart(2, '0')).join(''))
+  const nonce = BigInt(
+    '0x' +
+      Array.from(nonceBytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join(''),
+  )
 
   // 30-minute deadline
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 30 * 60)
@@ -894,25 +893,28 @@ async function signPermit2Transfer(
   // When there's no swap route (simple bridge, no fuel), the contract uses bytes32(0)
   // as the routeHash. Only compute the keccak256 when there are actual pool keys.
   const zeroBytes32Route = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
-  const routeHash = poolKeys.length > 0
-    ? keccak256(encodeAbiParameters(
-        [
-          {
-            name: 'path',
-            type: 'tuple[]',
-            components: [
-              { name: 'currency0', type: 'address' },
-              { name: 'currency1', type: 'address' },
-              { name: 'fee', type: 'uint24' },
-              { name: 'tickSpacing', type: 'int24' },
-              { name: 'hooks', type: 'address' },
+  const routeHash =
+    poolKeys.length > 0
+      ? keccak256(
+          encodeAbiParameters(
+            [
+              {
+                name: 'path',
+                type: 'tuple[]',
+                components: [
+                  { name: 'currency0', type: 'address' },
+                  { name: 'currency1', type: 'address' },
+                  { name: 'fee', type: 'uint24' },
+                  { name: 'tickSpacing', type: 'int24' },
+                  { name: 'hooks', type: 'address' },
+                ],
+              },
+              { name: 'zeroForOnes', type: 'bool[]' },
             ],
-          },
-          { name: 'zeroForOnes', type: 'bool[]' },
-        ],
-        [poolKeys, zeroForOnes],
-      ))
-    : zeroBytes32Route
+            [poolKeys, zeroForOnes],
+          ),
+        )
+      : zeroBytes32Route
 
   const message = {
     permitted: {
@@ -952,10 +954,7 @@ async function signPermit2Transfer(
   })
 
   console.log('[L1→L2] Requesting Permit2 signature...')
-  const signature = await requestWaapWallet(WAAP_METHOD.eth_signTypedData_v4, [
-    l1Address,
-    typedData,
-  ]) as `0x${string}`
+  const signature = (await requestWaapWallet(WAAP_METHOD.eth_signTypedData_v4, [l1Address, typedData])) as `0x${string}`
 
   console.log('[L1→L2] Permit2 signature obtained')
   return { nonce, deadline, signature }
@@ -978,9 +977,18 @@ export async function sendL1DepositTransaction(params: {
   passportAttestation?: PassportAttestationData
 }): Promise<DepositTxResult> {
   const {
-    l1Address, aztecAddress, amount, claimSecretHash, claimSecret,
-    isPrivacyModeEnabled, operationId, selectedToken, fuel, privateFuel,
-    attestation, passportAttestation,
+    l1Address,
+    aztecAddress,
+    amount,
+    claimSecretHash,
+    claimSecret,
+    isPrivacyModeEnabled,
+    operationId,
+    selectedToken,
+    fuel,
+    privateFuel,
+    attestation,
+    passportAttestation,
   } = params
 
   if (!SWAP_BRIDGE_ROUTER_ADDRESS) {
@@ -990,9 +998,8 @@ export async function sendL1DepositTransaction(params: {
   const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
   const l1TokenAddress = selectedToken?.l1TokenContract ?? ''
   const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as const
-  const fuelSecretHashHex = (
-    (privateFuel ? privateFuel.secretHash : fuel?.fuelSecretHash)?.toString() ?? zeroBytes32
-  ) as `0x${string}`
+  const fuelSecretHashHex = ((privateFuel ? privateFuel.secretHash : fuel?.fuelSecretHash)?.toString() ??
+    zeroBytes32) as `0x${string}`
   const permit2 = await signPermit2Transfer({
     l1Address,
     tokenPortal: l1PortalAddress as `0x${string}`,
@@ -1000,7 +1007,7 @@ export async function sendL1DepositTransaction(params: {
     totalAmount: amount,
     fuelAmount: fuel?.fuelAmount ?? 0n,
     aztecRecipient: aztecAddress as `0x${string}`,
-    fuelRecipient: (privateFuel ? privateFuel.fpcAddress : (fuel ? aztecAddress : zeroBytes32)) as `0x${string}`,
+    fuelRecipient: (privateFuel ? privateFuel.fpcAddress : fuel ? aztecAddress : zeroBytes32) as `0x${string}`,
     tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
     fuelSecretHash: fuelSecretHashHex,
     minFuelOutput: fuel?.fuelQuote.minOutput ?? 0n,
@@ -1018,11 +1025,25 @@ export async function sendL1DepositTransaction(params: {
   // When real attestation data is available (from fetchPochAttestation / fetchPassportAttestation),
   // use it. Otherwise fall back to empty structs (acceptable for public deposits).
   const cleanHands = attestation
-    ? { nonce: BigInt(attestation.nonce), actionId: BigInt(attestation.actionId), signature: attestation.l1Signature as `0x${string}` }
+    ? {
+        nonce: BigInt(attestation.nonce),
+        actionId: BigInt(attestation.actionId),
+        signature: attestation.l1Signature as `0x${string}`,
+      }
     : { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` }
   const passport = passportAttestation
-    ? { maxAmount: BigInt(passportAttestation.maxAmount), nonce: BigInt(passportAttestation.nonce), deadline: BigInt(passportAttestation.deadline), signature: passportAttestation.l1Signature as `0x${string}` }
-    : { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
+    ? {
+        maxAmount: BigInt(passportAttestation.maxAmount),
+        nonce: BigInt(passportAttestation.nonce),
+        deadline: BigInt(passportAttestation.deadline),
+        signature: passportAttestation.l1Signature as `0x${string}`,
+      }
+    : {
+        maxAmount: 0n,
+        nonce: 0n,
+        deadline: 0n,
+        signature: '0x' as `0x${string}`,
+      }
 
   let txHash: any
   if (fuel) {
@@ -1050,9 +1071,20 @@ export async function sendL1DepositTransaction(params: {
       ],
     })
 
-    console.log('[L1→L2] Sending SwapBridgeRouter.bridgeWithFuel tx, totalAmount:', amount.toString(), 'fuelAmount:', fuel.fuelAmount.toString(), 'fuelRecipient:', privateFuel ? privateFuel.fpcAddress : aztecAddress)
+    console.log(
+      '[L1→L2] Sending SwapBridgeRouter.bridgeWithFuel tx, totalAmount:',
+      amount.toString(),
+      'fuelAmount:',
+      fuel.fuelAmount.toString(),
+      'fuelRecipient:',
+      privateFuel ? privateFuel.fpcAddress : aztecAddress,
+    )
     txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
-      { from: l1Address as `0x${string}`, to: SWAP_BRIDGE_ROUTER_ADDRESS, data: bridgeData },
+      {
+        from: l1Address as `0x${string}`,
+        to: SWAP_BRIDGE_ROUTER_ADDRESS,
+        data: bridgeData,
+      },
     ])
   } else {
     const bridgeData = encodeFunctionData({
@@ -1073,18 +1105,25 @@ export async function sendL1DepositTransaction(params: {
       ],
     })
 
-    console.log('[L1→L2] Sending SwapBridgeRouter.bridge tx, amount:', amount.toString(), 'private:', isPrivacyModeEnabled)
+    console.log(
+      '[L1→L2] Sending SwapBridgeRouter.bridge tx, amount:',
+      amount.toString(),
+      'private:',
+      isPrivacyModeEnabled,
+    )
     txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
-      { from: l1Address as `0x${string}`, to: SWAP_BRIDGE_ROUTER_ADDRESS, data: bridgeData },
+      {
+        from: l1Address as `0x${string}`,
+        to: SWAP_BRIDGE_ROUTER_ADDRESS,
+        data: bridgeData,
+      },
     ])
   }
 
   console.log('[L1→L2] Deposit tx sent:', txHash)
 
   const l1TxHash =
-    typeof txHash === 'string'
-      ? txHash
-      : ((txHash as { toString?: () => string })?.toString?.() ?? String(txHash))
+    typeof txHash === 'string' ? txHash : ((txHash as { toString?: () => string })?.toString?.() ?? String(txHash))
   const l1TxUrl = getL1TxUrl(l1TxHash)
 
   updateLocalStorageItem(
@@ -1095,11 +1134,7 @@ export async function sendL1DepositTransaction(params: {
   console.log('L1 tx hash stored immediately in localStorage')
 
   console.log('[L1→L2] PATCH l1TxHash →', { operationId, l1TxHash })
-  const l1TxPatchOk = await patchOperationWithRetry(
-    operationId,
-    { l1TxHash, l1TxUrl },
-    { label: 'l1TxHash' },
-  )
+  const l1TxPatchOk = await patchOperationWithRetry(operationId, { l1TxHash, l1TxUrl }, { label: 'l1TxHash' })
   if (!l1TxPatchOk) {
     console.warn('[L1→L2] l1TxHash PATCH failed after retries — will be retried in persistReceiptToBackend')
   }
@@ -1122,21 +1157,33 @@ export async function waitForReceiptAndExtractEvent(params: {
   fuel?: FuelParams
 }): Promise<ReceiptResult> {
   const {
-    txHash, amount, claimSecretHash, claimSecret, aztecAddress,
-    isPrivacyModeEnabled, l1Address, operationId, selectedToken, fuel,
+    txHash,
+    amount,
+    claimSecretHash,
+    claimSecret,
+    aztecAddress,
+    isPrivacyModeEnabled,
+    l1Address,
+    operationId,
+    selectedToken,
+    fuel,
   } = params
 
   const l1PortalAddress = selectedToken?.l1PortalContract ?? ''
 
   console.log('[L1→L2] Waiting for deposit tx to be mined...')
-  const txReceipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+  const txReceipt = await publicClient.waitForTransactionReceipt({
+    hash: txHash,
+  })
 
   const l1TxHash = txReceipt?.transactionHash?.toString()
   const l1TxUrl = getL1TxUrl(l1TxHash)
   console.log('[L1→L2] Deposit tx confirmed:', l1TxHash, 'status:', txReceipt.status, 'logs:', txReceipt.logs.length)
 
   if (txReceipt.status === 'reverted') {
-    throw new Error(`L1 deposit transaction reverted: ${l1TxHash}. Tokens were NOT taken — Permit2 signature or contract call failed.`)
+    throw new Error(
+      `L1 deposit transaction reverted: ${l1TxHash}. Tokens were NOT taken — Permit2 signature or contract call failed.`,
+    )
   }
 
   // ── Extract the post-fee claim amount from TokenPortal's DepositToAztecPublic/Private event ──
@@ -1172,11 +1219,11 @@ export async function waitForReceiptAndExtractEvent(params: {
       `[L1→L2] TokenPortal ${portalEventName} event not found in receipt.`,
       `Portal address: ${l1PortalAddress}`,
       `Receipt logs (${txReceipt.logs.length}):`,
-      txReceipt.logs.map(l => l.address),
+      txReceipt.logs.map((l) => l.address),
     )
     console.warn(
       '[L1→L2] Falling back to pre-fee amount — L2 claim may fail if fees are enabled. ' +
-      'Resume will re-extract the event from the receipt.',
+        'Resume will re-extract the event from the receipt.',
     )
   }
 
@@ -1213,8 +1260,10 @@ export async function waitForReceiptAndExtractEvent(params: {
     const fuelAmountReceived = args.fuelAmount as bigint
 
     console.log('[L1→L2] BridgeWithFuel event extracted:', {
-      tokenKey: messageHashStr, tokenIndex: messageLeafIndexStr,
-      fuelKey: fuelMessageHashStr, fuelIndex: fuelMessageLeafIndexStr,
+      tokenKey: messageHashStr,
+      tokenIndex: messageLeafIndexStr,
+      fuelKey: fuelMessageHashStr,
+      fuelIndex: fuelMessageLeafIndexStr,
       fuelAmount: fuelAmountReceived.toString(),
       claimAmount: claimAmount.toString(),
     })
@@ -1233,11 +1282,17 @@ export async function waitForReceiptAndExtractEvent(params: {
     )
 
     return {
-      l1TxHash, l1TxUrl, messageHashStr, messageLeafIndexStr,
-      messageHash: args.tokenKey, messageLeafIndex: args.tokenIndex,
+      l1TxHash,
+      l1TxUrl,
+      messageHashStr,
+      messageLeafIndexStr,
+      messageHash: args.tokenKey,
+      messageLeafIndex: args.tokenIndex,
       claimAmount,
-      fuelMessageHashStr, fuelMessageLeafIndexStr,
-      fuelMessageHash: args.fuelKey, fuelMessageLeafIndex: args.fuelIndex,
+      fuelMessageHashStr,
+      fuelMessageLeafIndexStr,
+      fuelMessageHash: args.fuelKey,
+      fuelMessageLeafIndex: args.fuelIndex,
       fuelAmount: fuelAmountReceived,
     }
   }
@@ -1276,28 +1331,18 @@ export async function waitForReceiptAndExtractEvent(params: {
     // Try with our custom ABI first (has fee field), then upstream as fallback
     for (const abi of [CustomTokenPortalEventAbi, CustomTokenPortalAbi, TokenPortalAbi]) {
       try {
-        const eventName = isPrivacyModeEnabled
-          ? 'DepositToAztecPrivate'
-          : 'DepositToAztecPublic'
+        const eventName = isPrivacyModeEnabled ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
 
         // Match by secretHash only — amount in the event is post-fee (amountAfterFee),
         // so we can't filter by the pre-fee amount the frontend knows.
-        const privateEventFilter = (log: any) =>
-          log.args.secretHash === claimSecretHash.toString()
+        const privateEventFilter = (log: any) => log.args.secretHash === claimSecretHash.toString()
 
         const publicEventFilter = (log: any) =>
-          log.args.secretHash === claimSecretHash.toString() &&
-          log.args.to === aztecAddress
+          log.args.secretHash === claimSecretHash.toString() && log.args.to === aztecAddress
 
         const eventFilter = isPrivacyModeEnabled ? privateEventFilter : publicEventFilter
 
-        const log = extractEvent(
-          txReceipt.logs,
-          l1PortalAddress as `0x${string}`,
-          abi,
-          eventName,
-          eventFilter,
-        )
+        const log = extractEvent(txReceipt.logs, l1PortalAddress as `0x${string}`, abi, eventName, eventFilter)
 
         messageHash = log.args.key
         messageLeafIndex = log.args.index
@@ -1315,16 +1360,35 @@ export async function waitForReceiptAndExtractEvent(params: {
   }
   const messageHashStr = messageHash.toString()
   const messageLeafIndexStr = messageLeafIndex.toString()
-  console.log('[L1→L2] Event extracted:', { messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr, claimAmount: claimAmount.toString() })
+  console.log('[L1→L2] Event extracted:', {
+    messageHash: messageHashStr,
+    messageLeafIndex: messageLeafIndexStr,
+    claimAmount: claimAmount.toString(),
+  })
 
   updateLocalStorageItem(
     LS_KEY_BRIDGE_DEPOSITS,
-    (c: any) => operationId ? c.id === operationId : c.claimSecretHash === claimSecretHash.toString() && c.status === BridgeOperationStatus.pending,
-    (c: any) => ({ ...c, messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr }),
+    (c: any) =>
+      operationId
+        ? c.id === operationId
+        : c.claimSecretHash === claimSecretHash.toString() && c.status === BridgeOperationStatus.pending,
+    (c: any) => ({
+      ...c,
+      messageHash: messageHashStr,
+      messageLeafIndex: messageLeafIndexStr,
+    }),
   )
   console.log('messageHash and messageLeafIndex stored immediately after receipt')
 
-  return { l1TxHash, l1TxUrl, messageHashStr, messageLeafIndexStr, messageHash, messageLeafIndex, claimAmount }
+  return {
+    l1TxHash,
+    l1TxUrl,
+    messageHashStr,
+    messageLeafIndexStr,
+    messageHash,
+    messageLeafIndex,
+    claimAmount,
+  }
 }
 
 // ─── Step 6: Persist receipt data to backend ─────────────────────────
@@ -1359,7 +1423,9 @@ export async function persistReceiptToBackend(
   console.log('[L1→L2] PATCH receipt data →', { operationId, ...patchData })
 
   const succeeded = operationId
-    ? await patchOperationWithRetry(operationId, patchData, { label: 'receipt data' })
+    ? await patchOperationWithRetry(operationId, patchData, {
+        label: 'receipt data',
+      })
     : false
 
   if (succeeded) {
@@ -1389,16 +1455,26 @@ export function finalizeLocalStorageAfterDeposit(params: {
   operationId?: string
 }): { updatedClaim: any; wasExisting: boolean } {
   const {
-    claimSecret, claimSecretHash, claimAmount, l1Address, aztecAddress,
-    messageHashStr, messageLeafIndexStr, l1TxHash, l1TxUrl,
-    l1BlockNumberBeforeTx, nodeInfo, isPrivacyModeEnabled, operationId,
+    claimSecret,
+    claimSecretHash,
+    claimAmount,
+    l1Address,
+    aztecAddress,
+    messageHashStr,
+    messageLeafIndexStr,
+    l1TxHash,
+    l1TxUrl,
+    l1BlockNumberBeforeTx,
+    nodeInfo,
+    isPrivacyModeEnabled,
+    operationId,
   } = params
 
   const existingClaims = localStorage.getItem(LS_KEY_BRIDGE_DEPOSITS)
   const claims = existingClaims ? JSON.parse(existingClaims) : []
 
-  const claimIndex = claims.findIndex(
-    (c: any) => operationId
+  const claimIndex = claims.findIndex((c: any) =>
+    operationId
       ? c.id === operationId
       : c.claimSecretHash === claimSecretHash.toString() && c.status === BridgeOperationStatus.pending,
   )

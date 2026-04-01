@@ -1,26 +1,10 @@
 {
-  "activeDeploymentId": "4.1.2_2026-03-31",
+  "activeDeploymentId": "4.1.2_2026-04-01",
   "deployments": [
     {
-      "id": "4.0.0-devnet.2-patch.3_2026-03-25",
-      "file": "4.0.0-devnet.2-patch.3_2026-03-25.json",
-      "deployedAt": "2026-03-25T16:55:26.789Z",
-      "network": "devnet",
-      "aztecVersion": "4.0.0-devnet.2-patch.3",
-      "active": false
-    },
-    {
-      "id": "4.0.0-devnet.2-patch.3_2026-03-26",
-      "file": "4.0.0-devnet.2-patch.3_2026-03-26.json",
-      "deployedAt": "2026-03-26T15:18:26.504Z",
-      "network": "devnet",
-      "aztecVersion": "4.0.0-devnet.2-patch.3",
-      "active": false
-    },
-    {
-      "id": "4.1.2_2026-03-31",
-      "file": "4.1.2_2026-03-31.json",
-      "deployedAt": "2026-03-31T07:47:14.823Z",
+      "id": "4.1.2_2026-04-01",
+      "file": "4.1.2_2026-04-01.json",
+      "deployedAt": "2026-04-01T04:19:25.680Z",
       "network": "testnet",
       "aztecVersion": "4.1.2",
       "active": true

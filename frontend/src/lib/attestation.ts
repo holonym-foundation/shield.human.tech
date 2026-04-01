@@ -8,6 +8,19 @@
 import { keccak256, encodePacked, type Hex } from 'viem'
 import { privateKeyToAccount, signMessage } from 'viem/accounts'
 import { Schnorr } from '@aztec/foundation/crypto/schnorr'
+import {
+  POCH_ATTESTER_PRIVATE_KEY,
+  PASSPORT_SIGNER_PRIVATE_KEY,
+  L2_POCH_ATTESTER_PRIVATE_KEY,
+  L2_PASSPORT_SIGNER_PRIVATE_KEY,
+  CLEAN_HANDS_CIRCUIT_ID,
+  CLEAN_HANDS_ACTION_ID,
+  PASSPORT_SCORE_THRESHOLD,
+  PASSPORT_MAX_AMOUNT,
+  HOLONYM_API_URL,
+  PASSPORT_API_KEY,
+  PASSPORT_SCORER_ID,
+} from '@/config/env.config'
 import { deriveSigningKey } from '@aztec/stdlib/keys'
 import { computeInnerAuthWitHash } from '@aztec/stdlib/auth-witness'
 import { Fr } from '@aztec/aztec.js/fields'
@@ -16,43 +29,47 @@ import type { GrumpkinScalar } from '@aztec/foundation/curves/grumpkin'
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 function getAttesterPrivateKey(): Hex {
-  const key = process.env.POCH_ATTESTER_PRIVATE_KEY
-  if (!key) throw new Error('POCH_ATTESTER_PRIVATE_KEY not set')
-  return (key.startsWith('0x') ? key : `0x${key}`) as Hex
+  if (!POCH_ATTESTER_PRIVATE_KEY) throw new Error('POCH_ATTESTER_PRIVATE_KEY not set')
+  return (
+    POCH_ATTESTER_PRIVATE_KEY.startsWith('0x') ? POCH_ATTESTER_PRIVATE_KEY : `0x${POCH_ATTESTER_PRIVATE_KEY}`
+  ) as Hex
 }
 
 function getPassportSignerPrivateKey(): Hex {
-  const key = process.env.PASSPORT_SIGNER_PRIVATE_KEY
-  if (!key) throw new Error('PASSPORT_SIGNER_PRIVATE_KEY not set')
-  return (key.startsWith('0x') ? key : `0x${key}`) as Hex
+  if (!PASSPORT_SIGNER_PRIVATE_KEY) throw new Error('PASSPORT_SIGNER_PRIVATE_KEY not set')
+  return (
+    PASSPORT_SIGNER_PRIVATE_KEY.startsWith('0x') ? PASSPORT_SIGNER_PRIVATE_KEY : `0x${PASSPORT_SIGNER_PRIVATE_KEY}`
+  ) as Hex
 }
 
 function getL2PochAttesterPrivateKey(): string {
-  const key = process.env.L2_POCH_ATTESTER_PRIVATE_KEY
-  if (!key) throw new Error('L2_POCH_ATTESTER_PRIVATE_KEY not set')
-  return key.startsWith('0x') ? key : `0x${key}`
+  if (!L2_POCH_ATTESTER_PRIVATE_KEY) throw new Error('L2_POCH_ATTESTER_PRIVATE_KEY not set')
+  return L2_POCH_ATTESTER_PRIVATE_KEY.startsWith('0x')
+    ? L2_POCH_ATTESTER_PRIVATE_KEY
+    : `0x${L2_POCH_ATTESTER_PRIVATE_KEY}`
 }
 
 function getL2PassportSignerPrivateKey(): string {
-  const key = process.env.L2_PASSPORT_SIGNER_PRIVATE_KEY
-  if (!key) throw new Error('L2_PASSPORT_SIGNER_PRIVATE_KEY not set')
-  return key.startsWith('0x') ? key : `0x${key}`
+  if (!L2_PASSPORT_SIGNER_PRIVATE_KEY) throw new Error('L2_PASSPORT_SIGNER_PRIVATE_KEY not set')
+  return L2_PASSPORT_SIGNER_PRIVATE_KEY.startsWith('0x')
+    ? L2_PASSPORT_SIGNER_PRIVATE_KEY
+    : `0x${L2_PASSPORT_SIGNER_PRIVATE_KEY}`
 }
 
 export function getCircuitId(): bigint {
-  return BigInt(process.env.CLEAN_HANDS_CIRCUIT_ID || '0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19')
+  return BigInt(CLEAN_HANDS_CIRCUIT_ID)
 }
 
 export function getDefaultActionId(): bigint {
-  return BigInt(process.env.CLEAN_HANDS_ACTION_ID || '123456789')
+  return BigInt(CLEAN_HANDS_ACTION_ID)
 }
 
 export function getPassportScoreThreshold(): number {
-  return parseInt(process.env.PASSPORT_SCORE_THRESHOLD || '20', 10)
+  return parseInt(PASSPORT_SCORE_THRESHOLD, 10)
 }
 
 export function getPassportMaxAmount(): bigint {
-  return BigInt(process.env.PASSPORT_MAX_AMOUNT || '1000000000') // 1000 USDC (6 decimals)
+  return BigInt(PASSPORT_MAX_AMOUNT)
 }
 
 export function getAttesterAddress(): string {
@@ -103,8 +120,8 @@ export async function signCleanHandsAttestation(params: {
   const digest = keccak256(
     encodePacked(
       ['uint256', 'uint256', 'uint256', 'address'],
-      [params.nonce, params.circuitId, params.actionId, params.userAddress as `0x${string}`]
-    )
+      [params.nonce, params.circuitId, params.actionId, params.userAddress as `0x${string}`],
+    ),
   )
   const signature = await signMessage({
     privateKey: getAttesterPrivateKey(),
@@ -137,8 +154,8 @@ export async function signPassportAttestation(params: {
         params.nonce,
         params.deadline,
         params.portalAddress as `0x${string}`,
-      ]
-    )
+      ],
+    ),
   )
   const signature = await signMessage({
     privateKey: getPassportSignerPrivateKey(),
@@ -201,9 +218,12 @@ export async function signL2PassportAttestation(params: {
 
 // ─── Holonym API ─────────────────────────────────────────────────────────────
 
-const HOLONYM_API_BASE = process.env.HOLONYM_API_URL || 'https://api.holonym.io'
+const HOLONYM_API_BASE = HOLONYM_API_URL
 
-export async function checkCleanHands(userAddress: string, actionId?: bigint): Promise<{
+export async function checkCleanHands(
+  userAddress: string,
+  actionId?: bigint,
+): Promise<{
   isUnique: boolean
   signature?: string
   circuitId?: string
@@ -223,16 +243,15 @@ export async function fetchPassportScore(address: string): Promise<{
   score: number
   passing: boolean
 }> {
-  const apiKey = process.env.PASSPORT_API_KEY
-  const scorerId = process.env.PASSPORT_SCORER_ID
+  const apiKey = PASSPORT_API_KEY
+  const scorerId = PASSPORT_SCORER_ID
   if (!apiKey || !scorerId) {
     throw new Error('Missing PASSPORT_API_KEY or PASSPORT_SCORER_ID')
   }
 
-  const resp = await fetch(
-    `https://api.passport.xyz/v2/stamps/${scorerId}/score/${address}`,
-    { headers: { 'X-API-KEY': apiKey } }
-  )
+  const resp = await fetch(`https://api.passport.xyz/v2/stamps/${scorerId}/score/${address}`, {
+    headers: { 'X-API-KEY': apiKey },
+  })
   if (!resp.ok) {
     throw new Error(`Passport API error: ${resp.status} ${resp.statusText}`)
   }

@@ -40,20 +40,75 @@ function getSelectedDeployment(): DeploymentData {
       // Ignore localStorage errors (SSR, security restrictions)
     }
   }
-  return (
-    deploymentsData.deployments.find((d) => d.id === selectedId) ??
-    deploymentsData.deployments[0]
-  )
+  return deploymentsData.deployments.find((d) => d.id === selectedId) ?? deploymentsData.deployments[0]
 }
 
 const activeDeployment = getSelectedDeployment()
 
-// ─── Network Constants (from selected deployment) ─────────────────────
+// ─── Environment-aware Network Config ────────────────────────────────
+// Reads all RPC/node URLs from env vars. The active network is determined
+// by the deployment's l1ChainId — switch networks by changing the active
+// deployment (or NEXT_PUBLIC_AZTEC_ENV override), not by editing env var names.
+
+type AztecEnv = 'devnet' | 'testnet' | 'mainnet'
+
+import {
+  AZTEC_ENV as AZTEC_ENV_OVERRIDE,
+  L1_RPC_SEPOLIA,
+  L1_RPC_MAINNET,
+  AZTEC_NODE_DEVNET,
+  AZTEC_NODE_TESTNET,
+  AZTEC_NODE_MAINNET,
+} from './env.config'
+
+function resolveAztecEnv(): AztecEnv {
+  if (AZTEC_ENV_OVERRIDE && ['devnet', 'testnet', 'mainnet'].includes(AZTEC_ENV_OVERRIDE)) {
+    return AZTEC_ENV_OVERRIDE as AztecEnv
+  }
+  const name = activeDeployment.network.name?.toLowerCase() ?? ''
+  if (name.includes('mainnet')) return 'mainnet'
+  if (name.includes('devnet')) return 'devnet'
+  return 'testnet'
+}
+
+const AZTEC_ENV = resolveAztecEnv()
+
+const ENV_CONFIG = {
+  devnet: {
+    l1RpcUrl: L1_RPC_SEPOLIA,
+    l1ChainId: 11155111,
+    aztecNodeUrl: AZTEC_NODE_DEVNET,
+    aztecscanUrl: 'https://devnet.aztecscan.xyz',
+    aztecExplorerUrl: 'https://aztecexplorer.xyz/?network=devnet',
+    chainName: 'Aztec Devnet',
+  },
+  testnet: {
+    l1RpcUrl: L1_RPC_SEPOLIA,
+    l1ChainId: 11155111,
+    aztecNodeUrl: AZTEC_NODE_TESTNET,
+    aztecscanUrl: 'https://testnet.aztecscan.xyz',
+    aztecExplorerUrl: 'https://aztecexplorer.xyz/?network=testnet',
+    chainName: 'Aztec Testnet',
+  },
+  mainnet: {
+    l1RpcUrl: L1_RPC_MAINNET,
+    l1ChainId: 1,
+    aztecNodeUrl: AZTEC_NODE_MAINNET,
+    aztecscanUrl: 'https://aztecscan.xyz',
+    aztecExplorerUrl: 'https://aztecexplorer.xyz/?network=mainnet',
+    chainName: 'Aztec Mainnet',
+  },
+} as const
+
+const activeEnvConfig = ENV_CONFIG[AZTEC_ENV]
+
+// ─── Network Constants ───────────────────────────────────────────────
 
 export const L1_CHAIN_ID = activeDeployment.network.l1ChainId
 export const L2_CHAIN_ID = activeDeployment.network.l2ChainId
 export const L2_CHAIN_KEY = `aztec:${L2_CHAIN_ID}`
-export const L2_NODE_URL = activeDeployment.network.nodeUrl
+export const L1_RPC_URL = activeEnvConfig.l1RpcUrl
+export const L2_NODE_URL = activeEnvConfig.aztecNodeUrl
 export const DEPLOYMENT_ID = activeDeployment.id
 export const ROLLUP_VERSION = activeDeployment.network.rollupVersion
 export const AZTEC_VERSION = activeDeployment.network.aztecVersion
@@ -61,27 +116,28 @@ export const AZTEC_VERSION = activeDeployment.network.aztecVersion
 // L1 Aztec protocol contract addresses (from deployment snapshot)
 export const L1_CONTRACT_ADDRESSES = activeDeployment.l1ContractAddresses
 
-// Aztecscan URLs for different networks
-export const AZTECSCAN_URLS: Record<number, string> = {
-  [L2_CHAIN_ID]: 'https://devnet.aztecscan.xyz', // Aztec Devnet
-}
+// Explorer URLs (derived from active environment)
+export const AZTECSCAN_URL = activeEnvConfig.aztecscanUrl
+export const AZTEC_EXPLORER_URL = activeEnvConfig.aztecExplorerUrl
 
+export const AZTECSCAN_URLS: Record<number, string> = {
+  [L2_CHAIN_ID]: activeEnvConfig.aztecscanUrl,
+}
 
 export const getAztecscanUrl = (chainId: number): string => {
-  return AZTECSCAN_URLS[chainId] || 'https://aztecscan.xyz'
+  return AZTECSCAN_URLS[chainId] || activeEnvConfig.aztecscanUrl
 }
 
-export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` =
-  (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuicePortalAddress ?? '') as `0x${string}`
-export const FEE_JUICE_ADDRESS: `0x${string}` =
-  (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ?? '') as `0x${string}`
-export const BRIDGED_FPC_ADDRESS: string =
-  ((activeDeployment as any).bridgedFpcAddress ?? '') as string
+export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` = (activeDeployment.nodeInfo?.l1ContractAddresses
+  ?.feeJuicePortalAddress ?? '') as `0x${string}`
+export const FEE_JUICE_ADDRESS: `0x${string}` = (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ??
+  '') as `0x${string}`
+export const BRIDGED_FPC_ADDRESS: string = ((activeDeployment as any).bridgedFpcAddress ?? '') as string
 
 // ─── Permit2 + SwapBridgeRouter ──────────────────────────────────────
 export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
-export const SWAP_BRIDGE_ROUTER_ADDRESS: `0x${string}` =
-  ((activeDeployment as any).swapBridgeRouterAddress ?? '') as `0x${string}`
+export const SWAP_BRIDGE_ROUTER_ADDRESS: `0x${string}` = ((activeDeployment as any).swapBridgeRouterAddress ??
+  '') as `0x${string}`
 
 // ─── Uniswap V4 Sepolia Constants ───────────────────────────────────
 export const V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as const
@@ -90,8 +146,8 @@ export const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as cons
 export const NATIVE_ETH = '0x0000000000000000000000000000000000000000' as const
 
 // UniswapFuelSwap — deployed swap contract (set after running DeployUniswapFuelSwap)
-export const UNISWAP_FUEL_SWAP_ADDRESS: `0x${string}` =
-  ((activeDeployment as any).uniswapFuelSwapAddress ?? '') as `0x${string}`
+export const UNISWAP_FUEL_SWAP_ADDRESS: `0x${string}` = ((activeDeployment as any).uniswapFuelSwapAddress ??
+  '') as `0x${string}`
 
 // Pool parameters for route building
 // Intermediate hops (e.g. USDC/WETH) — 0.3% fee, 60 tick spacing
@@ -102,6 +158,9 @@ export const FEE_POOL_FEE = 3000 as const
 export const FEE_POOL_TICK_SPACING = 60 as const
 // Native ETH pool: mainnet uses native ETH (address(0)), Sepolia too
 export const FEE_POOL_USES_NATIVE_ETH = true as const
+// Direct pool (e.g. USDC/FeeJuice) — for smart routing when a direct path exists
+export const DIRECT_POOL_FEE = 3000 as const
+export const DIRECT_POOL_TICK_SPACING = 60 as const
 
 // Non-token protocol addresses (SBT)
 export const ADDRESS = {
@@ -114,7 +173,7 @@ export const ADDRESS = {
   },
   [L2_CHAIN_ID]: {
     CHAIN_ID: L2_CHAIN_ID,
-    CHAIN_NAME: 'Aztec Devnet',
+    CHAIN_NAME: activeEnvConfig.chainName,
     L2: {},
   },
 } as Record<number, any>
@@ -156,7 +215,7 @@ export const L1_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
   l2TokenContract: t.l2TokenContract,
   l1PortalContract: t.l1PortalContract,
   l2BridgeContract: t.l2BridgeContract,
-  l2ProxyContract: t.l2ProxyContract,
+  l2ProxyContract: (t as any).l2ProxyContract ?? '',
   feeAssetHandler: t.feeAssetHandler,
   pairedSymbol: `c${t.symbol}`,
 }))
@@ -172,7 +231,7 @@ export const L2_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
   l2TokenContract: t.l2TokenContract,
   l1PortalContract: t.l1PortalContract,
   l2BridgeContract: t.l2BridgeContract,
-  l2ProxyContract: t.l2ProxyContract,
+  l2ProxyContract: (t as any).l2ProxyContract ?? '',
   feeAssetHandler: t.feeAssetHandler,
   pairedSymbol: t.symbol,
 }))

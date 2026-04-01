@@ -1,6 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
 import { persistQueryClient } from '@tanstack/react-query-persist-client'
 import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister'
+import { APP_VERSION } from '@/config/env.config'
 
 /**
  * Configures localStorage persistence for React Query
@@ -24,7 +25,7 @@ export function setupQueryPersistence(queryClient: QueryClient) {
       queryClient: queryClient as any, // Force type to avoid version mismatch
       persister: localStoragePersister,
       maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days in milliseconds
-      buster: process.env.NEXT_PUBLIC_APP_VERSION || '1.0.0', // Cache buster based on app version
+      buster: APP_VERSION, // Cache buster based on app version
       // Only persist queries that are tagged for persistence
       // /** How to serialize the data to storage */
       // serialize?: (client: PersistedClient) => string
@@ -45,12 +46,11 @@ export function setupQueryPersistence(queryClient: QueryClient) {
             'l2NativeBalance',
             'l2HasSoulboundToken',
           ]
-          
+
           // Only persist queries with a persist flag or specific query keys
           return (
-            query.meta?.persist === true || 
-            (Array.isArray(query.queryKey) && 
-              keysToCache.includes(query.queryKey[0] as string))
+            query.meta?.persist === true ||
+            (Array.isArray(query.queryKey) && keysToCache.includes(query.queryKey[0] as string))
           )
         },
       },

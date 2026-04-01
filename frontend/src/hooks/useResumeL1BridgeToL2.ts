@@ -118,30 +118,19 @@ async function recoverFromReceipt(
 
   // Fallback: try DepositToAztecPublic/Private from TokenPortal (legacy path)
   // Try our custom ABI first (has fee field), then upstream as fallback
-  const eventName = isPrivacyModeEnabled
-    ? 'DepositToAztecPrivate'
-    : 'DepositToAztecPublic'
+  const eventName = isPrivacyModeEnabled ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
 
   // Match by secretHash only — event amount is post-fee (amountAfterFee),
   // so we can't filter by the pre-fee amount the recovery data stores.
-  const privateFilter = (log: any) =>
-    log.args.secretHash === claimSecretHash
+  const privateFilter = (log: any) => log.args.secretHash === claimSecretHash
 
-  const publicFilter = (log: any) =>
-    log.args.secretHash === claimSecretHash &&
-    log.args.to === aztecAddress
+  const publicFilter = (log: any) => log.args.secretHash === claimSecretHash && log.args.to === aztecAddress
 
   const filter = isPrivacyModeEnabled ? privateFilter : publicFilter
 
   for (const abi of [CustomTokenPortalEventAbi, CustomTokenPortalAbi]) {
     try {
-      const log = extractEvent(
-        receipt.logs,
-        portalAddress as `0x${string}`,
-        abi,
-        eventName,
-        filter,
-      )
+      const log = extractEvent(receipt.logs, portalAddress as `0x${string}`, abi, eventName, filter)
       const messageHash = log.args.key.toString()
       const messageLeafIndex = log.args.index.toString()
       const result: RecoveryResult = { messageHash, messageLeafIndex }
@@ -176,7 +165,13 @@ async function recoverFromBlockScan(
   // Scan up to 50000 blocks (~7 days at 12s/block) to cover delayed resumes
   const toBlock = fromBlock + 50000n > currentBlock ? currentBlock : fromBlock + 50000n
 
-  console.log('[Resume L1→L2] Scanning L1 blocks', fromBlock.toString(), '→', toBlock.toString(), 'for portal events...')
+  console.log(
+    '[Resume L1→L2] Scanning L1 blocks',
+    fromBlock.toString(),
+    '→',
+    toBlock.toString(),
+    'for portal events...',
+  )
 
   const addresses = [portalAddress as `0x${string}`]
   if (SWAP_BRIDGE_ROUTER_ADDRESS) {
@@ -188,9 +183,7 @@ async function recoverFromBlockScan(
     toBlock,
   })
 
-  const targetEventName = isPrivacyModeEnabled
-    ? 'DepositToAztecPrivate'
-    : 'DepositToAztecPublic'
+  const targetEventName = isPrivacyModeEnabled ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
 
   for (const rawLog of logs) {
     // Try SwapBridgeRouter events first
@@ -279,8 +272,8 @@ async function recoverFromBlockScan(
 
   throw new Error(
     `Could not find deposit event in blocks ${fromBlock}–${toBlock}. ` +
-    'The deposit may not have been mined yet, or the block range may need to be extended. ' +
-    'Try resuming again later.'
+      'The deposit may not have been mined yet, or the block range may need to be extended. ' +
+      'Try resuming again later.',
   )
 }
 
@@ -298,15 +291,12 @@ async function recoverFromBlockScan(
  * Pre-deposit failures (status=pending/failed with no l1TxHash) are safe — no funds at risk.
  */
 export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
-  const { setProgressStep, setTransactionUrls, clearRecovery } =
-    useBridgeStore()
+  const { setProgressStep, setTransactionUrls, clearRecovery } = useBridgeStore()
   const { aztecAddress, aztecLoginMethod } = useWalletStore()
   const walletAdapter = useWalletAdapter()
   const notify = useToast()
 
-  const mutationFn = async (
-    claimData: RecoveryClaimData,
-  ): Promise<string | undefined> => {
+  const mutationFn = async (claimData: RecoveryClaimData): Promise<string | undefined> => {
     const {
       operationId,
       claimSecret,
@@ -350,9 +340,7 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       throw new Error('Aztec wallet not connected')
     }
     if (!walletAdapter) {
-      throw new Error(
-        'Aztec wallet adapter not initialized. Please wait for wallet to connect.',
-      )
+      throw new Error('Aztec wallet adapter not initialized. Please wait for wallet to connect.')
     }
 
     if (!portalAddressL1) {
@@ -397,7 +385,7 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
         } else {
           throw new Error(
             'Cannot resume: no messageHash, no l1TxHash, and no l1BlockNumberBeforeTx. ' +
-            'There is not enough data to recover. Contact support.',
+              'There is not enough data to recover. Contact support.',
           )
         }
 
@@ -427,7 +415,9 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
         if (recovered.fuelMessageLeafIndex) patchData.fuelMessageLeafIndex = recovered.fuelMessageLeafIndex
         if (recovered.fuelAmount) patchData.fuelAmount = recovered.fuelAmount
 
-        const ok = await patchOperationWithRetry(operationId, patchData, { label: 'recovered data' })
+        const ok = await patchOperationWithRetry(operationId, patchData, {
+          label: 'recovered data',
+        })
         if (ok) {
           console.log('[Resume L1→L2] Recovered data stored on backend')
         }
@@ -435,7 +425,7 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
         console.error('[Resume L1→L2] Recovery failed:', recoveryError)
         throw new Error(
           `Recovery failed: ${recoveryError instanceof Error ? recoveryError.message : 'Unknown error'}. ` +
-          'Your funds are safe on L1. You can try resuming again later.',
+            'Your funds are safe on L1. You can try resuming again later.',
         )
       }
     }
@@ -459,7 +449,9 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       )
     }
 
-    // Extra buffer so the message is visible on the wallet's node
+    // Buffer wait: give the sequencer time to include the message in a block.
+    // Pre-simulation via PXE doesn't work (PXE lags behind sequencer, and
+    // Azguard wallet rejects simulateTx as out of capability scope).
     console.log('[Resume L1→L2] Final wait before claiming (2 min)...')
     await wait(120_000)
 
@@ -500,10 +492,11 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     // Same logic as useL1Operations.ts:883-945 — atomically claim FeeJuice and pay gas
     let feeOption: { fee: { paymentMethod: any; gasSettings?: any } } | undefined
     if (privateFuelSecret && privateFuelSalt && fuelMessageLeafIndex && fuelAmount && BRIDGED_FPC_ADDRESS) {
-      // Private fuel path: BridgedMintAndPayFeePaymentMethod
+      // Private fuel path: PrivateMintAndPayFeePaymentMethod
       try {
-        const { BridgedMintAndPayFeePaymentMethod, REASONABLE_GAS_LIMITS, maxFeesPerGasFromBaseFees } =
-          await import('@defi-wonderland/aztec-fee-payment')
+        const { PrivateMintAndPayFeePaymentMethod, REASONABLE_GAS_LIMITS, maxFeesPerGasFromBaseFees } = await import(
+          '@wonderland/aztec-fee-payment'
+        )
         const { Fr: FieldFr } = await import('@aztec/aztec.js/fields')
         const { Gas, GasFees } = await import('@aztec/stdlib/gas')
         const { aztecNode } = await import('@/aztec')
@@ -513,22 +506,32 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
         const gasLimits = REASONABLE_GAS_LIMITS
         const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
 
-        console.log('[Resume L1→L2] Building BridgedMintAndPayFeePaymentMethod (private fuel)')
+        console.log('[Resume L1→L2] Building PrivateMintAndPayFeePaymentMethod (private fuel)')
         // Convert string secrets to Fr field elements for the Noir contract
         const fuelSecretFr = FieldFr.fromString(privateFuelSecret)
         const fuelSaltFr = FieldFr.fromString(privateFuelSalt)
-        const paymentMethod = new BridgedMintAndPayFeePaymentMethod(
+        const paymentMethod = new PrivateMintAndPayFeePaymentMethod(
           AztecAddress.fromString(BRIDGED_FPC_ADDRESS),
           BigInt(fuelAmount),
           fuelSecretFr,
           fuelSaltFr,
           new FieldFr(BigInt(fuelMessageLeafIndex)),
         )
-        feeOption = { fee: { paymentMethod, gasSettings: { gasLimits, teardownGasLimits, maxFeesPerGas, maxPriorityFeesPerGas: GasFees.empty() } } }
+        feeOption = {
+          fee: {
+            paymentMethod,
+            gasSettings: {
+              gasLimits,
+              teardownGasLimits,
+              maxFeesPerGas,
+              maxPriorityFeesPerGas: GasFees.empty(),
+            },
+          },
+        }
       } catch (err) {
         // Payment method construction failure is not recoverable — re-throw so the user
         // sees a clear error instead of a confusing "insufficient fee" later.
-        throw new Error(`[Resume L1→L2] Failed to create BridgedMintAndPayFeePaymentMethod: ${err}`)
+        throw new Error(`[Resume L1→L2] Failed to create PrivateMintAndPayFeePaymentMethod: ${err}`)
       }
     } else if (fuelSecret && fuelMessageLeafIndex && fuelAmount) {
       // Public fuel path: FeeJuicePaymentMethodWithClaim
@@ -558,7 +561,10 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
           notify('info', `Claiming tokens on L2 (attempt ${attempt}/${maxAttempts})...`)
         },
         onRetry: (attempt, maxAttempts, delayMs) => {
-          notify('info', `L2 node hasn't synced this message yet. Retrying in ${Math.round(delayMs / 60_000)} min (${attempt}/${maxAttempts})...`)
+          notify(
+            'info',
+            `L2 node hasn't synced this message yet. Retrying in ${Math.round(delayMs / 60_000)} min (${attempt}/${maxAttempts})...`,
+          )
         },
         feeOption,
       },
@@ -573,14 +579,23 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     setTransactionUrls(l1TxUrl ?? null, l2TxUrl)
 
     // Backend: mark operation as completed (retry — critical for DB consistency)
-    console.log('[Resume L1→L2] PATCH completed →', { operationId, status: 'completed', l2TxHash, currentStep: 4 })
-    await patchOperationWithRetry(operationId, {
+    console.log('[Resume L1→L2] PATCH completed →', {
+      operationId,
       status: 'completed',
       l2TxHash,
-      l2TxUrl,
-      completedAt: new Date().toISOString(),
       currentStep: 4,
-    }, { label: 'L1→L2 resume completion' })
+    })
+    await patchOperationWithRetry(
+      operationId,
+      {
+        status: 'completed',
+        l2TxHash,
+        l2TxUrl,
+        completedAt: new Date().toISOString(),
+        currentStep: 4,
+      },
+      { label: 'L1→L2 resume completion' },
+    )
 
     // Update localStorage
     updateLocalStorageItem(

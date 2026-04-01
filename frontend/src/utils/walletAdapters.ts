@@ -10,7 +10,10 @@ import { aztecNode } from '@/aztec'
 export interface WalletContext {
   loginMethod: 'wallet-sdk'
   sdkWallet?: Wallet | null
-  aztecAccount?: { address: { toString: () => string }; sdkWallet: Wallet } | null
+  aztecAccount?: {
+    address: { toString: () => string }
+    sdkWallet: Wallet
+  } | null
 }
 
 export interface SimulateViewResult {
@@ -22,33 +25,37 @@ export interface ExecuteCallResult {
   blockNumber?: number
 }
 
-type ContractType = 'token' | 'bridge' | 'bridged_fpc' | 'fee_juice'
+type ContractType = 'token' | 'bridge' | 'proxy' | 'bridged_fpc' | 'fee_juice'
 
 async function getContractArtifact(type: ContractType) {
   if (type === 'bridge') {
-    const bridgeJson = await import('../../../aztec-contracts/token_bridge/target/token_bridge_contract-TokenBridge.json')
+    const bridgeJson = await import('@/constants/aztec/artifacts/token_bridge_contract-TokenBridge.json')
     const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
-    // @ts-ignore — JSON import from local build output
+    // @ts-ignore — JSON import from synced artifact
     return loadContractArtifact(bridgeJson.default ?? bridgeJson)
   }
+  if (type === 'proxy') {
+    const proxyJson = await import('@/constants/aztec/artifacts/token_minter_proxy-TokenMinterProxy.json')
+    const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
+    // @ts-ignore — JSON import from synced artifact
+    return loadContractArtifact(proxyJson.default ?? proxyJson)
+  }
   if (type === 'bridged_fpc') {
-    const { BridgedFPCContractArtifact } = await import('@defi-wonderland/aztec-fee-payment')
-    return BridgedFPCContractArtifact
+    const { PrivateFPCContractArtifact } = await import('@wonderland/aztec-fee-payment')
+    return PrivateFPCContractArtifact
   }
   if (type === 'fee_juice') {
     const { FeeJuiceContractArtifact } = await import('@aztec/noir-contracts.js/FeeJuice')
     return FeeJuiceContractArtifact
   }
-  const { TokenContract } = await import('@aztec/noir-contracts.js/Token')
-  return TokenContract.artifact
+  // Token artifact from Wonderland npm package (compiled for SDK 4.2)
+  const { TokenContractArtifact } = await import('@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js')
+  return TokenContractArtifact
 }
 
 const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
 
-function resolveArtifactType(
-  contractAddress: string,
-  bridgeAddress: string
-): ContractType {
+function resolveArtifactType(contractAddress: string, bridgeAddress: string): ContractType {
   if (contractAddress.toLowerCase() === bridgeAddress.toLowerCase()) return 'bridge'
   if (BRIDGED_FPC_ADDRESS && contractAddress.toLowerCase() === BRIDGED_FPC_ADDRESS.toLowerCase()) return 'bridged_fpc'
   if (contractAddress.toLowerCase() === FEE_JUICE_L2_ADDRESS.toLowerCase()) return 'fee_juice'
@@ -74,29 +81,28 @@ class WalletAdapter {
 
   async initializeContracts(): Promise<void> {
     // Register ALL tokens and bridges from config, not just the default
-    const deployedContracts: { addr: string; type: 'token' | 'bridge' }[] = L1_TOKENS.flatMap(
-      (t) => [
-        { addr: t.l2TokenContract ?? '', type: 'token' as const },
-        { addr: t.l2BridgeContract ?? '', type: 'bridge' as const },
-      ],
-    ).filter(({ addr }) => !!addr)
+    const deployedContracts: {
+      addr: string
+      type: 'token' | 'bridge' | 'proxy'
+    }[] = L1_TOKENS.flatMap((t) => [
+      { addr: t.l2TokenContract ?? '', type: 'token' as const },
+      { addr: t.l2BridgeContract ?? '', type: 'bridge' as const },
+      { addr: (t as any).l2ProxyContract ?? '', type: 'proxy' as const },
+    ]).filter(({ addr }) => !!addr)
 
     // Register deployed contracts (token, bridge) via node lookup
     await Promise.all(
       deployedContracts.map(async ({ addr, type }) => {
         try {
           const address = AztecAddress.fromString(addr)
-          const [instance, artifact] = await Promise.all([
-            aztecNode.getContract(address),
-            getContractArtifact(type),
-          ])
+          const [instance, artifact] = await Promise.all([aztecNode.getContract(address), getContractArtifact(type)])
           if (instance) {
             await this.wallet.registerContract(instance, artifact)
           }
         } catch {
           // Contract may already be registered
         }
-      })
+      }),
     )
 
     // Register BridgedFPC separately — it's a registered-not-deployed contract,
@@ -104,33 +110,29 @@ class WalletAdapter {
     // locally and register it with the wallet's PXE.
     if (BRIDGED_FPC_ADDRESS) {
       try {
-        const { registerBridgedContract } = await import('@defi-wonderland/aztec-fee-payment')
-        await registerBridgedContract(this.wallet)
+        const { registerPrivateContract } = await import('@wonderland/aztec-fee-payment')
+        await registerPrivateContract(this.wallet, Fr.ZERO)
       } catch {
         // May already be registered
       }
     }
   }
 
-  async simulateView(
-    contract: AztecAddress | string,
-    method: string,
-    args: any[]
-  ): Promise<SimulateViewResult> {
+  async simulateView(contract: AztecAddress | string, method: string, args: any[]): Promise<SimulateViewResult> {
     const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
     const type = resolveArtifactType(addr.toString(), this.bridgeAddress)
     const artifact = await getContractArtifact(type)
     const instance = await Contract.at(addr, artifact, this.wallet)
-    const result = await instance.methods[method](...args).simulate({ from: this.account })
+    const { result } = await instance.methods[method](...args).simulate({
+      from: this.account,
+    })
     return { result }
   }
 
   async simulateViews(
-    calls: { contract: AztecAddress | string; method: string; args: any[] }[]
+    calls: { contract: AztecAddress | string; method: string; args: any[] }[],
   ): Promise<SimulateViewResult[]> {
-    const results = await Promise.all(
-      calls.map((c) => this.simulateView(c.contract, c.method, c.args))
-    )
+    const results = await Promise.all(calls.map((c) => this.simulateView(c.contract, c.method, c.args)))
     return results
   }
 
@@ -143,7 +145,7 @@ class WalletAdapter {
     contract: AztecAddress | string,
     method: string,
     args: any[],
-    options?: { contractType?: ContractType; fee?: { paymentMethod: any } }
+    options?: { contractType?: ContractType; fee?: { paymentMethod: any } },
   ): Promise<void> {
     const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
     const type = options?.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
@@ -174,16 +176,18 @@ class WalletAdapter {
     contract: AztecAddress | string,
     method: string,
     args: any[],
-    options?: { contractType?: ContractType; fee?: { paymentMethod: any } }
+    options?: { contractType?: ContractType; fee?: { paymentMethod: any } },
   ): Promise<ExecuteCallResult> {
     const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
     const type = options?.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
     const artifact = await getContractArtifact(type)
     const instance = await Contract.at(addr, artifact, this.wallet)
     const sendOpts: any = { from: this.account }
-    if (options?.fee) sendOpts.fee = options.fee
-    const receipt = await instance.methods[method](...args)
-      .send(sendOpts)
+    if (options?.fee) {
+      sendOpts.fee = options.fee
+      sendOpts.skipFeeEnforcement = true
+    }
+    const { receipt } = await instance.methods[method](...args).send(sendOpts)
     return {
       txHash: receipt.txHash.toString(),
       blockNumber: receipt.blockNumber,
@@ -195,8 +199,13 @@ class WalletAdapter {
    * Each call is built into an interaction, then batched and sent atomically.
    */
   async executeBatch(
-    calls: { contract: AztecAddress | string; method: string; args: any[]; contractType?: ContractType }[],
-    options?: { fee?: { paymentMethod: any } }
+    calls: {
+      contract: AztecAddress | string
+      method: string
+      args: any[]
+      contractType?: ContractType
+    }[],
+    options?: { fee?: { paymentMethod: any } },
   ): Promise<ExecuteCallResult> {
     const interactions = await Promise.all(
       calls.map(async (call) => {
@@ -205,13 +214,13 @@ class WalletAdapter {
         const artifact = await getContractArtifact(type)
         const instance = await Contract.at(addr, artifact, this.wallet)
         return instance.methods[call.method](...call.args)
-      })
+      }),
     )
 
     const batch = new BatchCall(this.wallet, interactions)
     const sendOpts: any = { from: this.account }
     if (options?.fee) sendOpts.fee = options.fee
-    const receipt = await batch.send(sendOpts)
+    const { receipt } = await batch.send(sendOpts)
     return {
       txHash: receipt.txHash.toString(),
       blockNumber: receipt.blockNumber,
@@ -235,10 +244,12 @@ class WalletAdapter {
     l1Address: string,
     amount: bigint,
     nonce: Fr,
-    userAddress?: AztecAddress | string
+    userAddress?: AztecAddress | string,
   ): Promise<ExecuteCallResult> {
     const user = userAddress
-      ? (typeof userAddress === 'string' ? AztecAddress.fromString(userAddress) : userAddress)
+      ? typeof userAddress === 'string'
+        ? AztecAddress.fromString(userAddress)
+        : userAddress
       : this.account
 
     const bridgeAddr = AztecAddress.fromString(this.bridgeAddress)
@@ -268,11 +279,9 @@ class WalletAdapter {
 
     // Batch authwit + exit into a single tx — public calls execute in enqueue order,
     // so set_authorized runs before burn_public, making the auth visible.
-    const exitCall = bridge.methods.exit_to_l1_public(
-      EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce,
-    )
+    const exitCall = bridge.methods.exit_to_l1_public(EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
     const batch = new BatchCall(this.wallet, [authwit, exitCall])
-    const receipt = await batch.send({ from: this.account })
+    const { receipt } = await batch.send({ from: this.account })
 
     return {
       txHash: receipt.txHash.toString(),
@@ -290,11 +299,18 @@ class WalletAdapter {
     amount: bigint,
     nonce: Fr,
     cleanHandsData?: { nonce: bigint; action_id: bigint; signature: number[] },
-    passportData?: { max_amount: bigint; nonce: bigint; deadline: bigint; signature: number[] },
+    passportData?: {
+      max_amount: bigint
+      nonce: bigint
+      deadline: bigint
+      signature: number[]
+    },
     userAddress?: AztecAddress | string,
   ): Promise<ExecuteCallResult> {
     const user = userAddress
-      ? (typeof userAddress === 'string' ? AztecAddress.fromString(userAddress) : userAddress)
+      ? typeof userAddress === 'string'
+        ? AztecAddress.fromString(userAddress)
+        : userAddress
       : this.account
 
     const bridgeAddr = AztecAddress.fromString(this.bridgeAddress)
@@ -314,24 +330,21 @@ class WalletAdapter {
     const proxyAddr = AztecAddress.fromString(this.proxyAddress)
     const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
     const innerHash = await computeInnerAuthWitHashFromAction(proxyAddr, burnCall)
-    await this.wallet.createAuthWit(
-      this.account,
-      {
-        consumer: proxyAddr,
-        innerHash,
-      }
-    )
+    await this.wallet.createAuthWit(this.account, {
+      consumer: proxyAddr,
+      innerHash,
+    })
 
     // Send exit transaction — bridge contract params: (recipient, amount, caller_on_l1, nonce, ...)
     // No tokenAddr prefix — the bridge already knows its token from its config.
-    const exitArgs = cleanHandsData && passportData
-      ? [EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce, cleanHandsData, passportData]
-      : [EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce]
-    const exitMethod = cleanHandsData && passportData
-      ? 'exit_to_l1_private'
-      : 'exit_to_l1_public'
-    const receipt = await bridge.methods[exitMethod](...exitArgs)
-      .send({ from: this.account })
+    const exitArgs =
+      cleanHandsData && passportData
+        ? [EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce, cleanHandsData, passportData]
+        : [EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce]
+    const exitMethod = cleanHandsData && passportData ? 'exit_to_l1_private' : 'exit_to_l1_public'
+    const { receipt } = await bridge.methods[exitMethod](...exitArgs).send({
+      from: this.account,
+    })
 
     return {
       txHash: receipt.txHash.toString(),
@@ -343,10 +356,7 @@ class WalletAdapter {
     const addr = typeof tokenAddress === 'string' ? AztecAddress.fromString(tokenAddress) : tokenAddress
     const type = resolveArtifactType(addr.toString(), this.bridgeAddress)
     try {
-      const [instance, artifact] = await Promise.all([
-        aztecNode.getContract(addr),
-        getContractArtifact(type),
-      ])
+      const [instance, artifact] = await Promise.all([aztecNode.getContract(addr), getContractArtifact(type)])
       if (instance) {
         await this.wallet.registerContract(instance, artifact)
       }

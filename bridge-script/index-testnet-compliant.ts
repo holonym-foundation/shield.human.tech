@@ -160,6 +160,10 @@ function decodeFuelSwapError(error: unknown): { summary: string; detail: string;
 const RETRYABLE_PATTERNS = [
   'Include-by timestamp must be greater than the anchor block timestamp',
   'dropped by P2P node',
+  'nonexistent L1-to-L2 message',
+  'Tried to consume nonexistent',
+  'No L1 to L2 message found',
+  'Insufficient fee payer balance',
 ]
 
 async function sendPrivateWithRetry<T>(
@@ -176,15 +180,55 @@ async function sendPrivateWithRetry<T>(
       const msg = e?.message || ''
       const isRetryable = RETRYABLE_PATTERNS.some(p => msg.includes(p))
       if (isRetryable && attempt < maxRetries) {
-        logger.info(`[Retry] Transient failure (attempt ${attempt}/${maxRetries}): ${msg.slice(0, 120)}`)
-        logger.info(`[Retry] Waiting 15s for fresh L1 block before re-proving...`)
-        await wait(15_000)
+        // L1→L2 message not yet consumable — wait longer (2 min) for node to process
+        const isMessageSync = msg.includes('nonexistent L1-to-L2') || msg.includes('Tried to consume nonexistent') || msg.includes('No L1 to L2 message found') || msg.includes('Insufficient fee payer balance')
+        const retryDelay = isMessageSync ? 120_000 : 15_000
+        logger.info(`[Retry] Transient failure (attempt ${attempt}/${maxRetries}): ${msg.slice(0, 150)}`)
+        logger.info(`[Retry] Waiting ${retryDelay / 1000}s before retry...`)
+        await wait(retryDelay)
         continue
       }
       throw e
     }
   }
   throw new Error('sendPrivateWithRetry: unreachable')
+}
+
+/**
+ * Pre-simulate a claim call until it passes, polling every 30s up to maxWaitMs.
+ * This verifies the L1→L2 messages are actually consumable before sending the real tx.
+ * Uses skipTxValidation + skipFeeEnforcement to only check message availability.
+ */
+async function pollUntilClaimSimulationPasses(
+  interaction: { request: () => Promise<any> },
+  wallet: any,
+  fromAddress: any,
+  logger: Logger,
+  label = 'claim',
+  maxWaitMs = 10 * 60 * 1000,
+  pollIntervalMs = 30_000,
+): Promise<void> {
+  const start = Date.now()
+  let attempt = 0
+  logger.info(`[PreSim] Polling until ${label} simulation passes (max ${maxWaitMs / 60_000} min)...`)
+  while (Date.now() - start < maxWaitMs) {
+    attempt++
+    try {
+      const executionPayload = await interaction.request()
+      await wallet.simulateTx(executionPayload, {
+        from: fromAddress,
+        skipTxValidation: true,
+        skipFeeEnforcement: true,
+      })
+      logger.info(`[PreSim] ${label} simulation passed after ${attempt} polls (${Math.round((Date.now() - start) / 1000)}s)`)
+      return
+    } catch (e: any) {
+      const elapsed = Math.round((Date.now() - start) / 1000)
+      logger.info(`[PreSim] ${label} poll #${attempt} (${elapsed}s): not ready — ${(e?.message || '').slice(0, 120)}`)
+    }
+    await wait(pollIntervalMs)
+  }
+  logger.warn(`[PreSim] ${label} simulation did not pass within ${maxWaitMs / 60_000} min — proceeding anyway`)
 }
 
 import { SponsoredFPCContract, SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC'
@@ -1372,8 +1416,8 @@ async function testPublicFuelFlow(
     const pfFuelSecret = Fr.random()
     const pfFuelSecretHash = await computeSecretHash(pfFuelSecret)
 
-    const pfTotalAmount = 120n  // 0.00012 USDC total (6-decimal token)
-    const pfFuelAmount = 20n   // 0.00002 USDC swapped to FeeJuice → ~114 FJ at 10.5B FJ/ETH pool
+    const pfTotalAmount = 150n  // 0.00015 USDC total (6-decimal token)
+    const pfFuelAmount = 50n   // 0.00005 USDC swapped to FeeJuice (needs ~49 FJ for gas, target ~120 FJ)
     const pfMinFuelOutput = 0n // testnet — accept any output
 
     // Mint ERC20 for this test
@@ -1524,10 +1568,10 @@ async function testPublicFuelFlow(
     if (pfFuelAmountReceived < pfEstimatedMaxGasCost) {
       const ratePerUnit = pfFuelAmountReceived > 0n ? pfFuelAmountReceived / pfFuelAmount : 0n
       const requiredUnits = ratePerUnit > 0n ? pfEstimatedMaxGasCost / ratePerUnit : 0n
-      logger.warn(`  ⚠️  Public fuel test skipped: swap yielded ${pfFuelAmountReceived} FJ but gas requires ≥${pfEstimatedMaxGasCost}.`)
-      logger.warn(`      The ETH/FJ pool needs more liquidity. Reseed pools and retry.`)
-      if (requiredUnits > 0n) logger.warn(`      Estimated USDC units needed for fuel: ${requiredUnits} (${Number(requiredUnits) / 1e6} USDC)`)
-      return
+      const pct = pfEstimatedMaxGasCost > 0n ? Number((pfFuelAmountReceived * 100n) / pfEstimatedMaxGasCost) : 0
+      logger.warn(`  ⚠️  Fuel may be insufficient: swap yielded ${pfFuelAmountReceived} FJ but worst-case gas estimate is ${pfEstimatedMaxGasCost} (${pct}% coverage).`)
+      logger.warn(`      REASONABLE_GAS_LIMITS is a worst-case estimate (6.54M L2 gas). Actual claim cost is much lower — proceeding anyway.`)
+      if (requiredUnits > 0n) logger.warn(`      If claim fails, increase fuel to ${requiredUnits} units (${Number(requiredUnits) / 1e6} USDC)`)
     }
 
     // Wait for BOTH L1→L2 messages to sync
@@ -1545,8 +1589,10 @@ async function testPublicFuelFlow(
         await wait(120_000)
       }
     }
-    logger.info('Waiting 2 min before claiming on L2...')
-    await wait(120_000)
+    // Buffer wait: checkpoint found != message consumable on sequencer.
+    // Testnet sequencer typically needs 5-10 min after checkpoint to process the message.
+    logger.info('Waiting 5 min for sequencer to process L1→L2 messages...')
+    await wait(300_000)
 
     // Create FeeJuicePaymentMethodWithClaim (same as frontend public fuel path)
     const publicFuelPayment = new FeeJuicePaymentMethodWithClaim(ownerAztecAddress, {
@@ -1556,18 +1602,22 @@ async function testPublicFuelFlow(
     })
     logger.info('FeeJuicePaymentMethodWithClaim created')
 
-    // Claim tokens on L2 using public fuel to pay for gas
+    // Claim tokens on L2 using public fuel to pay for gas (retries if message not yet consumable)
+    // Testnet L1→L2 message sync can take 10+ min — use 8 retries × 2 min = 16 min
     logger.info('Claiming tokens on L2 with public fuel...')
-    await l2BridgeContract.methods
-      .claim_public(ownerAztecAddress, pfTokenAmount, pfClaimSecret, pfTokenIndex)
-      .send({
+    await sendPrivateWithRetry(
+      () => l2BridgeContract.methods.claim_public(ownerAztecAddress, pfTokenAmount, pfClaimSecret, pfTokenIndex),
+      {
         from: ownerAztecAddress,
         fee: {
           paymentMethod: publicFuelPayment,
           gasSettings: { gasLimits: pfGasLimits, teardownGasLimits: pfTeardownGasLimits, maxFeesPerGas: pfMaxFeesPerGas, maxPriorityFeesPerGas: GasFees.empty() },
         },
         wait: { timeout: getTimeouts().txTimeout },
-      })
+      },
+      logger,
+      8,
+    )
 
     await logFuelTestBalances('AFTER public fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
     logger.info('Public fuel (FeeJuicePaymentMethodWithClaim) test PASSED')
@@ -1648,8 +1698,8 @@ async function testPrivateFuelFlow(
     // 2. Generate token claim secret
     const [pvClaimSecret, pvClaimSecretHash] = await generateClaimSecret()
 
-    const pvTotalAmount = 120n  // 0.00012 USDC total (6-decimal token)
-    const pvFuelAmount = 20n   // 0.00002 USDC swapped to FeeJuice → ~114 FJ at 10.5B FJ/ETH pool
+    const pvTotalAmount = 150n  // 0.00015 USDC total (6-decimal token)
+    const pvFuelAmount = 50n   // 0.00005 USDC swapped to FeeJuice (needs ~49 FJ for gas, target ~120 FJ)
     const pvMinFuelOutput = 0n
 
     // Approve ERC20 → Permit2
@@ -1739,8 +1789,9 @@ async function testPrivateFuelFlow(
         await wait(120_000)
       }
     }
-    logger.info('Waiting 2 min before claiming on L2...')
-    await wait(120_000)
+    // Buffer wait: checkpoint found != message consumable on sequencer.
+    logger.info('Waiting 5 min for sequencer to process L1→L2 messages...')
+    await wait(300_000)
 
     // 3. Query base fees → build explicit gasSettings (same as frontend)
     const baseFees = await node.getCurrentMinFees()
@@ -1769,15 +1820,18 @@ async function testPrivateFuelFlow(
     }
     logger.info('PrivateMintAndPayFeePaymentMethod created with gasSettings')
 
-    // 5. Claim tokens on L2 with BridgedFPC fees
+    // 5. Claim tokens on L2 with BridgedFPC fees (retries if message not yet consumable)
     logger.info('Claiming tokens on L2 with BridgedFPC (private fuel)...')
-    await l2BridgeContract.methods
-      .claim_public(ownerAztecAddress, pvTokenAmount, pvClaimSecret, pvTokenIndex)
-      .send({
+    await sendPrivateWithRetry(
+      () => l2BridgeContract.methods.claim_public(ownerAztecAddress, pvTokenAmount, pvClaimSecret, pvTokenIndex),
+      {
         from: ownerAztecAddress,
         ...feeOption,
         wait: { timeout: getTimeouts().txTimeout },
-      })
+      },
+      logger,
+      8,
+    )
 
     await logFuelTestBalances('AFTER private fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
     logger.info('Private fuel (PrivateMintAndPayFeePaymentMethod) test PASSED')
@@ -1851,8 +1905,8 @@ async function testPrivateDepositFuelWithAttestation(
     const fuelSecret = Fr.random()
     const fuelSecretHash = await computeSecretHash(fuelSecret)
 
-    const totalAmount = 120n  // 0.00012 USDC total (6-decimal token)
-    const fuelAmount = 20n   // 0.00002 USDC swapped to FeeJuice → ~114 FJ at 10.5B FJ/ETH pool
+    const totalAmount = 160n  // 0.00016 USDC total (6-decimal token)
+    const fuelAmount = 60n   // 0.00006 USDC swapped to FeeJuice (needs ~49 FJ for gas, target ~140 FJ)
     const minFuelOutput = 0n
 
     // Mint ERC20
@@ -1969,8 +2023,9 @@ async function testPrivateDepositFuelWithAttestation(
         await wait(120_000)
       }
     }
-    logger.info('Waiting 2 min before claiming on L2...')
-    await wait(120_000)
+    // Buffer wait: checkpoint found != message consumable on sequencer.
+    logger.info('Waiting 5 min for sequencer to process L1→L2 messages...')
+    await wait(300_000)
 
     // Private deposit → claim_private on L2 (not claim_public)
     logger.info(`[L2] Claiming tokens privately (private deposit from ${label} fuel flow)`)
@@ -1991,6 +2046,7 @@ async function testPrivateDepositFuelWithAttestation(
         wait: { timeout: getTimeouts().txTimeout },
       },
       logger,
+      8,
     )
 
     const { result: privateBalance } = await l2TokenContract.methods
@@ -2079,9 +2135,11 @@ async function testPublicBridgeFlow(
     logger.info(`[L1→L2] Waiting 2 min...`)
     await wait(120_000)
   }
-  await wait(120_000) // Final buffer
+  // Buffer wait: checkpoint found != message consumable on sequencer.
+  logger.info('[L1→L2] Waiting 5 min for sequencer to process message...')
+  await wait(300_000)
 
-  // Claim on L2
+  // Claim on L2 (retries if message not yet consumable)
   logger.info(`[L2] Claiming tokens publicly`)
   const l2BridgeContract = TokenBridgeContract.at(
     AztecAddress.fromString(deployed.l2BridgeContract),
@@ -2096,13 +2154,16 @@ async function testPublicBridgeFlow(
     logger,
   )
 
-  await l2BridgeContract.methods
-    .claim_public(ownerAztecAddress, amountAfterFee, secret, leafIndex)
-    .send({
+  await sendPrivateWithRetry(
+    () => l2BridgeContract.methods.claim_public(ownerAztecAddress, amountAfterFee, secret, leafIndex),
+    {
       from: ownerAztecAddress,
       fee: { paymentMethod: sponsoredPaymentMethod },
       wait: { timeout: getTimeouts().txTimeout },
-    })
+    },
+    logger,
+    8,
+  )
 
   const l2TokenContract = TokenContract.at(
     AztecAddress.fromString(deployed.l2TokenContract),

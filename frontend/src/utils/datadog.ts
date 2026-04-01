@@ -1,5 +1,13 @@
 import { datadogLogs } from '@datadog/browser-logs'
 import { datadogRum } from '@datadog/browser-rum'
+import {
+  DATADOG_APPLICATION_ID,
+  DATADOG_CLIENT_TOKEN,
+  DATADOG_SITE,
+  DATADOG_SERVICE,
+  DATADOG_ENV,
+  DATADOG_LOGS_CLIENT_TOKEN,
+} from '@/config/env.config'
 
 export function init() {
   // Only initialize on client-side
@@ -12,37 +20,31 @@ export function init() {
   }
 
   datadogRum.init({
-    applicationId: process.env.NEXT_PUBLIC_DATADOG_APPLICATION_ID!,
-    clientToken: process.env.NEXT_PUBLIC_DATADOG_CLIENT_TOKEN!,
-    site: process.env.NEXT_PUBLIC_DATADOG_SITE!,
-    service: process.env.NEXT_PUBLIC_DATADOG_SERVICE!,
-    env: process.env.NEXT_PUBLIC_DATADOG_ENV ?? process?.env?.NODE_ENV ?? 'production',
-    // Specify a version number to identify the deployed version of your application in Datadog
-    // version: '1.0.0',
+    applicationId: DATADOG_APPLICATION_ID,
+    clientToken: DATADOG_CLIENT_TOKEN,
+    site: DATADOG_SITE,
+    service: DATADOG_SERVICE,
+    env: DATADOG_ENV,
     sessionSampleRate: 100,
     premiumSampleRate: 100,
     trackUserInteractions: true,
-    defaultPrivacyLevel: 'mask-user-input'
+    defaultPrivacyLevel: 'mask-user-input',
   })
 
   datadogLogs.init({
-    clientToken: process.env.NEXT_PUBLIC_DATADOG_LOGS_CLIENT_TOKEN!,
-    site: process.env.NEXT_PUBLIC_DATADOG_SITE!,
-    service: process.env.NEXT_PUBLIC_DATADOG_SERVICE!,
-    env: process.env.NEXT_PUBLIC_DATADOG_ENV ?? process?.env?.NODE_ENV ?? 'production',
+    clientToken: DATADOG_LOGS_CLIENT_TOKEN,
+    site: DATADOG_SITE,
+    service: DATADOG_SERVICE,
+    env: DATADOG_ENV,
     forwardErrorsToLogs: true,
     forwardConsoleLogs: ['error'],
-    sessionSampleRate: 100
+    sessionSampleRate: 100,
   })
 
   datadogRum.startSessionReplayRecording()
 }
 
-export function logInfo(
-  message: string,
-  messageContext?: object | undefined,
-  error?: Error | undefined
-) {
+export function logInfo(message: string, messageContext?: object | undefined, error?: Error | undefined) {
   // Only log on client-side
   if (typeof window === 'undefined') {
     console.log('logInfo (server):', message, messageContext)
@@ -53,17 +55,13 @@ export function logInfo(
     message,
     {
       ...messageContext,
-      src: 'aztec-bridge'
+      src: 'aztec-bridge',
     },
-    error
+    error,
   )
 }
 
-export function logError(
-  message: string,
-  messageContext?: object | undefined,
-  error?: Error | undefined
-) {
+export function logError(message: string, messageContext?: object | undefined, error?: Error | undefined) {
   // Only log on client-side
   if (typeof window === 'undefined') {
     console.error('logError (server):', message, messageContext, error)
@@ -74,8 +72,8 @@ export function logError(
     message,
     {
       ...messageContext,
-      src: 'aztec-bridge'
+      src: 'aztec-bridge',
     },
-    error as Error
+    error as Error,
   )
 }
