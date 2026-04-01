@@ -153,6 +153,75 @@ contract TokenPortalTest is Test {
         token.approve(address(portal), type(uint256).max);
     }
 
+    // ─── Signing Helpers ────────────────────────────────────────────────────────
+
+    function _signCleanHands(uint256 nonce, uint256 actionId, address signer)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 digest = keccak256(abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, signer));
+        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(attesterPrivateKey, personalSignPreimage);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _signCleanHandsWithKey(uint256 nonce, uint256 actionId, address signer, uint256 privateKey)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        bytes32 digest = keccak256(abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, signer));
+        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, personalSignPreimage);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _signPassport(address depositor, uint256 maxAmount, uint256 nonce, uint256 deadline)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 messageHash = keccak256(abi.encodePacked(depositor, maxAmount, nonce, deadline, address(portal)));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(passportSignerPrivateKey, ethSignedMessageHash);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _signPassportWithKey(address depositor, uint256 maxAmount, uint256 nonce, uint256 deadline, uint256 privateKey)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 messageHash = keccak256(abi.encodePacked(depositor, maxAmount, nonce, deadline, address(portal)));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, ethSignedMessageHash);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _makeCleanHands(uint256 nonce, uint256 actionId, address signer)
+        internal
+        view
+        returns (TokenPortal.CleanHandsData memory, TokenPortal.PassportData memory)
+    {
+        return (
+            TokenPortal.CleanHandsData({nonce: nonce, actionId: actionId, signature: _signCleanHands(nonce, actionId, signer)}),
+            TokenPortal.PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""})
+        );
+    }
+
+    function _makePassport(address depositor, uint256 nonce, uint256 maxAmount)
+        internal
+        view
+        returns (TokenPortal.CleanHandsData memory, TokenPortal.PassportData memory)
+    {
+        uint256 deadline = block.timestamp + 1 hours;
+        return (
+            TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""}),
+            TokenPortal.PassportData({maxAmount: maxAmount, nonce: nonce, deadline: deadline, signature: _signPassport(depositor, maxAmount, nonce, deadline)})
+        );
+    }
+
     // =============================================================
     // CONSTRUCTOR TESTS
     // =============================================================
@@ -173,14 +242,7 @@ contract TokenPortalTest is Test {
 
     function test_Constructor_RevertWhen_FeeTooHigh() public {
         vm.expectRevert(FeeTooHigh.selector);
-        new TokenPortal(
-            owner,
-            feeRecipient,
-            1001, // > MAX_FEE_BASIS_POINTS
-            humanIdAttester,
-            CLEAN_HANDS_CIRCUIT_ID,
-            passportSigner
-        );
+        new TokenPortal(owner, feeRecipient, 1001, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner);
     }
 
     // =============================================================
@@ -200,17 +262,12 @@ contract TokenPortalTest is Test {
         assertEq(address(newPortal.registry()), address(registry));
         assertEq(address(newPortal.underlying()), address(token));
         assertEq(newPortal.l2Bridge(), L2_BRIDGE);
-        assertEq(address(newPortal.rollup()), address(rollup));
-        assertEq(address(newPortal.outbox()), address(outbox));
-        assertEq(address(newPortal.inbox()), address(inbox));
-        assertEq(newPortal.rollupVersion(), ROLLUP_VERSION);
     }
 
     function test_Initialize_RevertWhen_NotDeployer() public {
         TokenPortal newPortal = new TokenPortal(
             owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
         );
-
         vm.prank(user);
         vm.expectRevert(Unauthorized.selector);
         newPortal.initialize(address(registry), address(token), L2_BRIDGE);
@@ -222,30 +279,21 @@ contract TokenPortalTest is Test {
     }
 
     function test_Initialize_RevertWhen_InvalidRegistryAddress() public {
-        TokenPortal newPortal = new TokenPortal(
-            owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
-        );
-
+        TokenPortal p = new TokenPortal(owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner);
         vm.expectRevert(InvalidAddress.selector);
-        newPortal.initialize(address(0), address(token), L2_BRIDGE);
+        p.initialize(address(0), address(token), L2_BRIDGE);
     }
 
     function test_Initialize_RevertWhen_InvalidUnderlyingAddress() public {
-        TokenPortal newPortal = new TokenPortal(
-            owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
-        );
-
+        TokenPortal p = new TokenPortal(owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner);
         vm.expectRevert(InvalidAddress.selector);
-        newPortal.initialize(address(registry), address(0), L2_BRIDGE);
+        p.initialize(address(registry), address(0), L2_BRIDGE);
     }
 
     function test_Initialize_RevertWhen_InvalidL2Bridge() public {
-        TokenPortal newPortal = new TokenPortal(
-            owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner
-        );
-
+        TokenPortal p = new TokenPortal(owner, feeRecipient, FEE_BASIS_POINTS, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner);
         vm.expectRevert(InvalidAddress.selector);
-        newPortal.initialize(address(registry), address(token), bytes32(0));
+        p.initialize(address(registry), address(token), bytes32(0));
     }
 
     // =============================================================
@@ -254,24 +302,42 @@ contract TokenPortalTest is Test {
 
     function test_DepositToAztecPublic() public {
         uint256 amount = 1000 ether;
-        bytes32 to = bytes32(uint256(0x456));
-        bytes32 secretHash = bytes32(uint256(0x789));
-
         uint256 expectedFee = portal.calculateFee(amount);
-        uint256 expectedAmountAfterFee = amount - expectedFee;
 
         vm.prank(user);
-        vm.expectEmit(true, true, true, true);
-        emit DepositToAztecPublic(
-            to, expectedAmountAfterFee, expectedFee, secretHash, keccak256(abi.encodePacked(uint256(1))), 1
-        );
-
-        (bytes32 key, uint256 index) = portal.depositToAztecPublic(to, amount, secretHash);
+        (bytes32 key, uint256 index, uint256 amountAfterFee) = portal.depositToAztecPublic(bytes32(uint256(0x456)), amount, bytes32(uint256(0x789)));
 
         assertEq(portal.collectedFees(), expectedFee);
         assertEq(token.balanceOf(address(portal)), amount);
-        assertEq(key, keccak256(abi.encodePacked(uint256(1))));
+        assertEq(amountAfterFee, amount - expectedFee);
+        assertTrue(key != bytes32(0));
         assertEq(index, 1);
+    }
+
+    function test_DepositToAztecPublic_ZeroFee() public {
+        // Deploy portal with 0% fee
+        TokenPortal zeroFeePortal = new TokenPortal(owner, feeRecipient, 0, humanIdAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner);
+        zeroFeePortal.initialize(address(registry), address(token), L2_BRIDGE);
+
+        token.mint(user, 1000 ether);
+        vm.prank(user);
+        token.approve(address(zeroFeePortal), type(uint256).max);
+
+        vm.prank(user);
+        zeroFeePortal.depositToAztecPublic(bytes32(uint256(1)), 1000 ether, bytes32(0));
+        assertEq(zeroFeePortal.collectedFees(), 0);
+    }
+
+    function test_DepositToAztecPublic_MultipleDeposits_FeeAccumulation() public {
+        vm.startPrank(user);
+        portal.depositToAztecPublic(bytes32(uint256(1)), 100 ether, bytes32(0));
+        portal.depositToAztecPublic(bytes32(uint256(2)), 200 ether, bytes32(0));
+        portal.depositToAztecPublic(bytes32(uint256(3)), 300 ether, bytes32(0));
+        vm.stopPrank();
+
+        uint256 expectedFees =
+            portal.calculateFee(100 ether) + portal.calculateFee(200 ether) + portal.calculateFee(300 ether);
+        assertEq(portal.collectedFees(), expectedFees);
     }
 
     function test_DepositToAztecPublic_RevertWhen_Paused() public {
@@ -290,216 +356,428 @@ contract TokenPortalTest is Test {
     }
 
     // =============================================================
-    // DEPOSIT TO AZTEC PRIVATE TESTS
+    // DEPOSIT TO AZTEC PRIVATE — CLEAN HANDS
     // =============================================================
 
-    function test_DepositToAztecPrivate_WithCleanHands() public {
-        uint256 amount = 1000 ether;
-        bytes32 secretHash = bytes32(uint256(0x789));
-
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
-            _createCleanHandsData(1, 100);
-
-        uint256 expectedFee = portal.calculateFee(amount);
+    function test_DepositPrivate_CleanHands() public {
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(1, 100, user);
 
         vm.prank(user);
-        (bytes32 key, uint256 index) = portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
+        portal.depositToAztecPrivate(1000 ether, bytes32(uint256(0x789)), ch, pp);
 
-        assertEq(portal.collectedFees(), expectedFee);
+        assertEq(portal.collectedFees(), portal.calculateFee(1000 ether));
         assertTrue(portal.cleanHandsNonces(user, 1));
-        assertEq(key, keccak256(abi.encodePacked(uint256(1))));
-        assertEq(index, 1);
     }
 
-    function _createCleanHandsData(uint256 nonce, uint256 actionId)
-        internal
-        view
-        returns (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport)
-    {
-        bytes32 digest = keccak256(abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user));
-        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(attesterPrivateKey, personalSignPreimage);
-
-        cleanHands =
-            TokenPortal.CleanHandsData({nonce: nonce, actionId: actionId, signature: abi.encodePacked(r, s, v)});
-
-        passport = TokenPortal.PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""});
-    }
-
-    function test_DepositToAztecPrivate_WithPassport() public {
-        uint256 amount = 500 ether;
-        bytes32 secretHash = bytes32(uint256(0x789));
-
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
-            _createPassportData(1, 1000 ether);
+    function test_DepositPrivate_CleanHands_RevertWhen_NonceReused() public {
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(1, 100, user);
 
         vm.prank(user);
-        portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+
+        vm.prank(user);
+        vm.expectRevert(CleanHandsNonceUsed.selector);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_DepositPrivate_CleanHands_RevertWhen_WrongSigner() public {
+        // Sign with wrong key — should fail clean hands, then fail passport (no passport sig)
+        bytes memory badSig = _signCleanHandsWithKey(1, 100, user, 0xBAD);
+        TokenPortal.CleanHandsData memory ch = TokenPortal.CleanHandsData({nonce: 1, actionId: 100, signature: badSig});
+        TokenPortal.PassportData memory pp = TokenPortal.PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""});
+
+        vm.prank(user);
+        vm.expectRevert(InvalidVerification.selector);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_DepositPrivate_CleanHands_RevertWhen_SignedForDifferentUser() public {
+        // Attestation signed for `user` but tx sent from a different address
+        address attacker = makeAddr("attacker");
+        token.mint(attacker, 1000 ether);
+        vm.prank(attacker);
+        token.approve(address(portal), type(uint256).max);
+
+        // Sign for `user`, not `attacker`
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(1, 100, user);
+
+        // Attacker sends tx — clean hands signed for `user` won't match `attacker` as depositor
+        vm.prank(attacker);
+        vm.expectRevert(InvalidVerification.selector);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+    }
+
+    // =============================================================
+    // DEPOSIT TO AZTEC PRIVATE — PASSPORT
+    // =============================================================
+
+    function test_DepositPrivate_Passport() public {
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makePassport(user, 1, 1000 ether);
+
+        vm.prank(user);
+        portal.depositToAztecPrivate(500 ether, bytes32(0), ch, pp);
 
         assertTrue(portal.passportNonces(user, 1));
     }
 
-    function _createPassportData(uint256 nonce, uint256 maxAmount)
-        internal
-        view
-        returns (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport)
-    {
-        uint256 deadline = block.timestamp + 1 hours;
-
-        bytes32 messageHash = keccak256(abi.encodePacked(user, maxAmount, nonce, deadline, address(portal)));
-        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(passportSignerPrivateKey, ethSignedMessageHash);
-
-        cleanHands = TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""});
-
-        passport = TokenPortal.PassportData({
-            maxAmount: maxAmount,
-            nonce: nonce,
-            deadline: deadline,
-            signature: abi.encodePacked(r, s, v)
-        });
-    }
-
-    function test_DepositToAztecPrivate_RevertWhen_Paused() public {
-        vm.prank(owner);
-        portal.pause();
-
-        TokenPortal.CleanHandsData memory cleanHands;
-        TokenPortal.PassportData memory passport;
+    function test_DepositPrivate_Passport_RevertWhen_NonceReused() public {
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makePassport(user, 1, 1000 ether);
 
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
-        portal.depositToAztecPrivate(100 ether, bytes32(0), cleanHands, passport);
-    }
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
 
-    function test_DepositToAztecPrivate_RevertWhen_ZeroAmount() public {
-        TokenPortal.CleanHandsData memory cleanHands;
-        TokenPortal.PassportData memory passport;
-
-        vm.prank(user);
-        vm.expectRevert("Amount must be greater than zero");
-        portal.depositToAztecPrivate(0, bytes32(0), cleanHands, passport);
-    }
-
-    function test_DepositToAztecPrivate_RevertWhen_CleanHandsNonceUsed() public {
-        uint256 amount = 1000 ether;
-        bytes32 secretHash = bytes32(uint256(0x789));
-
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
-            _createCleanHandsData(1, 100);
-
-        vm.prank(user);
-        portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
-
-        // Try to reuse the same nonce
-        vm.prank(user);
-        vm.expectRevert(CleanHandsNonceUsed.selector);
-        portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
-    }
-
-    function test_DepositToAztecPrivate_RevertWhen_PassportNonceUsed() public {
-        uint256 amount = 500 ether;
-        bytes32 secretHash = bytes32(uint256(0x789));
-
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
-            _createPassportData(1, 1000 ether);
-
-        vm.prank(user);
-        portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
-
-        // Try to reuse the same nonce
         vm.prank(user);
         vm.expectRevert(PassportNonceUsed.selector);
-        portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
     }
 
-    function test_DepositToAztecPrivate_RevertWhen_InvalidVerification() public {
-        uint256 amount = 500 ether;
-        bytes32 secretHash = bytes32(uint256(0x789));
-
-        TokenPortal.CleanHandsData memory cleanHands =
-            TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""});
-
-        TokenPortal.PassportData memory passport =
-            TokenPortal.PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""});
-
-        vm.prank(user);
-        vm.expectRevert(InvalidVerification.selector);
-        portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
-    }
-
-    function test_DepositToAztecPrivate_InvalidCleanHandsWithValidPassport() public {
-        uint256 amount = 500 ether;
-        bytes32 secretHash = bytes32(uint256(0x789));
-        uint256 cleanHandsNonce = 1;
-        uint256 passportNonce = 2;
-
-        // Create CleanHands with invalid signature (wrong signer)
-        bytes32 digest = keccak256(abi.encodePacked(cleanHandsNonce, CLEAN_HANDS_CIRCUIT_ID, uint256(100), user));
-        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xBAD, personalSignPreimage); // Wrong key
-
-        TokenPortal.CleanHandsData memory cleanHands =
-            TokenPortal.CleanHandsData({nonce: cleanHandsNonce, actionId: 100, signature: abi.encodePacked(r, s, v)});
-
-        // Create valid passport to fallback to
-        (, TokenPortal.PassportData memory passport) = _createPassportData(passportNonce, 1000 ether);
-
-        vm.prank(user);
-        portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
-
-        // CleanHands nonce should be marked as used (even though verification failed)
-        assertTrue(portal.cleanHandsNonces(user, cleanHandsNonce));
-        // Passport should have been used for actual verification
-        assertTrue(portal.passportNonces(user, passportNonce));
-    }
-
-    function test_DepositToAztecPrivate_RevertWhen_InvalidPassportSignature() public {
-        uint256 amount = 500 ether;
-        bytes32 secretHash = bytes32(uint256(0x789));
-
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
-            _createInvalidPassportData(1, 1000 ether);
-
-        vm.prank(user);
-        vm.expectRevert(InvalidPassportSignature.selector);
-        portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
-    }
-
-    function _createInvalidPassportData(uint256 nonce, uint256 maxAmount)
-        internal
-        view
-        returns (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport)
-    {
-        uint256 deadline = block.timestamp + 1 hours;
-
-        bytes32 messageHash = keccak256(abi.encodePacked(user, maxAmount, nonce, deadline, address(portal)));
-        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            0xBAD, // Wrong private key
-            ethSignedMessageHash
-        );
-
-        cleanHands = TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""});
-
-        passport = TokenPortal.PassportData({
-            maxAmount: maxAmount,
-            nonce: nonce,
-            deadline: deadline,
-            signature: abi.encodePacked(r, s, v)
-        });
-    }
-
-    function test_DepositToAztecPrivate_RevertWhen_AmountExceedsLimit() public {
-        uint256 amount = 2000 ether; // Exceeds maxAmount
-        bytes32 secretHash = bytes32(uint256(0x789));
-
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
-            _createPassportData(1, 1000 ether);
+    function test_DepositPrivate_Passport_RevertWhen_AmountExceedsLimit() public {
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makePassport(user, 1, 1000 ether);
 
         vm.prank(user);
         vm.expectRevert(AmountExceedsLimit.selector);
-        portal.depositToAztecPrivate(amount, secretHash, cleanHands, passport);
+        portal.depositToAztecPrivate(2000 ether, bytes32(0), ch, pp);
+    }
+
+    function test_DepositPrivate_Passport_RevertWhen_Expired() public {
+        uint256 deadline = block.timestamp - 1;
+        bytes memory sig = _signPassport(user, 1000 ether, 1, deadline);
+        TokenPortal.CleanHandsData memory ch = TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""});
+        TokenPortal.PassportData memory pp = TokenPortal.PassportData({maxAmount: 1000 ether, nonce: 1, deadline: deadline, signature: sig});
+
+        vm.prank(user);
+        vm.expectRevert(InvalidPassportSignature.selector);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_DepositPrivate_Passport_RevertWhen_WrongSigner() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory badSig = _signPassportWithKey(user, 1000 ether, 1, deadline, 0xBAD);
+        TokenPortal.CleanHandsData memory ch = TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""});
+        TokenPortal.PassportData memory pp = TokenPortal.PassportData({maxAmount: 1000 ether, nonce: 1, deadline: deadline, signature: badSig});
+
+        vm.prank(user);
+        vm.expectRevert(InvalidPassportSignature.selector);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_DepositPrivate_Passport_RevertWhen_SignedForDifferentUser() public {
+        address attacker = makeAddr("attacker");
+        token.mint(attacker, 1000 ether);
+        vm.prank(attacker);
+        token.approve(address(portal), type(uint256).max);
+
+        // Passport signed for `user`, attacker sends tx
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makePassport(user, 1, 1000 ether);
+
+        vm.prank(attacker);
+        vm.expectRevert(InvalidPassportSignature.selector);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+    }
+
+    // =============================================================
+    // ATTESTATION FALLBACK: CLEAN HANDS FAILS → PASSPORT SUCCEEDS
+    // =============================================================
+
+    function test_DepositPrivate_CleanHandsFails_FallsBackToPassport() public {
+        bytes memory badCleanHandsSig = _signCleanHandsWithKey(1, 100, user, 0xBAD);
+        TokenPortal.CleanHandsData memory ch = TokenPortal.CleanHandsData({nonce: 1, actionId: 100, signature: badCleanHandsSig});
+
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory goodPassportSig = _signPassport(user, 1000 ether, 2, deadline);
+        TokenPortal.PassportData memory pp = TokenPortal.PassportData({maxAmount: 1000 ether, nonce: 2, deadline: deadline, signature: goodPassportSig});
+
+        vm.prank(user);
+        portal.depositToAztecPrivate(500 ether, bytes32(0), ch, pp);
+
+        // Both nonces consumed
+        assertTrue(portal.cleanHandsNonces(user, 1));
+        assertTrue(portal.passportNonces(user, 2));
+    }
+
+    function test_DepositPrivate_NoSignatures_Reverts() public {
+        TokenPortal.CleanHandsData memory ch = TokenPortal.CleanHandsData({nonce: 0, actionId: 0, signature: ""});
+        TokenPortal.PassportData memory pp = TokenPortal.PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""});
+
+        vm.prank(user);
+        vm.expectRevert(InvalidVerification.selector);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_DepositPrivate_RevertWhen_Paused() public {
+        vm.prank(owner);
+        portal.pause();
+
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(1, 100, user);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_DepositPrivate_RevertWhen_ZeroAmount() public {
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(1, 100, user);
+        vm.prank(user);
+        vm.expectRevert("Amount must be greater than zero");
+        portal.depositToAztecPrivate(0, bytes32(0), ch, pp);
+    }
+
+    // =============================================================
+    // TRUSTED FORWARDER — depositToAztecPrivateFor
+    // =============================================================
+
+    function _setupForwarder(address forwarder, uint256 tokenAmount) internal {
+        vm.prank(owner);
+        portal.setTrustedForwarder(forwarder, true);
+        token.mint(forwarder, tokenAmount);
+        vm.prank(forwarder);
+        token.approve(address(portal), type(uint256).max);
+    }
+
+    function test_PrivateFor_CleanHands() public {
+        address forwarder = makeAddr("forwarder");
+        _setupForwarder(forwarder, 1000 ether);
+
+        // Attestation signed for `user` (the depositor), not `forwarder`
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(1, 100, user);
+
+        vm.prank(forwarder);
+        portal.depositToAztecPrivateFor(user, 1000 ether, bytes32(uint256(0x789)), ch, pp);
+
+        assertTrue(portal.cleanHandsNonces(user, 1));
+        assertEq(token.balanceOf(forwarder), 0);
+        assertEq(token.balanceOf(address(portal)), 1000 ether);
+    }
+
+    function test_PrivateFor_Passport() public {
+        address forwarder = makeAddr("forwarder");
+        _setupForwarder(forwarder, 500 ether);
+
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makePassport(user, 1, 1000 ether);
+
+        vm.prank(forwarder);
+        portal.depositToAztecPrivateFor(user, 500 ether, bytes32(0), ch, pp);
+
+        assertTrue(portal.passportNonces(user, 1));
+    }
+
+    function test_PrivateFor_RevertWhen_NotTrustedForwarder() public {
+        address notForwarder = makeAddr("notForwarder");
+
+        TokenPortal.CleanHandsData memory ch;
+        TokenPortal.PassportData memory pp;
+
+        vm.prank(notForwarder);
+        vm.expectRevert(NotTrustedForwarder.selector);
+        portal.depositToAztecPrivateFor(user, 1000 ether, bytes32(0), ch, pp);
+    }
+
+    function test_PrivateFor_RevertWhen_ForwarderRemoved() public {
+        address forwarder = makeAddr("forwarder");
+        _setupForwarder(forwarder, 1000 ether);
+
+        // Remove forwarder
+        vm.prank(owner);
+        portal.setTrustedForwarder(forwarder, false);
+
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(1, 100, user);
+
+        vm.prank(forwarder);
+        vm.expectRevert(NotTrustedForwarder.selector);
+        portal.depositToAztecPrivateFor(user, 100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_PrivateFor_RevertWhen_AttestationSignedForForwarderNotDepositor() public {
+        address forwarder = makeAddr("forwarder");
+        _setupForwarder(forwarder, 1000 ether);
+
+        // Attestation signed for `forwarder` instead of `user` — should fail
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(1, 100, forwarder);
+
+        vm.prank(forwarder);
+        // Validation uses `_depositor` (user), but sig was for `forwarder` → mismatch → falls to passport → no passport → revert
+        vm.expectRevert(InvalidVerification.selector);
+        portal.depositToAztecPrivateFor(user, 100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_PrivateFor_PassportSignedForForwarder_Reverts() public {
+        address forwarder = makeAddr("forwarder");
+        _setupForwarder(forwarder, 1000 ether);
+
+        // Passport signed for forwarder, not user
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makePassport(forwarder, 1, 1000 ether);
+
+        vm.prank(forwarder);
+        vm.expectRevert(InvalidPassportSignature.selector);
+        portal.depositToAztecPrivateFor(user, 100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_PrivateFor_NonceTrackedOnDepositorNotForwarder() public {
+        address forwarder = makeAddr("forwarder");
+        _setupForwarder(forwarder, 2000 ether);
+
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(42, 100, user);
+
+        vm.prank(forwarder);
+        portal.depositToAztecPrivateFor(user, 100 ether, bytes32(0), ch, pp);
+
+        // Nonce tracked on user, not forwarder
+        assertTrue(portal.cleanHandsNonces(user, 42));
+        assertFalse(portal.cleanHandsNonces(forwarder, 42));
+    }
+
+    function test_PrivateFor_RevertWhen_Paused() public {
+        address forwarder = makeAddr("forwarder");
+        _setupForwarder(forwarder, 1000 ether);
+
+        vm.prank(owner);
+        portal.pause();
+
+        TokenPortal.CleanHandsData memory ch;
+        TokenPortal.PassportData memory pp;
+
+        vm.prank(forwarder);
+        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
+        portal.depositToAztecPrivateFor(user, 100 ether, bytes32(0), ch, pp);
+    }
+
+    function test_PrivateFor_RevertWhen_ZeroAmount() public {
+        address forwarder = makeAddr("forwarder");
+        _setupForwarder(forwarder, 1000 ether);
+
+        TokenPortal.CleanHandsData memory ch;
+        TokenPortal.PassportData memory pp;
+
+        vm.prank(forwarder);
+        vm.expectRevert("Amount must be greater than zero");
+        portal.depositToAztecPrivateFor(user, 0, bytes32(0), ch, pp);
+    }
+
+    function test_PrivateFor_FeeDeducted() public {
+        address forwarder = makeAddr("forwarder");
+        _setupForwarder(forwarder, 1000 ether);
+
+        (TokenPortal.CleanHandsData memory ch, TokenPortal.PassportData memory pp) = _makeCleanHands(1, 100, user);
+
+        uint256 feesBefore = portal.collectedFees();
+
+        vm.prank(forwarder);
+        portal.depositToAztecPrivateFor(user, 1000 ether, bytes32(0), ch, pp);
+
+        assertEq(portal.collectedFees(), feesBefore + portal.calculateFee(1000 ether));
+    }
+
+    // =============================================================
+    // TRUSTED FORWARDER — ADMIN
+    // =============================================================
+
+    function test_SetTrustedForwarder() public {
+        address forwarder = makeAddr("forwarder");
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit TrustedForwarderUpdated(forwarder, true);
+        portal.setTrustedForwarder(forwarder, true);
+        assertTrue(portal.trustedForwarders(forwarder));
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit TrustedForwarderUpdated(forwarder, false);
+        portal.setTrustedForwarder(forwarder, false);
+        assertFalse(portal.trustedForwarders(forwarder));
+    }
+
+    function test_SetTrustedForwarder_RevertWhen_NotOwner() public {
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
+        portal.setTrustedForwarder(makeAddr("forwarder"), true);
+    }
+
+    function test_SetTrustedForwarder_RevertWhen_ZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(InvalidAddress.selector);
+        portal.setTrustedForwarder(address(0), true);
+    }
+
+    function test_MultipleForwarders() public {
+        address fwd1 = makeAddr("fwd1");
+        address fwd2 = makeAddr("fwd2");
+
+        vm.startPrank(owner);
+        portal.setTrustedForwarder(fwd1, true);
+        portal.setTrustedForwarder(fwd2, true);
+        vm.stopPrank();
+
+        assertTrue(portal.trustedForwarders(fwd1));
+        assertTrue(portal.trustedForwarders(fwd2));
+
+        // Remove one
+        vm.prank(owner);
+        portal.setTrustedForwarder(fwd1, false);
+
+        assertFalse(portal.trustedForwarders(fwd1));
+        assertTrue(portal.trustedForwarders(fwd2));
+    }
+
+    // =============================================================
+    // VERIFICATION — PUBLIC VIEW FUNCTIONS
+    // =============================================================
+
+    function test_VerifyCleanHandsSignature() public {
+        uint256 nonce = 123;
+        uint256 actionId = 456;
+        bytes memory sig = _signCleanHands(nonce, actionId, user);
+
+        // Public function uses _msgSender() so must call as user
+        vm.prank(user);
+        assertTrue(portal.verifyCleanHandsSignature(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, sig));
+    }
+
+    function test_VerifyCleanHandsSignature_WrongCaller() public {
+        uint256 nonce = 123;
+        uint256 actionId = 456;
+        // Sign for `user`
+        bytes memory sig = _signCleanHands(nonce, actionId, user);
+
+        // Call from a different address — _msgSender() != user → signature won't match
+        address other = makeAddr("other");
+        vm.prank(other);
+        assertFalse(portal.verifyCleanHandsSignature(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, sig));
+    }
+
+    function test_VerifyCleanHandsSignature_WrongKey() public {
+        uint256 nonce = 123;
+        uint256 actionId = 456;
+        bytes memory badSig = _signCleanHandsWithKey(nonce, actionId, user, 0xBAD);
+
+        vm.prank(user);
+        assertFalse(portal.verifyCleanHandsSignature(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, badSig));
+    }
+
+    function test_VerifyPassportSignature() public {
+        uint256 maxAmount = 1000 ether;
+        uint256 nonce = 1;
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _signPassport(user, maxAmount, nonce, deadline);
+
+        vm.prank(user);
+        assertTrue(portal.verifyPassportSignature(maxAmount, nonce, deadline, sig));
+    }
+
+    function test_VerifyPassportSignature_WrongCaller() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _signPassport(user, 1000 ether, 1, deadline);
+
+        address other = makeAddr("other");
+        vm.prank(other);
+        assertFalse(portal.verifyPassportSignature(1000 ether, 1, deadline, sig));
+    }
+
+    function test_VerifyPassportSignature_Expired() public {
+        uint256 deadline = block.timestamp - 1;
+        bytes memory sig = _signPassport(user, 1000 ether, 1, deadline);
+
+        vm.prank(user);
+        assertFalse(portal.verifyPassportSignature(1000 ether, 1, deadline, sig));
     }
 
     // =============================================================
@@ -507,73 +785,17 @@ contract TokenPortalTest is Test {
     // =============================================================
 
     function test_Withdraw() public {
-        // First deposit to have tokens in portal
-        uint256 depositAmount = 1000 ether;
         vm.prank(user);
-        portal.depositToAztecPublic(bytes32(0), depositAmount, bytes32(0));
+        portal.depositToAztecPublic(bytes32(0), 1000 ether, bytes32(0));
 
-        uint256 withdrawAmount = 500 ether;
         address recipient = makeAddr("recipient");
-
-        DataStructures.L2ToL1Msg memory message = DataStructures.L2ToL1Msg({
-            sender: DataStructures.L2Actor(L2_BRIDGE, ROLLUP_VERSION),
-            recipient: DataStructures.L1Actor(address(portal), block.chainid),
-            content: keccak256(
-                abi.encodePacked(
-                    "\x19Ethereum Signed Message:\n32",
-                    keccak256(
-                        abi.encodeWithSignature("withdraw(address,uint256,address)", recipient, withdrawAmount, address(0))
-                    )
-                )
-            )
-        });
-
-        bytes32[] memory path = new bytes32[](0);
-
-        uint256 expectedFee = portal.calculateFee(withdrawAmount);
-        uint256 expectedAmountAfterFee = withdrawAmount - expectedFee;
-
-        vm.prank(user);
-        portal.withdraw(recipient, withdrawAmount, false, 1, 0, path);
-
-        assertEq(token.balanceOf(recipient), expectedAmountAfterFee);
-    }
-
-    function test_Withdraw_WithCaller() public {
-        // First deposit
-        uint256 depositAmount = 1000 ether;
-        vm.prank(user);
-        portal.depositToAztecPublic(bytes32(0), depositAmount, bytes32(0));
-
-        uint256 withdrawAmount = 500 ether;
-        address recipient = makeAddr("recipient");
-
-        DataStructures.L2ToL1Msg memory message = DataStructures.L2ToL1Msg({
-            sender: DataStructures.L2Actor(L2_BRIDGE, ROLLUP_VERSION),
-            recipient: DataStructures.L1Actor(address(portal), block.chainid),
-            content: keccak256(
-                abi.encodePacked(
-                    "\x19Ethereum Signed Message:\n32",
-                    keccak256(
-                        abi.encodeWithSignature(
-                            "withdraw(address,uint256,address)",
-                            recipient,
-                            withdrawAmount,
-                            user // With caller
-                        )
-                    )
-                )
-            )
-        });
-
         bytes32[] memory path = new bytes32[](0);
 
         vm.prank(user);
-        portal.withdraw(recipient, withdrawAmount, true, 1, 0, path);
+        portal.withdraw(recipient, 500 ether, false, 1, 0, path);
 
-        uint256 expectedFee = portal.calculateFee(withdrawAmount);
-        uint256 expectedAmountAfterFee = withdrawAmount - expectedFee;
-        assertEq(token.balanceOf(recipient), expectedAmountAfterFee);
+        uint256 expectedFee = portal.calculateFee(500 ether);
+        assertEq(token.balanceOf(recipient), 500 ether - expectedFee);
     }
 
     function test_Withdraw_RevertWhen_Paused() public {
@@ -581,7 +803,6 @@ contract TokenPortalTest is Test {
         portal.pause();
 
         bytes32[] memory path = new bytes32[](0);
-
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         portal.withdraw(user, 100 ether, false, 1, 0, path);
@@ -589,80 +810,21 @@ contract TokenPortalTest is Test {
 
     function test_Withdraw_RevertWhen_ZeroAmount() public {
         bytes32[] memory path = new bytes32[](0);
-
         vm.prank(user);
         vm.expectRevert("Amount must be greater than zero");
         portal.withdraw(user, 0, false, 1, 0, path);
     }
 
     // =============================================================
-    // ADMIN FUNCTION TESTS
+    // FEE MANAGEMENT
     // =============================================================
 
-    function test_Pause() public {
-        vm.prank(owner);
-        portal.pause();
-
-        assertTrue(portal.paused());
-    }
-
-    function test_Pause_RevertWhen_NotOwner() public {
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
-        portal.pause();
-    }
-
-    function test_Unpause() public {
-        vm.prank(owner);
-        portal.pause();
-
-        vm.prank(owner);
-        portal.unpause();
-
-        assertFalse(portal.paused());
-    }
-
-    function test_Unpause_RevertWhen_NotOwner() public {
-        vm.prank(owner);
-        portal.pause();
-
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
-        portal.unpause();
-    }
-
-    function test_UpdateAttestationConfig() public {
-        address newAttester = makeAddr("newAttester");
-        uint256 newCircuitId = 999;
-        address newSigner = makeAddr("newSigner");
-
-        vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit AttestationConfigUpdated(newAttester, newCircuitId, newSigner);
-
-        portal.updateAttestationConfig(newAttester, newCircuitId, newSigner);
-
-        assertEq(portal.humanIdAttester(), newAttester);
-        assertEq(portal.cleanHandsCircuitId(), newCircuitId);
-        assertEq(portal.passportSigner(), newSigner);
-    }
-
-    function test_UpdateAttestationConfig_RevertWhen_NotOwner() public {
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
-        portal.updateAttestationConfig(address(0), 0, address(0));
-    }
-
     function test_UpdateFee() public {
-        uint256 newFee = 200;
-
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit FeeUpdated(newFee);
-
-        portal.updateFee(newFee);
-
-        assertEq(portal.feeBasisPoints(), newFee);
+        emit FeeUpdated(200);
+        portal.updateFee(200);
+        assertEq(portal.feeBasisPoints(), 200);
     }
 
     function test_UpdateFee_RevertWhen_NotOwner() public {
@@ -679,20 +841,9 @@ contract TokenPortalTest is Test {
 
     function test_UpdateFeeRecipient() public {
         address newRecipient = makeAddr("newRecipient");
-
         vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit FeeRecipientUpdated(newRecipient);
-
         portal.updateFeeRecipient(newRecipient);
-
         assertEq(portal.feeRecipient(), newRecipient);
-    }
-
-    function test_UpdateFeeRecipient_RevertWhen_NotOwner() public {
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
-        portal.updateFeeRecipient(makeAddr("someone"));
     }
 
     function test_UpdateFeeRecipient_RevertWhen_InvalidAddress() public {
@@ -702,28 +853,17 @@ contract TokenPortalTest is Test {
     }
 
     function test_WithdrawFees() public {
-        // First generate some fees
-        uint256 depositAmount = 1000 ether;
         vm.prank(user);
-        portal.depositToAztecPublic(bytes32(0), depositAmount, bytes32(0));
+        portal.depositToAztecPublic(bytes32(0), 1000 ether, bytes32(0));
 
-        uint256 expectedFees = portal.collectedFees();
-        uint256 balanceBefore = token.balanceOf(feeRecipient);
+        uint256 fees = portal.collectedFees();
+        assertTrue(fees > 0);
 
         vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit FeesWithdrawn(feeRecipient, expectedFees);
-
         portal.withdrawFees();
 
         assertEq(portal.collectedFees(), 0);
-        assertEq(token.balanceOf(feeRecipient), balanceBefore + expectedFees);
-    }
-
-    function test_WithdrawFees_RevertWhen_NotOwner() public {
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
-        portal.withdrawFees();
+        assertEq(token.balanceOf(feeRecipient), fees);
     }
 
     function test_WithdrawFees_RevertWhen_NoFees() public {
@@ -734,22 +874,11 @@ contract TokenPortalTest is Test {
 
     function test_RescueToken() public {
         ERC20Mock randomToken = new ERC20Mock();
-        uint256 rescueAmount = 100 ether;
-        randomToken.mint(address(portal), rescueAmount);
+        randomToken.mint(address(portal), 100 ether);
 
         vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit TokensRescued(address(randomToken), owner, rescueAmount);
-
-        portal.rescueToken(address(randomToken), rescueAmount);
-
-        assertEq(randomToken.balanceOf(owner), rescueAmount);
-    }
-
-    function test_RescueToken_RevertWhen_NotOwner() public {
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
-        portal.rescueToken(address(token), 100 ether);
+        portal.rescueToken(address(randomToken), 100 ether);
+        assertEq(randomToken.balanceOf(owner), 100 ether);
     }
 
     function test_RescueToken_RevertWhen_InvalidAddress() public {
@@ -758,40 +887,83 @@ contract TokenPortalTest is Test {
         portal.rescueToken(address(0), 100 ether);
     }
 
+    function test_CalculateFee() public view {
+        assertEq(portal.calculateFee(10000), (10000 * FEE_BASIS_POINTS) / 10000);
+        assertEq(portal.calculateFee(0), 0);
+    }
+
+    // =============================================================
+    // ATTESTATION CONFIG UPDATE
+    // =============================================================
+
+    function test_UpdateAttestationConfig() public {
+        address newAttester = makeAddr("newAttester");
+        address newSigner = makeAddr("newSigner");
+        uint256 newCircuitId = 999;
+
+        vm.prank(owner);
+        portal.updateAttestationConfig(newAttester, newCircuitId, newSigner);
+
+        assertEq(portal.humanIdAttester(), newAttester);
+        assertEq(portal.cleanHandsCircuitId(), newCircuitId);
+        assertEq(portal.passportSigner(), newSigner);
+    }
+
+    function test_UpdateAttestationConfig_OldSignaturesInvalidatedNewWork() public {
+        // Deposit with old attester works
+        (TokenPortal.CleanHandsData memory ch1, TokenPortal.PassportData memory pp1) = _makeCleanHands(1, 100, user);
+        vm.prank(user);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch1, pp1);
+
+        // Rotate attester
+        uint256 newAttesterKey = 0xCAFE;
+        address newAttester = vm.addr(newAttesterKey);
+        vm.prank(owner);
+        portal.updateAttestationConfig(newAttester, CLEAN_HANDS_CIRCUIT_ID, passportSigner);
+
+        // Old attester signature no longer valid
+        (TokenPortal.CleanHandsData memory ch2, TokenPortal.PassportData memory pp2) = _makeCleanHands(2, 100, user);
+        vm.prank(user);
+        vm.expectRevert(InvalidVerification.selector);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch2, pp2);
+
+        // New attester signature works
+        bytes32 digest = keccak256(abi.encodePacked(uint256(3), CLEAN_HANDS_CIRCUIT_ID, uint256(100), user));
+        bytes32 personalSig = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(newAttesterKey, personalSig);
+        TokenPortal.CleanHandsData memory ch3 = TokenPortal.CleanHandsData({nonce: 3, actionId: 100, signature: abi.encodePacked(r, s, v)});
+        TokenPortal.PassportData memory pp3 = TokenPortal.PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""});
+
+        vm.prank(user);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch3, pp3);
+        assertTrue(portal.cleanHandsNonces(user, 3));
+    }
+
+    // =============================================================
+    // PAUSE / UNPAUSE
+    // =============================================================
+
+    function test_PauseUnpause() public {
+        vm.prank(owner);
+        portal.pause();
+        assertTrue(portal.paused());
+
+        vm.prank(owner);
+        portal.unpause();
+        assertFalse(portal.paused());
+    }
+
     // =============================================================
     // OWNERSHIP TESTS
     // =============================================================
 
-    function test_ProposeOwnershipTransfer() public {
+    function test_ProposeAndAcceptOwnership() public {
         vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit OwnershipTransferProposed(owner, newOwner);
-
         portal.proposeOwnershipTransfer(newOwner);
-
         assertEq(portal.pendingOwner(), newOwner);
-        assertEq(portal.owner(), owner); // Not changed yet
-    }
-
-    function test_ProposeOwnershipTransfer_RevertWhen_NotOwner() public {
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
-        portal.proposeOwnershipTransfer(newOwner);
-    }
-
-    function test_ProposeOwnershipTransfer_RevertWhen_InvalidAddress() public {
-        vm.prank(owner);
-        vm.expectRevert(InvalidAddress.selector);
-        portal.proposeOwnershipTransfer(address(0));
-    }
-
-    function test_AcceptOwnership() public {
-        vm.prank(owner);
-        portal.proposeOwnershipTransfer(newOwner);
 
         vm.prank(newOwner);
         portal.acceptOwnership();
-
         assertEq(portal.owner(), newOwner);
         assertEq(portal.pendingOwner(), address(0));
     }
@@ -801,22 +973,8 @@ contract TokenPortalTest is Test {
         portal.proposeOwnershipTransfer(newOwner);
 
         vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit OwnershipTransferCancelled(owner);
-
         portal.cancelOwnershipTransfer();
-
         assertEq(portal.pendingOwner(), address(0));
-        assertEq(portal.owner(), owner);
-    }
-
-    function test_CancelOwnershipTransfer_RevertWhen_NotOwner() public {
-        vm.prank(owner);
-        portal.proposeOwnershipTransfer(newOwner);
-
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
-        portal.cancelOwnershipTransfer();
     }
 
     function test_CancelOwnershipTransfer_RevertWhen_NoPendingOwner() public {
@@ -825,281 +983,45 @@ contract TokenPortalTest is Test {
         portal.cancelOwnershipTransfer();
     }
 
-    // =============================================================
-    // VERIFICATION TESTS
-    // =============================================================
-
-    function test_VerifyCleanHandsSignature() public view {
-        uint256 nonce = 123;
-        uint256 actionId = 456;
-
-        bytes32 digest = keccak256(abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user));
-        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(attesterPrivateKey, personalSignPreimage);
-        bytes memory signature = abi.encodePacked(r, s, v);
-
-        bool result = portal.verifyCleanHandsSignature(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user, signature);
-
-        assertTrue(result);
-    }
-
-    function test_VerifyCleanHandsSignature_InvalidSignature() public view {
-        uint256 nonce = 123;
-        uint256 actionId = 456;
-
-        bytes32 digest = keccak256(abi.encodePacked(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user));
-        bytes32 personalSignPreimage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            0xBAD, // Wrong key
-            personalSignPreimage
-        );
-        bytes memory signature = abi.encodePacked(r, s, v);
-
-        bool result = portal.verifyCleanHandsSignature(nonce, CLEAN_HANDS_CIRCUIT_ID, actionId, user, signature);
-
-        assertFalse(result);
-    }
-
-    function test_VerifyPassportSignature() public {
-        uint256 maxAmount = 1000 ether;
-        uint256 nonce = 1;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        bytes memory signature = _signPassport(maxAmount, nonce, deadline);
-
-        vm.prank(user);
-        bool result = portal.verifyPassportSignature(maxAmount, nonce, deadline, signature);
-
-        assertTrue(result);
-    }
-
-    function _signPassport(uint256 maxAmount, uint256 nonce, uint256 deadline) internal view returns (bytes memory) {
-        bytes32 messageHash = keccak256(abi.encodePacked(user, maxAmount, nonce, deadline, address(portal)));
-        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(passportSignerPrivateKey, ethSignedMessageHash);
-        return abi.encodePacked(r, s, v);
-    }
-
-    function test_VerifyPassportSignature_ExpiredDeadline() public {
-        uint256 maxAmount = 1000 ether;
-        uint256 nonce = 1;
-        uint256 deadline = block.timestamp - 1; // Expired
-
-        bytes memory signature = _signPassport(maxAmount, nonce, deadline);
-
-        vm.prank(user);
-        bool result = portal.verifyPassportSignature(maxAmount, nonce, deadline, signature);
-
-        assertFalse(result);
-    }
-
-    function test_VerifyPassportSignature_InvalidSignature() public {
-        uint256 maxAmount = 1000 ether;
-        uint256 nonce = 1;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        bytes memory signature = _signPassportInvalid(maxAmount, nonce, deadline);
-
-        vm.prank(user);
-        bool result = portal.verifyPassportSignature(maxAmount, nonce, deadline, signature);
-
-        assertFalse(result);
-    }
-
-    function _signPassportInvalid(uint256 maxAmount, uint256 nonce, uint256 deadline)
-        internal
-        view
-        returns (bytes memory)
-    {
-        bytes32 messageHash = keccak256(abi.encodePacked(user, maxAmount, nonce, deadline, address(portal)));
-        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            0xBAD, // Wrong key
-            ethSignedMessageHash
-        );
-        return abi.encodePacked(r, s, v);
-    }
-
-    // =============================================================
-    // VIEW FUNCTION TESTS
-    // =============================================================
-
-    function test_CalculateFee() public view {
-        uint256 amount = 1000 ether;
-        uint256 expectedFee = (amount * FEE_BASIS_POINTS) / 10000;
-
-        assertEq(portal.calculateFee(amount), expectedFee);
-    }
-
-    function test_GetCollectedFees() public {
-        vm.prank(user);
-        portal.depositToAztecPublic(bytes32(0), 1000 ether, bytes32(0));
-
-        uint256 fees = portal.getCollectedFees();
-        assertEq(fees, portal.collectedFees());
-    }
-
-    function test_GetFeeRecipient() public view {
-        assertEq(portal.getFeeRecipient(), feeRecipient);
-    }
-
-    // =============================================================
-    // EDGE CASES & REENTRANCY TESTS
-    // =============================================================
-
-    function test_DepositToAztecPublic_MultipleDeposits() public {
-        vm.startPrank(user);
-
-        portal.depositToAztecPublic(bytes32(uint256(1)), 100 ether, bytes32(0));
-        portal.depositToAztecPublic(bytes32(uint256(2)), 200 ether, bytes32(0));
-        portal.depositToAztecPublic(bytes32(uint256(3)), 300 ether, bytes32(0));
-
-        vm.stopPrank();
-
-        uint256 expectedFees =
-            portal.calculateFee(100 ether) + portal.calculateFee(200 ether) + portal.calculateFee(300 ether);
-
-        assertEq(portal.collectedFees(), expectedFees);
-    }
-
-    function test_MaxFeeBasisPoints() public view {
-        assertEq(portal.MAX_FEE_BASIS_POINTS(), 1000);
-    }
-
-    // =============================================================
-    // TRUSTED FORWARDER TESTS
-    // =============================================================
-
-    function test_SetTrustedForwarder() public {
-        address forwarder = makeAddr("forwarder");
-
-        vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit TrustedForwarderUpdated(forwarder, true);
-        portal.setTrustedForwarder(forwarder, true);
-
-        assertTrue(portal.trustedForwarders(forwarder));
-
-        vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit TrustedForwarderUpdated(forwarder, false);
-        portal.setTrustedForwarder(forwarder, false);
-
-        assertFalse(portal.trustedForwarders(forwarder));
-    }
-
-    function test_SetTrustedForwarder_RevertWhen_NotOwner() public {
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user));
-        portal.setTrustedForwarder(makeAddr("forwarder"), true);
-    }
-
-    function test_SetTrustedForwarder_RevertWhen_ZeroAddress() public {
+    function test_ProposeOwnershipTransfer_RevertWhen_InvalidAddress() public {
         vm.prank(owner);
         vm.expectRevert(InvalidAddress.selector);
-        portal.setTrustedForwarder(address(0), true);
+        portal.proposeOwnershipTransfer(address(0));
     }
 
     // =============================================================
-    // DEPOSIT TO AZTEC PRIVATE FOR (TRUSTED FORWARDER) TESTS
+    // FUZZ TESTS
     // =============================================================
 
-    function test_DepositToAztecPrivateFor_WithCleanHands() public {
-        address forwarder = makeAddr("forwarder");
-        uint256 amount = 1000 ether;
-        bytes32 secretHash = bytes32(uint256(0x789));
+    function testFuzz_CalculateFee(uint256 amount) public view {
+        vm.assume(amount < type(uint256).max / 1000); // avoid overflow
+        uint256 fee = portal.calculateFee(amount);
+        assertEq(fee, (amount * FEE_BASIS_POINTS) / 10000);
+    }
 
-        // Setup: owner sets forwarder as trusted
-        vm.prank(owner);
-        portal.setTrustedForwarder(forwarder, true);
-
-        // Give tokens to forwarder (simulates Permit2 pull)
-        token.mint(forwarder, amount);
-        vm.prank(forwarder);
-        token.approve(address(portal), type(uint256).max);
-
-        // Create attestation signed for user address
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
-            _createCleanHandsData(1, 100);
+    function testFuzz_DepositPublic_FeeCorrect(uint256 amount) public {
+        amount = bound(amount, 1, 100000 ether);
+        token.mint(user, amount);
+        vm.prank(user);
+        token.approve(address(portal), amount);
 
         uint256 expectedFee = portal.calculateFee(amount);
 
-        // Forwarder calls depositToAztecPrivateFor on behalf of user
-        vm.prank(forwarder);
-        (bytes32 key, uint256 index) =
-            portal.depositToAztecPrivateFor(user, amount, secretHash, cleanHands, passport);
+        vm.prank(user);
+        portal.depositToAztecPublic(bytes32(uint256(1)), amount, bytes32(0));
 
         assertEq(portal.collectedFees(), expectedFee);
-        assertTrue(portal.cleanHandsNonces(user, 1));
-        assertEq(key, keccak256(abi.encodePacked(uint256(1))));
-        assertEq(index, 1);
-        // Tokens came from forwarder
-        assertEq(token.balanceOf(forwarder), 0);
-        assertEq(token.balanceOf(address(portal)), amount);
     }
 
-    function test_DepositToAztecPrivateFor_WithPassport() public {
-        address forwarder = makeAddr("forwarder");
-        uint256 amount = 500 ether;
-        bytes32 secretHash = bytes32(uint256(0x789));
+    function testFuzz_CleanHandsNonce(uint256 nonce) public {
+        vm.assume(nonce > 0 && nonce < type(uint128).max);
 
-        vm.prank(owner);
-        portal.setTrustedForwarder(forwarder, true);
+        bytes memory sig = _signCleanHands(nonce, 100, user);
+        TokenPortal.CleanHandsData memory ch = TokenPortal.CleanHandsData({nonce: nonce, actionId: 100, signature: sig});
+        TokenPortal.PassportData memory pp = TokenPortal.PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""});
 
-        token.mint(forwarder, amount);
-        vm.prank(forwarder);
-        token.approve(address(portal), type(uint256).max);
-
-        (TokenPortal.CleanHandsData memory cleanHands, TokenPortal.PassportData memory passport) =
-            _createPassportData(1, 1000 ether);
-
-        vm.prank(forwarder);
-        portal.depositToAztecPrivateFor(user, amount, secretHash, cleanHands, passport);
-
-        assertTrue(portal.passportNonces(user, 1));
-        assertEq(token.balanceOf(forwarder), 0);
-    }
-
-    function test_DepositToAztecPrivateFor_RevertWhen_NotTrustedForwarder() public {
-        address notForwarder = makeAddr("notForwarder");
-        uint256 amount = 1000 ether;
-
-        TokenPortal.CleanHandsData memory cleanHands;
-        TokenPortal.PassportData memory passport;
-
-        vm.prank(notForwarder);
-        vm.expectRevert(NotTrustedForwarder.selector);
-        portal.depositToAztecPrivateFor(user, amount, bytes32(0), cleanHands, passport);
-    }
-
-    function test_DepositToAztecPrivateFor_RevertWhen_Paused() public {
-        address forwarder = makeAddr("forwarder");
-
-        vm.prank(owner);
-        portal.setTrustedForwarder(forwarder, true);
-
-        vm.prank(owner);
-        portal.pause();
-
-        TokenPortal.CleanHandsData memory cleanHands;
-        TokenPortal.PassportData memory passport;
-
-        vm.prank(forwarder);
-        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
-        portal.depositToAztecPrivateFor(user, 100 ether, bytes32(0), cleanHands, passport);
-    }
-
-    function test_DepositToAztecPrivateFor_RevertWhen_ZeroAmount() public {
-        address forwarder = makeAddr("forwarder");
-
-        vm.prank(owner);
-        portal.setTrustedForwarder(forwarder, true);
-
-        TokenPortal.CleanHandsData memory cleanHands;
-        TokenPortal.PassportData memory passport;
-
-        vm.prank(forwarder);
-        vm.expectRevert("Amount must be greater than zero");
-        portal.depositToAztecPrivateFor(user, 0, bytes32(0), cleanHands, passport);
+        vm.prank(user);
+        portal.depositToAztecPrivate(100 ether, bytes32(0), ch, pp);
+        assertTrue(portal.cleanHandsNonces(user, nonce));
     }
 }

@@ -72,11 +72,11 @@ contract MockTokenPortal {
 
     function depositToAztecPublic(bytes32, uint256 amount, bytes32)
         external
-        returns (bytes32, uint256)
+        returns (bytes32, uint256, uint256)
     {
         token.transferFrom(msg.sender, address(this), amount);
         _callCount++;
-        return (bytes32(_callCount), _callCount);
+        return (bytes32(_callCount), _callCount, amount);
     }
 
     function depositToAztecPrivate(
@@ -84,10 +84,10 @@ contract MockTokenPortal {
         bytes32,
         CleanHandsData calldata,
         PassportData calldata
-    ) external returns (bytes32, uint256) {
+    ) external returns (bytes32, uint256, uint256) {
         token.transferFrom(msg.sender, address(this), amount);
         _callCount++;
-        return (bytes32(_callCount), _callCount);
+        return (bytes32(_callCount), _callCount, amount);
     }
 
     function depositToAztecPrivateFor(
@@ -96,10 +96,10 @@ contract MockTokenPortal {
         bytes32,
         CleanHandsData calldata,
         PassportData calldata
-    ) external returns (bytes32, uint256) {
+    ) external returns (bytes32, uint256, uint256) {
         token.transferFrom(msg.sender, address(this), amount);
         _callCount++;
-        return (bytes32(_callCount), _callCount);
+        return (bytes32(_callCount), _callCount, amount);
     }
 }
 
