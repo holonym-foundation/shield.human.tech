@@ -844,8 +844,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       // but the sequencer still needs the message in the L2 tree.
       // Pre-simulation via PXE doesn't work here (PXE lags behind sequencer,
       // and Azguard wallet rejects simulateTx as out of capability scope).
-      console.log('[L1→L2] Waiting 2 min for message propagation before claiming...')
-      await wait(120_000)
+      // Testnet epoch = 32 slots × 36s ≈ 19 min. Messages are only consumable
+      // after the sequencer includes them in an L2 block (up to 1 epoch wait).
+      console.log('[L1→L2] Waiting 20 min for sequencer to include L1→L2 messages in next epoch...')
+      await wait(1_200_000)
 
       // ─── Step 9: Claim on L2 ───────────────────────────────────────
       setProgressStep(2, 'completed')

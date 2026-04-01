@@ -1591,8 +1591,8 @@ async function testPublicFuelFlow(
     }
     // Buffer wait: checkpoint found != message consumable on sequencer.
     // Testnet sequencer typically needs 5-10 min after checkpoint to process the message.
-    logger.info('Waiting 5 min for sequencer to process L1→L2 messages...')
-    await wait(300_000)
+    logger.info('Waiting 20 min for sequencer to include L1→L2 messages in next epoch (~19 min/epoch on testnet)...')
+    await wait(1_200_000)
 
     // Create FeeJuicePaymentMethodWithClaim (same as frontend public fuel path)
     const publicFuelPayment = new FeeJuicePaymentMethodWithClaim(ownerAztecAddress, {
@@ -1616,7 +1616,7 @@ async function testPublicFuelFlow(
         wait: { timeout: getTimeouts().txTimeout },
       },
       logger,
-      8,
+      10,
     )
 
     await logFuelTestBalances('AFTER public fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
@@ -1790,8 +1790,8 @@ async function testPrivateFuelFlow(
       }
     }
     // Buffer wait: checkpoint found != message consumable on sequencer.
-    logger.info('Waiting 5 min for sequencer to process L1→L2 messages...')
-    await wait(300_000)
+    logger.info('Waiting 20 min for sequencer to include L1→L2 messages in next epoch (~19 min/epoch on testnet)...')
+    await wait(1_200_000)
 
     // 3. Query base fees → build explicit gasSettings (same as frontend)
     const baseFees = await node.getCurrentMinFees()
@@ -1830,7 +1830,7 @@ async function testPrivateFuelFlow(
         wait: { timeout: getTimeouts().txTimeout },
       },
       logger,
-      8,
+      10,
     )
 
     await logFuelTestBalances('AFTER private fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
@@ -2024,8 +2024,8 @@ async function testPrivateDepositFuelWithAttestation(
       }
     }
     // Buffer wait: checkpoint found != message consumable on sequencer.
-    logger.info('Waiting 5 min for sequencer to process L1→L2 messages...')
-    await wait(300_000)
+    logger.info('Waiting 20 min for sequencer to include L1→L2 messages in next epoch (~19 min/epoch on testnet)...')
+    await wait(1_200_000)
 
     // Private deposit → claim_private on L2 (not claim_public)
     logger.info(`[L2] Claiming tokens privately (private deposit from ${label} fuel flow)`)
@@ -2046,7 +2046,7 @@ async function testPrivateDepositFuelWithAttestation(
         wait: { timeout: getTimeouts().txTimeout },
       },
       logger,
-      8,
+      10,
     )
 
     const { result: privateBalance } = await l2TokenContract.methods
@@ -2136,8 +2136,8 @@ async function testPublicBridgeFlow(
     await wait(120_000)
   }
   // Buffer wait: checkpoint found != message consumable on sequencer.
-  logger.info('[L1→L2] Waiting 5 min for sequencer to process message...')
-  await wait(300_000)
+  logger.info('[L1→L2] Waiting 20 min for sequencer to include L1→L2 message in next epoch (~19 min/epoch on testnet)...')
+  await wait(1_200_000)
 
   // Claim on L2 (retries if message not yet consumable)
   logger.info(`[L2] Claiming tokens publicly`)
@@ -2162,7 +2162,7 @@ async function testPublicBridgeFlow(
       wait: { timeout: getTimeouts().txTimeout },
     },
     logger,
-    8,
+    10,
   )
 
   const l2TokenContract = TokenContract.at(

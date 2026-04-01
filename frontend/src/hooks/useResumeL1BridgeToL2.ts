@@ -452,8 +452,10 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     // Buffer wait: give the sequencer time to include the message in a block.
     // Pre-simulation via PXE doesn't work (PXE lags behind sequencer, and
     // Azguard wallet rejects simulateTx as out of capability scope).
-    console.log('[Resume L1→L2] Final wait before claiming (2 min)...')
-    await wait(120_000)
+    // Testnet epoch = 32 slots × 36s ≈ 19 min. Messages are only consumable
+    // after the sequencer includes them in an L2 block (up to 1 epoch wait).
+    console.log('[Resume L1→L2] Waiting 20 min for sequencer to include L1→L2 messages in next epoch...')
+    await wait(1_200_000)
 
     // ═══════════════════════════════════════════════════════════════════════
     // Step 3: Claim on L2

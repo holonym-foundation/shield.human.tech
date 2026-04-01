@@ -384,7 +384,8 @@ export async function executeL2Claim(
 ): Promise<L2ClaimResult> {
   const { walletAdapter, aztecAddress, isPrivacyModeEnabled } = deps
   const { amount, claimSecret, messageLeafIndex } = params
-  const maxAttempts = options?.maxAttempts ?? 5
+  // Testnet epoch ≈ 19 min — 10 retries × 2 min = 20 min additional coverage
+  const maxAttempts = options?.maxAttempts ?? 10
   const retryDelayMs = options?.retryDelayMs ?? 120_000
   const bruteForceMaxIndex = options?.bruteForceMaxIndex ?? 64
   const walletTimeoutMs = options?.walletTimeoutMs ?? 5 * 60_000 // 5 min default
