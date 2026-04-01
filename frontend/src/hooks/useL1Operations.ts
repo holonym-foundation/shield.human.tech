@@ -24,7 +24,7 @@ import {
   updateLocalStorageItem,
   getL1TxUrl,
 } from './bridge/bridgeUtils'
-import { pollL1ToL2MessageSync, executeL2Claim } from './bridge/bridgeL1ToL2'
+import { pollL1ToL2MessageSync, executeL2Claim, waitForNextL2Block } from './bridge/bridgeL1ToL2'
 import {
   validateAndCaptureBlocks,
   generateAndBackupClaimSecret,
@@ -839,15 +839,14 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         throw new Error(errorMessage)
       }
 
-      // Buffer wait: give the sequencer time to include the message in a block.
-      // The wallet's sendTx → proveTx path skips local public simulation,
-      // but the sequencer still needs the message in the L2 tree.
-      // Pre-simulation via PXE doesn't work here (PXE lags behind sequencer,
-      // and Azguard wallet rejects simulateTx as out of capability scope).
-      // Testnet epoch = 32 slots × 36s ≈ 19 min. Messages are only consumable
-      // after the sequencer includes them in an L2 block (up to 1 epoch wait).
-      console.log('[L1→L2] Waiting 20 min for sequencer to include L1→L2 messages in next epoch...')
-      await wait(1_200_000)
+      // Wait for the sequencer to produce a new L2 block that includes the
+      // L1→L2 messages. The archiver sees messages immediately, but the claim
+      // only works once the sequencer includes them in an L2 block (up to 1 epoch).
+      await waitForNextL2Block({
+        onPoll: (elapsed) => {
+          notify('info', `Waiting for L2 sequencer to include message (${Math.round(elapsed / 60)}m elapsed)...`)
+        },
+      })
 
       // ─── Step 9: Claim on L2 ───────────────────────────────────────
       setProgressStep(2, 'completed')

@@ -99,6 +99,61 @@ import { privateKeyToAccount, signMessage } from 'viem/accounts'
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
+ * Wait for the L2 sequencer to include the L1→L2 message in the state tree.
+ *
+ * The archiver checkpoint appears quickly, but the message is only consumable
+ * after the sequencer includes it in an L2 block — which can take up to 1
+ * epoch (~19 min on testnet: 32 slots × 36s).
+ *
+ * Strategy: wait for at least `minBlocks` new L2 blocks AND at least
+ * `minWaitMs` elapsed time, whichever is longer.
+ */
+async function waitForNextL2Block(
+  node: { getBlockNumber(): Promise<number> },
+  logger: { info(msg: string): void; warn(msg: string): void },
+  options?: { pollIntervalMs?: number; maxWaitMs?: number; minWaitMs?: number; minBlocks?: number },
+): Promise<number> {
+  const pollIntervalMs = options?.pollIntervalMs ?? 15_000
+  const maxWaitMs = options?.maxWaitMs ?? 25 * 60 * 1000
+  const minWaitMs = options?.minWaitMs ?? 2 * 60 * 1000 // 2 min minimum
+  const minBlocks = options?.minBlocks ?? 2 // wait for at least 2 new blocks
+  const startTime = Date.now()
+  const sinceBlock = await node.getBlockNumber()
+  const targetBlock = sinceBlock + minBlocks
+
+  logger.info(`Waiting for L2 block >= ${targetBlock} (since=${sinceBlock}, +${minBlocks} blocks, min ${minWaitMs / 1000}s)...`)
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const elapsedMs = Date.now() - startTime
+    const elapsedSec = Math.round(elapsedMs / 1000)
+    try {
+      const currentBlock = await node.getBlockNumber()
+      const blocksReady = currentBlock >= targetBlock
+      const minTimeReady = elapsedMs >= minWaitMs
+
+      if (blocksReady && minTimeReady) {
+        logger.info(`L2 block ${currentBlock} reached target after ${elapsedSec}s. Message should be consumable.`)
+        return currentBlock
+      }
+
+      if (blocksReady && !minTimeReady) {
+        const remainingSec = Math.round((minWaitMs - elapsedMs) / 1000)
+        logger.info(`  Block target reached (${currentBlock} >= ${targetBlock}), waiting ${remainingSec}s more for message propagation`)
+      } else {
+        logger.info(`  Block wait: ${elapsedSec}s elapsed, current=${currentBlock}, waiting for >=${targetBlock}`)
+      }
+    } catch (err) {
+      logger.warn(`  Block poll failed (${elapsedSec}s): ${err}`)
+    }
+    await wait(pollIntervalMs)
+  }
+
+  const finalBlock = await node.getBlockNumber().catch(() => sinceBlock)
+  logger.warn(`Block wait timed out after ${maxWaitMs / 60_000} min (block=${finalBlock}). Proceeding to claim with retries.`)
+  return finalBlock
+}
+
+/**
  * Decode a fuel swap / bridge revert into a human-readable diagnostic.
  * Covers UniswapFuelSwap, SwapBridgeRouter, PoolManager, and ERC-20 errors.
  */
@@ -166,21 +221,74 @@ const RETRYABLE_PATTERNS = [
   'Insufficient fee payer balance',
 ]
 
+/**
+ * Send a tx bypassing EmbeddedWallet's mandatory public simulation.
+ *
+ * EmbeddedWallet.sendTx() always calls simulateTx(simulatePublic: true) to estimate gas,
+ * which checks the PXE's local L1→L2 message tree — but that tree lags behind the sequencer.
+ * For L1→L2 claims (consume_l1_to_l2_message), the simulation always fails because the PXE
+ * hasn't synced the message yet, even though the sequencer has it.
+ *
+ * This function bypasses that by:
+ * 1. Building the execution request from the contract interaction
+ * 2. Calling pxe.proveTx() directly (which uses simulatePublic: false)
+ * 3. Submitting the proven tx to the node
+ *
+ * Gas settings must be provided explicitly since we skip estimation.
+ */
+async function sendWithoutPublicSimulation(
+  interaction: any,
+  wallet: any,
+  sendOpts: any,
+  logger: Logger,
+): Promise<any> {
+  const executionPayload = await interaction.request(sendOpts)
+  const scopes = sendOpts.from ? [sendOpts.from] : []
+
+  logger.info('[DirectSend] Proving tx (skipping public simulation)...')
+  const provenTx = await wallet.pxe.proveTx(
+    await wallet.createTxExecutionRequestFromPayloadAndFee(
+      executionPayload,
+      sendOpts.from,
+      await wallet.completeFeeOptions(sendOpts.from, executionPayload.feePayer, sendOpts.fee?.gasSettings),
+    ),
+    scopes,
+  )
+
+  const tx = await provenTx.toTx()
+  const txHash = tx.getTxHash()
+  logger.info(`[DirectSend] Submitting tx ${txHash} to sequencer...`)
+  await wallet.aztecNode.sendTx(tx)
+  logger.info(`[DirectSend] Tx ${txHash} submitted, waiting for receipt...`)
+
+  // Import waitForTx to wait for mining
+  const { waitForTx } = await import('@aztec/aztec.js/node')
+  const receipt = await waitForTx(wallet.aztecNode, txHash, sendOpts.wait)
+  logger.info(`[DirectSend] Tx mined in block ${receipt.blockNumber}`)
+  return receipt
+}
+
 async function sendPrivateWithRetry<T>(
-  buildTx: () => { send: (opts: any) => Promise<T> },
+  buildTx: () => any,
   sendOpts: any,
   logger: Logger,
   maxRetries = 2,
+  wallet?: any,
 ): Promise<any> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const { receipt } = await buildTx().send(sendOpts) as any
-      return receipt
+      if (wallet) {
+        // Bypass EmbeddedWallet's public simulation — send directly via proveTx + node.sendTx
+        return await sendWithoutPublicSimulation(buildTx(), wallet, sendOpts, logger)
+      } else {
+        // Standard path (for non-claim txs that don't consume L1→L2 messages)
+        const { receipt } = await buildTx().send(sendOpts) as any
+        return receipt
+      }
     } catch (e: any) {
       const msg = e?.message || ''
       const isRetryable = RETRYABLE_PATTERNS.some(p => msg.includes(p))
       if (isRetryable && attempt < maxRetries) {
-        // L1→L2 message not yet consumable — wait longer (2 min) for node to process
         const isMessageSync = msg.includes('nonexistent L1-to-L2') || msg.includes('Tried to consume nonexistent') || msg.includes('No L1 to L2 message found') || msg.includes('Insufficient fee payer balance')
         const retryDelay = isMessageSync ? 120_000 : 15_000
         logger.info(`[Retry] Transient failure (attempt ${attempt}/${maxRetries}): ${msg.slice(0, 150)}`)
@@ -1554,6 +1662,28 @@ async function testPublicFuelFlow(
     logger.info(`  BridgeWithFuel event: tokenAmount=${pfTokenAmount}, fuelAmount=${pfFuelAmountReceived}`)
     logger.info(`  tokenIndex=${pfTokenIndex}, fuelIndex=${pfFuelIndex}`)
 
+    // ── Cross-check: read the portal's DepositToAztecPublic event for the actual post-fee amount ──
+    let portalAmountAfterFee = 0n
+    let portalFee = 0n
+    for (const log of bridgeReceipt.logs) {
+      if (log.address.toLowerCase() !== portalAddr.toLowerCase()) continue
+      try {
+        const decoded = decodeEventLog({ abi: CustomTokenPortalAbi, data: log.data, topics: log.topics })
+        if (decoded.eventName === 'DepositToAztecPublic') {
+          const a = decoded.args as any
+          portalAmountAfterFee = a.amount ?? a.amountAfterFee ?? 0n
+          portalFee = a.fee ?? 0n
+          logger.info(`  Portal DepositToAztecPublic: amountAfterFee=${portalAmountAfterFee}, fee=${portalFee}`)
+          break
+        }
+      } catch { /* not our event */ }
+    }
+    if (portalAmountAfterFee > 0n && portalAmountAfterFee !== pfTokenAmount) {
+      logger.warn(`  ⚠️ AMOUNT MISMATCH: Router event says ${pfTokenAmount} but portal says ${portalAmountAfterFee}`)
+      logger.warn(`  Using portal's post-fee amount for claim instead`)
+      pfTokenAmount = portalAmountAfterFee
+    }
+
     // ── Early sufficiency check — fail fast before any waiting ──────────────
     const pfBaseFees = await node.getCurrentMinFees()
     const pfMaxFeesPerGas = maxFeesPerGasFromBaseFees(pfBaseFees)
@@ -1589,10 +1719,8 @@ async function testPublicFuelFlow(
         await wait(120_000)
       }
     }
-    // Buffer wait: checkpoint found != message consumable on sequencer.
-    // Testnet sequencer typically needs 5-10 min after checkpoint to process the message.
-    logger.info('Waiting 20 min for sequencer to include L1→L2 messages in next epoch (~19 min/epoch on testnet)...')
-    await wait(1_200_000)
+    // Wait for sequencer to produce a new L2 block that includes the L1→L2 messages
+    await waitForNextL2Block(node, logger)
 
     // Create FeeJuicePaymentMethodWithClaim (same as frontend public fuel path)
     const publicFuelPayment = new FeeJuicePaymentMethodWithClaim(ownerAztecAddress, {
@@ -1617,6 +1745,7 @@ async function testPublicFuelFlow(
       },
       logger,
       10,
+      wallet,
     )
 
     await logFuelTestBalances('AFTER public fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
@@ -1774,6 +1903,26 @@ async function testPrivateFuelFlow(
     logger.info(`  BridgeWithFuel event: tokenAmount=${pvTokenAmount}, fuelAmount=${pvFuelAmountReceived}`)
     logger.info(`  tokenIndex=${pvTokenIndex}, fuelIndex=${pvFuelIndex}`)
 
+    // ── Cross-check: read the portal's DepositToAztecPublic event for the actual post-fee amount ──
+    let pvPortalAmountAfterFee = 0n
+    for (const log of bridgeReceipt.logs) {
+      if (log.address.toLowerCase() !== portalAddr.toLowerCase()) continue
+      try {
+        const decoded = decodeEventLog({ abi: CustomTokenPortalAbi, data: log.data, topics: log.topics })
+        if (decoded.eventName === 'DepositToAztecPublic') {
+          const a = decoded.args as any
+          pvPortalAmountAfterFee = a.amount ?? a.amountAfterFee ?? 0n
+          logger.info(`  Portal DepositToAztecPublic: amountAfterFee=${pvPortalAmountAfterFee}, fee=${a.fee ?? 0n}`)
+          break
+        }
+      } catch { /* not our event */ }
+    }
+    if (pvPortalAmountAfterFee > 0n && pvPortalAmountAfterFee !== pvTokenAmount) {
+      logger.warn(`  ⚠️ AMOUNT MISMATCH: Router event says ${pvTokenAmount} but portal says ${pvPortalAmountAfterFee}`)
+      logger.warn(`  Using portal's post-fee amount for claim instead`)
+      pvTokenAmount = pvPortalAmountAfterFee
+    }
+
     // Wait for BOTH L1→L2 messages
     for (const [label, msgHash] of [['token', pvTokenKey], ['fuel', pvFuelKey]] as const) {
       if (!msgHash || msgHash === '0x0') continue
@@ -1789,9 +1938,8 @@ async function testPrivateFuelFlow(
         await wait(120_000)
       }
     }
-    // Buffer wait: checkpoint found != message consumable on sequencer.
-    logger.info('Waiting 20 min for sequencer to include L1→L2 messages in next epoch (~19 min/epoch on testnet)...')
-    await wait(1_200_000)
+    // Wait for sequencer to produce a new L2 block that includes the L1→L2 messages
+    await waitForNextL2Block(node, logger)
 
     // 3. Query base fees → build explicit gasSettings (same as frontend)
     const baseFees = await node.getCurrentMinFees()
@@ -1831,6 +1979,7 @@ async function testPrivateFuelFlow(
       },
       logger,
       10,
+      wallet,
     )
 
     await logFuelTestBalances('AFTER private fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
@@ -2008,6 +2157,26 @@ async function testPrivateDepositFuelWithAttestation(
     logger.info(`  BridgeWithFuel event: tokenAmount=${tokenAmount}, fuelAmount=${fuelAmountReceived}`)
     logger.info(`  tokenIndex=${tokenIndex}, fuelIndex=${fuelIndex}`)
 
+    // ── Cross-check: read the portal's DepositToAztecPrivate event for the actual post-fee amount ──
+    let pdPortalAmountAfterFee = 0n
+    for (const log of bridgeReceipt.logs) {
+      if (log.address.toLowerCase() !== portalAddr.toLowerCase()) continue
+      try {
+        const decoded = decodeEventLog({ abi: CustomTokenPortalAbi, data: log.data, topics: log.topics })
+        if (decoded.eventName === 'DepositToAztecPrivate') {
+          const a = decoded.args as any
+          pdPortalAmountAfterFee = a.amount ?? a.amountAfterFee ?? 0n
+          logger.info(`  Portal DepositToAztecPrivate: amountAfterFee=${pdPortalAmountAfterFee}, fee=${a.fee ?? 0n}`)
+          break
+        }
+      } catch { /* not our event */ }
+    }
+    if (pdPortalAmountAfterFee > 0n && pdPortalAmountAfterFee !== tokenAmount) {
+      logger.warn(`  ⚠️ AMOUNT MISMATCH: Router event says ${tokenAmount} but portal says ${pdPortalAmountAfterFee}`)
+      logger.warn(`  Using portal's post-fee amount for claim instead`)
+      tokenAmount = pdPortalAmountAfterFee
+    }
+
     // Wait for BOTH L1→L2 messages to sync
     for (const [msgLabel, msgHash] of [['token', tokenKey], ['fuel', fuelKey]] as const) {
       if (!msgHash || msgHash === '0x0') continue
@@ -2023,9 +2192,8 @@ async function testPrivateDepositFuelWithAttestation(
         await wait(120_000)
       }
     }
-    // Buffer wait: checkpoint found != message consumable on sequencer.
-    logger.info('Waiting 20 min for sequencer to include L1→L2 messages in next epoch (~19 min/epoch on testnet)...')
-    await wait(1_200_000)
+    // Wait for sequencer to produce a new L2 block that includes the L1→L2 messages
+    await waitForNextL2Block(node, logger)
 
     // Private deposit → claim_private on L2 (not claim_public)
     logger.info(`[L2] Claiming tokens privately (private deposit from ${label} fuel flow)`)
@@ -2047,6 +2215,7 @@ async function testPrivateDepositFuelWithAttestation(
       },
       logger,
       10,
+      wallet,
     )
 
     const { result: privateBalance } = await l2TokenContract.methods
@@ -2135,9 +2304,8 @@ async function testPublicBridgeFlow(
     logger.info(`[L1→L2] Waiting 2 min...`)
     await wait(120_000)
   }
-  // Buffer wait: checkpoint found != message consumable on sequencer.
-  logger.info('[L1→L2] Waiting 20 min for sequencer to include L1→L2 message in next epoch (~19 min/epoch on testnet)...')
-  await wait(1_200_000)
+  // Wait for sequencer to produce a new L2 block that includes the L1→L2 messages
+  await waitForNextL2Block(node, logger)
 
   // Claim on L2 (retries if message not yet consumable)
   logger.info(`[L2] Claiming tokens publicly`)
@@ -2163,6 +2331,7 @@ async function testPublicBridgeFlow(
     },
     logger,
     10,
+    wallet,
   )
 
   const l2TokenContract = TokenContract.at(
@@ -2387,7 +2556,7 @@ async function testPrivateDepositAndClaimFlow(
     logger.info(`[L1→L2] Waiting 2 min...`)
     await wait(120_000)
   }
-  await wait(120_000) // Final buffer
+  await waitForNextL2Block(node, logger)
 
   // Claim on L2 (private)
   logger.info(`[L2] Claiming tokens privately`)
@@ -2412,6 +2581,8 @@ async function testPrivateDepositAndClaimFlow(
       wait: { timeout: getTimeouts().txTimeout },
     },
     logger,
+    10,
+    wallet,
   )
 
   // Verify private balance
@@ -2540,6 +2711,8 @@ async function testPrivateExitFlow(
       authWitnesses: [burnAuthWitness],
     },
     logger,
+    10,
+    wallet,
   )
 
   const { result: newPrivateBalance } = await l2TokenContract.methods
@@ -2662,7 +2835,7 @@ async function testNegativeCrossClaim(
     logger.info(`[L1→L2] Waiting 2 min...`)
     await wait(120_000)
   }
-  await wait(120_000) // Final buffer
+  await waitForNextL2Block(node, logger)
 
   // Now try the WRONG claim type
   const l2BridgeContract = TokenBridgeContract.at(
@@ -2771,7 +2944,7 @@ async function testWrongRecipientCantClaimPublic(
     logger.info(`[L1→L2] Waiting 2 min...`)
     await wait(120_000)
   }
-  await wait(120_000)
+  await waitForNextL2Block(node, logger)
 
   const l2BridgeContract = TokenBridgeContract.at(
     AztecAddress.fromString(deployed.l2BridgeContract),
@@ -2884,7 +3057,7 @@ async function testWrongSecretCantClaimPrivate(
     logger.info(`[L1→L2] Waiting 2 min...`)
     await wait(120_000)
   }
-  await wait(120_000)
+  await waitForNextL2Block(node, logger)
 
   const l2BridgeContract = TokenBridgeContract.at(
     AztecAddress.fromString(deployed.l2BridgeContract),
@@ -2916,6 +3089,8 @@ async function testWrongSecretCantClaimPrivate(
       wait: { timeout: getTimeouts().txTimeout },
     },
     logger,
+    10,
+    wallet,
   )
   logger.info(`[L2] Correct secret claimed successfully — access control verified`)
 }

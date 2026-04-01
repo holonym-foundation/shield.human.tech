@@ -93,6 +93,11 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
     IUniswapFuelSwap public swapTarget;
 
     // ─── Events ──────────────────────────────────────────────────────
+    /// @notice Emitted after a bridge-with-fuel operation completes.
+    /// @dev `tokenAmount` is the post-fee value returned by the TokenPortal, but consumers
+    ///      should prefer the portal's own DepositToAztecPublic/Private event for the
+    ///      authoritative post-fee amount used in the L1→L2 content hash. The router merely
+    ///      passes through whatever the portal returns; fee logic lives entirely in the portal.
     event BridgeWithFuel(
         bytes32 indexed aztecRecipient,
         bytes32 tokenKey,

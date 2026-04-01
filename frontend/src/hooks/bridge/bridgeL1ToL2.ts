@@ -350,6 +350,81 @@ export async function pollL1ToL2MessageSync(
   }
 }
 
+/**
+ * Wait for the L2 sequencer to include the L1→L2 message in the state tree.
+ *
+ * The archiver checkpoint appears quickly, but the message is only consumable
+ * after the sequencer includes it in an L2 block — which can take up to 1
+ * epoch (~19 min on testnet: 32 slots × 36s).
+ *
+ * Strategy: wait for at least `minBlocks` new L2 blocks AND at least
+ * `minWaitMs` elapsed time, whichever is longer. This ensures the sequencer
+ * has had enough time to process the L1 state containing the message.
+ *
+ * @param sinceBlock - The L2 block number at the time the checkpoint was found.
+ *   If omitted, captures the current block and waits for it to advance.
+ * @returns The new block number.
+ */
+export async function waitForNextL2Block(options?: {
+  sinceBlock?: number
+  pollIntervalMs?: number
+  maxWaitMs?: number
+  minWaitMs?: number
+  minBlocks?: number
+  onPoll?: (elapsed: number, currentBlock: number, targetBlock: number) => void
+}): Promise<number> {
+  const pollIntervalMs = options?.pollIntervalMs ?? 15_000
+  const maxWaitMs = options?.maxWaitMs ?? 25 * 60 * 1000 // 25 min (>1 epoch)
+  const minWaitMs = options?.minWaitMs ?? 2 * 60 * 1000 // 2 min minimum even if blocks advance
+  const minBlocks = options?.minBlocks ?? 2 // wait for at least 2 new blocks
+  const startTime = Date.now()
+
+  const sinceBlock = options?.sinceBlock ?? (await aztecNode.getBlockNumber())
+  const targetBlock = sinceBlock + minBlocks
+
+  console.log(
+    `[L1→L2] Waiting for L2 block >= ${targetBlock} (since=${sinceBlock}, +${minBlocks} blocks, min ${minWaitMs / 1000}s)...`,
+  )
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const elapsedMs = Date.now() - startTime
+    const elapsedSec = Math.round(elapsedMs / 1000)
+    try {
+      const currentBlock = await aztecNode.getBlockNumber()
+      options?.onPoll?.(elapsedSec, currentBlock, targetBlock)
+
+      const blocksReady = currentBlock >= targetBlock
+      const minTimeReady = elapsedMs >= minWaitMs
+
+      if (blocksReady && minTimeReady) {
+        console.log(
+          `[L1→L2] L2 block ${currentBlock} reached target after ${elapsedSec}s. Message should be consumable.`,
+        )
+        return currentBlock
+      }
+
+      if (blocksReady && !minTimeReady) {
+        const remainingSec = Math.round((minWaitMs - elapsedMs) / 1000)
+        console.log(
+          `[L1→L2] Block target reached (${currentBlock} >= ${targetBlock}), waiting ${remainingSec}s more for message propagation`,
+        )
+      } else {
+        console.log(`[L1→L2] Block wait: ${elapsedSec}s elapsed, current=${currentBlock}, waiting for >=${targetBlock}`)
+      }
+    } catch (err) {
+      console.warn(`[L1→L2] Block poll failed (${elapsedSec}s):`, err)
+    }
+    await wait(pollIntervalMs)
+  }
+
+  // Timed out — return current block anyway so the caller can proceed to retry-based claiming
+  const finalBlock = await aztecNode.getBlockNumber().catch(() => sinceBlock)
+  console.warn(
+    `[L1→L2] Block wait timed out after ${maxWaitMs / 60_000} min (block=${finalBlock}). Proceeding to claim with retries.`,
+  )
+  return finalBlock
+}
+
 // ═════════════════════════════════════════════════════════════════════
 // SHARED: L2 Claim Execution
 // ═════════════════════════════════════════════════════════════════════

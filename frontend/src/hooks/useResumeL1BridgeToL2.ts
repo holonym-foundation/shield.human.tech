@@ -27,6 +27,7 @@ import {
 import {
   pollL1ToL2MessageSync,
   executeL2Claim,
+  waitForNextL2Block,
   getPostFeeClaimAmount,
   CustomTokenPortalEventAbi,
 } from './bridge/bridgeL1ToL2'
@@ -449,13 +450,14 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       )
     }
 
-    // Buffer wait: give the sequencer time to include the message in a block.
-    // Pre-simulation via PXE doesn't work (PXE lags behind sequencer, and
-    // Azguard wallet rejects simulateTx as out of capability scope).
-    // Testnet epoch = 32 slots × 36s ≈ 19 min. Messages are only consumable
-    // after the sequencer includes them in an L2 block (up to 1 epoch wait).
-    console.log('[Resume L1→L2] Waiting 20 min for sequencer to include L1→L2 messages in next epoch...')
-    await wait(1_200_000)
+    // Wait for the sequencer to produce a new L2 block that includes the
+    // L1→L2 messages. The archiver sees messages immediately, but the claim
+    // only works once the sequencer includes them in an L2 block (up to 1 epoch).
+    await waitForNextL2Block({
+      onPoll: (elapsed) => {
+        notify('info', `Waiting for L2 sequencer to include message (${Math.round(elapsed / 60)}m elapsed)...`)
+      },
+    })
 
     // ═══════════════════════════════════════════════════════════════════════
     // Step 3: Claim on L2
