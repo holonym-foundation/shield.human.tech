@@ -82,6 +82,11 @@ export BOOTNODE=https://v4-devnet-2.aztec-labs.com
 aztec start --port 8081 --pxe --pxe.nodeUrl=$BOOTNODE --pxe.proverEnabled true --l1-chain-id $L1_CHAIN_ID
 ```
 
+## Useful References
+
+- **Aztec Networks** (bootnode URLs, chain IDs, node endpoints): https://docs.aztec.network/networks
+- **Migration Notes** (breaking changes between versions): https://docs.aztec.network/developers/docs/resources/migration_notes
+
 ## Troubleshooting
 
 ### Package path export error
