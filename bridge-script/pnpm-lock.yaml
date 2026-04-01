@@ -45,8 +45,8 @@ importers:
         specifier: 4.2.0-aztecnr-rc.2
         version: 4.2.0-aztecnr-rc.2(typescript@5.9.3)(zod@3.25.76)
       '@defi-wonderland/aztec-standards':
-        specifier: https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz
-        version: https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz
+        specifier: 4.2.0-aztecnr-rc.2
+        version: 4.2.0-aztecnr-rc.2
       '@types/node':
         specifier: ^22.13.10
         version: 22.19.15
@@ -626,9 +626,8 @@ packages:
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
 
-  '@defi-wonderland/aztec-standards@https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz':
-    resolution: {tarball: https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz}
-    version: 4.2.0-aztecnr-rc.2-prerelease.1ad0e28
+  '@defi-wonderland/aztec-standards@4.2.0-aztecnr-rc.2':
+    resolution: {integrity: sha512-IjT/5VwWDM/iKTlhVFLMpF92giwZXlV6GnOtfnrYYd/xd/9sipxPiqqUI2thBg6M7jCFNSn79Sg3movlCdGD0w==}
 
   '@esbuild/aix-ppc64@0.27.4':
     resolution: {integrity: sha512-cQPwL2mp2nSmHHJlCyoXgHGhbEPMrEEU5xhkcy3Hs/O7nGZqEpZ2sUtLaL9MORLtDfRvVl2/3PAuEkYZH0Ty8Q==}
@@ -4880,7 +4879,7 @@ snapshots:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
 
-  '@defi-wonderland/aztec-standards@https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-1ad0e28/defi-wonderland-aztec-standards-4.2.0-aztecnr-rc.2-prerelease.1ad0e28.tgz': {}
+  '@defi-wonderland/aztec-standards@4.2.0-aztecnr-rc.2': {}
 
   '@esbuild/aix-ppc64@0.27.4':
     optional: true
@@ -7407,10 +7406,10 @@ snapshots:
   ox@0.6.7(typescript@5.9.3)(zod@3.25.76):
     dependencies:
       '@adraffy/ens-normalize': 1.11.1
-      '@noble/curves': 1.8.1
-      '@noble/hashes': 1.7.1
-      '@scure/bip32': 1.6.2
-      '@scure/bip39': 1.5.4
+      '@noble/curves': 1.9.1
+      '@noble/hashes': 1.8.0
+      '@scure/bip32': 1.7.0
+      '@scure/bip39': 1.6.0
       abitype: 1.0.8(typescript@5.9.3)(zod@3.25.76)
       eventemitter3: 5.0.1
     optionalDependencies:
