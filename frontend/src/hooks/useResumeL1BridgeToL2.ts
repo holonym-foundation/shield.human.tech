@@ -541,13 +541,16 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       // Public fuel path: FeeJuicePaymentMethodWithClaim
       try {
         const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+        const { buildClaimGasSettings } = await import('@/utils/fuelGasEstimate')
+
+        const claimGasSettings = await buildClaimGasSettings()
         console.log('[Resume L1→L2] Building FeeJuicePaymentMethodWithClaim (public fuel)')
         const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
           claimAmount: BigInt(fuelAmount),
           claimSecret: Fr.fromString(fuelSecret),
           messageLeafIndex: BigInt(fuelMessageLeafIndex),
         })
-        feeOption = { fee: { paymentMethod } }
+        feeOption = { fee: { paymentMethod, gasSettings: claimGasSettings } }
       } catch (err) {
         throw new Error(`[Resume L1→L2] Failed to create FeeJuicePaymentMethodWithClaim: ${err}`)
       }

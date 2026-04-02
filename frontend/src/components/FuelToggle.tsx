@@ -83,6 +83,55 @@ function useV4FuelQuote(
   return { fjOutput, loading, error }
 }
 
+/**
+ * Hook that checks whether the expected FJ output is sufficient to cover L2 claim gas costs.
+ * Debounced: only runs when fjOutput changes and is non-null.
+ */
+function useFuelSufficiency(fjOutput: bigint | null): {
+  sufficient: boolean | null
+  feeLimitFj: string | null
+  loading: boolean
+} {
+  const [sufficient, setSufficient] = useState<boolean | null>(null)
+  const [feeLimitFj, setFeeLimitFj] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (fjOutput === null || fjOutput === 0n) {
+      setSufficient(null)
+      setFeeLimitFj(null)
+      return
+    }
+
+    let cancelled = false
+    setLoading(true)
+    ;(async () => {
+      try {
+        const { checkFuelSufficiency } = await import('@/utils/fuelGasEstimate')
+        const result = await checkFuelSufficiency(fjOutput)
+        if (!cancelled) {
+          setSufficient(result.sufficient)
+          setFeeLimitFj(result.feeLimitFj)
+        }
+      } catch (err) {
+        console.warn('[FuelToggle] Sufficiency check failed:', err)
+        if (!cancelled) {
+          setSufficient(null)
+          setFeeLimitFj(null)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [fjOutput])
+
+  return { sufficient, feeLimitFj, loading }
+}
+
 function QuoteSkeleton() {
   return (
     <div className="space-y-2 animate-pulse">
@@ -117,6 +166,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   const { prices, isLoading: pricesLoading, error: pricesError } = useTokenPrices()
 
   const { fjOutput, loading, error } = useV4FuelQuote(isValid ? fuelAmount : '', tokenAddress, tokenDecimals)
+  const { sufficient: fuelSufficient, feeLimitFj, loading: sufficiencyLoading } = useFuelSufficiency(fjOutput)
 
   // Check which USD preset is currently selected (if any)
   const activePreset = USD_PRESETS.find((usd) => fuelAmount === usdToTokenAmount(usd, tokenSymbol, prices))
@@ -239,6 +289,12 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                   <p>
                     You&apos;ll receive: {netBridge} {tokenSymbol} + ~{formatFjAmount(fjOutput)} Fee Juice
                   </p>
+                  {!sufficiencyLoading && fuelSufficient === false && (
+                    <p className="text-amber-600 font-medium mt-1">
+                      Not enough gas: ~{formatFjAmount(fjOutput)} FJ from swap but ~{feeLimitFj} FJ needed for L2 claim.
+                      Increase the fuel amount.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

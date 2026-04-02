@@ -574,6 +574,18 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             fuelAmount: fuelAmountTokenUnits,
             inputDecimals: selectedToken?.decimals ?? 6,
           })
+
+          // Pre-flight check: verify the expected FJ output covers L2 claim gas costs
+          const { checkFuelSufficiency } = await import('@/utils/fuelGasEstimate')
+          const sufficiency = await checkFuelSufficiency(fuelQuote.expectedOutput)
+          console.log('[L1→L2] Private fuel sufficiency check:', sufficiency)
+          if (!sufficiency.sufficient) {
+            throw new Error(
+              `Insufficient fuel: swap produces ~${sufficiency.expectedFj} FJ but the L2 claim requires ~${sufficiency.feeLimitFj} FJ. ` +
+                `Increase the fuel amount or bridge without fuel and top up gas separately.`,
+            )
+          }
+
           fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
           privateFuel = {
             fuelAmount: fuelAmountTokenUnits,
@@ -591,6 +603,18 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             fuelAmount: fuelAmountTokenUnits,
             inputDecimals: selectedToken?.decimals ?? 6,
           })
+
+          // Pre-flight check: verify the expected FJ output covers L2 claim gas costs
+          const { checkFuelSufficiency } = await import('@/utils/fuelGasEstimate')
+          const sufficiency = await checkFuelSufficiency(fuelQuote.expectedOutput)
+          console.log('[L1→L2] Fuel sufficiency check:', sufficiency)
+          if (!sufficiency.sufficient) {
+            throw new Error(
+              `Insufficient fuel: swap produces ~${sufficiency.expectedFj} FJ but the L2 claim requires ~${sufficiency.feeLimitFj} FJ. ` +
+                `Increase the fuel amount or bridge without fuel and top up gas separately.`,
+            )
+          }
+
           fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
           console.log('[L1→L2] Public fuel enabled:', {
             fuelAmount: fuelAmountTokenUnits.toString(),
@@ -948,12 +972,31 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         ) {
           try {
             const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+            const { buildClaimGasSettings } = await import('@/utils/fuelGasEstimate')
+
+            const claimGasSettings = await buildClaimGasSettings()
+            console.log('[L1→L2] Public fuel claim params:', {
+              sender: aztecAddress,
+              claimAmount: receipt.fuelAmount.toString(),
+              claimSecretStr: backup.fuelSecret.toString().slice(0, 18) + '...',
+              messageLeafIndex: receipt.fuelMessageLeafIndexStr,
+              fuelMessageHash: receipt.fuelMessageHashStr,
+              gasLimits: {
+                l2Gas: claimGasSettings.gasLimits.l2Gas.toString(),
+                daGas: claimGasSettings.gasLimits.daGas.toString(),
+              },
+              maxFeesPerGas: {
+                feePerL2Gas: claimGasSettings.maxFeesPerGas.feePerL2Gas.toString(),
+                feePerDaGas: claimGasSettings.maxFeesPerGas.feePerDaGas.toString(),
+              },
+            })
+
             const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
               claimAmount: receipt.fuelAmount,
               claimSecret: backup.fuelSecret,
               messageLeafIndex: BigInt(receipt.fuelMessageLeafIndexStr!),
             })
-            feeOption = { fee: { paymentMethod } }
+            feeOption = { fee: { paymentMethod, gasSettings: claimGasSettings } }
             console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim (public fuel)')
           } catch (err) {
             console.warn('[L1→L2] Failed to create FeeJuicePaymentMethodWithClaim, falling back to default:', err)
