@@ -45,14 +45,14 @@ export class TokenBridgeContract extends ContractBase {
   /**
    * Creates a tx to deploy a new instance of this contract.
    */
-  public static deploy(wallet: Wallet, token_minter_proxy: AztecAddressLike, portal: EthAddressLike, human_id_attester_x: FieldLike, human_id_attester_y: FieldLike, circuit_id: FieldLike, passport_signer_x: FieldLike, passport_signer_y: FieldLike) {
+  public static deploy(wallet: Wallet, token_minter_proxy: AztecAddressLike, portal: EthAddressLike, human_id_attester_x: FieldLike, human_id_attester_y: FieldLike, circuit_id: FieldLike, action_id: FieldLike, passport_signer_x: FieldLike, passport_signer_y: FieldLike) {
     return new DeployMethod<TokenBridgeContract>(PublicKeys.default(), wallet, TokenBridgeContractArtifact, (instance, wallet) => TokenBridgeContract.at(instance.address, wallet), Array.from(arguments).slice(1));
   }
 
   /**
    * Creates a tx to deploy a new instance of this contract using the specified public keys hash to derive the address.
    */
-  public static deployWithPublicKeys(publicKeys: PublicKeys, wallet: Wallet, token_minter_proxy: AztecAddressLike, portal: EthAddressLike, human_id_attester_x: FieldLike, human_id_attester_y: FieldLike, circuit_id: FieldLike, passport_signer_x: FieldLike, passport_signer_y: FieldLike) {
+  public static deployWithPublicKeys(publicKeys: PublicKeys, wallet: Wallet, token_minter_proxy: AztecAddressLike, portal: EthAddressLike, human_id_attester_x: FieldLike, human_id_attester_y: FieldLike, circuit_id: FieldLike, action_id: FieldLike, passport_signer_x: FieldLike, passport_signer_y: FieldLike) {
     return new DeployMethod<TokenBridgeContract>(publicKeys, wallet, TokenBridgeContractArtifact, (instance, wallet) => TokenBridgeContract.at(instance.address, wallet), Array.from(arguments).slice(2));
   }
 
@@ -90,7 +90,7 @@ export class TokenBridgeContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'owner' | 'pending_owner' | 'config' | 'human_id_attester_pubkey' | 'clean_hands_circuit_id' | 'passport_signer_pubkey' | 'clean_hands_nonces' | 'passport_nonces' | 'is_paused'> {
+  public static get storage(): ContractStorageLayout<'owner' | 'pending_owner' | 'config' | 'human_id_attester_pubkey' | 'clean_hands_circuit_id' | 'clean_hands_action_id' | 'passport_signer_pubkey' | 'clean_hands_nonces' | 'passport_nonces' | 'is_paused'> {
       return {
         owner: {
       slot: new Fr(1n),
@@ -107,19 +107,22 @@ human_id_attester_pubkey: {
 clean_hands_circuit_id: {
       slot: new Fr(12n),
     },
-passport_signer_pubkey: {
+clean_hands_action_id: {
       slot: new Fr(16n),
     },
+passport_signer_pubkey: {
+      slot: new Fr(20n),
+    },
 clean_hands_nonces: {
-      slot: new Fr(22n),
+      slot: new Fr(26n),
     },
 passport_nonces: {
-      slot: new Fr(23n),
+      slot: new Fr(27n),
     },
 is_paused: {
-      slot: new Fr(24n),
+      slot: new Fr(28n),
     }
-      } as ContractStorageLayout<'owner' | 'pending_owner' | 'config' | 'human_id_attester_pubkey' | 'clean_hands_circuit_id' | 'passport_signer_pubkey' | 'clean_hands_nonces' | 'passport_nonces' | 'is_paused'>;
+      } as ContractStorageLayout<'owner' | 'pending_owner' | 'config' | 'human_id_attester_pubkey' | 'clean_hands_circuit_id' | 'clean_hands_action_id' | 'passport_signer_pubkey' | 'clean_hands_nonces' | 'passport_nonces' | 'is_paused'>;
     }
     
 
@@ -138,11 +141,11 @@ is_paused: {
     /** claim_public(to: struct, amount: integer, secret: field, message_leaf_index: field) */
     claim_public: ((to: AztecAddressLike, amount: (bigint | number), secret: FieldLike, message_leaf_index: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** constructor(token_minter_proxy: struct, portal: struct, human_id_attester_x: field, human_id_attester_y: field, circuit_id: field, passport_signer_x: field, passport_signer_y: field) */
-    constructor: ((token_minter_proxy: AztecAddressLike, portal: EthAddressLike, human_id_attester_x: FieldLike, human_id_attester_y: FieldLike, circuit_id: FieldLike, passport_signer_x: FieldLike, passport_signer_y: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** constructor(token_minter_proxy: struct, portal: struct, human_id_attester_x: field, human_id_attester_y: field, circuit_id: field, action_id: field, passport_signer_x: field, passport_signer_y: field) */
+    constructor: ((token_minter_proxy: AztecAddressLike, portal: EthAddressLike, human_id_attester_x: FieldLike, human_id_attester_y: FieldLike, circuit_id: FieldLike, action_id: FieldLike, passport_signer_x: FieldLike, passport_signer_y: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** exit_to_l1_private(recipient: struct, amount: integer, caller_on_l1: struct, authwit_nonce: field, clean_hands: struct, passport: struct) */
-    exit_to_l1_private: ((recipient: EthAddressLike, amount: (bigint | number), caller_on_l1: EthAddressLike, authwit_nonce: FieldLike, clean_hands: { nonce: FieldLike, action_id: FieldLike, signature: (bigint | number)[] }, passport: { max_amount: (bigint | number), nonce: FieldLike, deadline: (bigint | number), signature: (bigint | number)[] }) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    exit_to_l1_private: ((recipient: EthAddressLike, amount: (bigint | number), caller_on_l1: EthAddressLike, authwit_nonce: FieldLike, clean_hands: { nonce: FieldLike, signature: (bigint | number)[] }, passport: { max_amount: (bigint | number), nonce: FieldLike, deadline: (bigint | number), signature: (bigint | number)[] }) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** exit_to_l1_public(recipient: struct, amount: integer, caller_on_l1: struct, authwit_nonce: field) */
     exit_to_l1_public: ((recipient: EthAddressLike, amount: (bigint | number), caller_on_l1: EthAddressLike, authwit_nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -174,8 +177,8 @@ is_paused: {
     /** transfer_ownership(new_owner: struct) */
     transfer_ownership: ((new_owner: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** update_attestation_config(attester_x: field, attester_y: field, circuit_id: field, passport_x: field, passport_y: field) */
-    update_attestation_config: ((attester_x: FieldLike, attester_y: FieldLike, circuit_id: FieldLike, passport_x: FieldLike, passport_y: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** update_attestation_config(attester_x: field, attester_y: field, circuit_id: field, action_id: field, passport_x: field, passport_y: field) */
+    update_attestation_config: ((attester_x: FieldLike, attester_y: FieldLike, circuit_id: FieldLike, action_id: FieldLike, passport_x: FieldLike, passport_y: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
   };
 
   

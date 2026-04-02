@@ -16,6 +16,8 @@ export interface DeployedToken {
   // Fee infrastructure
   feeAssetHandler: string;
   sponsoredFee: string;
+  // Migration state: true when deposits are paused on this portal (rollup upgrade window)
+  depositsPaused?: boolean;
 }
 
 export interface L1ContractAddresses {

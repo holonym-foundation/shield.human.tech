@@ -40,6 +40,7 @@ contract DeployTokenPortalWithForwarder is Script {
         uint256 feeBasisPoints = vm.envUint("FEE_BASIS_POINTS");
         address humanIdAttester = vm.envAddress("HUMAN_ID_ATTESTER");
         uint256 cleanHandsCircuitId = vm.envUint("CLEAN_HANDS_CIRCUIT_ID");
+        uint256 cleanHandsActionId = vm.envUint("CLEAN_HANDS_ACTION_ID");
         address passportSigner = vm.envAddress("PASSPORT_SIGNER");
 
         vm.startBroadcast(pk);
@@ -51,6 +52,7 @@ contract DeployTokenPortalWithForwarder is Script {
             feeBasisPoints,
             humanIdAttester,
             cleanHandsCircuitId,
+            cleanHandsActionId,
             passportSigner
         );
         console.log("TokenPortal deployed at:", address(portal));

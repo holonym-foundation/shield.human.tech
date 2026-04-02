@@ -14,7 +14,6 @@ import {ISignatureTransfer} from "./interfaces/ISignatureTransfer.sol";
 /// @notice Attestation structs matching TokenPortal's private deposit requirements.
 struct CleanHandsData {
     uint256 nonce;
-    uint256 actionId;
     bytes signature;
 }
 

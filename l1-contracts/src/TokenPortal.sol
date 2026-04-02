@@ -32,6 +32,7 @@ error AmountExceedsLimit();
 error Unauthorized();
 error NoPendingOwner();
 error NotTrustedForwarder();
+error DepositsPaused();
 
 /**
  * @title TokenPortal
@@ -53,7 +54,6 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
     struct CleanHandsData {
         uint256 nonce;
-        uint256 actionId;
         bytes signature;
     }
 
@@ -74,6 +74,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     // Attestation Config
     address public humanIdAttester;
     uint256 public cleanHandsCircuitId;
+    uint256 public cleanHandsActionId;
     address public passportSigner;
 
     mapping(address => mapping(uint256 => bool)) public passportNonces;
@@ -88,6 +89,9 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     address public feeRecipient;
     uint256 public collectedFees;
 
+    // Migration pause: blocks new deposits while allowing withdrawals during rollup upgrade window
+    bool public depositsActive = true;
+
     // =============================================================
     // EVENTS
     // =============================================================
@@ -101,8 +105,10 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     event FeeRecipientUpdated(address indexed newFeeRecipient);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
     event TokensRescued(address indexed token, address indexed to, uint256 amount);
-    event AttestationConfigUpdated(address indexed attester, uint256 circuitId, address indexed signer);
+    event AttestationConfigUpdated(address indexed attester, uint256 circuitId, uint256 actionId, address indexed signer);
     event TrustedForwarderUpdated(address indexed forwarder, bool trusted);
+    event DepositsBlocked();
+    event DepositsUnblocked();
     event OwnershipTransferProposed(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferCancelled(address indexed currentOwner);
     // =============================================================
@@ -115,6 +121,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         uint256 _feeBasisPoints,
         address _humanIdAttester,
         uint256 _cleanHandsCircuitId,
+        uint256 _cleanHandsActionId,
         address _passportSigner
     ) Ownable(_initialOwner) {
         DEPLOYER = _msgSender();
@@ -128,6 +135,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         if (_passportSigner == address(0)) revert InvalidAddress();
         humanIdAttester = _humanIdAttester;
         cleanHandsCircuitId = _cleanHandsCircuitId;
+        cleanHandsActionId = _cleanHandsActionId;
         passportSigner = _passportSigner;
     }
 
@@ -160,6 +168,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         nonReentrant
         returns (bytes32, uint256, uint256)
     {
+        if (!depositsActive) revert DepositsPaused();
         require(_amount > 0, "Amount must be greater than zero");
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
@@ -183,6 +192,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
     ) external whenNotPaused nonReentrant returns (bytes32, uint256, uint256) {
+        if (!depositsActive) revert DepositsPaused();
         require(_amount > 0, "Amount must be greater than zero");
         _validatePrivateAttestations(_msgSender(), _amount, _cleanHands, _passport);
 
@@ -208,6 +218,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
     ) external whenNotPaused nonReentrant returns (bytes32, uint256, uint256) {
+        if (!depositsActive) revert DepositsPaused();
         if (!trustedForwarders[msg.sender]) revert NotTrustedForwarder();
         require(_amount > 0, "Amount must be greater than zero");
         _validatePrivateAttestations(_depositor, _amount, _cleanHands, _passport);
@@ -267,19 +278,33 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         _unpause();
     }
 
+    /// @notice Pause new deposits only. Withdrawals remain live.
+    ///         Use during rollup upgrade delay window (migration pause).
+    function pauseDeposits() external onlyOwner {
+        depositsActive = false;
+        emit DepositsBlocked();
+    }
+
+    /// @notice Re-enable deposits after migration is complete.
+    function unpauseDeposits() external onlyOwner {
+        depositsActive = true;
+        emit DepositsUnblocked();
+    }
+
     function setTrustedForwarder(address _forwarder, bool _trusted) external onlyOwner {
         if (_forwarder == address(0)) revert InvalidAddress();
         trustedForwarders[_forwarder] = _trusted;
         emit TrustedForwarderUpdated(_forwarder, _trusted);
     }
 
-    function updateAttestationConfig(address _attester, uint256 _circuitId, address _signer) external onlyOwner {
+    function updateAttestationConfig(address _attester, uint256 _circuitId, uint256 _actionId, address _signer) external onlyOwner {
         if (_attester == address(0)) revert InvalidAddress();
         if (_signer == address(0)) revert InvalidAddress();
         humanIdAttester = _attester;
         cleanHandsCircuitId = _circuitId;
+        cleanHandsActionId = _actionId;
         passportSigner = _signer;
-        emit AttestationConfigUpdated(_attester, _circuitId, _signer);
+        emit AttestationConfigUpdated(_attester, _circuitId, _actionId, _signer);
     }
 
     function updateFee(uint256 _newFeeBasisPoints) external onlyOwner {
@@ -327,7 +352,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
                 revert CleanHandsNonceUsed();
             }
             verified = _verifyCleanHandsSignatureFor(
-                _depositor, _cleanHands.nonce, cleanHandsCircuitId, _cleanHands.actionId, _cleanHands.signature
+                _depositor, _cleanHands.nonce, cleanHandsCircuitId, cleanHandsActionId, _cleanHands.signature
             );
             cleanHandsNonces[_depositor][_cleanHands.nonce] = true;
         }
@@ -353,11 +378,9 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
 
     function verifyCleanHandsSignature(
         uint256 nonce,
-        uint256 circuitId,
-        uint256 actionId,
         bytes memory signature
     ) public view returns (bool) {
-        return _verifyCleanHandsSignatureFor(_msgSender(), nonce, circuitId, actionId, signature);
+        return _verifyCleanHandsSignatureFor(_msgSender(), nonce, cleanHandsCircuitId, cleanHandsActionId, signature);
     }
 
     function _verifyCleanHandsSignatureFor(

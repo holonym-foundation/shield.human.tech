@@ -372,6 +372,7 @@ const L1_URL = process.env.L1_URL || getL1RpcUrl()
 const MINT_AMOUNT = BigInt(process.env.MINT_AMOUNT || '1000000000000000') // 1e15
 const FEE_BASIS_POINTS = BigInt(process.env.FEE_BASIS_POINTS || '500') // 5% fee
 const CLEAN_HANDS_CIRCUIT_ID = BigInt(process.env.CLEAN_HANDS_CIRCUIT_ID || '0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19')
+const CLEAN_HANDS_ACTION_ID = BigInt(process.env.CLEAN_HANDS_ACTION_ID || '123456789')
 
 // Attestation/signer keys — all required via .env
 if (!process.env.POCH_ATTESTER_PRIVATE_KEY) throw new Error('POCH_ATTESTER_PRIVATE_KEY is required in .env')
@@ -671,6 +672,7 @@ async function deployCustomTokenPortal(
       FEE_BASIS_POINTS,
       humanIdAttester,
       CLEAN_HANDS_CIRCUIT_ID,
+      CLEAN_HANDS_ACTION_ID,
       passportSigner,
     ]
   ).then(({ address }) => address)
@@ -905,7 +907,6 @@ const SwapBridgeRouterAbiLocal = [
         { name: 'isPrivate', type: 'bool' },
         { name: 'cleanHands', type: 'tuple', components: [
           { name: 'nonce', type: 'uint256' },
-          { name: 'actionId', type: 'uint256' },
           { name: 'signature', type: 'bytes' },
         ] },
         { name: 'passport', type: 'tuple', components: [
@@ -1350,6 +1351,7 @@ async function deployCompliantTokenSetup(
   logger.info(`[L1]   passportSigner:  ${passportSignerAccount.address}`)
   logger.info(`[L1]   feeBasisPoints:  ${FEE_BASIS_POINTS}`)
   logger.info(`[L1]   circuitId:       ${CLEAN_HANDS_CIRCUIT_ID}`)
+  logger.info(`[L2]   actionId:        ${CLEAN_HANDS_ACTION_ID}`)
 
   const l1PortalContractAddress = await deployCustomTokenPortal(
     l1Client,
@@ -1385,7 +1387,7 @@ async function deployCompliantTokenSetup(
   })
   logger.info(`[L2] ${tokenConfig.symbol} Token at ${l2TokenContract.address}`)
 
-  // ── Step 6: Deploy L2 Custom TokenBridge (7 args) ──
+  // ── Step 6: Deploy L2 Custom TokenBridge (8 args) ──
   logger.info(`[L2] Deploying Custom TokenBridge for ${tokenConfig.symbol}`)
   const { contract: l2BridgeContract } = await TokenBridgeContract.deploy(
     wallet,
@@ -1394,6 +1396,7 @@ async function deployCompliantTokenSetup(
     l2PochPubkey.x,              // human_id_attester_x (Grumpkin)
     l2PochPubkey.y,              // human_id_attester_y (Grumpkin)
     CLEAN_HANDS_CIRCUIT_ID,      // circuit_id
+    CLEAN_HANDS_ACTION_ID,       // action_id
     l2PassportPubkey.x,          // passport_signer_x (Grumpkin)
     l2PassportPubkey.y,          // passport_signer_y (Grumpkin)
   ).send({
@@ -2064,20 +2067,19 @@ async function testPrivateDepositFuelWithAttestation(
 
     // Build attestation data — signed over the depositor's L1 address (ownerEthAddress)
     // The SwapBridgeRouter passes msg.sender as _depositor to depositToAztecPrivateFor
-    let cleanHandsData: { nonce: bigint; actionId: bigint; signature: `0x${string}` }
+    let cleanHandsData: { nonce: bigint; signature: `0x${string}` }
     let passportData: { maxAmount: bigint; nonce: bigint; deadline: bigint; signature: `0x${string}` }
 
     if (attestationType === 'poch') {
       const pochNonce = BigInt(Date.now())
-      const actionId = 987654321n
       logger.info(`[L1] Signing POCH attestation for fuel deposit (nonce=${pochNonce})`)
       const pochSig = await signCleanHandsAttestation({
         nonce: pochNonce,
         circuitId: CLEAN_HANDS_CIRCUIT_ID,
-        actionId,
+        actionId: CLEAN_HANDS_ACTION_ID,
         userAddress: ownerEthAddress,
       })
-      cleanHandsData = { nonce: pochNonce, actionId, signature: pochSig }
+      cleanHandsData = { nonce: pochNonce, signature: pochSig }
       passportData = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
     } else {
       const l1Public = createPublicClient({ transport: http(L1_URL) })
@@ -2093,7 +2095,7 @@ async function testPrivateDepositFuelWithAttestation(
         deadline,
         portalAddress: portalAddr,
       })
-      cleanHandsData = { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` }
+      cleanHandsData = { nonce: 0n, signature: '0x' as `0x${string}` }
       passportData = { maxAmount, nonce: passportNonce, deadline, signature: passportSig }
     }
 
@@ -2489,15 +2491,14 @@ async function testPrivateDepositAndClaimFlow(
 
   if (attestationType === 'poch') {
     const pochNonce = BigInt(Date.now())
-    const actionId = 123456789n
-    logger.info(`[L1] Signing POCH attestation (nonce=${pochNonce}, actionId=${actionId})`)
+    logger.info(`[L1] Signing POCH attestation (nonce=${pochNonce})`)
     const pochSig = await signCleanHandsAttestation({
       nonce: pochNonce,
       circuitId: CLEAN_HANDS_CIRCUIT_ID,
-      actionId,
+      actionId: CLEAN_HANDS_ACTION_ID,
       userAddress: ownerEthAddress,
     })
-    cleanHandsData = { nonce: pochNonce, actionId, signature: pochSig }
+    cleanHandsData = { nonce: pochNonce, signature: pochSig }
     passportData = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as Hex }
   } else {
     const l1Public = createPublicClient({ transport: http(L1_URL) })
@@ -2513,7 +2514,7 @@ async function testPrivateDepositAndClaimFlow(
       deadline,
       portalAddress: l1PortalAddr,
     })
-    cleanHandsData = { nonce: 0n, actionId: 0n, signature: '0x' as Hex }
+    cleanHandsData = { nonce: 0n, signature: '0x' as Hex }
     passportData = { maxAmount, nonce: passportNonce, deadline, signature: passportSig }
   }
 
@@ -2636,22 +2637,21 @@ async function testPrivateExitFlow(
   logger.info(`[L2] Private AuthWit created and stored in PXE`)
 
   // Build L2 attestation data
-  let cleanHandsData: { nonce: bigint, action_id: bigint, signature: number[] }
+  let cleanHandsData: { nonce: bigint, signature: number[] }
   let passportData: { max_amount: bigint, nonce: bigint, deadline: bigint, signature: number[] }
 
   const l2BridgeAddress = AztecAddress.fromString(deployed.l2BridgeContract)
 
   if (attestationType === 'poch') {
     const pochNonce = BigInt(Date.now())
-    const actionId = 123456789n
-    logger.info(`[L2] Signing L2 POCH attestation (nonce=${pochNonce}, actionId=${actionId})`)
+    logger.info(`[L2] Signing L2 POCH attestation (nonce=${pochNonce})`)
     const sig = await signL2CleanHandsAttestation({
       circuitId: CLEAN_HANDS_CIRCUIT_ID,
-      actionId,
+      actionId: CLEAN_HANDS_ACTION_ID,
       nonce: pochNonce,
       userAztecAddress: ownerAztecAddress,
     })
-    cleanHandsData = { nonce: pochNonce, action_id: actionId, signature: sig }
+    cleanHandsData = { nonce: pochNonce, signature: sig }
     passportData = { max_amount: 0n, nonce: 0n, deadline: 0n, signature: new Array(64).fill(0) }
   } else {
     const l1Public = createPublicClient({ transport: http(L1_URL) })
@@ -2667,7 +2667,7 @@ async function testPrivateExitFlow(
       deadline,
       bridgeAddress: l2BridgeAddress,
     })
-    cleanHandsData = { nonce: 0n, action_id: 0n, signature: new Array(64).fill(0) }
+    cleanHandsData = { nonce: 0n, signature: new Array(64).fill(0) }
     passportData = { max_amount: maxAmount, nonce: passportNonce, deadline, signature: sig }
   }
 
@@ -2799,14 +2799,14 @@ async function testNegativeCrossClaim(
     const pochSig = await signCleanHandsAttestation({
       nonce: pochNonce,
       circuitId: CLEAN_HANDS_CIRCUIT_ID,
-      actionId: 123456789n,
+      actionId: CLEAN_HANDS_ACTION_ID,
       userAddress: ownerEthAddress,
     })
     logger.info(`[L1] depositToAztecPrivate (amount=${depositAmount})`)
     const depositTx = await l1Portal.write.depositToAztecPrivate([
       depositAmount,
       secretHash.toString() as Hex,
-      { nonce: pochNonce, actionId: 123456789n, signature: pochSig },
+      { nonce: pochNonce, signature: pochSig },
       { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as Hex },
     ])
     const receipt = await l1Client.waitForTransactionReceipt({ hash: depositTx, timeout: getTimeouts().txTimeout })
@@ -3022,7 +3022,7 @@ async function testWrongSecretCantClaimPrivate(
   const pochSig = await signCleanHandsAttestation({
     nonce: pochNonce,
     circuitId: CLEAN_HANDS_CIRCUIT_ID,
-    actionId: 123456789n,
+    actionId: CLEAN_HANDS_ACTION_ID,
     userAddress: ownerEthAddress,
   })
 
@@ -3030,7 +3030,7 @@ async function testWrongSecretCantClaimPrivate(
   const depositTx = await l1Portal.write.depositToAztecPrivate([
     depositAmount,
     secretHash.toString() as Hex,
-    { nonce: pochNonce, actionId: 123456789n, signature: pochSig },
+    { nonce: pochNonce, signature: pochSig },
     { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as Hex },
   ])
   const receipt = await l1Client.waitForTransactionReceipt({ hash: depositTx, timeout: getTimeouts().txTimeout })

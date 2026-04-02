@@ -545,7 +545,7 @@ contract SwapBridgeRouterTest is Test {
     // ═════════════════════════════════════════════════════════════════
 
     function _emptyCleanHands() internal pure returns (CleanHandsData memory) {
-        return CleanHandsData({ nonce: 0, actionId: 0, signature: "" });
+        return CleanHandsData({ nonce: 0, signature: "" });
     }
 
     function _emptyPassport() internal pure returns (PassportData memory) {

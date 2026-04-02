@@ -13,6 +13,7 @@ use std::embedded_curve_ops::{EmbeddedCurvePoint, EmbeddedCurveScalar, multi_sca
 
 pub global DUMMY_PORTAL: EthAddress = EthAddress::from_field(0xdead);
 pub global DUMMY_CIRCUIT_ID: Field = 42;
+pub global DUMMY_ACTION_ID: Field = 1;
 
 // ========================================================================
 // Schnorr Signing Primitives (adapted from FPC test pattern)
@@ -212,6 +213,7 @@ pub unconstrained fn setup() -> (TestEnvironment, AztecAddress, AztecAddress, Az
         pk.x,
         pk.y,
         DUMMY_CIRCUIT_ID,
+        DUMMY_ACTION_ID,
         pk.x,
         pk.y,
     );

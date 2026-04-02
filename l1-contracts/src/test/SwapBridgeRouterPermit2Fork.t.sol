@@ -147,7 +147,7 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
             path: path,
             zeroForOnes: zeroForOnes,
             isPrivate: false,
-            cleanHands: CleanHandsData({nonce: 0, actionId: 0, signature: ""}),
+            cleanHands: CleanHandsData({nonce: 0, signature: ""}),
             passport: PassportData({maxAmount: 0, nonce: 0, deadline: 0, signature: ""})
         });
     }

@@ -219,6 +219,7 @@ unconstrained fn test_update_attestation_config() {
             new_attester_x,
             new_attester_y,
             new_circuit_id,
+            utils::DUMMY_ACTION_ID, // action_id
             new_passport_x,
             new_passport_y,
         ),
@@ -245,6 +246,7 @@ unconstrained fn test_update_attestation_config_fails_non_owner() {
             new_attester_x,
             new_attester_y,
             new_circuit_id,
+            utils::DUMMY_ACTION_ID, // action_id
             new_passport_x,
             new_passport_y,
         ),
@@ -312,7 +314,7 @@ unconstrained fn test_passport_nonce_different_users_independent() {
 #[test]
 unconstrained fn test_schnorr_sign_clean_hands_valid() {
     let circuit_id = utils::DUMMY_CIRCUIT_ID;
-    let action_id: Field = 1;
+    let action_id: Field = utils::DUMMY_ACTION_ID;
     let nonce: Field = 100;
     let user_address = AztecAddress::from_field(0xabc);
 
@@ -333,7 +335,7 @@ unconstrained fn test_schnorr_sign_clean_hands_valid() {
 #[test]
 unconstrained fn test_schnorr_sign_clean_hands_wrong_message() {
     let circuit_id = utils::DUMMY_CIRCUIT_ID;
-    let action_id: Field = 1;
+    let action_id: Field = utils::DUMMY_ACTION_ID;
     let nonce: Field = 100;
     let user_address = AztecAddress::from_field(0xabc);
 
@@ -354,7 +356,7 @@ unconstrained fn test_schnorr_sign_clean_hands_wrong_message() {
 #[test]
 unconstrained fn test_schnorr_sign_clean_hands_wrong_key() {
     let circuit_id = utils::DUMMY_CIRCUIT_ID;
-    let action_id: Field = 1;
+    let action_id: Field = utils::DUMMY_ACTION_ID;
     let nonce: Field = 100;
     let user_address = AztecAddress::from_field(0xabc);
 
