@@ -32,7 +32,17 @@ const logger = createLogger('test-fuel-swap')
 // ── Sepolia constants ──────────────────────────────────────────────
 const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as `0x${string}`
 const POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as `0x${string}`
-const AZTEC_TOKEN = '0x35d0186d1FD53b72996475D965C5Ed171D52b986' as `0x${string}`
+// Read AZTEC_TOKEN from deployment — do NOT hardcode (differs per environment)
+let AZTEC_TOKEN: `0x${string}` = '0x0000000000000000000000000000000000000000' as `0x${string}`
+try {
+  const { loadActiveDeployment } = await import('./utils/save_contracts.js')
+  const _d = loadActiveDeployment()
+  AZTEC_TOKEN = ((_d?.nodeInfo?.l1ContractAddresses as any)?.feeJuiceAddress ?? '') as `0x${string}`
+  if (!AZTEC_TOKEN) throw new Error('feeJuiceAddress missing from deployment')
+} catch (e) {
+  console.error('Failed to read AZTEC_TOKEN from deployment:', e)
+  process.exit(1)
+}
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
 
 // Pool key params (must match seed-pools.ts / index-devnet.ts)

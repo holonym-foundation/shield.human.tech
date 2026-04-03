@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
-import { buildSwapRoute, getV4Quote } from '@/utils/fuelPricing'
+import { buildSwapCandidates, getBestRoute } from '@/utils/fuelPricing'
 import { BRIDGED_FPC_ADDRESS, L1_RPC_URL } from '@/config'
 import { useTokenPrices } from '@/utils/coinGeckoPrice'
 
@@ -57,14 +57,16 @@ function useV4FuelQuote(
 
     const timeout = setTimeout(async () => {
       try {
-        const { poolKeys, zeroForOnes } = buildSwapRoute(tokenAddress as `0x${string}`)
-        const output = await getV4Quote({
-          poolKeys,
-          zeroForOnes,
+        const candidates = buildSwapCandidates(tokenAddress as `0x${string}`)
+        const best = await getBestRoute({
+          candidates,
           inputAmount: inputRaw,
           l1RpcUrl: L1_RPC_URL,
         })
-        setFjOutput(output)
+        console.log(
+          `[FuelToggle] Best route: ${best.route.label} → ${(Number(best.expectedOutput) / 1e18).toFixed(4)} FJ`,
+        )
+        setFjOutput(best.expectedOutput)
         setError(null)
       } catch (err) {
         console.error('[FuelToggle] V4 quote failed:', err)

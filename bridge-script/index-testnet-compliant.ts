@@ -833,9 +833,15 @@ function generateTokenSalts(symbol: string) {
 
 const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as `0x${string}`
 const POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as `0x${string}`
-const FEE_ASSET_HANDLER_ADDR = '0xED9c5557d2E0abCc7c7FCA958eE4292199413494' as `0x${string}`
-const AZTEC_TOKEN = '0x35d0186d1FD53b72996475D965C5Ed171D52b986' as `0x${string}`
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
+// IMPORTANT: These MUST match the deployment's nodeInfo. The values below are loaded
+// from the active deployment at module init. If no deployment is active they fall back
+// to the Aztec Alpha (mainnet-settling) addresses, but the pool-seeding functions
+// always prefer l1ContractAddresses from nodeInfo when available.
+// These are populated from l1ContractAddresses inside main() — NOT read at module init.
+// The deploy script creates a fresh deployment with nodeInfo, so these aren't available until then.
+let FEE_ASSET_HANDLER_ADDR = '' as `0x${string}`
+let AZTEC_TOKEN = '' as `0x${string}`
 
 // ETH/FeeJuice pool params (~10,500,000,000 FeeJuice per ETH)
 // Chosen so that 0.02 USDC → ~100 FJ (2x buffer over ~48 FJ gas at current testnet fees)
@@ -850,7 +856,7 @@ const ETH_AZTEC_LIQUIDITY = 2n * 10n ** 17n  // Virtual FJ ≈ L×8470 ticks ≈
 const ETH_SEED = 1000000000000000n  // 0.001 ETH — sufficient for 7e10 ETH_units virtual reserve
 const FEE_MINT_COUNT = 2            // 2000 FJ > 1694 FJ virtual needed
 
-// ERC20/WETH pool — unchanged
+// ERC20/WETH pool — multi-hop fallback (skipped by default)
 const ERC20_WETH_SQRT_PRICE = 1728916962386276374966316084832192n
 const ERC20_WETH_TICK_LOWER = 169800
 const ERC20_WETH_TICK_UPPER = 229800
@@ -858,6 +864,16 @@ const ERC20_WETH_FEE = 3000
 const ERC20_WETH_TICK_SPACING = 60
 const ERC20_WETH_LIQUIDITY = 1000000000000n
 const WETH_SEED = 20000000000000000n
+
+// ERC20/AZTEC direct pool — primary fuel route (~10 FJ per USDC)
+// sqrtPriceX96 computed at runtime based on currency ordering (see seedAllTokenPools)
+const DIRECT_FEE = 3000
+const DIRECT_TICK_SPACING = 60
+const DIRECT_TICK_LOWER = -887220 // full range
+const DIRECT_TICK_UPPER = 887220  // full range
+const DIRECT_LIQUIDITY = 1000000000000000n // 1e15
+const DIRECT_FJ_MINT_COUNT = 100 // 100 x 1000 FJ = 100K FJ
+const SKIP_DIRECT_POOL = process.env.SKIP_DIRECT_POOL === 'true'
 
 // Minimal ABIs for pool seeding / fuel test interactions
 const ERC20_ABI = [
@@ -1021,9 +1037,10 @@ async function logFuelTestBalances(
   logger.info(`  L1 deployer ETH:  ${(Number(ethBal) / 1e18).toFixed(4)} ETH`)
 }
 
-async function logPoolBalances(l1Client: ExtendedViemWalletClient, deployedContracts: DeployedCompliantToken[], label: string, logger: Logger) {
+async function logPoolBalances(l1Client: ExtendedViemWalletClient, deployedContracts: DeployedCompliantToken[], label: string, logger: Logger, feeJuiceAddr?: `0x${string}`) {
   const l1Public = createPublicClient({ transport: http(L1_URL) })
   const deployer = l1Client.account.address
+  const fjAddr = feeJuiceAddr || AZTEC_TOKEN
 
   logger.info(`\n--- Pool & Wallet Balances (${label}) ---`)
   const ethBalance = await l1Public.getBalance({ address: deployer })
@@ -1032,9 +1049,13 @@ async function logPoolBalances(l1Client: ExtendedViemWalletClient, deployedContr
   const pmEthBalance = await l1Public.getBalance({ address: POOL_MANAGER })
   logger.info(`  PoolManager ETH:    ${(Number(pmEthBalance) / 1e18).toFixed(4)} ETH`)
 
-  const aztecToken = getContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, client: l1Public as any }) as any
-  const pmFjBalance = await aztecToken.read.balanceOf([POOL_MANAGER]) as bigint
-  logger.info(`  PoolManager FJ:     ${(Number(pmFjBalance) / 1e18).toFixed(2)} FeeJuice ${pmFjBalance > 0n ? '' : '(ETH/AZTEC pool not seeded)'}`)
+  if (fjAddr) {
+    const aztecToken = getContract({ address: fjAddr, abi: ERC20_ABI, client: l1Public as any }) as any
+    const pmFjBalance = await aztecToken.read.balanceOf([POOL_MANAGER]) as bigint
+    logger.info(`  PoolManager FJ:     ${(Number(pmFjBalance) / 1e18).toFixed(2)} FeeJuice ${pmFjBalance > 0n ? '' : '(ETH/AZTEC pool not seeded)'}`)
+  } else {
+    logger.info(`  PoolManager FJ:     (skipped — no FeeJuice address)`)
+  }
 
   const weth = getContract({ address: WETH_ADDRESS, abi: ERC20_ABI, client: l1Public as any }) as any
   const pmWethBalance = await weth.read.balanceOf([POOL_MANAGER]) as bigint
@@ -1295,7 +1316,89 @@ async function seedAllTokenPools(
     }
   }
 
-  logger.info(`\n✅ Pool seeding complete — ${erc20Tokens.length} ERC20/WETH pools + 1 ETH/AZTEC pool`)
+  // ── 3. Seed ERC20/AZTEC direct pool (primary fuel route) ──────────
+  if (SKIP_DIRECT_POOL) {
+    logger.info('\n--- ERC20/AZTEC direct pool — skipping (SKIP_DIRECT_POOL=true) ---')
+  } else if (erc20Tokens.length > 0) {
+    const token = erc20Tokens[0]
+    const tokenAddr = token.l1TokenContract as `0x${string}`
+    try {
+      logger.info(`\n--- ${token.symbol}/AZTEC direct pool ---`)
+
+      const deployHash = await l1Client.deployContract({
+        abi: PoolSeederAbi,
+        bytecode: PoolSeederBytecode,
+        args: [POOL_MANAGER],
+      })
+      const deployReceipt = await l1Client.waitForTransactionReceipt({ hash: deployHash, timeout: 120_000 })
+      const seederAddr = deployReceipt.contractAddress as `0x${string}`
+      logger.info(`  PoolSeeder deployed at ${seederAddr}`)
+
+      const seeder = getContract({ address: seederAddr, abi: PoolSeederAbi, client: l1Client as any }) as any
+      const erc20 = getContract({ address: tokenAddr, abi: ERC20_ABI, client: l1Client as any }) as any
+      const feeJuiceToken = getContract({ address: feeJuiceAddr, abi: ERC20_ABI, client: l1Client as any }) as any
+      const feeHandler = getContract({ address: feeAssetHandlerAddr, abi: FEE_HANDLER_ABI, client: l1Client as any }) as any
+
+      const decimals = await erc20.read.decimals() as number
+      const directErc20Amount = BigInt(50000) * (10n ** BigInt(decimals))
+
+      // Mint ERC20 for direct pool
+      const mintTx = await erc20.write.mint([seederAddr, directErc20Amount])
+      await sendAndWait(l1Client, mintTx, `Minted ${directErc20Amount} ${token.symbol}`, logger)
+
+      // Mint FeeJuice for direct pool
+      logger.info(`  Minting FeeJuice: ${DIRECT_FJ_MINT_COUNT} x 1000 FJ`)
+      for (let i = 0; i < DIRECT_FJ_MINT_COUNT; i++) {
+        const tx = await feeHandler.write.mint([seederAddr])
+        await l1Client.waitForTransactionReceipt({ hash: tx, timeout: 120_000 })
+        if ((i + 1) % 10 === 0 || i === DIRECT_FJ_MINT_COUNT - 1) logger.info(`  ... minted ${i + 1}/${DIRECT_FJ_MINT_COUNT}`)
+      }
+
+      // Transfer deployer's FJ to seeder
+      const deployerFj = await feeJuiceToken.read.balanceOf([deployer]) as bigint
+      if (deployerFj > 0n) {
+        const tx = await feeJuiceToken.write.transfer([seederAddr, deployerFj])
+        await sendAndWait(l1Client, tx, `Transferred ${deployerFj} FJ to seeder`, logger)
+      }
+
+      // Compute sqrtPriceX96 based on currency ordering
+      // Target: 10 FJ (18 dec) per 1 USDC (6 dec)
+      const [c0, c1] = sortCurrencies(tokenAddr, feeJuiceAddr)
+      let directSqrtPrice: bigint
+      if (BigInt(tokenAddr) < BigInt(feeJuiceAddr)) {
+        // ERC20 is currency0, AZTEC is currency1 → price = AZTEC/ERC20 = high
+        directSqrtPrice = 250541396071120286692299382636675072n
+      } else {
+        // AZTEC is currency0, ERC20 is currency1 → price = ERC20/AZTEC = low
+        directSqrtPrice = 25054144837504792002560n
+      }
+
+      const poolKey = { currency0: c0, currency1: c1, fee: DIRECT_FEE, tickSpacing: DIRECT_TICK_SPACING, hooks: ZERO_ADDRESS }
+      const setupArgs = [poolKey, directSqrtPrice, DIRECT_TICK_LOWER, DIRECT_TICK_UPPER, DIRECT_LIQUIDITY] as const
+      try {
+        await seeder.simulate.setup(setupArgs)
+        logger.info('  Dry-run passed — sending seed tx...')
+      } catch (simError) {
+        logger.error(`  ❌ Dry-run failed: ${simError}`)
+        throw simError
+      }
+      const seedTx = await seeder.write.setup(setupArgs)
+      await sendAndWait(l1Client, seedTx, `${token.symbol}/AZTEC direct pool seeded`, logger)
+
+      await sendAndWait(l1Client, await seeder.write.sweep([tokenAddr]), `Swept ${token.symbol}`, logger)
+      await sendAndWait(l1Client, await seeder.write.sweep([feeJuiceAddr]), 'Swept FeeJuice', logger)
+      logger.info(`✅ ${token.symbol}/AZTEC direct pool done`)
+    } catch (error) {
+      logger.error(`❌ ${token.symbol}/AZTEC direct pool seeding failed: ${error}`)
+    }
+  }
+
+  const poolsSummary = [
+    SKIP_ETH_AZTEC ? '' : '1 ETH/AZTEC',
+    `${erc20Tokens.length} ERC20/WETH`,
+    !SKIP_DIRECT_POOL && erc20Tokens.length > 0 ? '1 ERC20/AZTEC direct' : '',
+  ].filter(Boolean).join(' + ')
+  logger.info(`\n✅ Pool seeding complete — ${poolsSummary}`)
 }
 
 // ─── Compliant Token Setup ───────────────────────────────────────────────────
@@ -3459,15 +3562,16 @@ async function main() {
     }
 
     // Check balances BEFORE seeding
-    await logPoolBalances(l1Client, deployedContracts, 'BEFORE pool seeding', logger)
-
-    // Seed Uniswap V4 pools for all deployed tokens
     const feeJuiceAddrForSeed = ((l1ContractAddresses as any).feeJuiceAddress?.toString() || AZTEC_TOKEN) as `0x${string}`
     const feeAssetHandlerAddrForSeed = ((l1ContractAddresses as any).feeAssetHandlerAddress?.toString() || FEE_ASSET_HANDLER_ADDR) as `0x${string}`
+
+    await logPoolBalances(l1Client, deployedContracts, 'BEFORE pool seeding', logger, feeJuiceAddrForSeed)
+
+    // Seed Uniswap V4 pools for all deployed tokens
     await seedAllTokenPools(deployedContracts, l1Client, logger, feeJuiceAddrForSeed, feeAssetHandlerAddrForSeed)
 
     // Check balances AFTER seeding
-    await logPoolBalances(l1Client, deployedContracts, 'AFTER pool seeding', logger)
+    await logPoolBalances(l1Client, deployedContracts, 'AFTER pool seeding', logger, feeJuiceAddrForSeed)
 
     // Set SwapBridgeRouter as trusted forwarder on all token portals
     const deployment = loadActiveDeployment()

@@ -42,7 +42,7 @@ import {
 } from './bridge/bridgeL1ToL2'
 import { BRIDGED_FPC_ADDRESS, SWAP_BRIDGE_ROUTER_ADDRESS, UNISWAP_FUEL_SWAP_ADDRESS, L1_RPC_URL } from '@/config'
 import { getUniswapFuelQuote, type FuelQuote } from '@/utils/fuelQuote'
-import { buildSwapRoute, getV4Quote } from '@/utils/fuelPricing'
+import { buildSwapCandidates, getBestRoute } from '@/utils/fuelPricing'
 import { createSigningMessage, deriveEncryptionKey, decryptData } from '@/utils/encryption'
 
 // Fix the bytecode format
@@ -57,20 +57,21 @@ async function buildFuelQuote(params: {
   inputDecimals: number
 }): Promise<FuelQuote> {
   const { bridgeTokenAddress, fuelAmount } = params
-  const { poolKeys, zeroForOnes } = buildSwapRoute(bridgeTokenAddress)
-
-  const expectedOutput = await getV4Quote({
-    poolKeys,
-    zeroForOnes,
+  const candidates = buildSwapCandidates(bridgeTokenAddress)
+  const best = await getBestRoute({
+    candidates,
     inputAmount: fuelAmount,
     l1RpcUrl: L1_RPC_URL,
   })
+  console.log(
+    `[buildFuelQuote] Best route: ${best.route.label} → ${(Number(best.expectedOutput) / 1e18).toFixed(4)} FJ`,
+  )
 
   return getUniswapFuelQuote({
-    expectedOutput,
+    expectedOutput: best.expectedOutput,
     slippageBps: 300, // 3% slippage for testnet
-    poolKeys,
-    zeroForOnes,
+    poolKeys: best.route.poolKeys,
+    zeroForOnes: best.route.zeroForOnes,
   })
 }
 
@@ -868,7 +869,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       // only works once the sequencer includes them in an L2 block (up to 1 epoch).
       await waitForNextL2Block({
         onPoll: (elapsed) => {
-          notify('info', `Waiting for L2 sequencer to include message (${Math.round(elapsed / 60)}m elapsed)...`)
+          notify('info', `Waiting for L2 sequencer to include message (${Math.round(elapsed / 60)}m elapsed)...`, {
+            toastId: 'l2-block-wait',
+          })
         },
       })
 

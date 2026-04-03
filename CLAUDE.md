@@ -34,9 +34,9 @@ l1-contracts/                — Solidity contracts (Foundry)
 - **L2**: Aztec (Noir contracts), `@aztec/*` packages
 - **Scripts**: TypeScript, viem, `@aztec/ethereum`
 - **Frontend**: Next.js, React
-- **Network**: Sepolia testnet (devnet), Aztec v4.0.0-devnet.2-patch.3
+- **Network**: Aztec Alpha (settles on Ethereum mainnet), Aztec v4.2.0-aztecnr-rc.2
 
-### Sepolia V4 Addresses
+### L1 Contract Addresses (Ethereum Mainnet)
 
 - PoolManager: `0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`
 - WETH: `0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14`

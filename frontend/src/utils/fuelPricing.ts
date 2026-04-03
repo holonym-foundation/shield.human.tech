@@ -18,6 +18,8 @@ import {
   FEE_POOL_FEE,
   FEE_POOL_TICK_SPACING,
   FEE_POOL_USES_NATIVE_ETH,
+  DIRECT_POOL_FEE,
+  DIRECT_POOL_TICK_SPACING,
 } from '@/config'
 
 export const FEE_JUICE_DECIMALS = 18
@@ -36,7 +38,13 @@ export function getTokenPriceUsd(symbol: string, prices?: Record<string, number>
   }
   // Fallback for Sepolia testnet (tokens have no real market price)
   const SEPOLIA_FALLBACK: Record<string, number> = {
-    WETH: 2100, USDC: 1, USDT: 1, DAI: 1, WBTC: 60000, AZTEC: 0.02, FEE_JUICE: 0.02,
+    WETH: 2100,
+    USDC: 1,
+    USDT: 1,
+    DAI: 1,
+    WBTC: 60000,
+    AZTEC: 0.02,
+    FEE_JUICE: 0.02,
   }
   return SEPOLIA_FALLBACK[symbol.toUpperCase()] ?? 1.0
 }
@@ -68,7 +76,11 @@ export function formatFuelDisplay(rawFj: bigint): string {
  * e.g. usdToTokenAmount(5, "USDC") → "5" (at $1/USDC)
  *      usdToTokenAmount(5, "WETH") → "0.0024" (at $2100/WETH)
  */
-export function usdToTokenAmount(usdAmount: number, tokenSymbol: string, prices?: Record<string, number> | null): string {
+export function usdToTokenAmount(
+  usdAmount: number,
+  tokenSymbol: string,
+  prices?: Record<string, number> | null,
+): string {
   const pricePerToken = getTokenPriceUsd(tokenSymbol, prices)
   if (pricePerToken <= 0) return '0'
   const tokenAmount = usdAmount / pricePerToken
@@ -114,39 +126,71 @@ function isZeroForOne(selling: string, buying: string): boolean {
   return BigInt(selling) < BigInt(buying)
 }
 
-/**
- * Build the V4 swap route for a given input token → FeeJuice.
- *
- * - Single-hop if inputToken is WETH (WETH → ETH/AZTEC or WETH → AZTEC)
- * - Multi-hop otherwise (Token → WETH → ETH/AZTEC)
- *
- * When FEE_POOL_USES_NATIVE_ETH is true, the FeeJuice pool is keyed to native ETH.
- * The UniswapFuelSwap contract handles WETH→ETH unwrapping internally.
- */
-export function buildSwapRoute(inputToken: `0x${string}`): {
+export interface CandidateRoute {
+  label: string
   poolKeys: PoolKeyParam[]
   zeroForOnes: boolean[]
-} {
+}
+
+export interface RouteResult {
+  route: CandidateRoute
+  expectedOutput: bigint
+}
+
+/**
+ * Build candidate V4 swap routes for a given input token → FeeJuice.
+ *
+ * Returns multiple candidates that are quoted in parallel by getBestRoute().
+ * Routes that hit non-existent pools revert during quoting and are skipped.
+ */
+export function buildSwapCandidates(inputToken: `0x${string}`): CandidateRoute[] {
   const weth = WETH_ADDRESS
   const aztec = FEE_JUICE_ADDRESS
   const feePoolBase = FEE_POOL_USES_NATIVE_ETH ? NATIVE_ETH : weth
+  const candidates: CandidateRoute[] = []
 
   if (inputToken.toLowerCase() === weth.toLowerCase()) {
-    // Single hop: WETH → FeeJuice (via ETH/FEE or WETH/FEE pool)
-    return {
+    // WETH only has one route: WETH → FeeJuice
+    candidates.push({
+      label: 'direct-weth',
       poolKeys: [buildPoolKey(feePoolBase, aztec, FEE_POOL_FEE, FEE_POOL_TICK_SPACING)],
       zeroForOnes: [isZeroForOne(feePoolBase, aztec)],
-    }
+    })
+    return candidates
   }
 
-  // Multi-hop: Token → WETH → FeeJuice
-  return {
+  // Route A: Direct (inputToken → FeeJuice) — pool may not exist
+  candidates.push({
+    label: 'direct',
+    poolKeys: [buildPoolKey(inputToken, aztec, DIRECT_POOL_FEE, DIRECT_POOL_TICK_SPACING)],
+    zeroForOnes: [isZeroForOne(inputToken, aztec)],
+  })
+
+  // Route B: Via WETH (inputToken → WETH → FeeJuice) — multi-hop
+  candidates.push({
+    label: 'via-weth',
     poolKeys: [
       buildPoolKey(inputToken, weth, INTERMEDIATE_POOL_FEE, INTERMEDIATE_POOL_TICK_SPACING),
       buildPoolKey(feePoolBase, aztec, FEE_POOL_FEE, FEE_POOL_TICK_SPACING),
     ],
     zeroForOnes: [isZeroForOne(inputToken, weth), isZeroForOne(feePoolBase, aztec)],
-  }
+  })
+
+  return candidates
+}
+
+/**
+ * Legacy single-route builder. Returns the best route's poolKeys/zeroForOnes.
+ * Kept for backward compatibility with callers that don't use getBestRoute().
+ */
+export function buildSwapRoute(inputToken: `0x${string}`): {
+  poolKeys: PoolKeyParam[]
+  zeroForOnes: boolean[]
+} {
+  // Prefer direct route when available; callers that need smart routing
+  // should use buildSwapCandidates() + getBestRoute() instead.
+  const candidates = buildSwapCandidates(inputToken)
+  return candidates[0]
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -211,12 +255,47 @@ export async function getV4Quote(params: {
 
   let currentAmount = params.inputAmount
   for (let i = 0; i < params.poolKeys.length; i++) {
-    currentAmount = await quoteExactInputSingleCall(
-      client,
-      params.poolKeys[i],
-      params.zeroForOnes[i],
-      currentAmount,
-    )
+    currentAmount = await quoteExactInputSingleCall(client, params.poolKeys[i], params.zeroForOnes[i], currentAmount)
   }
   return currentAmount
+}
+
+/**
+ * Quote all candidate routes in parallel, return the best one.
+ * Non-existent pools revert during quoting and are silently skipped.
+ */
+export async function getBestRoute(params: {
+  candidates: CandidateRoute[]
+  inputAmount: bigint
+  l1RpcUrl: string
+}): Promise<RouteResult> {
+  const { candidates, inputAmount, l1RpcUrl } = params
+
+  const results = await Promise.allSettled(
+    candidates.map(async (route) => {
+      const output = await getV4Quote({
+        poolKeys: route.poolKeys,
+        zeroForOnes: route.zeroForOnes,
+        inputAmount,
+        l1RpcUrl,
+      })
+      return { route, expectedOutput: output }
+    }),
+  )
+
+  const fulfilled: RouteResult[] = []
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i]
+    if (r.status === 'fulfilled' && r.value.expectedOutput > 0n) {
+      fulfilled.push(r.value)
+    }
+  }
+
+  if (fulfilled.length === 0) {
+    throw new Error('All swap routes failed — no pool has liquidity for this token pair')
+  }
+
+  // Pick the route with the highest output
+  fulfilled.sort((a, b) => (b.expectedOutput > a.expectedOutput ? 1 : -1))
+  return fulfilled[0]
 }

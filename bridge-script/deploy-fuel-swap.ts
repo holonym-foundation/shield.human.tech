@@ -40,7 +40,11 @@ async function main() {
 
   const deployment = loadActiveDeployment()
   const feeJuiceAddress = deployment?.nodeInfo?.l1ContractAddresses?.feeJuiceAddress
-    || '0x35d0186d1FD53b72996475D965C5Ed171D52b986'
+    || ''
+  if (!feeJuiceAddress) {
+    logger.error('feeJuiceAddress missing from deployment nodeInfo')
+    process.exit(1)
+  }
 
   logger.info('Deploying UniswapFuelSwap...')
   logger.info(`  PoolManager: ${POOL_MANAGER}`)

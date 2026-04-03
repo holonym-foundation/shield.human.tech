@@ -572,9 +572,8 @@ async function deployCompleteTokenSetup(
 // ── Sepolia constants for pool seeding ──────────────────────────────
 const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as `0x${string}`
 const POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as `0x${string}`
-const FEE_ASSET_HANDLER = '0xED9c5557d2E0abCc7c7FCA958eE4292199413494' as `0x${string}`
-const AZTEC_TOKEN = '0x35d0186d1FD53b72996475D965C5Ed171D52b986' as `0x${string}`
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
+// FEE_ASSET_HANDLER and AZTEC_TOKEN are read from deployment nodeInfo at runtime (see below)
 
 // Pool seed amounts — minimized for devnet ETH budget (~0.07 ETH total):
 //   Pool 1 (ETH/AZTEC): L=1e18 consumes 0.00684 ETH + 68.4 FJ. ETH_SEED=0.05 (excess swept).
@@ -649,7 +648,6 @@ const SwapBridgeRouterAbiLocal = [
         { name: 'isPrivate', type: 'bool' },
         { name: 'cleanHands', type: 'tuple', components: [
           { name: 'nonce', type: 'uint256' },
-          { name: 'actionId', type: 'uint256' },
           { name: 'signature', type: 'bytes' },
         ] },
         { name: 'passport', type: 'tuple', components: [
@@ -850,7 +848,7 @@ function sortCurrencies(a: `0x${string}`, b: `0x${string}`): [`0x${string}`, `0x
 /**
  * Log PoolManager balances and deployer wallet balance.
  */
-async function logPoolBalances(l1Client: ExtendedViemWalletClient, deployedContracts: DeployedToken[], label: string, logger: Logger) {
+async function logPoolBalances(l1Client: ExtendedViemWalletClient, deployedContracts: DeployedToken[], label: string, logger: Logger, aztecTokenAddr?: `0x${string}`) {
   const l1Public = createPublicClient({ transport: http(L1_URL) })
   const deployer = l1Client.account.address
 
@@ -865,7 +863,7 @@ async function logPoolBalances(l1Client: ExtendedViemWalletClient, deployedContr
   logger.info(`  PoolManager ETH:    ${(Number(pmEthBalance) / 1e18).toFixed(4)} ETH (shared across all V4 pools)`)
 
   // PoolManager FeeJuice balance (our ETH/AZTEC pool)
-  const aztecToken = getContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, client: l1Public as any }) as any
+  const aztecToken = getContract({ address: aztecTokenAddr ?? AZTEC_TOKEN, abi: ERC20_ABI, client: l1Public as any }) as any
   const pmFjBalance = await aztecToken.read.balanceOf([POOL_MANAGER]) as bigint
   logger.info(`  PoolManager FJ:     ${(Number(pmFjBalance) / 1e18).toFixed(2)} FeeJuice ${pmFjBalance > 0n ? '✅' : '❌ (ETH/AZTEC pool not seeded)'}`)
 
@@ -1824,7 +1822,7 @@ async function main() {
             path: poolKeys,
             zeroForOnes,
             isPrivate: false,
-            cleanHands: { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` },
+            cleanHands: { nonce: 0n, signature: '0x' as `0x${string}` },
             passport: { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` },
           },
           { nonce: pfPermit.nonce, deadline: pfPermit.deadline, signature: pfPermit.signature },
@@ -1976,7 +1974,7 @@ async function main() {
               path: poolKeys,
               zeroForOnes,
               isPrivate: false,
-              cleanHands: { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` },
+              cleanHands: { nonce: 0n, signature: '0x' as `0x${string}` },
               passport: { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` },
             },
             { nonce: pvPermit.nonce, deadline: pvPermit.deadline, signature: pvPermit.signature },

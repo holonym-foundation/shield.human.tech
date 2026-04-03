@@ -8,7 +8,6 @@ const CleanHandsTuple = {
   type: 'tuple',
   components: [
     { name: 'nonce', type: 'uint256' },
-    { name: 'actionId', type: 'uint256' },
     { name: 'signature', type: 'bytes' },
   ],
 } as const

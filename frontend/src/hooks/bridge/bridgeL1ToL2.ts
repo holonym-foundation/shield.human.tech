@@ -1103,10 +1103,9 @@ export async function sendL1DepositTransaction(params: {
   const cleanHands = attestation
     ? {
         nonce: BigInt(attestation.nonce),
-        actionId: BigInt(attestation.actionId),
         signature: attestation.l1Signature as `0x${string}`,
       }
-    : { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` }
+    : { nonce: 0n, signature: '0x' as `0x${string}` }
   const passport = passportAttestation
     ? {
         maxAmount: BigInt(passportAttestation.maxAmount),
@@ -1160,6 +1159,7 @@ export async function sendL1DepositTransaction(params: {
         from: l1Address as `0x${string}`,
         to: SWAP_BRIDGE_ROUTER_ADDRESS,
         data: bridgeData,
+        gas: '0xF42400', // 16M — bridgeWithFuel is complex (Permit2 + swap + 2 portal deposits)
       },
     ])
   } else {
@@ -1192,6 +1192,7 @@ export async function sendL1DepositTransaction(params: {
         from: l1Address as `0x${string}`,
         to: SWAP_BRIDGE_ROUTER_ADDRESS,
         data: bridgeData,
+        gas: '0xF42400', // 16M — bridge tx can be complex with Permit2 + portal deposit
       },
     ])
   }

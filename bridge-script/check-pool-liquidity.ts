@@ -22,7 +22,10 @@ import { getL1RpcUrl } from './config/config.js'
 
 const POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as `0x${string}`
 const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as `0x${string}`
-const AZTEC_TOKEN = '0x35d0186d1FD53b72996475D965C5Ed171D52b986' as `0x${string}`
+// Read AZTEC_TOKEN from deployment — do NOT hardcode (differs per environment)
+const _cpDeploy = loadActiveDeployment()
+const AZTEC_TOKEN = ((_cpDeploy?.nodeInfo?.l1ContractAddresses as any)?.feeJuiceAddress ?? '') as `0x${string}`
+if (!AZTEC_TOKEN) { console.error('feeJuiceAddress missing from deployment'); process.exit(1) }
 
 const ERC20_ABI = [
   { type: 'function', name: 'balanceOf', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view' },

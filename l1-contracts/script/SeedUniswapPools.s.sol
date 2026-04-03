@@ -108,6 +108,21 @@ contract PoolSeeder is IUnlockCallback {
         return "";
     }
 
+    /**
+     * @notice Remove liquidity from a pool and return tokens to this contract.
+     *         Call sweep() afterwards to transfer tokens to the deployer.
+     */
+    function removeLiquidity(
+        PoolKey calldata key,
+        int24 tickLower,
+        int24 tickUpper,
+        int256 liquidityDelta
+    ) external {
+        require(msg.sender == deployer, "not deployer");
+        require(liquidityDelta < 0, "must be negative");
+        pm.unlock(abi.encode(key, tickLower, tickUpper, liquidityDelta));
+    }
+
     function sweep(address token) external {
         require(msg.sender == deployer, "not deployer");
         if (token == address(0)) {
@@ -146,28 +161,47 @@ contract SeedUniswapPools is Script {
     // ── Sepolia constants ──────────────────────────────────────────
     address constant POOL_MANAGER      = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
     address constant WETH              = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
-    address constant AZTEC             = 0x35d0186d1FD53b72996475D965C5Ed171D52b986;
-    address constant FEE_ASSET_HANDLER = 0xED9c5557d2E0abCc7c7FCA958eE4292199413494;
+    // AZTEC and FEE_ASSET_HANDLER are read from env (differ per environment)
 
     // ── ETH/AZTEC pool params (~10,000 FeeJuice per ETH) ───────────
     uint24  constant ETH_AZTEC_FEE         = 3000;
     int24   constant ETH_AZTEC_TICK_SPACING = 60;
     uint160 constant ETH_AZTEC_SQRT_PRICE  = 7922816251426433759354395033600;
-    int24   constant ETH_AZTEC_TICK_LOWER  = 69060;
-    int24   constant ETH_AZTEC_TICK_UPPER  = 115140;
+    int24   constant ETH_AZTEC_TICK_LOWER  = -887220;  // full range (tick spacing = 60)
+    int24   constant ETH_AZTEC_TICK_UPPER  = 887220;   // full range
 
     // ── ERC20/WETH pool params (~2,100 USDC per WETH) ──────────────
     uint24  constant ERC20_WETH_FEE         = 3000;
     int24   constant ERC20_WETH_TICK_SPACING = 60;
     uint160 constant ERC20_WETH_SQRT_PRICE  = 1728916962386276374966316084832192;
-    int24   constant ERC20_WETH_TICK_LOWER  = 169800;
-    int24   constant ERC20_WETH_TICK_UPPER  = 229800;
+    int24   constant ERC20_WETH_TICK_LOWER  = -887220;  // full range
+    int24   constant ERC20_WETH_TICK_UPPER  = 887220;   // full range
+
+    // ── ERC20/AZTEC direct pool params (~10 FeeJuice per USDC) ──────
+    // NOTE: sqrtPriceX96 depends on currency ordering (lower address = currency0).
+    // The script computes the correct price at runtime based on actual addresses.
+    uint24  constant DIRECT_FEE         = 3000;
+    int24   constant DIRECT_TICK_SPACING = 60;
+    int24   constant DIRECT_TICK_LOWER  = -887220;  // full range
+    int24   constant DIRECT_TICK_UPPER  = 887220;   // full range
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
 
+        // AZTEC (FeeJuice) and FeeAssetHandler addresses — MUST be set per environment
+        address AZTEC             = vm.envAddress("AZTEC_TOKEN");
+        address FEE_ASSET_HANDLER = vm.envAddress("FEE_ASSET_HANDLER");
+
         // ERC20 token for the ERC20/WETH pool (defaults to the USDC from old deploy script)
         address erc20Token = vm.envOr("ERC20_TOKEN", address(0));
+
+        // Log addresses so the operator can verify before broadcasting
+        console.log("\n=== Address verification ===");
+        console.log("  AZTEC (FeeJuice):", AZTEC);
+        console.log("  FEE_ASSET_HANDLER:", FEE_ASSET_HANDLER);
+        console.log("  ERC20_TOKEN:", erc20Token);
+        console.log("  Verify these match your active frontend deployment before proceeding.");
+        console.log("============================\n");
 
         // Configurable params
         uint256 feeMintCount       = vm.envOr("FEE_MINT_COUNT", uint256(100));
@@ -219,7 +253,8 @@ contract SeedUniswapPools is Script {
         }
 
         // ── Pool 2: ERC20/WETH ─────────────────────────────────────
-        if (erc20Token != address(0)) {
+        bool skipErc20Weth = vm.envOr("SKIP_ERC20_WETH", false);
+        if (erc20Token != address(0) && !skipErc20Weth) {
             console.log("\n--- ERC20/WETH pool ---");
             console.log("  ERC20 token:", erc20Token);
 
@@ -263,6 +298,66 @@ contract SeedUniswapPools is Script {
             seeder.sweep(erc20Token);
         } else {
             console.log("\n--- Skipping ERC20/WETH pool (no ERC20_TOKEN set) ---");
+        }
+
+        // ── Pool 3: ERC20/AZTEC direct pool (testnet only) ──────────
+        bool seedDirectPool = vm.envOr("SEED_DIRECT_POOL", false);
+        if (seedDirectPool && erc20Token != address(0)) {
+            console.log("\n--- ERC20/AZTEC direct pool ---");
+
+            uint8 decimals = ITestERC20(erc20Token).decimals();
+            uint256 directErc20Amount = vm.envOr("DIRECT_ERC20_AMOUNT", uint256(50000 * 10 ** decimals));
+            uint256 directFjMintCount = vm.envOr("DIRECT_FJ_MINT_COUNT", uint256(100));
+
+            // Mint ERC20 for direct pool
+            ITestERC20(erc20Token).mint(address(seeder), directErc20Amount);
+            console.log("  Minted ERC20:", directErc20Amount);
+
+            // Mint FeeJuice for direct pool
+            for (uint256 i = 0; i < directFjMintCount; i++) {
+                IFeeAssetHandler(FEE_ASSET_HANDLER).mint(address(seeder));
+            }
+            console.log("  Minted FJ:", directFjMintCount, "x 1000 FJ");
+
+            // Also transfer any deployer FJ to seeder
+            uint256 deployerFjBal2 = IERC20(AZTEC).balanceOf(vm.addr(pk));
+            if (deployerFjBal2 > 0) {
+                IERC20(AZTEC).safeTransfer(address(seeder), deployerFjBal2);
+                console.log("  Transferred deployer FJ to seeder:", deployerFjBal2);
+            }
+
+            // Compute sqrtPriceX96 based on currency ordering
+            // Target: 10 FJ (18 dec) per 1 USDC (6 dec) → raw price = 10e18/1e6 = 1e13
+            // If AZTEC < ERC20: price = ERC20/AZTEC = 1e6/10e18 = 1e-13 → sqrtPriceX96 ≈ 25054139607112
+            // If ERC20 < AZTEC: price = AZTEC/ERC20 = 10e18/1e6 = 1e13 → sqrtPriceX96 ≈ 250541396071120286692299382636675072
+            uint160 directSqrtPrice;
+            if (erc20Token < AZTEC) {
+                // ERC20 is currency0, AZTEC is currency1 → price = AZTEC/ERC20 = high
+                directSqrtPrice = 250541396071120286692299382636675072;
+            } else {
+                // AZTEC is currency0, ERC20 is currency1 → price = ERC20/AZTEC = low
+                directSqrtPrice = 25054144837504792002560;
+            }
+
+            int256 directLiquidity = int256(vm.envOr("DIRECT_LIQUIDITY", uint256(1e15)));
+            seeder.setup(
+                PoolKey({
+                    currency0: Currency.wrap(erc20Token < AZTEC ? erc20Token : AZTEC),
+                    currency1: Currency.wrap(erc20Token < AZTEC ? AZTEC : erc20Token),
+                    fee: DIRECT_FEE,
+                    tickSpacing: DIRECT_TICK_SPACING,
+                    hooks: IHooks(address(0))
+                }),
+                directSqrtPrice,
+                DIRECT_TICK_LOWER,
+                DIRECT_TICK_UPPER,
+                directLiquidity
+            );
+            console.log("  ERC20/AZTEC direct pool seeded");
+
+            seeder.sweep(erc20Token);
+        } else if (seedDirectPool) {
+            console.log("\n--- Skipping ERC20/AZTEC pool (no ERC20_TOKEN set) ---");
         }
 
         // ── Sweep leftovers ────────────────────────────────────────

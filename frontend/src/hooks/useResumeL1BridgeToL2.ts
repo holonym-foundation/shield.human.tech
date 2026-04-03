@@ -455,7 +455,9 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     // only works once the sequencer includes them in an L2 block (up to 1 epoch).
     await waitForNextL2Block({
       onPoll: (elapsed) => {
-        notify('info', `Waiting for L2 sequencer to include message (${Math.round(elapsed / 60)}m elapsed)...`)
+        notify('info', `Waiting for L2 sequencer to include message (${Math.round(elapsed / 60)}m elapsed)...`, {
+          toastId: 'l2-block-wait',
+        })
       },
     })
 
