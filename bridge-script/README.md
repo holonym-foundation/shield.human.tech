@@ -104,10 +104,10 @@ These can be combined, e.g.:
 
 ```bash
 # Deploy only USDC, no tests
-DEPLOY_ONLY=true DEPLOY_TOKEN=USDC node --import tsx index-devnet-compliant.ts
+DEPLOY_ONLY=true DEPLOY_TOKEN=USDC node --import tsx index-testnet-compliant.ts
 
 # Force redeploy USDC (set forceDeploy in TOKEN_CONFIGS or use env vars)
-DEPLOY_TOKEN=USDC node --import tsx index-devnet-compliant.ts
+DEPLOY_TOKEN=USDC node --import tsx index-testnet-compliant.ts
 ```
 
 ### Skip-if-Deployed
