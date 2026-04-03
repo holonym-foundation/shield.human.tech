@@ -11,6 +11,8 @@ import { createPublicClient, http } from 'viem'
 import { sepolia } from 'viem/chains'
 import { api } from '@/lib/api'
 import { wait } from '@/utils'
+import { L1_CHAIN_ID, L1_RPC_URL } from '@/config'
+import { networkConfig } from '@/config/l1.config'
 
 // ─── Shared Log Context ─────────────────────────────────────────────
 
@@ -33,7 +35,18 @@ export const LS_KEY_BRIDGE_DEPOSITS = 'bridge:deposits:l1ToL2'
 /** localStorage key for L2→L1 withdrawal operations. */
 export const LS_KEY_BRIDGE_WITHDRAWALS = 'bridge:withdrawals:l2ToL1'
 
-const L1_RPC_URL = process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL
+// L1_RPC_URL imported from @/config (env-aware, no direct process.env reads)
+
+/** Get the L1 block explorer base URL from networkConfig (e.g. 'https://sepolia.etherscan.io/'). */
+export function getL1ExplorerUrl(): string {
+  return networkConfig[L1_CHAIN_ID]?.blockExplorer ?? 'https://etherscan.io/'
+}
+
+/** Build a full L1 transaction URL from a tx hash. */
+export function getL1TxUrl(txHash: string): string {
+  const base = getL1ExplorerUrl().replace(/\/+$/, '')
+  return `${base}/tx/${txHash}`
+}
 
 /** Shared L1 public client for transaction polling and contract reads. */
 export const publicClient = createPublicClient({
@@ -50,7 +63,7 @@ export const publicClient = createPublicClient({
 export async function patchOperationWithRetry(
   operationId: string,
   data: Record<string, unknown>,
-  options?: { maxAttempts?: number; retryDelayMs?: number; label?: string }
+  options?: { maxAttempts?: number; retryDelayMs?: number; label?: string },
 ): Promise<boolean> {
   const maxAttempts = options?.maxAttempts ?? 3
   const retryDelayMs = options?.retryDelayMs ?? 2000
@@ -61,10 +74,7 @@ export async function patchOperationWithRetry(
       await api.patch(`/api/bridge/operations/${operationId}`, data)
       return true
     } catch (err) {
-      console.warn(
-        `[Bridge] ${label} attempt ${attempt + 1}/${maxAttempts} failed:`,
-        err,
-      )
+      console.warn(`[Bridge] ${label} attempt ${attempt + 1}/${maxAttempts} failed:`, err)
       if (attempt < maxAttempts - 1) await wait(retryDelayMs)
     }
   }
@@ -75,17 +85,10 @@ export async function patchOperationWithRetry(
  * Fire-and-forget PATCH (non-critical step updates like currentStep).
  * Logs failures so they are visible in browser console for debugging.
  */
-export function patchOperationAsync(
-  operationId: string | undefined,
-  data: Record<string, unknown>,
-): void {
+export function patchOperationAsync(operationId: string | undefined, data: Record<string, unknown>): void {
   if (!operationId) return
   api.patch(`/api/bridge/operations/${operationId}`, data).catch((err) => {
-    console.error(
-      `[Bridge] patchOperationAsync failed for ${operationId}:`,
-      Object.keys(data).join(', '),
-      err,
-    )
+    console.error(`[Bridge] patchOperationAsync failed for ${operationId}:`, Object.keys(data).join(', '), err)
   })
 }
 
@@ -117,10 +120,7 @@ export function updateLocalStorageItem(
 /**
  * Push an item to a localStorage JSON array.
  */
-export function pushToLocalStorageArray(
-  storageKey: string,
-  item: any,
-): void {
+export function pushToLocalStorageArray(storageKey: string, item: any): void {
   try {
     const existing = localStorage.getItem(storageKey)
     const items = existing ? JSON.parse(existing) : []

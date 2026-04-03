@@ -21,6 +21,7 @@ import {
   useL2MintSoulboundToken,
   useL2TokenBalance,
   useL2FeeJuiceBalance,
+  useL2PrivateFeeJuiceBalance,
   useL2WithdrawTokensToL1,
   useL1ContractAddresses,
   useL2NodeIsReady,
@@ -36,10 +37,10 @@ import {
   Token as TokenType,
 } from '@/types/bridge'
 import BridgeSection from '@/components/BridgeSection'
-// import TransactionBreakdown from '@/components/TransactionBreakdown'
+import TransactionBreakdown from '@/components/TransactionBreakdown'
 import BridgeFooter from '@/components/BridgeFooter'
 import BridgeHeader from '@/components/BridgeHeader'
-// import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import BridgeActionButton from '@/components/BridgeActionButton'
 import {
   L1_CHAIN_ID,
@@ -67,14 +68,14 @@ import {
   MAINTENANCE_MODE,
   MAINTENANCE_MESSAGE,
   MAINTENANCE_TITLE,
-  BRIDGE_AND_FUEL_ADDRESS,
+  SWAP_BRIDGE_ROUTER_ADDRESS,
 } from '@/config'
 
-// const variants = {
-//   hidden: { opacity: 0, y: 100 },
-//   enter: { opacity: 1, y: 0 },
-//   exit: { opacity: 0, y: -100 },
-// }
+const variants = {
+  hidden: { opacity: 0, y: 100 },
+  enter: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -100 },
+}
 
 export default function Home() {
   const router = useRouter()
@@ -82,9 +83,8 @@ export default function Home() {
   // UI state
   const [selectNetwork, setSelectNetwork] = useState<boolean>(false)
   const [selectToken, setSelectToken] = useState<boolean>(false)
- console.log("selectToken ", selectToken);
   const [isFromSection, setIsFromSection] = useState<boolean>(true)
-  // const [showBreakdown, setShowBreakdown] = useState(false)
+  const [showBreakdown, setShowBreakdown] = useState(false)
   const [mounted, setMounted] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const [inputAmount, setInputAmount] = useState('')
@@ -113,8 +113,10 @@ export default function Home() {
     reset: resetBridgeStore,
     fuelEnabled,
     fuelAmount,
+    fuelType,
     setFuelEnabled,
     setFuelAmount,
+    setFuelType,
   } = useBridgeStore()
 
   // Get wallet state from useWalletStore
@@ -198,7 +200,8 @@ export default function Home() {
 
   // Prefer Alchemy if available, fall back to direct RPC
   const l1Balance = l1BalanceAlchemy ?? l1BalanceRpc
-  const { data: attestationData, isLoading: attestationLoading } = useAttestationCheck()
+  const { data: attestationData, isLoading: attestationLoading } =
+    useAttestationCheck()
   const { data: hasL1SBT } = useL1HasSoulboundToken()
   const { mutate: mintL1SBT, isPending: mintL1SBTPending } =
     useL1MintSoulboundToken(mintL1SBTOnSuccess)
@@ -218,8 +221,17 @@ export default function Home() {
 
   const l2PrivateBalance = l2Balance?.privateBalance
   const l2PublicBalance = l2Balance?.publicBalance
-  const { data: feeJuiceBalance, isLoading: feeJuiceLoading, isPending: feeJuicePending, refetch: refetchFeeJuiceBalance } =
-    useL2FeeJuiceBalance()
+  const {
+    data: feeJuiceBalance,
+    isLoading: feeJuiceBalanceLoading,
+    isPending: feeJuicePending,
+    refetch: refetchFeeJuiceBalance,
+  } = useL2FeeJuiceBalance()
+  const {
+    data: privateFeeJuiceBalance,
+    isLoading: privateFeeJuiceBalanceLoading,
+    refetch: refetchPrivateFeeJuiceBalance,
+  } = useL2PrivateFeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
   const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
     useL2MintSoulboundToken(mintL2SBTOnSuccess)
@@ -232,6 +244,7 @@ export default function Home() {
           refetchL1Balance(),
           refetchL2Balance(),
           refetchFeeJuiceBalance(),
+          refetchPrivateFeeJuiceBalance(),
         ]),
         {
           pending: 'Refreshing balances...',
@@ -253,6 +266,7 @@ export default function Home() {
       refetchL1Balance,
       refetchL2Balance,
       refetchFeeJuiceBalance,
+      refetchPrivateFeeJuiceBalance,
       setBridgeConfig,
       bridgeConfig,
       notify,
@@ -552,39 +566,78 @@ export default function Home() {
           </div>
 
           <div className='px-5'>
-            <BridgeSection
-              bridgeConfig={bridgeConfig}
-              setIsFromSection={setIsFromSection}
-              setSelectNetwork={setSelectNetwork}
-              setSelectToken={setSelectToken}
-              inputAmount={bridgeConfig.amount}
-              setInputAmount={handleAmountChange}
-              l1NativeBalance={l1NativeBalance}
-              l1Balance={l1Balance}
-              l2Balance={l2Balance}
-              direction={bridgeConfig.direction}
-              inputRef={inputRef as React.RefObject<HTMLInputElement>}
-              onSwap={swapDirection}
-              isPrivacyModeEnabled={isPrivacyModeEnabled}
-              feeJuiceBalance={feeJuiceBalance}
-              feeJuiceLoading={feeJuiceLoading}
-              attestationMethod={attestationData?.method ?? null}
-              passportMaxAmount={attestationData?.passportMaxAmount}
-            />
-            {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
-              !isPrivacyModeEnabled &&
-              !!BRIDGE_AND_FUEL_ADDRESS && (
-                <FuelToggle
-                  fuelEnabled={fuelEnabled}
-                  fuelAmount={fuelAmount}
-                  bridgeAmount={bridgeConfig.amount}
-                  tokenSymbol={bridgeConfig.from.token?.symbol ?? 'USDC'}
-                  tokenDecimals={bridgeConfig.from.token?.decimals ?? 6}
-                  onToggle={setFuelEnabled}
-                  onAmountChange={setFuelAmount}
-                  feeJuiceBalance={feeJuiceBalance}
-                />
+            <AnimatePresence mode='popLayout'>
+              {!showBreakdown ? (
+                <motion.div
+                  key='bridge'
+                  initial='hidden'
+                  animate='enter'
+                  exit='exit'
+                  variants={variants}
+                  transition={{ ease: 'easeInOut', duration: 0.5 }}>
+                  <BridgeSection
+                    bridgeConfig={bridgeConfig}
+                    setIsFromSection={setIsFromSection}
+                    setSelectNetwork={setSelectNetwork}
+                    setSelectToken={setSelectToken}
+                    inputAmount={bridgeConfig.amount}
+                    setInputAmount={handleAmountChange}
+                    l1NativeBalance={l1NativeBalance}
+                    l1Balance={l1Balance}
+                    l2Balance={l2Balance}
+                    direction={bridgeConfig.direction}
+                    inputRef={inputRef as React.RefObject<HTMLInputElement>}
+                    onSwap={swapDirection}
+                    isPrivacyModeEnabled={isPrivacyModeEnabled}
+                    feeJuiceBalance={feeJuiceBalance}
+                    feeJuiceLoading={feeJuiceBalanceLoading}
+                    attestationMethod={attestationData?.method ?? null}
+                    passportMaxAmount={attestationData?.passportMaxAmount}
+                  />
+                  {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
+                    !isPrivacyModeEnabled &&
+                    !!SWAP_BRIDGE_ROUTER_ADDRESS && (
+                      <FuelToggle
+                        fuelEnabled={fuelEnabled}
+                        fuelAmount={fuelAmount}
+                        bridgeAmount={bridgeConfig.amount}
+                        tokenSymbol={bridgeConfig.from.token?.symbol ?? 'USDC'}
+                        tokenDecimals={bridgeConfig.from.token?.decimals ?? 6}
+                        tokenAddress={
+                          bridgeConfig.from.token?.l1TokenContract ?? ''
+                        }
+                        onToggle={setFuelEnabled}
+                        onAmountChange={setFuelAmount}
+                        feeJuiceBalance={feeJuiceBalance}
+                        privateFeeJuiceBalance={privateFeeJuiceBalance}
+                        feeJuiceBalanceLoading={feeJuiceBalanceLoading}
+                        privateFeeJuiceBalanceLoading={
+                          privateFeeJuiceBalanceLoading
+                        }
+                        fuelType={fuelType}
+                        onFuelTypeChange={setFuelType}
+                      />
+                    )}
+                  <TransactionBreakdown
+                    isOpen={false}
+                    onToggle={() => setShowBreakdown(true)}
+                  />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key='breakdown'
+                  initial='hidden'
+                  animate='enter'
+                  exit='exit'
+                  variants={variants}
+                  transition={{ ease: 'easeInOut', duration: 0.5 }}>
+                  <TransactionBreakdown
+                    isOpen={true}
+                    onToggle={() => setShowBreakdown(false)}
+                  />
+                </motion.div>
               )}
+            </AnimatePresence>
           </div>
 
           <div className='self-end'>
@@ -646,6 +699,11 @@ export default function Home() {
                 // Disable if L2 node error
                 l2NodeError={l2NodeIsReadyIsError && !l2NodeIsReadyLoading}
                 l2NodeIsReadyLoading={l2NodeIsReadyLoading}
+                feeJuiceBalanceLoading={
+                  feeJuiceBalanceLoading ||
+                  privateFeeJuiceBalanceLoading ||
+                  (isAztecConnected && feeJuiceBalance == null)
+                }
               />
               <BridgeFooter />
             </div>

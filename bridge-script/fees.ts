@@ -8,7 +8,7 @@ import {
 import { getSchnorrAccount } from '@aztec/accounts/schnorr';
 import { deriveSigningKey } from '@aztec/stdlib/keys';
 import { foundry } from 'viem/chains'
-import { mnemonicToAccount } from 'viem/accounts';
+import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
 import { FeeJuiceContract } from "@aztec/noir-contracts.js/FeeJuice";
 import { FPCContract } from "@aztec/noir-contracts.js/FPC";
 import { EasyPrivateVotingContract } from "../src/artifacts/EasyPrivateVoting.js"
@@ -29,7 +29,8 @@ const setupPXE = async () => {
     return pxe;
 };
 
-const MNEMONIC = 'test test test test test test test test test test test junk';
+const L1_PRIVATE_KEY = process.env.L1_PRIVATE_KEY;
+const MNEMONIC = process.env.MNEMONIC || 'test test test test test test test test test test test junk';
 const FEE_FUNDING_FOR_TESTER_ACCOUNT = 1000000000000000000n;
 
 let walletClient = getL1WalletClient(process.env.L1_URL!, 0);
@@ -142,7 +143,9 @@ main();
 
 // from here: https://github.com/AztecProtocol/aztec-packages/blob/ecbd59e58006533c8885a8b2fadbd9507489300c/yarn-project/end-to-end/src/fixtures/utils.ts#L534
 function getL1WalletClient(rpcUrl: string, index: number) {
-    const hdAccount = mnemonicToAccount(MNEMONIC, { addressIndex: index });
+    const hdAccount = L1_PRIVATE_KEY
+        ? privateKeyToAccount(L1_PRIVATE_KEY as `0x${string}`)
+        : mnemonicToAccount(MNEMONIC, { addressIndex: index });
     const chain: Chain = {
         id: Number(process.env.L1_CHAIN_ID!),
         name: "test",

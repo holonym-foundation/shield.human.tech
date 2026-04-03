@@ -37,6 +37,7 @@ export interface RecoveryClaimData {
   messageHash: string | null
   messageLeafIndex: string | null
   amount: string
+  claimAmount: string | null // Post-fee amount from deposit event; must match L2 content hash
   l1Address: string
   l2Address: string
   l1TxHash: string | null
@@ -51,6 +52,14 @@ export interface RecoveryClaimData {
   bridgeAddressL2: string | null
   tokenAddressL1: string | null
   tokenAddressL2: string | null
+  // Fuel recovery fields (from decrypted blob — secrets needed to claim FeeJuice on L2)
+  fuelSecret: string | null
+  privateFuelSalt: string | null
+  privateFuelSecret: string | null
+  // Fuel receipt fields (from DB — extracted from BridgeWithFuel event)
+  fuelMessageHash: string | null
+  fuelMessageLeafIndex: string | null
+  fuelAmount: string | null
 }
 
 /** Data needed to resume an incomplete L2→L1 withdrawal */
@@ -99,8 +108,10 @@ interface BridgeStoreState
   // Fuel (gas funding) state
   fuelEnabled: boolean
   fuelAmount: string
+  fuelType: 'public' | 'private'
   setFuelEnabled: (enabled: boolean) => void
   setFuelAmount: (amount: string) => void
+  setFuelType: (type: 'public' | 'private') => void
 
   // Step actions
   setHeaderStep: (
@@ -225,6 +236,7 @@ const initialState = {
   isPrivacyModeEnabled: getInitialPrivacyMode(),
   fuelEnabled: false,
   fuelAmount: '',
+  fuelType: 'public' as const,
 } as const
 
 const bridgeStore = create<BridgeStoreState>((set, get) => ({
@@ -247,8 +259,10 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   // Fuel (gas funding) actions
   fuelEnabled: false,
   fuelAmount: '',
+  fuelType: 'public' as const,
   setFuelEnabled: (enabled: boolean) => set({ fuelEnabled: enabled, fuelAmount: '' }),
   setFuelAmount: (amount: string) => set({ fuelAmount: amount }),
+  setFuelType: (type: 'public' | 'private') => set({ fuelType: type }),
 
   // Step actions
   setHeaderStep: (
@@ -386,6 +400,7 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
     recoveryWithdrawalData: null,
     fuelEnabled: false,
     fuelAmount: '',
+    fuelType: 'public' as const,
   })),
 }))
 
@@ -435,8 +450,10 @@ export const useBridgeStore = () =>
       // Fuel (gas funding)
       fuelEnabled: state.fuelEnabled,
       fuelAmount: state.fuelAmount,
+      fuelType: state.fuelType,
       setFuelEnabled: state.setFuelEnabled,
       setFuelAmount: state.setFuelAmount,
+      setFuelType: state.setFuelType,
 
       // Recovery
       recoveryOperationId: state.recoveryOperationId,

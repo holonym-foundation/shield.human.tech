@@ -36,8 +36,13 @@ function isResumable(op: BridgeOperation): boolean {
     // - Best: messageHash + messageLeafIndex already stored
     // - Fallback: l1TxHash → scan receipt for portal events
     // - Last resort: l1BlockNumberBeforeTx → scan L1 blocks for portal events
+    // Also allow 'pending' if l1TxHash exists (L1 tx mined but status PATCH failed)
+    const resumableStatus =
+      op.status === 'deposited' ||
+      op.status === 'claimed' ||
+      (op.status === 'pending' && !!op.l1TxHash)
     return (
-      (op.status === 'deposited' || op.status === 'claimed') &&
+      resumableStatus &&
       (!!op.messageHash || !!op.l1TxHash || !!op.l1BlockNumberBeforeTx)
     )
   }
@@ -64,8 +69,10 @@ export default function ActivityCard({
   onResume,
   resuming,
 }: ActivityCardProps) {
+  const decimals = operation.tokenDecimalsL1 ?? L1_TOKEN_METADATA.decimals
+  const tokenSymbol = operation.tokenSymbol ?? operation.tokenSymbolL1 ?? L1_TOKEN_METADATA.symbol
   const amount = operation.amountDisplayL1
-    ?? (operation.amountL1 ? formatUnits(BigInt(operation.amountL1), L1_TOKEN_METADATA.decimals) : '?')
+    ?? (operation.amountL1 ? formatUnits(BigInt(operation.amountL1), decimals) : '?')
   const date = new Date(operation.createdAt).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -88,7 +95,7 @@ export default function ActivityCard({
         <span className='text-xs text-gray-400'>{date}</span>
       </div>
 
-      <p className='text-xl font-semibold mt-2'>{amount} USDC</p>
+      <p className='text-xl font-semibold mt-2'>{amount} {tokenSymbol}</p>
 
       {operation.lastErrorMessage && (
         <p className='text-xs text-red-500 mt-1 truncate'>

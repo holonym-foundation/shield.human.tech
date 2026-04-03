@@ -109,6 +109,7 @@ export default function ActivityPage() {
             messageHash: operation.messageHash,
             messageLeafIndex: operation.messageLeafIndex,
             amount: decrypted.amount ?? operation.amountL1 ?? '0',
+            claimAmount: operation.claimAmount ?? null,
             l1Address: decrypted.l1Address ?? l1Address,
             l2Address: decrypted.l2Address ?? '',
             l1TxHash: operation.l1TxHash,
@@ -123,6 +124,13 @@ export default function ActivityPage() {
             bridgeAddressL2: operation.bridgeAddressL2,
             tokenAddressL1: operation.tokenAddressL1,
             tokenAddressL2: operation.tokenAddressL2,
+            // Fuel recovery: secrets from decrypted blob, receipt data from DB
+            fuelSecret: decrypted.fuelSecret ?? null,
+            privateFuelSalt: decrypted.privateFuelSalt ?? null,
+            privateFuelSecret: decrypted.privateFuelSecret ?? null,
+            fuelMessageHash: operation.fuelMessageHash ?? null,
+            fuelMessageLeafIndex: operation.fuelMessageLeafIndex ?? null,
+            fuelAmount: operation.fuelAmount ?? null,
           }
 
           setDirection(BridgeDirection.L1_TO_L2)

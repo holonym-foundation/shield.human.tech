@@ -29,6 +29,7 @@ export interface BridgeOperation {
   messageHash: string | null
   messageLeafIndex: string | null
   l1BlockNumberBeforeTx: string | null
+  claimAmount: string | null
   // L1→L2 fuel recovery fields
   fuelMessageHash: string | null
   fuelMessageLeafIndex: string | null
@@ -51,6 +52,17 @@ export interface BridgeOperation {
   tokenSymbol: string | null
   tokenAddressL1: string | null
   tokenAddressL2: string | null
+  tokenDecimalsL1: number | null
+  tokenDecimalsL2: number | null
+  tokenNameL1: string | null
+  tokenNameL2: string | null
+  // Network names
+  fromNetworkName: string | null
+  toNetworkName: string | null
+  // Additional contract snapshot
+  chainIdL2: number | null
+  l1InboxAddress: string | null
+  l1RegistryAddress: string | null
   // Progress tracking
   currentStep: number | null
   // Common
@@ -109,7 +121,7 @@ export async function decryptOperationPayload(
 
   const domain =
     operation.keyDerivationDomain ?? getKeyDerivationDomain()
-  const signingMessage = createSigningMessage(l1Address)
+  const signingMessage = createSigningMessage(l1Address, domain)
   const signature = await signMessage(signingMessage)
   if (!signature) {
     throw new Error('Wallet signature required to decrypt operation data')

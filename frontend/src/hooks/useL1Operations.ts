@@ -1,38 +1,20 @@
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { useBridgeStore } from '@/stores/bridgeStore'
-import {
-  truncateDecimals,
-  wait,
-  exportClaimData,
-  copyToClipboard,
-} from '@/utils'
+import { truncateDecimals, wait, exportClaimData, copyToClipboard } from '@/utils'
 import axios from 'axios'
+import { api } from '@/lib/api'
 import { logError, logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { useWalletAdapter } from './useWalletAdapter'
-import {
-  ADDRESS,
-  getAztecscanUrl,
-  L1_CHAIN_ID,
-  L1_TOKENS,
-  L2_CHAIN_ID,
-} from '@/config'
+import { ADDRESS, getAztecscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { formatUnits, parseUnits, encodeFunctionData } from 'viem'
+import { formatUnits, encodeFunctionData } from 'viem'
 import PortalSBTJson from '../constants/PortalSBT.json'
 import { useToast, useToastMutation, useToastQuery } from './useToast'
-import {
-  requestWaapWallet,
-  useWalletStore,
-  WAAP_METHOD,
-} from '@/stores/walletStore'
-import {
-  I_UserTokenBalance,
-  T_AlchemyTokenBalanceResponse,
-  T_UserTokenType,
-} from '@/types/token.balances.types'
+import { requestWaapWallet, useWalletStore, WAAP_METHOD } from '@/stores/walletStore'
+import { I_UserTokenBalance, T_AlchemyTokenBalanceResponse, T_UserTokenType } from '@/types/token.balances.types'
 import { axiosErrorMessage } from './helper'
 import { networkConfig, silkUrl } from '@/config/l1.config'
 import {
@@ -40,11 +22,9 @@ import {
   patchOperationAsync,
   patchOperationWithRetry,
   updateLocalStorageItem,
+  getL1TxUrl,
 } from './bridge/bridgeUtils'
-import {
-  pollL1ToL2MessageSync,
-  executeL2Claim,
-} from './bridge/bridgeL1ToL2'
+import { pollL1ToL2MessageSync, executeL2Claim, waitForNextL2Block } from './bridge/bridgeL1ToL2'
 import {
   validateAndCaptureBlocks,
   generateAndBackupClaimSecret,
@@ -56,22 +36,44 @@ import {
   fetchPochAttestation,
   fetchPassportAttestation,
   type FuelParams,
+  type PrivateFuelParams,
   type PochAttestationData,
   type PassportAttestationData,
 } from './bridge/bridgeL1ToL2'
-import {
-  BRIDGE_AND_FUEL_ADDRESS,
-  MOCK_FUEL_SWAP_ADDRESS,
-} from '@/config'
-import { getMockFuelQuote } from '@/utils/fuelQuote'
-import {
-  createSigningMessage,
-  deriveEncryptionKey,
-  decryptData,
-} from '@/utils/encryption'
+import { BRIDGED_FPC_ADDRESS, SWAP_BRIDGE_ROUTER_ADDRESS, UNISWAP_FUEL_SWAP_ADDRESS, L1_RPC_URL } from '@/config'
+import { getUniswapFuelQuote, type FuelQuote } from '@/utils/fuelQuote'
+import { buildSwapCandidates, getBestRoute } from '@/utils/fuelPricing'
+import { createSigningMessage, deriveEncryptionKey, decryptData } from '@/utils/encryption'
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
+
+/**
+ * Build a fuel swap quote via Uniswap V4.
+ */
+async function buildFuelQuote(params: {
+  bridgeTokenAddress: `0x${string}`
+  fuelAmount: bigint
+  inputDecimals: number
+}): Promise<FuelQuote> {
+  const { bridgeTokenAddress, fuelAmount } = params
+  const candidates = buildSwapCandidates(bridgeTokenAddress)
+  const best = await getBestRoute({
+    candidates,
+    inputAmount: fuelAmount,
+    l1RpcUrl: L1_RPC_URL,
+  })
+  console.log(
+    `[buildFuelQuote] Best route: ${best.route.label} → ${(Number(best.expectedOutput) / 1e18).toFixed(4)} FJ`,
+  )
+
+  return getUniswapFuelQuote({
+    expectedOutput: best.expectedOutput,
+    slippageBps: 300, // 3% slippage for testnet
+    poolKeys: best.route.poolKeys,
+    zeroForOnes: best.route.zeroForOnes,
+  })
+}
 
 export function useL1NativeBalance() {
   const { waapAddress: l1Address } = useWalletStore()
@@ -156,55 +158,45 @@ export function useL1TokenBalances() {
   const queryKey = ['l1TokenBalances', l1Address]
   const queryFn = async () => {
     try {
-      const response = await axios.post<T_AlchemyTokenBalanceResponse[]>(
-        '/api/alchemy/tokens-balances',
-        {
-          address: l1Address,
-          chains: [L1_CHAIN_ID], // Sepolia testnet
-        },
-      )
+      const response = await axios.post<T_AlchemyTokenBalanceResponse[]>('/api/alchemy/tokens-balances', {
+        address: l1Address,
+        chains: [L1_CHAIN_ID], // Sepolia testnet
+      })
 
       const tokens = response?.data
 
-      const tokenBalnces = tokens?.map(
-        (token: T_AlchemyTokenBalanceResponse) => {
-          let tokenType: T_UserTokenType
+      const tokenBalnces = tokens?.map((token: T_AlchemyTokenBalanceResponse) => {
+        let tokenType: T_UserTokenType
 
-          if (!token.tokenAddress || token.tokenAddress === null) {
-            tokenType = 'native'
-          } else {
-            tokenType = 'erc20'
-          }
+        if (!token.tokenAddress || token.tokenAddress === null) {
+          tokenType = 'native'
+        } else {
+          tokenType = 'erc20'
+        }
 
-          const formattedBalance = formatUnits(
-            BigInt(token.tokenBalance),
-            token?.tokenMetadata?.decimals ?? 18,
-          )
-          const balance_formatted = truncateDecimals(formattedBalance)
+        const formattedBalance = formatUnits(BigInt(token.tokenBalance), token?.tokenMetadata?.decimals ?? 18)
+        const balance_formatted = truncateDecimals(formattedBalance)
 
-          const usdExchangeRate =
-            token.tokenPrices?.find((price: any) => price.currency === 'usd')
-              ?.value || '0'
+        const usdExchangeRate = token.tokenPrices?.find((price: any) => price.currency === 'usd')?.value || '0'
 
-          const usdValue = Number(balance_formatted) * Number(usdExchangeRate)
-          const usdValueTruncated = truncateDecimals(usdValue, 2)
+        const usdValue = Number(balance_formatted) * Number(usdExchangeRate)
+        const usdValueTruncated = truncateDecimals(usdValue, 2)
 
-          return {
-            address: token.tokenAddress,
-            name: token.tokenMetadata.name,
-            symbol: token.tokenMetadata.symbol,
-            decimals: token.tokenMetadata.decimals,
-            chain: networkConfig[token.chainId]?.name || '',
-            network: networkConfig[token.chainId],
-            logo: token.tokenMetadata.logo || undefined,
-            type: tokenType,
-            balance: token.tokenBalance,
-            balance_formatted: balance_formatted,
-            balance_usd_value: usdValueTruncated,
-            exchange_rate: Number(usdExchangeRate),
-          }
-        },
-      ) as I_UserTokenBalance[]
+        return {
+          address: token.tokenAddress,
+          name: token.tokenMetadata.name,
+          symbol: token.tokenMetadata.symbol,
+          decimals: token.tokenMetadata.decimals,
+          chain: networkConfig[token.chainId]?.name || '',
+          network: networkConfig[token.chainId],
+          logo: token.tokenMetadata.logo || undefined,
+          type: tokenType,
+          balance: token.tokenBalance,
+          balance_formatted: balance_formatted,
+          balance_usd_value: usdValueTruncated,
+          exchange_rate: Number(usdExchangeRate),
+        }
+      }) as I_UserTokenBalance[]
 
       return tokenBalnces
     } catch (error) {
@@ -243,18 +235,10 @@ export function useL1Faucet() {
   const queryClient = useQueryClient()
 
   // Get wallet information from useWalletStore
-  const {
-    waapLoginMethod: loginMethod,
-    waapWalletProvider: walletProvider,
-    waapChainId: chainId,
-  } = useWalletStore()
+  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
 
   // L1 (Ethereum) balances and operations
-  const {
-    data: l1TokenBalances = [],
-    isLoading: l1BalanceLoading,
-    refetch: refetchL1Balance,
-  } = useL1TokenBalances()
+  const { data: l1TokenBalances = [], isLoading: l1BalanceLoading, refetch: refetchL1Balance } = useL1TokenBalances()
 
   // native token
   const sepoliaNativeTokens = l1TokenBalances.find(
@@ -275,16 +259,12 @@ export function useL1Faucet() {
   const mintTokenAmount = 10
 
   // Helper function to check if user has gas
-  const hasGas =
-    !!l1NativeBalance && Number(l1NativeBalance || 0) > mintNativeAmount
+  const hasGas = !!l1NativeBalance && Number(l1NativeBalance || 0) > mintNativeAmount
 
   // Check balances - only if balance data is loaded
   const balancesLoaded = !l1BalanceLoading
-  const needsGas =
-    balancesLoaded &&
-    (!l1NativeBalance || Number(l1NativeBalance || 0) <= mintNativeAmount)
-  const needsTokens =
-    balancesLoaded && Number(l1Balance || 0) <= mintTokenAmount
+  const needsGas = balancesLoaded && (!l1NativeBalance || Number(l1NativeBalance || 0) <= mintNativeAmount)
+  const needsTokens = balancesLoaded && Number(l1Balance || 0) <= mintTokenAmount
 
   // User is eligible for faucet if they need gas OR tokens
   // Check if user has gas but still needs tokens - they should be eligible for tokens only
@@ -334,9 +314,7 @@ export function useL1Faucet() {
         try {
           // Check if we should use external faucet for ETH
           // For now, we'll skip internal ETH faucet since it's disabled
-          console.log(
-            'ETH needed but internal faucet is disabled. User should get ETH from external source.',
-          )
+          console.log('ETH needed but internal faucet is disabled. User should get ETH from external source.')
           result.gasProvided = false // Mark as not provided by internal API
         } catch (error) {
           console.log('Error requesting gas:', error)
@@ -350,14 +328,11 @@ export function useL1Faucet() {
         // Always try to mint tokens if user needs them
         console.log('Checking if tokens need to be minted...')
 
-        const currentNativeBalance =
-          result?.balances?.recipient?.after || l1NativeBalance
+        const currentNativeBalance = result?.balances?.recipient?.after || l1NativeBalance
 
         // If user only needs tokens (has gas), proceed directly
         // If user needs both gas and tokens, check if they have enough gas
-        const hasEnoughGas =
-          needsTokensOnly ||
-          Number(currentNativeBalance || 0) >= mintNativeAmount
+        const hasEnoughGas = needsTokensOnly || Number(currentNativeBalance || 0) >= mintNativeAmount
 
         if (hasEnoughGas) {
           console.log('User has gas. Requesting tokens from API...')
@@ -366,10 +341,10 @@ export function useL1Faucet() {
             // await wait(30000) // 30 seconds
 
             // Call our mint-tokens API endpoint with the first token address
-            const { data: mintResult } = await axios.post<{ txHash?: string }>(
-              '/api/mint-tokens',
-              { address: l1Address, tokenAddress: L1_TOKENS[0]?.l1TokenContract },
-            )
+            const { data: mintResult } = await api.post<{ txHash?: string }>('/api/mint-tokens', {
+              address: l1Address,
+              tokenAddress: L1_TOKENS[0]?.l1TokenContract,
+            })
             result.tokensMinted = true
             result.tokenHash = mintResult.txHash
             console.log('Tokens minted successfully via API:', mintResult)
@@ -384,9 +359,7 @@ export function useL1Faucet() {
             throw error
           }
         } else {
-          console.log(
-            'User still does not have enough gas for receiving tokens',
-          )
+          console.log('User still does not have enough gas for receiving tokens')
           throw new Error('Not enough ETH for gas to receive tokens')
         }
       }
@@ -493,9 +466,7 @@ export function useL1MintTokens() {
 
     // Check eligibility
     if (!hasGas) {
-      throw new Error(
-        'Not enough ETH for gas. Please get ETH from the faucet first.',
-      )
+      throw new Error('Not enough ETH for gas. Please get ETH from the faucet first.')
     }
 
     const mintAmount = BigInt(1000000000000000000)
@@ -520,10 +491,7 @@ export function useL1MintTokens() {
     console.log('Mint transaction sent, hash:', txHash)
 
     // Wait for confirmation
-    const receipt = await requestWaapWallet(
-      WAAP_METHOD.eth_getTransactionReceipt,
-      [txHash],
-    )
+    const receipt = await requestWaapWallet(WAAP_METHOD.eth_getTransactionReceipt, [txHash])
     console.log('Mint transaction confirmed, receipt:', receipt)
     return receipt
   }
@@ -566,15 +534,18 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
   } = useWalletStore()
 
   // Get wallet information from useWalletStore
-  const {
-    waapLoginMethod: loginMethod,
-    waapWalletProvider: walletProvider,
-    waapChainId: chainId,
-  } = useWalletStore()
+  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
 
   const queryClient = useQueryClient()
-  const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled, bridgeConfig, fuelEnabled, fuelAmount: fuelAmountStr } =
-    useBridgeStore()
+  const {
+    setProgressStep,
+    setTransactionUrls,
+    isPrivacyModeEnabled,
+    bridgeConfig,
+    fuelEnabled,
+    fuelAmount: fuelAmountStr,
+    fuelType,
+  } = useBridgeStore()
   const notify = useToast()
 
   const walletAdapter = useWalletAdapter()
@@ -591,17 +562,66 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
     // Build fuel params if fuel is enabled (public L1→L2 only)
     let fuel: FuelParams | undefined
-    if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr && BRIDGE_AND_FUEL_ADDRESS && MOCK_FUEL_SWAP_ADDRESS) {
+    let privateFuel: PrivateFuelParams | undefined
+    if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr) {
+      const { parseUnits } = await import('viem')
       const fuelAmountTokenUnits = parseUnits(fuelAmountStr, selectedToken?.decimals ?? 6)
+      const hasSwapTarget = UNISWAP_FUEL_SWAP_ADDRESS
       if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amount) {
-        const fuelQuote = getMockFuelQuote({
-          mockFuelSwapAddress: MOCK_FUEL_SWAP_ADDRESS,
-          bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
-          fuelAmount: fuelAmountTokenUnits,
-          inputDecimals: selectedToken?.decimals ?? 6,
-        })
-        fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
-        console.log('[L1→L2] Fuel enabled:', { fuelAmount: fuelAmountTokenUnits.toString(), expectedOutput: fuelQuote.expectedOutput.toString() })
+        if (fuelType === 'private' && BRIDGED_FPC_ADDRESS && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
+          // Private fuel (BridgedFPC): swap via SwapBridgeRouter, FJ deposited to FPC, then claim+mint on L2
+          const fuelQuote = await buildFuelQuote({
+            bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
+            fuelAmount: fuelAmountTokenUnits,
+            inputDecimals: selectedToken?.decimals ?? 6,
+          })
+
+          // Pre-flight check: verify the expected FJ output covers L2 claim gas costs
+          const { checkFuelSufficiency } = await import('@/utils/fuelGasEstimate')
+          const sufficiency = await checkFuelSufficiency(fuelQuote.expectedOutput)
+          console.log('[L1→L2] Private fuel sufficiency check:', sufficiency)
+          if (!sufficiency.sufficient) {
+            throw new Error(
+              `Insufficient fuel: swap produces ~${sufficiency.expectedFj} FJ but the L2 claim requires ~${sufficiency.feeLimitFj} FJ. ` +
+                `Increase the fuel amount or bridge without fuel and top up gas separately.`,
+            )
+          }
+
+          fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
+          privateFuel = {
+            fuelAmount: fuelAmountTokenUnits,
+            fpcAddress: BRIDGED_FPC_ADDRESS,
+          }
+          console.log('[L1→L2] Private fuel enabled:', {
+            fuelAmount: fuelAmountTokenUnits.toString(),
+            fpcAddress: BRIDGED_FPC_ADDRESS,
+            expectedOutput: fuelQuote.expectedOutput.toString(),
+          })
+        } else if (fuelType === 'public' && SWAP_BRIDGE_ROUTER_ADDRESS && hasSwapTarget) {
+          // Public fuel: swap tokens → FJ via SwapBridgeRouter
+          const fuelQuote = await buildFuelQuote({
+            bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
+            fuelAmount: fuelAmountTokenUnits,
+            inputDecimals: selectedToken?.decimals ?? 6,
+          })
+
+          // Pre-flight check: verify the expected FJ output covers L2 claim gas costs
+          const { checkFuelSufficiency } = await import('@/utils/fuelGasEstimate')
+          const sufficiency = await checkFuelSufficiency(fuelQuote.expectedOutput)
+          console.log('[L1→L2] Fuel sufficiency check:', sufficiency)
+          if (!sufficiency.sufficient) {
+            throw new Error(
+              `Insufficient fuel: swap produces ~${sufficiency.expectedFj} FJ but the L2 claim requires ~${sufficiency.feeLimitFj} FJ. ` +
+                `Increase the fuel amount or bridge without fuel and top up gas separately.`,
+            )
+          }
+
+          fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
+          console.log('[L1→L2] Public fuel enabled:', {
+            fuelAmount: fuelAmountTokenUnits.toString(),
+            expectedOutput: fuelQuote.expectedOutput.toString(),
+          })
+        }
       }
     }
     if (!l1Address) {
@@ -617,14 +637,21 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     // 'deposited' so the user can Resume the L2 claim from the activity page.
     let depositConfirmed = false
     // Track receipt data for error logging
-    let receiptData: { messageHashStr?: string; messageLeafIndexStr?: string; l1TxHash?: string } = {}
+    let receiptData: {
+      messageHashStr?: string
+      messageLeafIndexStr?: string
+      l1TxHash?: string
+    } = {}
     try {
       // ─── Step 1: Validate wallets and capture block numbers ──────────
       setProgressStep(1, 'active')
       console.log('Initiating bridge tokens to L2...')
 
-      const { nodeInfo, l1BlockNumberBeforeTx, l2BlockNumberBeforeTx } =
-        await validateAndCaptureBlocks(l1Address, aztecAddress, walletAdapter, {
+      const { nodeInfo, l1BlockNumberBeforeTx, l2BlockNumberBeforeTx } = await validateAndCaptureBlocks(
+        l1Address,
+        aztecAddress,
+        walletAdapter,
+        {
           walletType: WalletType.WAAP,
           loginMethod: loginMethod,
           walletProvider: walletProvider,
@@ -633,7 +660,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           aztecLoginMethod: aztecLoginMethod,
           aztecAddress: aztecAddress,
           amount: amount.toString(),
-        }, selectedToken)
+        },
+        selectedToken,
+      )
 
       // ─── Step 2: Generate secret, encrypt, backup to server ─────────
       const backup = await generateAndBackupClaimSecret({
@@ -650,11 +679,12 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         signWaapMessage,
         selectedToken,
         fuel,
+        privateFuel,
       })
       operationId = backup.operationId
 
-      // ─── Step 3: Check allowance and approve ────────────────────────
-      await checkAndApproveAllowance(l1Address, amount, selectedToken, fuel)
+      // ─── Step 3: Check allowance and approve (+ Permit2 sign) ────────
+      await checkAndApproveAllowance(l1Address, amount, selectedToken)
 
       // ─── Step 3b: Fetch attestation for private deposits (POCH → Passport fallback) ──
       let attestation: PochAttestationData | undefined
@@ -668,22 +698,42 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         } catch (pochErr) {
           console.warn('[L1→L2] POCH attestation failed, trying Passport fallback...', pochErr)
           passportAttestation = await fetchPassportAttestation(portalAddress)
-          console.log('[L1→L2] Passport attestation received, nonce:', passportAttestation.nonce, 'maxAmount:', passportAttestation.maxAmount)
+          console.log(
+            '[L1→L2] Passport attestation received, nonce:',
+            passportAttestation.nonce,
+            'maxAmount:',
+            passportAttestation.maxAmount,
+          )
           // Enforce amount limit for Passport path
           if (amount > BigInt(passportAttestation.maxAmount)) {
             const maxFormatted = (Number(passportAttestation.maxAmount) / 1e6).toFixed(2)
-            throw new Error(`Passport allows up to ${maxFormatted} USDC per transaction. Mint a POCH SBT to remove this limit.`)
+            throw new Error(
+              `Passport allows up to ${maxFormatted} USDC per transaction. Mint a POCH SBT to remove this limit.`,
+            )
           }
         }
       }
 
       // ─── Step 4: Send L1 deposit transaction ────────────────────────
       // ═══ DANGER ZONE: tokens are locked on L1 after this ═══
-      notify('warn', {
-        heading: 'Do Not Reload',
-        message: 'Your deposit is in progress. Please do not reload or close this page until it completes, or it may be difficult to recover your funds.',
-      }, { autoClose: false })
+      notify(
+        'warn',
+        {
+          heading: 'Do Not Reload',
+          message:
+            'Your deposit is in progress. Please do not reload or close this page until it completes, or it may be difficult to recover your funds.',
+        },
+        { autoClose: false },
+      )
 
+      console.log('[L1→L2] Pre-deposit params:', {
+        hasFuel: !!fuel,
+        hasPrivateFuel: !!privateFuel,
+        fuelAmount: fuel?.fuelAmount?.toString(),
+        privateFuelFpcAddress: privateFuel?.fpcAddress,
+        hasFuelSecretHash: !!backup.fuelSecretHash,
+        hasPrivateFuelSecretHash: !!backup.privateFuelSecretHash,
+      })
       const deposit = await sendL1DepositTransaction({
         l1Address,
         aztecAddress,
@@ -693,13 +743,25 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
         operationId: backup.operationId,
         selectedToken,
-        fuel: fuel && backup.fuelSecretHash ? { ...fuel, fuelSecretHash: backup.fuelSecretHash } : undefined,
+        // Public fuel: needs fuelSecretHash from backup (random secret).
+        // Private fuel: fuel is passed for the swap quote, but fuelSecretHash is a dummy
+        // (overridden by privateFuel.secretHash in sendL1DepositTransaction).
+        fuel: fuel
+          ? {
+              ...fuel,
+              fuelSecretHash: backup.fuelSecretHash ?? backup.privateFuelSecretHash!,
+            }
+          : undefined,
+        privateFuel:
+          privateFuel && backup.privateFuelSecretHash
+            ? {
+                ...privateFuel,
+                secretHash: backup.privateFuelSecretHash,
+              }
+            : undefined,
         attestation,
         passportAttestation,
       })
-      // 🔒 Funds are now POTENTIALLY locked on L1 — from this point, the outer catch must
-      // NEVER mark the operation as 'failed'.
-      depositConfirmed = true
 
       // ─── Step 5: Wait for receipt and extract event ─────────────────
       const receipt = await waitForReceiptAndExtractEvent({
@@ -710,9 +772,13 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         aztecAddress,
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
         l1Address,
+        operationId,
         selectedToken,
         fuel,
       })
+      // 🔒 Receipt confirmed with status=success — funds ARE locked on L1.
+      // From this point, the outer catch must NEVER mark the operation as 'failed'.
+      depositConfirmed = true
       receiptData = receipt
       setTransactionUrls(receipt.l1TxUrl, null)
 
@@ -734,7 +800,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       const { updatedClaim, wasExisting } = finalizeLocalStorageAfterDeposit({
         claimSecret: backup.claimSecret,
         claimSecretHash: backup.claimSecretHash,
-        claimAmount: amount,
+        claimAmount: receipt.claimAmount,
         l1Address,
         aztecAddress,
         messageHashStr: receipt.messageHashStr,
@@ -744,6 +810,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         l1BlockNumberBeforeTx,
         nodeInfo,
         isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
+        operationId,
       })
 
       if (wasExisting && updatedClaim) {
@@ -767,11 +834,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       setProgressStep(1, 'completed')
       setProgressStep(2, 'active')
 
-      // Poll for both messages in parallel when fuel is enabled
-      const syncPromises: Promise<any>[] = [
-        pollL1ToL2MessageSync(receipt.messageHash.toString()),
-      ]
-      if (fuel && receipt.fuelMessageHash) {
+      // Poll for all messages in parallel (token + fuel + private fuel)
+      const syncPromises: Promise<any>[] = [pollL1ToL2MessageSync(receipt.messageHash.toString())]
+      if (receipt.fuelMessageHash) {
         syncPromises.push(pollL1ToL2MessageSync(receipt.fuelMessageHash.toString()))
       }
       const syncResults = await Promise.all(syncPromises)
@@ -799,9 +864,16 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         throw new Error(errorMessage)
       }
 
-      // Extra buffer so the message is visible on the wallet's node
-      console.log('[L1→L2] Final wait before claiming (2 min)...')
-      await wait(120_000)
+      // Wait for the sequencer to produce a new L2 block that includes the
+      // L1→L2 messages. The archiver sees messages immediately, but the claim
+      // only works once the sequencer includes them in an L2 block (up to 1 epoch).
+      await waitForNextL2Block({
+        onPoll: (elapsed) => {
+          notify('info', `Waiting for L2 sequencer to include message (${Math.round(elapsed / 60)}m elapsed)...`, {
+            toastId: 'l2-block-wait',
+          })
+        },
+      })
 
       // ─── Step 9: Claim on L2 ───────────────────────────────────────
       setProgressStep(2, 'completed')
@@ -810,37 +882,143 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
       try {
         if (!walletAdapter) {
-          throw new Error(
-            'Aztec wallet not connected or bridge contract not initialized',
-          )
+          throw new Error('Aztec wallet not connected or bridge contract not initialized')
         }
 
-        // Build fee payment method if fuel is enabled
-        let feeOption: { fee: { paymentMethod: any } } | undefined
-        if (fuel && backup.fuelSecret && receipt.fuelMessageLeafIndex != null && receipt.fuelAmount) {
+        // Build fee payment method for the L2 claim transaction:
+        // - Public fuel: FeeJuicePaymentMethodWithClaim (claim FJ to user, pay gas)
+        // - Private fuel: PrivateMintAndPayFeePaymentMethod (FeeJuice.claim + mint_and_pay_fee, all private)
+        let feeOption: { fee: { paymentMethod: any; gasSettings?: any } } | undefined
+        console.log('[L1→L2] Private fuel check:', {
+          hasPrivateFuel: !!privateFuel,
+          hasSecret: !!backup.privateFuelSecret,
+          hasSalt: !!backup.privateFuelSalt,
+          fuelMessageLeafIndex: receipt.fuelMessageLeafIndex,
+          fuelAmount: receipt.fuelAmount?.toString(),
+        })
+        if (
+          privateFuel &&
+          backup.privateFuelSecret &&
+          backup.privateFuelSalt &&
+          receipt.fuelMessageLeafIndex != null &&
+          receipt.fuelAmount
+        ) {
+          try {
+            const {
+              PrivateMintAndPayFeePaymentMethod,
+              REASONABLE_GAS_LIMITS,
+              maxFeesPerGasFromBaseFees,
+              maxGasCostFor,
+            } = await import('@wonderland/aztec-fee-payment')
+            const { Fr: FieldFr } = await import('@aztec/aztec.js/fields')
+            const { Gas, GasFees } = await import('@aztec/stdlib/gas')
+            const { aztecNode } = await import('@/aztec')
+
+            // Query current base fees and compute gas settings
+            // (mirrors getGasSetup in aztec-fee-payment tests)
+            const baseFees = await aztecNode.getCurrentMinFees()
+            const maxFeesPerGas = maxFeesPerGasFromBaseFees(baseFees)
+            const gasLimits = REASONABLE_GAS_LIMITS
+            const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 }) // no teardown for pay_fee
+
+            const estimatedMaxGasCost = maxGasCostFor(maxFeesPerGas, gasLimits)
+            console.log('[L1→L2] Gas diagnostics:', {
+              baseFees: {
+                feePerDaGas: baseFees.feePerDaGas.toString(),
+                feePerL2Gas: baseFees.feePerL2Gas.toString(),
+              },
+              maxFeesPerGas: {
+                feePerDaGas: maxFeesPerGas.feePerDaGas.toString(),
+                feePerL2Gas: maxFeesPerGas.feePerL2Gas.toString(),
+              },
+              gasLimits: {
+                daGas: gasLimits.daGas.toString(),
+                l2Gas: gasLimits.l2Gas.toString(),
+              },
+              teardownGasLimits: {
+                daGas: teardownGasLimits.daGas.toString(),
+                l2Gas: teardownGasLimits.l2Gas.toString(),
+              },
+              estimatedMaxGasCost: estimatedMaxGasCost.toString(),
+              fuelAmount: receipt.fuelAmount.toString(),
+              sufficient: receipt.fuelAmount >= estimatedMaxGasCost,
+            })
+
+            const paymentMethod = new PrivateMintAndPayFeePaymentMethod(
+              AztecAddress.fromString(privateFuel.fpcAddress),
+              receipt.fuelAmount,
+              backup.privateFuelSecret,
+              backup.privateFuelSalt,
+              new FieldFr(BigInt(receipt.fuelMessageLeafIndexStr!)),
+            )
+            feeOption = {
+              fee: {
+                paymentMethod,
+                gasSettings: {
+                  gasLimits,
+                  teardownGasLimits,
+                  maxFeesPerGas,
+                  maxPriorityFeesPerGas: GasFees.empty(),
+                },
+              },
+            }
+            console.log('[L1→L2] Using PrivateMintAndPayFeePaymentMethod with explicit gasSettings (private fuel)')
+          } catch (err) {
+            console.warn('[L1→L2] Failed to create PrivateMintAndPayFeePaymentMethod, falling back to default:', err)
+          }
+        } else if (
+          fuel &&
+          !privateFuel &&
+          backup.fuelSecret &&
+          receipt.fuelMessageLeafIndex != null &&
+          receipt.fuelAmount
+        ) {
           try {
             const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+            const { buildClaimGasSettings } = await import('@/utils/fuelGasEstimate')
+
+            const claimGasSettings = await buildClaimGasSettings()
+            console.log('[L1→L2] Public fuel claim params:', {
+              sender: aztecAddress,
+              claimAmount: receipt.fuelAmount.toString(),
+              claimSecretStr: backup.fuelSecret.toString().slice(0, 18) + '...',
+              messageLeafIndex: receipt.fuelMessageLeafIndexStr,
+              fuelMessageHash: receipt.fuelMessageHashStr,
+              gasLimits: {
+                l2Gas: claimGasSettings.gasLimits.l2Gas.toString(),
+                daGas: claimGasSettings.gasLimits.daGas.toString(),
+              },
+              maxFeesPerGas: {
+                feePerL2Gas: claimGasSettings.maxFeesPerGas.feePerL2Gas.toString(),
+                feePerDaGas: claimGasSettings.maxFeesPerGas.feePerDaGas.toString(),
+              },
+            })
+
             const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
               claimAmount: receipt.fuelAmount,
               claimSecret: backup.fuelSecret,
               messageLeafIndex: BigInt(receipt.fuelMessageLeafIndexStr!),
             })
-            feeOption = { fee: { paymentMethod } }
-            console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim')
+            feeOption = { fee: { paymentMethod, gasSettings: claimGasSettings } }
+            console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim (public fuel)')
           } catch (err) {
             console.warn('[L1→L2] Failed to create FeeJuicePaymentMethodWithClaim, falling back to default:', err)
           }
         }
 
         // Portal deducts fees before creating the L1→L2 message — claim must use the post-fee amount
-        if (!receipt.amountAfterFee) {
-          throw new Error('amountAfterFee missing from deposit event — cannot determine correct claim amount')
+        if (!receipt.claimAmount) {
+          throw new Error('claimAmount missing from deposit event — cannot determine correct claim amount')
         }
-        const claimAmount = receipt.amountAfterFee
+        const claimAmount = receipt.claimAmount
         console.log('[L1→L2] Claim amount (after fee):', claimAmount.toString())
 
         const claimResult = await executeL2Claim(
-          { walletAdapter, aztecAddress, isPrivacyModeEnabled: isPrivacyModeEnabled ?? false },
+          {
+            walletAdapter,
+            aztecAddress,
+            isPrivacyModeEnabled: isPrivacyModeEnabled ?? false,
+          },
           {
             amount: claimAmount,
             claimSecret: backup.claimSecret,
@@ -851,7 +1029,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               notify('info', `Claiming tokens on L2 (attempt ${attempt}/${maxAttempts})...`)
             },
             onRetry: (attempt, maxAttempts, delayMs) => {
-              notify('info', `L2 node hasn't synced this message yet. Retrying in ${Math.round(delayMs / 60_000)} min (${attempt}/${maxAttempts})...`)
+              notify(
+                'info',
+                `L2 node hasn't synced this message yet. Retrying in ${Math.round(delayMs / 60_000)} min (${attempt}/${maxAttempts})...`,
+              )
             },
             feeOption,
           },
@@ -885,13 +1066,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         console.log('✅ L2 claim success stored (status=completed, l2TxHash)')
 
         // 🔒 PATCH: mark operation as completed on server (retry — critical for DB consistency)
-        await patchOperationWithRetry(operationId, {
-          status: 'completed',
-          l2TxHash,
-          l2TxUrl,
-          completedAt: new Date().toISOString(),
-          currentStep: 4,
-        }, { label: 'L1→L2 completion' })
+        await patchOperationWithRetry(
+          operationId,
+          {
+            status: 'completed',
+            l2TxHash,
+            l2TxUrl,
+            completedAt: new Date().toISOString(),
+            currentStep: 4,
+          },
+          { label: 'L1→L2 completion' },
+        )
 
         // ─── Step 10: Bridge Complete ─────────────────────────────────
         setProgressStep(3, 'completed')
@@ -957,8 +1142,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         return l2TxHash
       } catch (error) {
         // If claim fails, keep data in localStorage — operation stays 'deposited' for recovery
-        const claimErrorMessage =
-          error instanceof Error ? error.message : String(error)
+        const claimErrorMessage = error instanceof Error ? error.message : String(error)
         console.error('Claim failed:', error)
 
         if (typeof operationId === 'string') {
@@ -990,8 +1174,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         throw error
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
       console.error('[L1→L2] Bridge transaction failed:', errorMessage, error)
 
       // 🔒 CRITICAL: Only mark as 'failed' if deposit has NOT been confirmed (no funds at risk).
@@ -1007,20 +1190,13 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       }
 
       if (
-        errorMessage.includes(
-          '"path":["revertReason","functionErrorStack",0,"functionSelector"]',
-        ) ||
-        (errorMessage.includes('invalid_type') &&
-          errorMessage.includes('functionSelector'))
+        errorMessage.includes('"path":["revertReason","functionErrorStack",0,"functionSelector"]') ||
+        (errorMessage.includes('invalid_type') && errorMessage.includes('functionSelector'))
       ) {
         console.error('[L1→L2] Bridge failed (congestion):', error)
-        notify(
-          'error',
-          'The Aztec Testnet is congested right now. Unfortunately your transaction was dropped.',
-          {
-            autoClose: false,
-          },
-        )
+        notify('error', 'The Aztec Testnet is congested right now. Unfortunately your transaction was dropped.', {
+          autoClose: false,
+        })
 
         logError('Bridge from L1 to L2 failed due to network congestion', {
           walletType: WalletType.WAAP,
@@ -1043,15 +1219,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           userAction: 'bridge_l1_to_l2_congestion_error',
         })
 
-        throw new Error(
-          'The Aztec Testnet is congested right now. Unfortunately your transaction was dropped.',
-        )
+        throw new Error('The Aztec Testnet is congested right now. Unfortunately your transaction was dropped.')
       } else if (errorMessage.includes('0xfb8f41b2')) {
         console.error('[L1→L2] Bridge failed (contract 0xfb8f41b2):', error)
-        notify(
-          'error',
-          'Bridge transaction failed (error: 0xfb8f41b2). Please reload the page ',
-        )
+        notify('error', 'Bridge transaction failed (error: 0xfb8f41b2). Please reload the page ')
 
         logError('Bridge from L1 to L2 failed with contract error', {
           walletType: WalletType.WAAP,
@@ -1069,8 +1240,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           amount: amount.toString(),
           l1Address: l1Address,
           l2Address: aztecAddress,
-          error:
-            'Contract reverted with signature 0xfb8f41b2. Recommend reload.',
+          error: 'Contract reverted with signature 0xfb8f41b2. Recommend reload.',
           errorSignature: '0xfb8f41b2',
           userAction: 'bridge_l1_to_l2_contract_error',
         })
@@ -1079,14 +1249,13 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           errorMessage.includes('Contract artifact not found') ||
           errorMessage.includes('artifact not found') ||
           errorMessage.includes('Contract artifact') ||
-          (errorMessage.includes('artifact') &&
-            errorMessage.includes('not found'))
+          (errorMessage.includes('artifact') && errorMessage.includes('not found'))
 
         if (isArtifactError) {
           console.error('[L1→L2] Bridge failed (artifact not found):', error)
           notify('error', {
             heading: 'Contract Artifact Not Found',
-            message: `The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.`,
+            message: `The contract artifact is not available in the public registry. Please upload it to https://testnet.aztec-registry.xyz/ to make it available for the wallet.`,
           })
         } else {
           notify('error', `Bridge transaction failed: ${errorMessage}`)
@@ -1124,7 +1293,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       queryClient.invalidateQueries({
         queryKey: ['l1TokenBalances', l1Address],
       })
-      queryClient.invalidateQueries({ queryKey: ['l1TokenBalance', l1Address] })
+      queryClient.invalidateQueries({
+        queryKey: ['l1TokenBalance', l1Address],
+      })
       queryClient.invalidateQueries({
         queryKey: ['l2TokenBalance', aztecAddress],
       })
@@ -1164,13 +1335,9 @@ export function useExportClaimData() {
       }
 
       exportClaimData(claim)
-      notify(
-        'success',
-        'Claim data exported successfully! Save this file in a safe place.',
-      )
+      notify('success', 'Claim data exported successfully! Save this file in a safe place.')
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       notify('error', `Failed to export claim data: ${errorMessage}`)
     }
   }
@@ -1192,14 +1359,15 @@ export function useExportClaimData() {
       }
 
       // Decrypt the claim secret from the encrypted localStorage entry
-      const signingMessage = createSigningMessage(claim.l1Address)
-      const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [
+      // Use stored domain so decryption works even after a domain migration
+      const signingMessage = createSigningMessage(claim.l1Address, claim.keyDerivationDomain)
+      const signature = (await requestWaapWallet(WAAP_METHOD.personal_sign, [
         signingMessage,
         claim.l1Address,
-      ]) as string
+      ])) as string
       const encryptionKey = await deriveEncryptionKey(claim.l1Address, signature, claim.keyDerivationDomain)
       const decrypted = JSON.parse(
-        await decryptData(claim.encryptedCiphertext, claim.encryptedIv, claim.encryptedTag, encryptionKey)
+        await decryptData(claim.encryptedCiphertext, claim.encryptedIv, claim.encryptedTag, encryptionKey),
       )
 
       logInfo('bridge.decrypt_claim_secret', {
@@ -1224,8 +1392,7 @@ export function useExportClaimData() {
         return false
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       notify('error', `Failed to copy claim secret: ${errorMessage}`)
       return false
     }
@@ -1284,8 +1451,7 @@ export function useL1HasSoulboundToken() {
       return Boolean(hasSBT)
     } catch (error) {
       console.error('Error checking L1 SBT status:', error)
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
       notify('error', 'Failed to check SBT status on Ethereum: ' + errorMessage)
       return false
     }
@@ -1340,24 +1506,17 @@ export function useL1MintSoulboundToken(onSuccess: (data: any) => void) {
       ])
 
       // Wait for confirmation
-      const receipt = await requestWaapWallet(
-        WAAP_METHOD.eth_getTransactionReceipt,
-        [txHash],
-      )
+      const receipt = await requestWaapWallet(WAAP_METHOD.eth_getTransactionReceipt, [txHash])
       const txHashStr = receipt?.transactionHash?.toString()
 
-      const etherscanUrl = `https://sepolia.etherscan.io/tx/${txHashStr}`
-      notify(
-        'info',
-        `SBT minted successfully on Ethereum! Click to view on Ethereum`,
-        {
-          onClick: () => {
-            window.open(etherscanUrl, '_blank')
-          },
-          closeOnClick: false,
-          style: { cursor: 'pointer' },
+      const etherscanUrl = getL1TxUrl(txHashStr ?? '')
+      notify('info', `SBT minted successfully on Ethereum! Click to view on Ethereum`, {
+        onClick: () => {
+          window.open(etherscanUrl, '_blank')
         },
-      )
+        closeOnClick: false,
+        style: { cursor: 'pointer' },
+      })
 
       console.log('SBT minted successfully on L1', { receipt })
       return receipt
@@ -1373,8 +1532,7 @@ export function useL1MintSoulboundToken(onSuccess: (data: any) => void) {
       onSuccess(data)
     },
     onError: (error) => {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
       notify('error', errorMessage)
     },
     // toastMessages: {

@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import {
-  createPublicClient,
-  createWalletClient,
-  http,
-  custom,
-  parseEther,
-  formatEther,
-} from 'viem'
+import { createPublicClient, createWalletClient, http, custom, parseEther, formatEther } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { sepolia } from 'viem/chains'
 import { ADDRESS } from '@/config'
+import { L1_RPC_SEPOLIA, FAUCET_PRIVATE_KEY as ENV_FAUCET_KEY } from '@/config/env.config'
 
 // Configure Vercel function timeout (300 seconds for Pro plan)
 export const maxDuration = 300
@@ -26,20 +20,17 @@ const FAUCET_AMOUNT = parseEther('0.02')
 // users from requesting tokens more than once in 24 hours
 
 function getPrivateKeyAndRpc() {
-  let privateKey = process.env.FAUCET_PRIVATE_KEY
-  const rpcUrl = process.env.ETHEREUM_RPC_URL
+  let privateKey = ENV_FAUCET_KEY
+  const rpcUrl = L1_RPC_SEPOLIA
   if (!privateKey) throw new Error('FAUCET_PRIVATE_KEY is not set')
-  if (!rpcUrl) throw new Error('ETHEREUM_RPC_URL is not set')
+  if (!rpcUrl) throw new Error('L1_RPC_SEPOLIA is not set')
   if (!privateKey.startsWith('0x')) privateKey = `0x${privateKey}`
   return { privateKey: privateKey as `0x${string}`, rpcUrl }
 }
 
 export async function POST(request: NextRequest) {
   // API is disabled
-  return NextResponse.json(
-    { error: 'Faucet API is currently disabled' },
-    { status: 503 }
-  )
+  return NextResponse.json({ error: 'Faucet API is currently disabled' }, { status: 503 })
 
   try {
     // Only accept POST requests
@@ -52,10 +43,7 @@ export async function POST(request: NextRequest) {
 
     // Validate recipient address
     if (!address || typeof address !== 'string' || !address.startsWith('0x')) {
-      return NextResponse.json(
-        { error: 'Invalid recipient address' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Invalid recipient address' }, { status: 400 })
     }
 
     try {
@@ -74,17 +62,13 @@ export async function POST(request: NextRequest) {
       const faucetBalanceBefore = await publicClient.getBalance({
         address: account.address,
       })
-      console.log(
-        `Faucet account balance before: ${formatEther(faucetBalanceBefore)} ETH`
-      )
+      console.log(`Faucet account balance before: ${formatEther(faucetBalanceBefore)} ETH`)
 
       // Check recipient balance before transaction
       const recipientBalanceBefore = await publicClient.getBalance({
         address: address as `0x${string}`,
       })
-      console.log(
-        `Recipient balance before: ${formatEther(recipientBalanceBefore)} ETH`
-      )
+      console.log(`Recipient balance before: ${formatEther(recipientBalanceBefore)} ETH`)
 
       // Send ETH instead of tokens
       console.log(`Sending ${FAUCET_AMOUNT} ETH to ${address}`)
@@ -112,12 +96,11 @@ export async function POST(request: NextRequest) {
         serializedTransaction: signedTx,
       })
 
-
       // Wait for transaction to be mined
       console.log('Waiting for transaction to be mined...')
-      const receipt = await publicClient.waitForTransactionReceipt({ 
+      const receipt = await publicClient.waitForTransactionReceipt({
         hash,
-        timeout: 300_000 // 5 minutes timeout
+        timeout: 300_000, // 5 minutes timeout
       })
       console.log('Transaction mined!')
       const txHash = receipt.transactionHash
@@ -126,16 +109,12 @@ export async function POST(request: NextRequest) {
       const faucetBalanceAfter = await publicClient.getBalance({
         address: account.address,
       })
-      console.log(
-        `Faucet account balance after: ${formatEther(faucetBalanceAfter)} ETH`
-      )
+      console.log(`Faucet account balance after: ${formatEther(faucetBalanceAfter)} ETH`)
 
       const recipientBalanceAfter = await publicClient.getBalance({
         address: address as `0x${string}`,
       })
-      console.log(
-        `Recipient balance after: ${formatEther(recipientBalanceAfter)} ETH`
-      )
+      console.log(`Recipient balance after: ${formatEther(recipientBalanceAfter)} ETH`)
 
       return NextResponse.json({
         success: true,
@@ -156,18 +135,16 @@ export async function POST(request: NextRequest) {
       console.error('Error with transaction:', err)
       return NextResponse.json(
         {
-          error: `Error processing transaction: ${
-            err instanceof Error ? (err as Error).message : 'Unknown error'
-          }`,
+          error: `Error processing transaction: ${err instanceof Error ? (err as Error).message : 'Unknown error'}`,
         },
-        { status: 500 }
+        { status: 500 },
       )
     }
   } catch (error) {
     console.error('Faucet error:', error)
     return NextResponse.json(
       { error: error instanceof Error ? (error as Error).message : 'Unknown error' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }

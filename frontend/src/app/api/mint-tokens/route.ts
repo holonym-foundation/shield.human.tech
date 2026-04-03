@@ -3,6 +3,7 @@ import { createPublicClient, createWalletClient, http, parseUnits } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { sepolia } from 'viem/chains'
 import { L1_TOKENS } from '@/config'
+import { L1_RPC_SEPOLIA, FAUCET_PRIVATE_KEY as ENV_FAUCET_KEY } from '@/config/env.config'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 
@@ -13,10 +14,10 @@ export const maxDuration = 300
 const TOKEN_AMOUNT = 1000
 
 function getPrivateKeyAndRpc() {
-  let privateKey = process.env.FAUCET_PRIVATE_KEY
-  const rpcUrl = process.env.ETHEREUM_RPC_URL
+  let privateKey = ENV_FAUCET_KEY
+  const rpcUrl = L1_RPC_SEPOLIA
   if (!privateKey) throw new Error('FAUCET_PRIVATE_KEY is not set')
-  if (!rpcUrl) throw new Error('ETHEREUM_RPC_URL is not set')
+  if (!rpcUrl) throw new Error('L1_RPC_SEPOLIA is not set')
   if (!privateKey.startsWith('0x')) privateKey = `0x${privateKey}`
   return { privateKey: privateKey as `0x${string}`, rpcUrl }
 }
@@ -33,29 +34,18 @@ export async function POST(request: NextRequest) {
 
     // Validate recipient address
     if (!address || typeof address !== 'string' || !address.startsWith('0x')) {
-      return NextResponse.json(
-        { error: 'Invalid recipient address' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Invalid recipient address' }, { status: 400 })
     }
 
     // Validate token address — must be explicitly provided
     if (!tokenAddress || typeof tokenAddress !== 'string' || !tokenAddress.startsWith('0x')) {
-      return NextResponse.json(
-        { error: 'Invalid or missing tokenAddress (must be 0x-prefixed)' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Invalid or missing tokenAddress (must be 0x-prefixed)' }, { status: 400 })
     }
 
     // Verify the requested token is a known deployed token
-    const isKnownToken = L1_TOKENS.some(
-      (t) => t.l1TokenContract?.toLowerCase() === tokenAddress.toLowerCase()
-    )
+    const isKnownToken = L1_TOKENS.some((t) => t.l1TokenContract?.toLowerCase() === tokenAddress.toLowerCase())
     if (!isKnownToken) {
-      return NextResponse.json(
-        { error: 'Token address is not a recognized deployed token' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Token address is not a recognized deployed token' }, { status: 400 })
     }
 
     const tokenContractAddress = tokenAddress
@@ -121,9 +111,9 @@ export async function POST(request: NextRequest) {
         console.log(`Token mint transaction sent: ${hash}`)
 
         // Wait for the transaction to be mined
-        const receipt = await publicClient.waitForTransactionReceipt({ 
+        const receipt = await publicClient.waitForTransactionReceipt({
           hash,
-        timeout: 300_000 // 5 minutes timeout
+          timeout: 300_000, // 5 minutes timeout
         })
         console.log(`Token mint confirmed: ${hash}`)
 
@@ -140,18 +130,13 @@ export async function POST(request: NextRequest) {
       console.error('Error minting tokens:', err)
       return NextResponse.json(
         {
-          error: `Error minting tokens: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          error: `Error minting tokens: ${err instanceof Error ? err.message : String(err)}`,
         },
-        { status: 500 }
+        { status: 500 },
       )
     }
   } catch (error) {
     console.error('Mint-tokens API error:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 })
   }
 }

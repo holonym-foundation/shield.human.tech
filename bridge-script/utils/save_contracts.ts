@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join, resolve } from 'path';
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
@@ -16,6 +16,8 @@ export interface DeployedToken {
   // Fee infrastructure
   feeAssetHandler: string;
   sponsoredFee: string;
+  // Migration state: true when deposits are paused on this portal (rollup upgrade window)
+  depositsPaused?: boolean;
 }
 
 export interface L1ContractAddresses {
@@ -42,9 +44,11 @@ export interface DeploymentFile {
   l1ContractAddresses: L1ContractAddresses;
   nodeInfo: Record<string, unknown>;
   sponsoredFeeAddress: string;
-  bridgeAndFuelAddress?: string;
-  mockFuelSwapAddress?: string;
   tokens: DeployedToken[];
+  // Fuel swap infrastructure
+  uniswapFuelSwapAddress?: string;
+  swapBridgeRouterAddress?: string;
+  bridgedFpcAddress?: string;
 }
 
 export interface RegistryEntry {
@@ -66,6 +70,17 @@ export interface DeploymentRegistry {
 const DEPLOYMENTS_DIR = join('deployments');
 const REGISTRY_FILE = join(DEPLOYMENTS_DIR, 'registry.json');
 const FRONTEND_DEPLOYMENTS = resolve('..', 'frontend', 'src', 'constants', 'deployments.json');
+const FRONTEND_ARTIFACTS_DIR = resolve('..', 'frontend', 'src', 'constants', 'aztec', 'artifacts');
+
+// Source artifact paths (compiled Noir contracts + codegen)
+const ARTIFACT_SOURCES = [
+  // Token artifact (Wonderland compliant token — from bridge-script codegen)
+  { src: resolve('constants', 'aztec', 'artifacts', 'token-Token.json'), dest: 'token-Token.json' },
+  // TokenBridge artifact (custom contract — from aztec-contracts build)
+  { src: resolve('..', 'aztec-contracts', 'token_bridge', 'target', 'token_bridge_contract-TokenBridge.json'), dest: 'token_bridge_contract-TokenBridge.json' },
+  // TokenMinterProxy artifact (custom contract — from aztec-contracts build)
+  { src: resolve('..', 'aztec-contracts', 'token_minter_proxy', 'target', 'token_minter_proxy-TokenMinterProxy.json'), dest: 'token_minter_proxy-TokenMinterProxy.json' },
+];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -151,7 +166,7 @@ export function createDeployment(params: {
     network: {
       name: params.networkName,
       nodeUrl: params.nodeUrl,
-      l1RpcUrl: params.l1RpcUrl,
+      l1RpcUrl: '', // not saved — frontend uses NEXT_PUBLIC_ETHEREUM_RPC_URL env var
       l1ChainId: params.l1ChainId,
       l2ChainId: params.l2ChainId,
       aztecVersion: params.aztecVersion,
@@ -161,6 +176,10 @@ export function createDeployment(params: {
     nodeInfo: params.nodeInfo,
     sponsoredFeeAddress: params.sponsoredFeeAddress,
     tokens: existingTokens,
+    // Preserve fuel swap infra addresses across re-runs
+    ...(existing?.uniswapFuelSwapAddress && { uniswapFuelSwapAddress: existing.uniswapFuelSwapAddress }),
+    ...(existing?.swapBridgeRouterAddress && { swapBridgeRouterAddress: existing.swapBridgeRouterAddress }),
+    ...(existing?.bridgedFpcAddress && { bridgedFpcAddress: existing.bridgedFpcAddress }),
   };
 
   writeJson(filePath, deployment);
@@ -218,31 +237,6 @@ export function saveTokenToDeployment(token: DeployedToken, deploymentId?: strin
 }
 
 /**
- * Save BridgeAndFuel / MockFuelSwap addresses to the active deployment.
- */
-export function saveFuelInfraToDeployment(params: {
-  bridgeAndFuelAddress: string;
-  mockFuelSwapAddress: string;
-}, deploymentId?: string): void {
-  const id = deploymentId ?? loadRegistry()?.activeDeploymentId;
-  if (!id) throw new Error('No active deployment to save fuel infra to');
-
-  const registry = loadRegistry();
-  const entry = registry?.deployments.find(d => d.id === id);
-  if (!entry) throw new Error(`Deployment ${id} not found in registry`);
-
-  const filePath = join(DEPLOYMENTS_DIR, entry.file);
-  const deployment = readJson<DeploymentFile>(filePath);
-  if (!deployment) throw new Error(`Deployment file not found: ${filePath}`);
-
-  deployment.bridgeAndFuelAddress = params.bridgeAndFuelAddress;
-  deployment.mockFuelSwapAddress = params.mockFuelSwapAddress;
-
-  writeJson(filePath, deployment);
-  console.log(`✅ Saved fuel infra to deployment ${id}`);
-}
-
-/**
  * Load existing tokens from the active deployment (for skip-if-deployed checks).
  */
 export function loadExistingTokens(): DeployedToken[] {
@@ -274,4 +268,42 @@ export function copyToFrontend(): void {
 
   writeJson(FRONTEND_DEPLOYMENTS, bundle);
   console.log(`📋 Synced ${allDeployments.length} deployment(s) to frontend: ${FRONTEND_DEPLOYMENTS}`);
+
+  // Sync contract artifacts to frontend
+  ensureDir(FRONTEND_ARTIFACTS_DIR);
+  for (const { src, dest } of ARTIFACT_SOURCES) {
+    if (existsSync(src)) {
+      copyFileSync(src, join(FRONTEND_ARTIFACTS_DIR, dest));
+      console.log(`📦 Synced artifact: ${dest}`);
+    } else {
+      console.warn(`⚠️  Artifact not found, skipping: ${src}`);
+    }
+  }
+}
+
+/**
+ * Save fuel swap infrastructure addresses to the active deployment.
+ * These contracts are deployed via Forge scripts (not the TS deployer):
+ *   - UniswapFuelSwap: Uniswap V4 swap contract for token→FeeJuice
+ *   - SwapBridgeRouter: Permit2-enabled bridge + fuel router
+ *   - BridgedFPC: L2 private fee payment contract
+ */
+export function saveFuelSwapInfraToDeployment(params: {
+  uniswapFuelSwapAddress?: string;
+  swapBridgeRouterAddress?: string;
+  bridgedFpcAddress?: string;
+}, deploymentId?: string): void {
+  const registry = loadRegistry();
+  if (!registry) throw new Error('No registry found');
+  const id = deploymentId ?? registry.activeDeploymentId;
+  const deployment = loadDeploymentById(id);
+  if (!deployment) throw new Error(`Deployment ${id} not found`);
+
+  if (params.uniswapFuelSwapAddress) deployment.uniswapFuelSwapAddress = params.uniswapFuelSwapAddress;
+  if (params.swapBridgeRouterAddress) deployment.swapBridgeRouterAddress = params.swapBridgeRouterAddress;
+  if (params.bridgedFpcAddress) deployment.bridgedFpcAddress = params.bridgedFpcAddress;
+
+  const filePath = join(DEPLOYMENTS_DIR, `${id}.json`);
+  writeJson(filePath, deployment);
+  console.log(`✅ Saved fuel swap infra to deployment ${id}`);
 }

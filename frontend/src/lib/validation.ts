@@ -43,10 +43,7 @@ export const NUMERIC_STRING_REGEX = /^\d+$/
 // ─── Sanitization helpers ───────────────────────────────────────────────
 
 /** Trim and limit a string field. Returns undefined if input is falsy. */
-export function sanitizeString(
-  value: unknown,
-  maxLength: number = MAX_STRING_LENGTH,
-): string | undefined {
+export function sanitizeString(value: unknown, maxLength: number = MAX_STRING_LENGTH): string | undefined {
   if (value == null || typeof value !== 'string') return undefined
   const trimmed = value.trim()
   if (!trimmed.length) return undefined
@@ -61,10 +58,7 @@ export function sanitizeEthAddress(value: unknown): string | undefined {
 }
 
 /** Sanitize and validate a hex string (0x-prefixed). Returns lowercase or undefined. */
-export function sanitizeHexString(
-  value: unknown,
-  maxLength: number = MAX_STRING_LENGTH,
-): string | undefined {
+export function sanitizeHexString(value: unknown, maxLength: number = MAX_STRING_LENGTH): string | undefined {
   const s = sanitizeString(value, maxLength)
   if (!s || !HEX_STRING_REGEX.test(s)) return undefined
   return s.toLowerCase()
@@ -84,29 +78,41 @@ export function sanitizeNumericString(value: unknown): string | undefined {
   return s
 }
 
-/** Sanitize a URL string. Returns trimmed URL or undefined. */
+/** Known-good explorer URL prefixes for transaction links. */
+const ALLOWED_URL_PREFIXES = [
+  'https://etherscan.io/',
+  'https://sepolia.etherscan.io/',
+  'https://goerli.etherscan.io/',
+  'https://holesky.etherscan.io/',
+  'https://aztec.network/',
+  'https://aztecscan.io/',
+  'https://aztecscan.xyz/',
+  'https://devnet.aztecscan.xyz/',
+  'https://testnet.aztecscan.xyz/',
+  'https://aztecexplorer.xyz/',
+]
+
+/** Sanitize a URL string. Only allows known explorer hosts. Returns trimmed URL or undefined. */
 export function sanitizeUrl(value: unknown): string | undefined {
   const s = sanitizeString(value, 2048)
   if (!s) return undefined
   try {
     const url = new URL(s)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+    if (url.protocol !== 'https:') return undefined
+    if (!ALLOWED_URL_PREFIXES.some((prefix) => s.startsWith(prefix))) return undefined
     return s
   } catch {
     return undefined
   }
 }
 
-/** Validate and clamp an integer to a range. Returns the clamped value or undefined. */
-export function sanitizeInt(
-  value: unknown,
-  min: number = 0,
-  max: number = 1000,
-): number | undefined {
+/** Validate an integer is within range. Returns the value or undefined if out of range. */
+export function sanitizeInt(value: unknown, min: number = 0, max: number = 1000): number | undefined {
   if (value == null) return undefined
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined
-  return Math.max(min, Math.min(max, n))
+  if (n < min || n > max) return undefined
+  return n
 }
 
 /** Validate a boolean. Returns the boolean or undefined. */
@@ -119,10 +125,7 @@ export function sanitizeBoolean(value: unknown): boolean | undefined {
  * Sanitize ciphertext: reject (not truncate) if oversized, since truncation
  * would silently corrupt encrypted data and make it unrecoverable.
  */
-export function sanitizeCiphertext(
-  value: unknown,
-  maxLength: number = MAX_CIPHERTEXT_LENGTH,
-): string | undefined {
+export function sanitizeCiphertext(value: unknown, maxLength: number = MAX_CIPHERTEXT_LENGTH): string | undefined {
   if (value == null || typeof value !== 'string') return undefined
   const trimmed = value.trim()
   if (!trimmed.length) return undefined
@@ -135,11 +138,8 @@ export function sanitizeCiphertext(
  * Ensures it's a plain object, strips prototype chains via JSON round-trip,
  * and enforces serialized size limits.
  */
-export function sanitizeNodeInfo(
-  value: unknown,
-): Record<string, unknown> | undefined {
-  if (value == null || typeof value !== 'object' || Array.isArray(value))
-    return undefined
+export function sanitizeNodeInfo(value: unknown): Record<string, unknown> | undefined {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return undefined
   try {
     const serialized = JSON.stringify(value)
     if (serialized.length > MAX_NODE_INFO_LENGTH) return undefined

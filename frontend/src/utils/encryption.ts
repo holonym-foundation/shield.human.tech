@@ -64,15 +64,22 @@ export function verifyDomain(): void {
  * Security: domain-bound + wallet-bound. personal_sign is deterministic
  * for the same message and wallet.
  */
-export function createSigningMessage(l1Address: string): string {
-  const domain = getKeyDerivationDomain()
+/**
+ * @param l1Address - User's L1 (Ethereum) address
+ * @param domain - Optional domain override. When decrypting old backups, pass
+ *   the stored `keyDerivationDomain` so the signing message (and thus the
+ *   derived key) matches the one used at encryption time.  When encrypting
+ *   (creating new operations), omit this to use the current domain.
+ */
+export function createSigningMessage(l1Address: string, domain?: string): string {
+  const effectiveDomain = domain ?? getKeyDerivationDomain()
   return [
     'Aztec Bridge - Unlock My Secrets',
     '',
     'This signature derives an encryption key that protects your bridge operation secrets.',
     'Your encrypted data is stored securely and can only be decrypted by you.',
     '',
-    `ONLY sign this on: ${domain}`,
+    `ONLY sign this on: ${effectiveDomain}`,
     `Wallet: ${l1Address.toLowerCase()}`,
   ].join('\n')
 }
@@ -124,7 +131,7 @@ export async function deriveEncryptionKey(
 export async function encryptData(
   plaintext: string,
   key: Uint8Array
-): Promise<{ ciphertext: string; iv: string; tag: string }> {
+): Promise<{ ciphertext: string; iv: string; tag: string; version: number }> {
   // Generate random IV (Initialization Vector)
   // 12 bytes is standard for GCM mode
   const iv = crypto.getRandomValues(new Uint8Array(12))
@@ -147,6 +154,7 @@ export async function encryptData(
     ciphertext: toHex(ciphertext),
     iv: toHex(iv),
     tag: toHex(tag),
+    version: ENCRYPTION_VERSION,
   }
 }
 
@@ -196,27 +204,43 @@ export async function decryptData(
 /**
  * Type definitions for encrypted data
  */
+/** Current encryption format version. Increment when changing KDF, cipher, or payload structure. */
+export const ENCRYPTION_VERSION = 1
+
 export interface EncryptedData {
   ciphertext: string
   iv: string
   tag: string
+  /** Encryption format version — allows future migration to different schemes. */
+  version?: number
+  /** Domain used for key derivation — needed to decrypt if domain changes. */
+  keyDerivationDomain?: string
 }
 
 export interface BridgeActivityData {
-  // For L1→L2
+  // L1→L2: claim secrets (encrypted blob only — server never sees these)
   claimSecret?: string
   claimSecretHash?: string
-  messageHash?: string
-  messageLeafIndex?: string
-  
-  // For L2→L1
+
+  // L1→L2: fuel secrets (encrypted blob only)
+  fuelSecret?: string
+  fuelSecretHash?: string
+  privateFuelSalt?: string
+  privateFuelSecret?: string
+  privateFuelSecretHash?: string
+
+  // L1→L2: snapshot stored in blob for offline recovery
+  l1BlockNumberBeforeTx?: string
+  nodeInfo?: Record<string, unknown>
+
+  // L2→L1: authwit nonce (encrypted blob only — needed to re-attempt interrupted burn)
   nonce?: string
-  l2BlockNumber?: string
-  l2ToL1MessageIndex?: string
-  siblingPath?: string[]
-  
-  // Common
+  l2BridgeAddress?: string
+  portalAddressL1?: string
+
+  // Common (present in both L1→L2 and L2→L1 blobs)
   amount?: string
   l1Address?: string
   l2Address?: string
+  isPrivacyModeEnabled?: boolean
 }

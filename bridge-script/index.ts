@@ -32,7 +32,9 @@ import { getContract, toFunctionSelector } from 'viem';
 
 // docs:end:imports
 // docs:start:utils
-const MNEMONIC = 'test test test test test test test test test test test junk';
+const L1_PRIVATE_KEY = process.env.L1_PRIVATE_KEY;
+const MNEMONIC = process.env.MNEMONIC || 'test test test test test test test test test test test junk';
+const L1_CREDENTIAL = L1_PRIVATE_KEY || MNEMONIC;
 const { ETHEREUM_HOSTS = 'http://localhost:8545' } = process.env;
 
 let walletClient: ExtendedViemWalletClient;
@@ -41,7 +43,7 @@ let ownerEthAddress: `0x${string}`;
 
 const initL1Clients = (l1ChainId: number) => {
   const chain = createEthereumChain(ETHEREUM_HOSTS.split(','), l1ChainId);
-  walletClient = createExtendedL1Client(chain.rpcUrls, MNEMONIC, chain.chainInfo);
+  walletClient = createExtendedL1Client(chain.rpcUrls, L1_CREDENTIAL, chain.chainInfo);
   publicClient = getPublicClient({ l1RpcUrls: chain.rpcUrls, l1ChainId });
   ownerEthAddress = walletClient.account.address;
 };
