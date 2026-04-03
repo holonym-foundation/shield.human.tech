@@ -1,8 +1,8 @@
 # Aztec Token Bridge Scripts
 
-Deployment and testing scripts for the Aztec L1↔L2 token bridge. Includes both a standard bridge (`index-devnet.ts`) and a compliant bridge with attestation/passport support (`index-devnet-compliant.ts`).
+Deployment and testing scripts for the Aztec L1↔L2 token bridge. Uses the compliant bridge with attestation/passport support (`index-testnet-compliant.ts`).
 
-The standard bridge deploys all L1 and L2 contracts: TestERC20, TokenPortal, TokenContract, TokenBridgeContract, UniswapFuelSwap, and SwapBridgeRouter.
+Deploys all L1 and L2 contracts: TestERC20, TokenPortal, TokenContract, TokenBridgeContract, UniswapFuelSwap, SwapBridgeRouter, and seeds Uniswap V4 pools (including direct USDC/FJ pool for fuel swaps).
 
 ## Setup
 

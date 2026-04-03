@@ -10,9 +10,10 @@ This is the **Aztec Token Bridge** — a full-stack system for bridging ERC-20 t
 frontend/                    — Next.js app (bridge UI)
 packages/sdk/                — @human.tech/aztec-bridge-sdk (core bridge logic, env-agnostic)
 bridge-script/               — Deployment & testing scripts (TypeScript + viem)
-  ├── index-devnet.ts        — Main devnet deployment script (tokens, pools, fuel tests)
-  ├── seed-pools.ts          — Standalone pool seeding script
+  ├── index-testnet-compliant.ts — Main deployment + test script (deploy, seed, test all flows)
+  ├── seed-pools.ts          — Standalone pool seeding script (direct USDC/FJ pool primary)
   ├── test-fuel-swap.ts      — Standalone fuel swap E2E test
+  ├── recover-liquidity.ts   — Recover ETH/tokens from old pool positions
   ├── constants/tokens.ts    — Token configurations (USDC, USDT, DAI, HUMN, GOAT, WBTC, WETH)
   └── deployments/           — Persisted deployment state (JSON)
 l1-contracts/                — Solidity contracts (Foundry)

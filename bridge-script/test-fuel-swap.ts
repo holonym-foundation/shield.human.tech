@@ -45,7 +45,7 @@ try {
 }
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
 
-// Pool key params (must match seed-pools.ts / index-devnet.ts)
+// Pool key params (must match seed-pools.ts / index-testnet-compliant.ts)
 const ETH_AZTEC_FEE = 3000
 const ETH_AZTEC_TICK_SPACING = 60
 const ERC20_WETH_FEE = 3000

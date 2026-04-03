@@ -1,13 +1,11 @@
 {
   "name": "src",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "index-testnet-compliant.ts",
   "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import tsx index.ts",
-    "start-devnet": "AZTEC_ENV=devnet LOG_LEVEL='silent;info:bridge' node --import tsx index-devnet.ts",
     "start-testnet": "AZTEC_ENV=testnet LOG_LEVEL='silent;info:bridge' node --import tsx index-testnet-compliant.ts",
     "deploy-testnet:compliant": "AZTEC_ENV=testnet DEPLOY_ONLY=true LOG_LEVEL='silent;info:bridge' node --import tsx index-testnet-compliant.ts",
     "deploy-testnet:compliant:token": "AZTEC_ENV=testnet DEPLOY_ONLY=true DEPLOY_TOKEN=${TOKEN} LOG_LEVEL='silent;info:bridge' node --import tsx index-testnet-compliant.ts",
