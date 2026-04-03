@@ -1,4 +1,4 @@
-# Aztec Bridge UI
+# Aztec Bridge UI 
 A visual overview of the Aztec Bridge flow:
 
 ![Aztec Bridge Flow](docs/aztec%20bridge%20flow.png)
