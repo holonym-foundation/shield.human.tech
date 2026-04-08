@@ -27,15 +27,11 @@ import {
   useL2NodeIsReady,
 } from '@/hooks/useL2Operations'
 import { showToast, useToast } from '@/hooks/useToast'
+import { extractErrorMessage } from '@/utils'
 import clsxm from '@/utils/clsxm'
 import NetworkModal from '@/components/model/Network'
 import TokensModal from '@/components/model/TokensModal'
-import {
-  BridgeDirection,
-  BridgeState,
-  Network as NetworkType,
-  Token as TokenType,
-} from '@/types/bridge'
+import { BridgeDirection, BridgeState, Network as NetworkType, Token as TokenType } from '@/types/bridge'
 import BridgeSection from '@/components/BridgeSection'
 import TransactionBreakdown from '@/components/TransactionBreakdown'
 import BridgeFooter from '@/components/BridgeFooter'
@@ -64,12 +60,7 @@ import { useBridgeStore } from '@/stores/bridgeStore'
 import { useRouter } from 'next/navigation'
 import MaintenanceOverlay from '@/components/MaintenanceOverlay'
 import FuelToggle from '@/components/FuelToggle'
-import {
-  MAINTENANCE_MODE,
-  MAINTENANCE_MESSAGE,
-  MAINTENANCE_TITLE,
-  SWAP_BRIDGE_ROUTER_ADDRESS,
-} from '@/config'
+import { MAINTENANCE_MODE, MAINTENANCE_MESSAGE, MAINTENANCE_TITLE, SWAP_BRIDGE_ROUTER_ADDRESS } from '@/config'
 
 const variants = {
   hidden: { opacity: 0, y: 100 },
@@ -92,9 +83,7 @@ export default function Home() {
 
   // Operational state
   const [showSBTModal, setShowSBTModal] = useState(false)
-  const [currentSBTChain, setCurrentSBTChain] = useState<'Ethereum' | 'Aztec'>(
-    'Ethereum',
-  )
+  const [currentSBTChain, setCurrentSBTChain] = useState<'Ethereum' | 'Aztec'>('Ethereum')
   const [bridgeCompleted, setBridgeCompleted] = useState(false)
 
   // Notification system
@@ -180,8 +169,7 @@ export default function Home() {
 
   // native token
   const sepoliaNativeTokens = l1TokenBalances.find(
-    (token) =>
-      token.type === 'native' && token.network?.chainId === L1_CHAIN_ID,
+    (token) => token.type === 'native' && token.network?.chainId === L1_CHAIN_ID,
   )
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted
 
@@ -191,8 +179,7 @@ export default function Home() {
     (token) =>
       token.type === 'erc20' &&
       token.network?.chainId === L1_CHAIN_ID &&
-      token.address ===
-        (selectedFromToken?.l1TokenContract ?? L1_TOKENS[0]?.l1TokenContract),
+      token.address === (selectedFromToken?.l1TokenContract ?? L1_TOKENS[0]?.l1TokenContract),
   )?.balance_formatted
 
   // Direct RPC balance via eth_call (works for any ERC20 including custom test tokens)
@@ -200,11 +187,9 @@ export default function Home() {
 
   // Prefer Alchemy if available, fall back to direct RPC
   const l1Balance = l1BalanceAlchemy ?? l1BalanceRpc
-  const { data: attestationData, isLoading: attestationLoading } =
-    useAttestationCheck()
+  const { data: attestationData, isLoading: attestationLoading } = useAttestationCheck()
   const { data: hasL1SBT } = useL1HasSoulboundToken()
-  const { mutate: mintL1SBT, isPending: mintL1SBTPending } =
-    useL1MintSoulboundToken(mintL1SBTOnSuccess)
+  const { mutate: mintL1SBT, isPending: mintL1SBTPending } = useL1MintSoulboundToken(mintL1SBTOnSuccess)
 
   // const { mutate: mintL1Tokens, isPending: mintL1TokensPending } =
   //   useL1MintTokens()
@@ -233,8 +218,7 @@ export default function Home() {
     refetch: refetchPrivateFeeJuiceBalance,
   } = useL2PrivateFeeJuiceBalance()
   const { data: hasL2SBT } = useL2HasSoulboundToken()
-  const { mutate: mintL2SBT, isPending: mintL2SBTPending } =
-    useL2MintSoulboundToken(mintL2SBTOnSuccess)
+  const { mutate: mintL2SBT, isPending: mintL2SBTPending } = useL2MintSoulboundToken(mintL2SBTOnSuccess)
 
   // Bridge success callback (runs after L1→L2 bridge or L2→L1 withdrawal)
   const handleBridgeSuccess = useCallback(
@@ -273,8 +257,7 @@ export default function Home() {
     ],
   )
 
-  const { mutate: bridgeTokensToL2, isPending: bridgeTokensToL2Pending } =
-    useL1BridgeToL2(handleBridgeSuccess)
+  const { mutate: bridgeTokensToL2, isPending: bridgeTokensToL2Pending } = useL1BridgeToL2(handleBridgeSuccess)
 
   const { mutate: withdrawTokensToL1, isPending: withdrawTokensToL1Pending } =
     useL2WithdrawTokensToL1(handleBridgeSuccess)
@@ -294,8 +277,7 @@ export default function Home() {
 
   // External faucet handler
   const handleExternalFaucet = () => {
-    const googleFaucetUrl =
-      'https://cloud.google.com/application/web3/faucet/ethereum/sepolia'
+    const googleFaucetUrl = 'https://cloud.google.com/application/web3/faucet/ethereum/sepolia'
 
     // Log faucet redirect to Google
     logInfo('Faucet redirect to Google initiated', {
@@ -362,12 +344,7 @@ export default function Home() {
         await mintL1SBT()
       }
     } catch (error) {
-      notify(
-        'error',
-        `Error minting SBT: ${
-          error instanceof Error ? error.message : 'Unknown error'
-        }`,
-      )
+      notify('error', `Error minting SBT: ${extractErrorMessage(error)}`)
     }
   }
 
@@ -393,15 +370,10 @@ export default function Home() {
         address: '',
         chainId: null,
         userAction: 'wallet_connection_failure',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: extractErrorMessage(error),
       })
 
-      notify(
-        'error',
-        `Failed to connect wallet: ${
-          error instanceof Error ? error.message : 'Unknown error'
-        }`,
-      )
+      notify('error', `Failed to connect wallet: ${extractErrorMessage(error)}`)
     }
   }
 
@@ -459,12 +431,7 @@ export default function Home() {
     <>
       <RootStyle>
         {/* Maintenance Overlay - blocks all interactions when enabled */}
-        {MAINTENANCE_MODE && (
-          <MaintenanceOverlay
-            title={MAINTENANCE_TITLE}
-            message={MAINTENANCE_MESSAGE}
-          />
-        )}
+        {MAINTENANCE_MODE && <MaintenanceOverlay title={MAINTENANCE_TITLE} message={MAINTENANCE_MESSAGE} />}
         {showWalletInstallPrompt && (
           <WalletDiscoveryModal
             isOpen={true}
@@ -474,8 +441,7 @@ export default function Home() {
             onClose={() => setShowWalletInstallPrompt(false)}
           />
         )}
-        {(walletConnectionPhase === 'discovering' ||
-          walletConnectionPhase === 'selecting') && (
+        {(walletConnectionPhase === 'discovering' || walletConnectionPhase === 'selecting') && (
           <WalletDiscoveryModal
             isOpen={true}
             wallets={discoveredWallets}
@@ -494,17 +460,9 @@ export default function Home() {
           />
         )}
         {walletConnectionPhase === 'requesting' && (
-          <div className='absolute inset-0 bg-latest-grey-1000 z-20 rounded-lg flex flex-col items-center justify-center gap-4'>
-            <Oval
-              height={40}
-              width={40}
-              color='#3b82f6'
-              secondaryColor='#93c5fd'
-              strokeWidth={4}
-            />
-            <p className='text-latest-grey-600 text-14 font-medium'>
-              Requesting permissions...
-            </p>
+          <div className="absolute inset-0 bg-latest-grey-1000 z-20 rounded-lg flex flex-col items-center justify-center gap-4">
+            <Oval height={40} width={40} color="#3b82f6" secondaryColor="#93c5fd" strokeWidth={4} />
+            <p className="text-latest-grey-600 text-14 font-medium">Requesting permissions...</p>
           </div>
         )}
         {walletConnectionPhase === 'account-select' && (
@@ -513,7 +471,7 @@ export default function Home() {
             accounts={availableAccounts}
             onSelect={selectAccount}
             onCancel={cancelWalletConnection}
-            title='Select Account'
+            title="Select Account"
           />
         )}
         {selectNetwork && (
@@ -541,11 +499,7 @@ export default function Home() {
             chain={currentSBTChain}
             onMint={handleSBTMinted}
             onClose={() => setShowSBTModal(false)}
-            isPending={
-              bridgeConfig.direction === BridgeDirection.L2_TO_L1
-                ? mintL2SBTPending
-                : mintL1SBTPending
-            }
+            isPending={bridgeConfig.direction === BridgeDirection.L2_TO_L1 ? mintL2SBTPending : mintL1SBTPending}
           />
         )}
         {/* Wallet selection is now handled by WalletDiscoveryModal above */}
@@ -553,8 +507,9 @@ export default function Home() {
         <div
           className={`grid grid-rows-[max-content_1fr_max-content] h-full ${
             MAINTENANCE_MODE ? 'pointer-events-none' : ''
-          }`}>
-          <div className='p-5'>
+          }`}
+        >
+          <div className="p-5">
             <BridgeHeader
               onClick={async () => {
                 await disconnectWaapWallet()
@@ -565,16 +520,17 @@ export default function Home() {
             />
           </div>
 
-          <div className='px-5'>
-            <AnimatePresence mode='popLayout'>
+          <div className="px-5">
+            <AnimatePresence mode="popLayout">
               {!showBreakdown ? (
                 <motion.div
-                  key='bridge'
-                  initial='hidden'
-                  animate='enter'
-                  exit='exit'
+                  key="bridge"
+                  initial="hidden"
+                  animate="enter"
+                  exit="exit"
                   variants={variants}
-                  transition={{ ease: 'easeInOut', duration: 0.5 }}>
+                  transition={{ ease: 'easeInOut', duration: 0.5 }}
+                >
                   <BridgeSection
                     bridgeConfig={bridgeConfig}
                     setIsFromSection={setIsFromSection}
@@ -603,45 +559,36 @@ export default function Home() {
                         bridgeAmount={bridgeConfig.amount}
                         tokenSymbol={bridgeConfig.from.token?.symbol ?? 'USDC'}
                         tokenDecimals={bridgeConfig.from.token?.decimals ?? 6}
-                        tokenAddress={
-                          bridgeConfig.from.token?.l1TokenContract ?? ''
-                        }
+                        tokenAddress={bridgeConfig.from.token?.l1TokenContract ?? ''}
                         onToggle={setFuelEnabled}
                         onAmountChange={setFuelAmount}
                         feeJuiceBalance={feeJuiceBalance}
                         privateFeeJuiceBalance={privateFeeJuiceBalance}
                         feeJuiceBalanceLoading={feeJuiceBalanceLoading}
-                        privateFeeJuiceBalanceLoading={
-                          privateFeeJuiceBalanceLoading
-                        }
+                        privateFeeJuiceBalanceLoading={privateFeeJuiceBalanceLoading}
                         fuelType={fuelType}
                         onFuelTypeChange={setFuelType}
                       />
                     )}
-                  <TransactionBreakdown
-                    isOpen={false}
-                    onToggle={() => setShowBreakdown(true)}
-                  />
+                  <TransactionBreakdown isOpen={false} onToggle={() => setShowBreakdown(true)} />
                 </motion.div>
               ) : (
                 <motion.div
-                  key='breakdown'
-                  initial='hidden'
-                  animate='enter'
-                  exit='exit'
+                  key="breakdown"
+                  initial="hidden"
+                  animate="enter"
+                  exit="exit"
                   variants={variants}
-                  transition={{ ease: 'easeInOut', duration: 0.5 }}>
-                  <TransactionBreakdown
-                    isOpen={true}
-                    onToggle={() => setShowBreakdown(false)}
-                  />
+                  transition={{ ease: 'easeInOut', duration: 0.5 }}
+                >
+                  <TransactionBreakdown isOpen={true} onToggle={() => setShowBreakdown(false)} />
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
 
-          <div className='self-end'>
-            <div className='rounded-[16px] border border-[#D4D4D4] bg-white shadow-[0px_0px_16px_0px_rgba(0,0,0,0.16)] flex flex-col items-center gap-[16px] pt-[16px] pr-[10px] pb-0 pl-[10px] w-full'>
+          <div className="self-end">
+            <div className="rounded-[16px] border border-[#D4D4D4] bg-white shadow-[0px_0px_16px_0px_rgba(0,0,0,0.16)] flex flex-col items-center gap-[16px] pt-[16px] pr-[10px] pb-0 pl-[10px] w-full">
               <BridgeActionButton
                 // isDisabled={isWaapConnected && isAztecConnected && isL2BalanceError}
                 // isDisabled={isWaapConnected && isAztecConnected && true}

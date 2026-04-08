@@ -65,11 +65,11 @@ function buildConfig(env: Environment): EnvironmentConfig {
         name: 'devnet',
         environment: 'devnet',
         network: {
-          nodeUrl: process.env.AZTEC_NODE_DEVNET || 'https://v4-devnet-2.aztec-labs.com',
+          nodeUrl: process.env.AZTEC_NODE_DEVNET || 'https://v4-devnet-3.aztec-labs.com',
           l1RpcUrl: process.env.L1_RPC_SEPOLIA || 'https://ethereum-sepolia-rpc.publicnode.com',
           l1ChainId: 11155111,
         },
-        settings: { skipSandbox: true, version: '4.0.0-devnet.2-patch.0' },
+        settings: { skipSandbox: true, version: '4.2.0-aztecnr-rc.2' },
         timeouts: { deployTimeout: 1_200_000, txTimeout: 180_000, waitTimeout: 60_000 },
       };
 

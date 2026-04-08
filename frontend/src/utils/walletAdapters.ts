@@ -55,6 +55,28 @@ async function getContractArtifact(type: ContractType) {
 
 const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
 
+/**
+ * Verify an Aztec TxReceipt was mined and executed successfully.
+ * Throws a descriptive error if the tx was dropped, pending, or reverted.
+ */
+function assertReceiptSuccess(receipt: {
+  status: string
+  executionResult?: string
+  error?: string
+  txHash: { toString(): string }
+}) {
+  const hash = receipt.txHash.toString()
+  if (receipt.status === 'dropped') {
+    throw new Error(`L2 transaction was dropped by the network (${hash}). ${receipt.error ?? 'Try again.'}`)
+  }
+  if (receipt.status === 'pending') {
+    throw new Error(`L2 transaction is still pending and was not included in a block (${hash}).`)
+  }
+  if (receipt.executionResult && receipt.executionResult !== 'success') {
+    throw new Error(`L2 transaction reverted (${receipt.executionResult}): ${receipt.error ?? hash}`)
+  }
+}
+
 function resolveArtifactType(contractAddress: string, bridgeAddress: string): ContractType {
   if (contractAddress.toLowerCase() === bridgeAddress.toLowerCase()) return 'bridge'
   if (BRIDGED_FPC_ADDRESS && contractAddress.toLowerCase() === BRIDGED_FPC_ADDRESS.toLowerCase()) return 'bridged_fpc'
@@ -188,6 +210,7 @@ class WalletAdapter {
       sendOpts.skipFeeEnforcement = true
     }
     const { receipt } = await instance.methods[method](...args).send(sendOpts)
+    assertReceiptSuccess(receipt)
     return {
       txHash: receipt.txHash.toString(),
       blockNumber: receipt.blockNumber,
@@ -221,6 +244,7 @@ class WalletAdapter {
     const sendOpts: any = { from: this.account }
     if (options?.fee) sendOpts.fee = options.fee
     const { receipt } = await batch.send(sendOpts)
+    assertReceiptSuccess(receipt)
     return {
       txHash: receipt.txHash.toString(),
       blockNumber: receipt.blockNumber,
@@ -282,6 +306,7 @@ class WalletAdapter {
     const exitCall = bridge.methods.exit_to_l1_public(EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
     const batch = new BatchCall(this.wallet, [authwit, exitCall])
     const { receipt } = await batch.send({ from: this.account })
+    assertReceiptSuccess(receipt)
 
     return {
       txHash: receipt.txHash.toString(),
@@ -345,6 +370,7 @@ class WalletAdapter {
     const { receipt } = await bridge.methods[exitMethod](...exitArgs).send({
       from: this.account,
     })
+    assertReceiptSuccess(receipt)
 
     return {
       txHash: receipt.txHash.toString(),

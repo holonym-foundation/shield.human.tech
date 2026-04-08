@@ -14,7 +14,7 @@
 export const L1_RPC_SEPOLIA = process.env.NEXT_PUBLIC_L1_RPC_SEPOLIA ?? ''
 export const L1_RPC_MAINNET = process.env.NEXT_PUBLIC_L1_RPC_MAINNET ?? ''
 
-export const AZTEC_NODE_DEVNET = process.env.NEXT_PUBLIC_AZTEC_NODE_DEVNET ?? 'https://v4-devnet-2.aztec-labs.com'
+export const AZTEC_NODE_DEVNET = process.env.NEXT_PUBLIC_AZTEC_NODE_DEVNET ?? 'https://v4-devnet-3.aztec-labs.com'
 export const AZTEC_NODE_TESTNET = process.env.NEXT_PUBLIC_AZTEC_NODE_TESTNET ?? 'https://rpc.testnet.aztec-labs.com'
 export const AZTEC_NODE_MAINNET = process.env.NEXT_PUBLIC_AZTEC_NODE_MAINNET ?? 'https://aztec-mainnet.drpc.org'
 

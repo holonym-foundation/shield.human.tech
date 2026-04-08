@@ -18,10 +18,13 @@ import { L2_NODE_URL } from '@/config'
 //   - Setup phase: claim_and_end_setup (FeeJuice L1→L2 message consumption)
 //   - App phase: claim_public (token L1→L2 message consumption + mint)
 //
-// Measured usage is ~200K-500K L2 gas. We use 2M as a safe 4x margin.
+// Measured usage varies by account contract: ~500K for vanilla Schnorr,
+// but Azguard's account contract uses ~1.5M for the claim_and_end_setup +
+// claim_public path. Using 500K caused "[SETUP] UNRECOVERABLE ERROR" on Azguard.
+// 2M gives a safety margin above the worst-known account contract cost.
 // DA gas is negligible for claims (no large data payloads).
 
-const CLAIM_L2_GAS_LIMIT = 500_000
+const CLAIM_L2_GAS_LIMIT = 2_000_000
 const CLAIM_DA_GAS_LIMIT = 50_000
 const CLAIM_TEARDOWN_L2_GAS_LIMIT = 0
 const CLAIM_TEARDOWN_DA_GAS_LIMIT = 0

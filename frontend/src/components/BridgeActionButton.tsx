@@ -4,20 +4,21 @@ import StyledImage from './StyledImage'
 import { Oval } from 'react-loader-spinner'
 import { BridgeDirection } from '@/types/bridge'
 import { useToast } from '@/hooks/useToast'
+import { extractErrorMessage } from '@/utils'
 import { parseUnits } from 'viem'
 import CongestionWarningModal from './model/CongestionWarningModal'
 import { useL2PendingTxCount, useNetworkHealth } from '@/hooks/useL2Operations'
 
 function LoadingContent({ label }: { label: string }) {
   return (
-    <div className='flex justify-center gap-2'>
+    <div className="flex justify-center gap-2">
       <Oval
-        height='20'
-        width='20'
-        color='#ccc'
+        height="20"
+        width="20"
+        color="#ccc"
         visible={true}
-        ariaLabel='oval-loading'
-        secondaryColor='#ccc'
+        ariaLabel="oval-loading"
+        secondaryColor="#ccc"
         strokeWidth={6}
         strokeWidthSecondary={6}
       />
@@ -147,17 +148,16 @@ function BridgeActionButton({
   const isNetworkDown = networkHealth?.isNetworkDown ?? false
 
   const bothWalletsConnected = isWaapConnected && isAztecConnected
-  const balancesLoading = bothWalletsConnected && (!isStateInitialized || l1BalanceLoading || l2BalanceLoading || feeJuiceLoading)
+  const balancesLoading =
+    bothWalletsConnected && (!isStateInitialized || l1BalanceLoading || l2BalanceLoading || feeJuiceLoading)
 
   // Helper functions
-  const getOperationType = (dir: BridgeDirection) =>
-    dir === BridgeDirection.L2_TO_L1 ? 'withdrawal' : 'bridge'
+  const getOperationType = (dir: BridgeDirection) => (dir === BridgeDirection.L2_TO_L1 ? 'withdrawal' : 'bridge')
 
   const getOperationLabel = (dir: BridgeDirection) =>
     dir === BridgeDirection.L2_TO_L1 ? 'Withdraw Tokens' : 'Bridge Tokens'
 
-  const getSBTChainForDirection = (dir: BridgeDirection) =>
-    dir === BridgeDirection.L2_TO_L1 ? 'Aztec' : 'Ethereum'
+  const getSBTChainForDirection = (dir: BridgeDirection) => (dir === BridgeDirection.L2_TO_L1 ? 'Aztec' : 'Ethereum')
 
   // Process operations for bridging or withdrawing
   const processBridgeOperation = async () => {
@@ -177,17 +177,14 @@ function BridgeActionButton({
       }
     } catch (error) {
       const operationType = getOperationType(direction)
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+      const errorMsg = extractErrorMessage(error)
 
       if (errorMsg.includes('insufficient')) {
         notify('error', `Insufficient funds for ${operationType} operation`)
       } else if (errorMsg.includes('rejected') || errorMsg.includes('denied')) {
         notify('error', `Transaction rejected by user`)
       } else {
-        notify(
-          'error',
-          `${operationType.charAt(0).toUpperCase() + operationType.slice(1)} failed: ${errorMsg}`
-        )
+        notify('error', `${operationType.charAt(0).toUpperCase() + operationType.slice(1)} failed: ${errorMsg}`)
       }
     } finally {
       setIsOperationPending(false)
@@ -276,24 +273,32 @@ function BridgeActionButton({
       if (!pochEligible) {
         notify('error', {
           heading: 'Attestation Required',
-          message: React.createElement('span', null,
-            React.createElement('span', null,
-              pochReason ? `${pochReason}. ` : 'Cannot use private mode. ',
+          message: React.createElement(
+            'span',
+            null,
+            React.createElement('span', null, pochReason ? `${pochReason}. ` : 'Cannot use private mode. '),
+            React.createElement('br'),
+            React.createElement(
+              'a',
+              {
+                href: 'https://id.human.tech/sandbox/clean-hands',
+                target: '_blank',
+                rel: 'noopener noreferrer',
+                style: { color: '#2563eb', textDecoration: 'underline' },
+              },
+              'Mint your POCH SBT here',
             ),
             React.createElement('br'),
-            React.createElement('a', {
-              href: 'https://id.human.tech/sandbox/clean-hands',
-              target: '_blank',
-              rel: 'noopener noreferrer',
-              style: { color: '#2563eb', textDecoration: 'underline' },
-            }, 'Mint your POCH SBT here'),
-            React.createElement('br'),
-            React.createElement('a', {
-              href: 'https://app.passport.xyz/',
-              target: '_blank',
-              rel: 'noopener noreferrer',
-              style: { color: '#2563eb', textDecoration: 'underline' },
-            }, `Build your Passport score${passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''}`),
+            React.createElement(
+              'a',
+              {
+                href: 'https://app.passport.xyz/',
+                target: '_blank',
+                rel: 'noopener noreferrer',
+                style: { color: '#2563eb', textDecoration: 'underline' },
+              },
+              `Build your Passport score${passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''}`,
+            ),
             React.createElement('br'),
             'Or switch to public mode.',
           ),
@@ -312,14 +317,20 @@ function BridgeActionButton({
           const maxFormatted = (Number(passportMaxAmount) / 10 ** decimals).toFixed(2)
           notify('error', {
             heading: 'Amount Exceeds Passport Limit',
-            message: React.createElement('span', null,
+            message: React.createElement(
+              'span',
+              null,
               `Passport allows up to ${maxFormatted} USDC per transaction. `,
-              React.createElement('a', {
-                href: 'https://id.human.tech/sandbox/clean-hands',
-                target: '_blank',
-                rel: 'noopener noreferrer',
-                style: { color: '#2563eb', textDecoration: 'underline' },
-              }, 'Mint a POCH SBT'),
+              React.createElement(
+                'a',
+                {
+                  href: 'https://id.human.tech/sandbox/clean-hands',
+                  target: '_blank',
+                  rel: 'noopener noreferrer',
+                  style: { color: '#2563eb', textDecoration: 'underline' },
+                },
+                'Mint a POCH SBT',
+              ),
               ' to remove this limit.',
             ),
           })
@@ -365,11 +376,7 @@ function BridgeActionButton({
     bridgeCompleted
 
   const isOperationInFlight =
-    isConnecting ||
-    requestFaucetPending ||
-    withdrawTokensToL1Pending ||
-    bridgeTokensToL2Pending ||
-    isOperationPending
+    isConnecting || requestFaucetPending || withdrawTokensToL1Pending || bridgeTokensToL2Pending || isOperationPending
 
   const showLoadingSpinner =
     l2NodeIsReadyLoading ||
@@ -423,20 +430,13 @@ function BridgeActionButton({
 
   return (
     <>
-      <div className='w-full'>
-        <TextButton
-          onClick={handleButtonClick}
-          disabled={isButtonDisabled || isDisabled}
-          className=''>
+      <div className="w-full">
+        <TextButton onClick={handleButtonClick} disabled={isButtonDisabled || isDisabled} className="">
           {showLoadingSpinner ? (
             <LoadingContent label={getLoadingText()} />
           ) : bridgeCompleted ? (
-            <div className='flex items-center gap-2'>
-              <StyledImage
-                src='/assets/svg/check-circle.svg'
-                alt=''
-                className='h-5 w-5'
-              />
+            <div className="flex items-center gap-2">
+              <StyledImage src="/assets/svg/check-circle.svg" alt="" className="h-5 w-5" />
               <span>Bridge Complete!</span>
             </div>
           ) : (

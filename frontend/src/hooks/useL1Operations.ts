@@ -1,6 +1,6 @@
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { useBridgeStore } from '@/stores/bridgeStore'
-import { truncateDecimals, wait, exportClaimData, copyToClipboard } from '@/utils'
+import { truncateDecimals, wait, exportClaimData, copyToClipboard, extractErrorMessage } from '@/utils'
 import axios from 'axios'
 import { api } from '@/lib/api'
 import { logError, logInfo } from '@/utils/datadog'
@@ -385,7 +385,7 @@ export function useL1Faucet() {
         faucetProvider: 'Internal API',
         faucetType: 'internal',
         userAction: 'faucet_request_failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: extractErrorMessage(error),
       })
 
       throw error
@@ -1132,7 +1132,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               walletProvider: walletProvider,
               address: l1Address,
               chainId: chainId,
-              error: error instanceof Error ? error.message : 'Unknown error',
+              error: extractErrorMessage(error),
               tokenAddress: selectedToken?.l2TokenContract ?? '',
               userAction: 'token_add_to_wallet_failed',
             })
@@ -1142,7 +1142,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         return l2TxHash
       } catch (error) {
         // If claim fails, keep data in localStorage — operation stays 'deposited' for recovery
-        const claimErrorMessage = error instanceof Error ? error.message : String(error)
+        const claimErrorMessage = extractErrorMessage(error)
         console.error('Claim failed:', error)
 
         if (typeof operationId === 'string') {
@@ -1174,7 +1174,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         throw error
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error)
       console.error('[L1→L2] Bridge transaction failed:', errorMessage, error)
 
       // 🔒 CRITICAL: Only mark as 'failed' if deposit has NOT been confirmed (no funds at risk).
@@ -1277,7 +1277,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           amount: amount.toString(),
           l1Address: l1Address,
           l2Address: aztecAddress,
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: extractErrorMessage(error),
           userAction: 'bridge_l1_to_l2_failed',
         })
 
@@ -1337,7 +1337,7 @@ export function useExportClaimData() {
       exportClaimData(claim)
       notify('success', 'Claim data exported successfully! Save this file in a safe place.')
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       notify('error', `Failed to export claim data: ${errorMessage}`)
     }
   }
@@ -1392,7 +1392,7 @@ export function useExportClaimData() {
         return false
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       notify('error', `Failed to copy claim secret: ${errorMessage}`)
       return false
     }
@@ -1451,7 +1451,7 @@ export function useL1HasSoulboundToken() {
       return Boolean(hasSBT)
     } catch (error) {
       console.error('Error checking L1 SBT status:', error)
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error)
       notify('error', 'Failed to check SBT status on Ethereum: ' + errorMessage)
       return false
     }
@@ -1532,7 +1532,7 @@ export function useL1MintSoulboundToken(onSuccess: (data: any) => void) {
       onSuccess(data)
     },
     onError: (error) => {
-      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error)
       notify('error', errorMessage)
     },
     // toastMessages: {

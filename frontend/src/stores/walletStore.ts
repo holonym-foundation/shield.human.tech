@@ -11,6 +11,7 @@ import {
   handleWaapError,
 } from '@/stores/waapWalletHelpers'
 import { AztecLoginMethod, LOGIN_METHODS, WaapLoginMethod, WalletType } from '@/types/wallet'
+import { extractErrorMessage } from '@/utils'
 import { logError, logInfo } from '@/utils/datadog'
 import {
   discoverWallets,
@@ -345,7 +346,7 @@ const walletStore = create<WalletState>((set, get) => ({
         sdkProvider: provider,
       })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       logError('Failed to establish secure channel', {
         walletType: WalletType.AZTEC,
         loginMethod: 'wallet-sdk',
@@ -490,7 +491,7 @@ const walletStore = create<WalletState>((set, get) => ({
         set({ walletConnectionPhase: 'account-select' })
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       console.error('[walletStore] confirmWalletConnection failed:', errorMessage)
       logError('Failed to confirm wallet connection', {
         walletType: WalletType.AZTEC,
@@ -595,7 +596,7 @@ const walletStore = create<WalletState>((set, get) => ({
         userAction: 'aztec_wallet_connection_success',
       })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       console.error('[walletStore] selectAccount failed:', errorMessage)
       set({
         walletConnectionPhase: 'idle',
@@ -650,7 +651,7 @@ const walletStore = create<WalletState>((set, get) => ({
       // Start the wallet-sdk discovery flow
       await get().startWalletDiscovery()
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       logError('Failed to connect Aztec wallet', {
         walletType: WalletType.AZTEC,
         loginMethod: 'wallet-sdk',
