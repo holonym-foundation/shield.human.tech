@@ -984,14 +984,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               claimSecretStr: backup.fuelSecret.toString().slice(0, 18) + '...',
               messageLeafIndex: receipt.fuelMessageLeafIndexStr,
               fuelMessageHash: receipt.fuelMessageHashStr,
-              gasLimits: {
-                l2Gas: claimGasSettings.gasLimits.l2Gas.toString(),
-                daGas: claimGasSettings.gasLimits.daGas.toString(),
-              },
               maxFeesPerGas: {
                 feePerL2Gas: claimGasSettings.maxFeesPerGas.feePerL2Gas.toString(),
                 feePerDaGas: claimGasSettings.maxFeesPerGas.feePerDaGas.toString(),
               },
+              gasLimitsOmitted: 'wallet estimates from preflight',
             })
 
             const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {

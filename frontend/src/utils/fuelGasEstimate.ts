@@ -12,32 +12,42 @@
 
 import { L2_NODE_URL } from '@/config'
 
-// ─── Tight Gas Limits for Claim Transactions ────────────────────────
+// ─── Gas Limit Ceiling (sufficiency check only — not passed to the wallet) ─
 //
 // A token claim (claim_public / claim_private) involves:
 //   - Setup phase: claim_and_end_setup (FeeJuice L1→L2 message consumption)
 //   - App phase: claim_public (token L1→L2 message consumption + mint)
 //
-// Measured usage varies by account contract: ~500K for vanilla Schnorr,
-// but Azguard's account contract uses ~1.5M for the claim_and_end_setup +
-// claim_public path. Using 500K caused "[SETUP] UNRECOVERABLE ERROR" on Azguard.
-// 2M gives a safety margin above the worst-known account contract cost.
-// DA gas is negligible for claims (no large data payloads).
-
-const CLAIM_L2_GAS_LIMIT = 2_000_000
-const CLAIM_DA_GAS_LIMIT = 50_000
-const CLAIM_TEARDOWN_L2_GAS_LIMIT = 0
-const CLAIM_TEARDOWN_DA_GAS_LIMIT = 0
+// Actual usage varies significantly by account contract: ~500K for vanilla
+// Schnorr, ~1.5M for Azguard. Rather than picking a single number that fits
+// every account (per Aztec dev guidance), we omit gasLimits/teardownGasLimits
+// from the gasSettings we hand to FeeJuicePaymentMethodWithClaim — the wallet
+// then runs a preflight simulation to size the limits correctly for whatever
+// account contract is paying.
+//
+// This 2M constant is ONLY used for the pre-deposit fuel-sufficiency check:
+// a worst-case ceiling we use to decide "does the fuel swap output enough FJ
+// to definitely cover the claim?" before sending the L1 deposit. If the
+// wallet later picks a smaller real limit during preflight, that's fine —
+// the user just has slightly more FJ than strictly required.
+const CLAIM_L2_GAS_CEILING = 2_000_000
+const CLAIM_DA_GAS_CEILING = 50_000
 
 /**
- * Build tight gasSettings for an L2 claim transaction paid with bridged FeeJuice.
+ * Build gasSettings for an L2 claim transaction paid with bridged FeeJuice.
  *
- * Queries current base fees from the Aztec node and applies a 3x safety multiplier
- * (matching Wonderland's DEFAULT_FEE_MULTIPLIER).
+ * Returns ONLY the fee-rate config (maxFeesPerGas / maxPriorityFeesPerGas).
+ * gasLimits and teardownGasLimits are intentionally omitted so the wallet
+ * estimates them from a preflight simulation per the account contract in use
+ * (Azguard needs ~1.5M, Schnorr ~500K — a single hardcoded value breaks one
+ * or the other).
+ *
+ * Queries current base fees from the Aztec node and applies a 2x safety
+ * multiplier for the max fee rate.
  */
 export async function buildClaimGasSettings() {
   const { createAztecNodeClient } = await import('@aztec/aztec.js/node')
-  const { Gas, GasFees } = await import('@aztec/stdlib/gas')
+  const { GasFees } = await import('@aztec/stdlib/gas')
 
   const node = createAztecNodeClient(L2_NODE_URL)
   const baseFees = await node.getCurrentMinFees()
@@ -52,8 +62,6 @@ export async function buildClaimGasSettings() {
   )
 
   return {
-    gasLimits: Gas.from({ l2Gas: CLAIM_L2_GAS_LIMIT, daGas: CLAIM_DA_GAS_LIMIT }),
-    teardownGasLimits: Gas.from({ l2Gas: CLAIM_TEARDOWN_L2_GAS_LIMIT, daGas: CLAIM_TEARDOWN_DA_GAS_LIMIT }),
     maxFeesPerGas,
     maxPriorityFeesPerGas: GasFees.empty(),
   }
@@ -76,7 +84,7 @@ export async function estimateClaimFeeLimit(): Promise<bigint> {
   const maxFeePerL2Gas = BigInt(baseFees.feePerL2Gas) * FEE_MULTIPLIER
   const maxFeePerDaGas = BigInt(baseFees.feePerDaGas) * FEE_MULTIPLIER
 
-  return maxFeePerL2Gas * BigInt(CLAIM_L2_GAS_LIMIT) + maxFeePerDaGas * BigInt(CLAIM_DA_GAS_LIMIT)
+  return maxFeePerL2Gas * BigInt(CLAIM_L2_GAS_CEILING) + maxFeePerDaGas * BigInt(CLAIM_DA_GAS_CEILING)
 }
 
 /**
