@@ -428,10 +428,10 @@ async function main() {
       await sendAndWait(l1Client, mintTx, `Minted ${directErc20Amount} ${token.symbol}`, logger)
 
       // Mint FeeJuice for direct pool (or transfer deployer's existing FJ)
-      // Default 20 mints (20,000 FJ) — enough for DIRECT_LIQUIDITY=1e15 at current price.
+      // Default 200 mints (200,000 FJ) — provides ample liquidity for the direct pool.
       // Previously defaulted to 0, which only worked if the deployer wallet had residual
       // FJ from a prior ETH/AZTEC seed run (broken when SKIP_ETH_AZTEC=true, the default).
-      const directFjMintCount = Number(process.env.DIRECT_FJ_MINT_COUNT || '20')
+      const directFjMintCount = Number(process.env.DIRECT_FJ_MINT_COUNT || '200')
       if (directFjMintCount > 0) {
         const feeHandler = getContract({ address: FEE_ASSET_HANDLER, abi: FEE_HANDLER_ABI, client: l1Client as any }) as any
         logger.info(`  Minting FeeJuice: ${directFjMintCount} x 1000 FJ`)

@@ -22,6 +22,7 @@ interface FuelToggleProps {
   privateFeeJuiceBalanceLoading?: boolean
   fuelType: 'public' | 'private'
   onFuelTypeChange: (type: 'public' | 'private') => void
+  onSufficiencyChange?: (sufficient: boolean) => void
 }
 
 const USD_PRESETS = [1, 5, 10]
@@ -158,6 +159,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   privateFeeJuiceBalanceLoading,
   fuelType,
   onFuelTypeChange,
+  onSufficiencyChange,
 }) => {
   const bridgeNum = Number(bridgeAmount) || 0
   const fuelNum = Number(fuelAmount) || 0
@@ -169,6 +171,16 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
 
   const { fjOutput, loading, error } = useV4FuelQuote(isValid ? fuelAmount : '', tokenAddress, tokenDecimals)
   const { sufficient: fuelSufficient, feeLimitFj, loading: sufficiencyLoading } = useFuelSufficiency(fjOutput)
+
+  useEffect(() => {
+    if (!fuelEnabled || !isValid) {
+      onSufficiencyChange?.(true)
+      return
+    }
+    if (!sufficiencyLoading && fuelSufficient !== null) {
+      onSufficiencyChange?.(fuelSufficient)
+    }
+  }, [fuelEnabled, isValid, fuelSufficient, sufficiencyLoading, onSufficiencyChange])
 
   // Check which USD preset is currently selected (if any)
   const activePreset = USD_PRESETS.find((usd) => fuelAmount === usdToTokenAmount(usd, tokenSymbol, prices))
@@ -292,7 +304,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                     You&apos;ll receive: {netBridge} {tokenSymbol} + ~{formatFjAmount(fjOutput)} Fee Juice
                   </p>
                   {!sufficiencyLoading && fuelSufficient === false && (
-                    <p className="text-amber-600 font-medium mt-1">
+                    <p className="text-red font-medium mt-1">
                       Not enough gas: ~{formatFjAmount(fjOutput)} FJ from swap but ~{feeLimitFj} FJ needed for L2 claim.
                       Increase the fuel amount.
                     </p>

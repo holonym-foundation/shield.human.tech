@@ -85,6 +85,7 @@ export default function Home() {
   const [showSBTModal, setShowSBTModal] = useState(false)
   const [currentSBTChain, setCurrentSBTChain] = useState<'Ethereum' | 'Aztec'>('Ethereum')
   const [bridgeCompleted, setBridgeCompleted] = useState(false)
+  const [fuelSufficient, setFuelSufficient] = useState(true)
 
   // Notification system
   const notify = useToast()
@@ -568,6 +569,7 @@ export default function Home() {
                         privateFeeJuiceBalanceLoading={privateFeeJuiceBalanceLoading}
                         fuelType={fuelType}
                         onFuelTypeChange={setFuelType}
+                        onSufficiencyChange={setFuelSufficient}
                       />
                     )}
                   <TransactionBreakdown isOpen={false} onToggle={() => setShowBreakdown(true)} />
@@ -590,8 +592,7 @@ export default function Home() {
           <div className="self-end">
             <div className="rounded-[16px] border border-[#D4D4D4] bg-white shadow-[0px_0px_16px_0px_rgba(0,0,0,0.16)] flex flex-col items-center gap-[16px] pt-[16px] pr-[10px] pb-0 pl-[10px] w-full">
               <BridgeActionButton
-                // isDisabled={isWaapConnected && isAztecConnected && isL2BalanceError}
-                // isDisabled={isWaapConnected && isAztecConnected && true}
+                isDisabled={!fuelSufficient}
                 // Connection states
                 isWaapConnected={isWaapConnected}
                 connectWaapWallet={connectWaapWallet}
