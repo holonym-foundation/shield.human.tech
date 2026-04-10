@@ -22,7 +22,7 @@ import { sha256ToField } from "@aztec/foundation/crypto/sha256";
 import { computeL2ToL1MessageHash } from "@aztec/stdlib/hash";
 import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging";
 import { TxHash } from "@aztec/stdlib/tx";
-import { TokenPortalAbi, RollupAbi } from "@aztec/l1-artifacts";
+import { TokenPortalAbi } from "@aztec/l1-artifacts";
 import { toFunctionSelector, encodeFunctionData } from "viem";
 import { BridgeDirection, BridgeOperationStatus } from "@prisma/client";
 import { aztecNode } from "@/aztec";
@@ -277,12 +277,18 @@ export async function computeWitness(
 // ═════════════════════════════════════════════════════════════════════
 
 /**
- * Poll L1 Rollup.getProvenCheckpointNumber() until our L2 block is proven.
- * Falls back to a fixed wait if rollupAddress is unavailable or polling fails.
+ * Poll aztecNode.getProvenBlockNumber() until our L2 block is proven.
+ *
+ * NOTE: Do NOT use the L1 Rollup contract's getProvenCheckpointNumber() here.
+ * That function returns a checkpoint counter — a sequential index that resets
+ * to 0 on each rollup redeployment — which is a different scale from the L2
+ * block number. aztecNode.getProvenBlockNumber() returns the proven L2 block
+ * number directly and is the correct thing to compare against blockNumberForProof.
+ *
+ * Falls back to a fixed wait if the node call fails.
  */
 export async function waitForBlockProven(params: {
   blockNumberForProof: number;
-  rollupAddress: string | null | undefined;
   pollIntervalMs?: number;
   maxWaitMs?: number;
   fixedFallbackMs?: number;
@@ -292,12 +298,11 @@ export async function waitForBlockProven(params: {
     neededBlock: number,
     elapsedMs: number,
   ) => void;
-  /** Called when we fall back to the fixed wait (no rollup address or poll failed). */
+  /** Called when we fall back to the fixed wait (node call failed). */
   onFallback?: (fixedWaitMs: number) => void;
 }): Promise<{ proven: boolean; usedPoll: boolean }> {
   const {
     blockNumberForProof,
-    rollupAddress,
     pollIntervalMs = 120_000,
     maxWaitMs = 50 * 60 * 1000,
     fixedFallbackMs = 40 * 60 * 1000,
@@ -308,64 +313,56 @@ export async function waitForBlockProven(params: {
   let blockProven = false;
   let usedPoll = false;
 
-  if (rollupAddress) {
-    try {
-      usedPoll = true;
-      const startWait = Date.now();
-      console.log(
-        "[L2→L1] Polling L1 Rollup for proven block (need block=",
-        blockNumberForProof,
-        ")...",
-      );
-      while (Date.now() - startWait < maxWaitMs) {
-        const proven = await publicClient.readContract({
-          address: rollupAddress as `0x${string}`,
-          abi: RollupAbi,
-          functionName: "getProvenCheckpointNumber",
-        });
-        const provenBlock =
-          typeof proven === "bigint" ? Number(proven) : (proven as number);
-        if (provenBlock >= blockNumberForProof) {
-          console.log(
-            "[L2→L1] Block",
-            blockNumberForProof,
-            "proven on L1 (proven=",
-            provenBlock,
-            ")",
-          );
-          blockProven = true;
-          break;
-        }
+  try {
+    usedPoll = true;
+    const startWait = Date.now();
+    console.log(
+      "[L2→L1] Polling Aztec node for proven block (need block=",
+      blockNumberForProof,
+      ")...",
+    );
+    while (Date.now() - startWait < maxWaitMs) {
+      const provenBlock = await aztecNode.getProvenBlockNumber();
+      if (provenBlock >= blockNumberForProof) {
         console.log(
-          "[L2→L1] Not yet proven (proven=",
-          provenBlock,
-          ", need=",
+          "[L2→L1] Block",
           blockNumberForProof,
-          "). Waiting...",
+          "proven (provenBlock=",
+          provenBlock,
+          ")",
         );
-        onPoll?.(provenBlock, blockNumberForProof, Date.now() - startWait);
-        await wait(pollIntervalMs);
+        blockProven = true;
+        break;
       }
-      if (!blockProven) {
-        // Block is confirmed NOT proven after exhaustive polling — do NOT proceed.
-        // Sending an L1 withdraw would burn gas on a guaranteed revert.
-        throw new Error(
-          "[L2→L1] Block not yet proven after max wait. " +
-            "The L1 withdraw would revert. Please resume later when the block is proven.",
-        );
-      }
-    } catch (e) {
-      // If the block was confirmed unproven (our own timeout error), propagate it.
-      // Only swallow transient RPC errors (getProvenCheckpointNumber call failures).
-      if (
-        e instanceof Error &&
-        e.message.includes("Block not yet proven after max wait")
-      ) {
-        throw e;
-      }
-      console.warn("[L2→L1] Rollup poll failed, using fixed wait:", e);
-      usedPoll = false;
+      console.log(
+        "[L2→L1] Not yet proven (proven=",
+        provenBlock,
+        ", need=",
+        blockNumberForProof,
+        "). Waiting...",
+      );
+      onPoll?.(provenBlock, blockNumberForProof, Date.now() - startWait);
+      await wait(pollIntervalMs);
     }
+    if (!blockProven) {
+      // Block is confirmed NOT proven after exhaustive polling — do NOT proceed.
+      // Sending an L1 withdraw would burn gas on a guaranteed revert.
+      throw new Error(
+        "[L2→L1] Block not yet proven after max wait. " +
+          "The L1 withdraw would revert. Please resume later when the block is proven.",
+      );
+    }
+  } catch (e) {
+    // If the block was confirmed unproven (our own timeout error), propagate it.
+    // Only swallow transient errors from the node call itself.
+    if (
+      e instanceof Error &&
+      e.message.includes("Block not yet proven after max wait")
+    ) {
+      throw e;
+    }
+    console.warn("[L2→L1] Proven block poll failed, using fixed wait:", e);
+    usedPoll = false;
   }
 
   if (!blockProven && !usedPoll) {

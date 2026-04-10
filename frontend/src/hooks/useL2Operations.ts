@@ -471,7 +471,6 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
 
       await waitForBlockProven({
         blockNumberForProof: receiptResult.blockNumberForProof,
-        rollupAddress: witnessResult.rollupAddress,
         onPoll: (provenBlock, neededBlock, elapsedMs) => {
           const elapsedMin = Math.round(elapsedMs / 60_000)
           notify(

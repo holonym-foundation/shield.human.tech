@@ -419,7 +419,6 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
 
     await waitForBlockProven({
       blockNumberForProof,
-      rollupAddress: l1RollupAddress,
       onPoll: (provenBlock, neededBlock, elapsedMs) => {
         const elapsedMin = Math.round(elapsedMs / 60_000);
         notify(

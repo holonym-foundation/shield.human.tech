@@ -28,7 +28,6 @@ import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
 import {
   FeeAssetHandlerAbi,
   FeeAssetHandlerBytecode,
-  RollupAbi,
 } from '@aztec/l1-artifacts'
 import { TokenContract, TokenContractArtifact } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js'
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee'
@@ -3274,28 +3273,22 @@ async function waitForProofAndWithdrawL1(
   const blockNumber = l2TxReceipt.blockNumber!
   const rollupAddress = l1ContractAddresses?.rollupAddress?.toString()
 
-  // Poll for proven block
-  if (rollupAddress) {
-    logger.info(`[L1] Polling for proven block (need block ${blockNumber})...`)
-    const maxWaitMs = 50 * 60 * 1000
-    const startWait = Date.now()
-    while (Date.now() - startWait < maxWaitMs) {
-      const proven = await l1Client.readContract({
-        address: rollupAddress as `0x${string}`,
-        abi: RollupAbi,
-        functionName: 'getProvenCheckpointNumber',
-      })
-      const provenBlock = typeof proven === 'bigint' ? Number(proven) : proven
-      if (provenBlock >= blockNumber) {
-        logger.info(`[L1] Block ${blockNumber} proven (proven=${provenBlock})`)
-        break
-      }
-      logger.info(`[L1] Not proven yet (proven=${provenBlock}). Waiting 2 min...`)
-      await wait(120_000)
+  // Poll for proven block using the Aztec node's getProvenBlockNumber().
+  // Do NOT use L1 Rollup.getProvenCheckpointNumber() — that returns a checkpoint
+  // counter that resets to 0 on each rollup redeployment and is a different scale
+  // from the L2 block number. node.getProvenBlockNumber() returns the proven L2
+  // block number directly and is the correct thing to compare against blockNumber.
+  logger.info(`[L1] Polling for proven block (need block ${blockNumber})...`)
+  const maxWaitMs = 50 * 60 * 1000
+  const startWait = Date.now()
+  while (Date.now() - startWait < maxWaitMs) {
+    const provenBlock = await node.getProvenBlockNumber()
+    if (provenBlock >= blockNumber) {
+      logger.info(`[L1] Block ${blockNumber} proven (proven=${provenBlock})`)
+      break
     }
-  } else {
-    logger.info(`[L1] No rollup address, waiting 40 min fixed...`)
-    await wait(40 * 60 * 1000)
+    logger.info(`[L1] Not proven yet (proven=${provenBlock}). Waiting 2 min...`)
+    await wait(120_000)
   }
 
   const txHash = typeof l2TxReceipt.txHash === 'string'
