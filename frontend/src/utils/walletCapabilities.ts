@@ -5,6 +5,9 @@ import type { ContractFunctionPattern } from '@aztec/aztec.js/wallet'
 /** Well-known Fee Juice contract on L2 */
 const FEE_JUICE_ADDRESS = AztecAddress.fromString('0x0000000000000000000000000000000000000000000000000000000000000005')
 
+/** Auth Registry protocol contract on L2 (canonical address = 1) */
+const AUTH_REGISTRY_ADDRESS = AztecAddress.fromString('0x0000000000000000000000000000000000000000000000000000000000000001')
+
 function pattern(contract: AztecAddress, fn: string): ContractFunctionPattern {
   return { contract, function: fn }
 }
@@ -29,6 +32,8 @@ const BRIDGED_FPC_SIMULATION_METHODS = ['balance_of'] as const
 
 const BRIDGED_FPC_TRANSACTION_METHODS = ['mint', 'mint_and_pay_fee', 'pay_fee'] as const
 
+const AUTH_REGISTRY_TRANSACTION_METHODS = ['set_authorized'] as const
+
 export function buildCapabilityManifest() {
   const tokenAddresses = L1_TOKENS.map((t) => t.l2TokenContract)
     .filter((addr): addr is string => !!addr)
@@ -49,6 +54,7 @@ export function buildCapabilityManifest() {
     ...bridgeAddresses,
     ...proxyAddresses,
     FEE_JUICE_ADDRESS,
+    AUTH_REGISTRY_ADDRESS,
     ...(fpcAddress ? [fpcAddress] : []),
   ]
 
@@ -66,6 +72,7 @@ export function buildCapabilityManifest() {
     ...tokenAddresses.flatMap((addr) => patternsFor(addr, [...TOKEN_TRANSACTION_METHODS])),
     ...bridgeAddresses.flatMap((addr) => patternsFor(addr, [...BRIDGE_TRANSACTION_METHODS])),
     ...patternsFor(FEE_JUICE_ADDRESS, [...FEE_JUICE_TRANSACTION_METHODS]),
+    ...patternsFor(AUTH_REGISTRY_ADDRESS, [...AUTH_REGISTRY_TRANSACTION_METHODS]),
     ...(fpcAddress ? patternsFor(fpcAddress, [...BRIDGED_FPC_TRANSACTION_METHODS]) : []),
   ]
 
