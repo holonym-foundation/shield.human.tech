@@ -8,10 +8,15 @@ const nextConfig: NextConfig = {
   // Barretenberg WASM) works on localhost without these headers. For
   // production, a different strategy is needed (e.g. service worker proxy
   // or isolating WASM in a cross-origin-isolated iframe).
-  // Tell Vercel's output file tracing to include the Barretenberg WASM
-  // binaries — they are binary files so tracing misses them automatically.
   outputFileTracingIncludes: {
-    '/api/**': ['./node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz'],
+    '/api/**/*': [
+      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz',
+      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.js'
+    ],
+    '/**/*': [
+      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz',
+      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.js'
+    ],
   },
   // Keep @aztec/bb.js as external on the server so the WASM file resolves
   // from node_modules instead of being broken by webpack bundling.
