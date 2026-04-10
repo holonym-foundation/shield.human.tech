@@ -266,12 +266,17 @@ async function main() {
       const feeHandler = getContract({ address: FEE_ASSET_HANDLER, abi: FEE_HANDLER_ABI, client: l1Client as any }) as any
       const aztecToken = getContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, client: l1Client as any }) as any
 
-      // Mint FeeJuice to seeder
-      logger.info(`  Minting FeeJuice: ${feeMintCount} x 1000 FJ`)
-      for (let i = 0; i < feeMintCount; i++) {
-        const tx = await feeHandler.write.mint([seederAddr])
-        await l1Client.waitForTransactionReceipt({ hash: tx, timeout: 120_000 })
-        if ((i + 1) % 10 === 0) logger.info(`  ... minted ${i + 1}/${feeMintCount}`)
+      // Mint FeeJuice to seeder (batched — send BATCH_SIZE txs, then wait for all)
+      const BATCH_SIZE = 10
+      logger.info(`  Minting FeeJuice: ${feeMintCount} x 1000 FJ (batches of ${BATCH_SIZE})`)
+      for (let i = 0; i < feeMintCount; i += BATCH_SIZE) {
+        const batchEnd = Math.min(i + BATCH_SIZE, feeMintCount)
+        const hashes: `0x${string}`[] = []
+        for (let j = i; j < batchEnd; j++) {
+          hashes.push(await feeHandler.write.mint([seederAddr]))
+        }
+        await Promise.all(hashes.map(h => l1Client.waitForTransactionReceipt({ hash: h, timeout: 180_000 })))
+        logger.info(`  ... minted ${batchEnd}/${feeMintCount}`)
       }
 
       // Transfer any deployer FJ to seeder
@@ -434,11 +439,16 @@ async function main() {
       const directFjMintCount = Number(process.env.DIRECT_FJ_MINT_COUNT || '200')
       if (directFjMintCount > 0) {
         const feeHandler = getContract({ address: FEE_ASSET_HANDLER, abi: FEE_HANDLER_ABI, client: l1Client as any }) as any
-        logger.info(`  Minting FeeJuice: ${directFjMintCount} x 1000 FJ`)
-        for (let i = 0; i < directFjMintCount; i++) {
-          const tx = await feeHandler.write.mint([seederAddr])
-          await l1Client.waitForTransactionReceipt({ hash: tx, timeout: 120_000 })
-          if ((i + 1) % 10 === 0) logger.info(`  ... minted ${i + 1}/${directFjMintCount}`)
+        const BATCH_SIZE = 10
+        logger.info(`  Minting FeeJuice: ${directFjMintCount} x 1000 FJ (batches of ${BATCH_SIZE})`)
+        for (let i = 0; i < directFjMintCount; i += BATCH_SIZE) {
+          const batchEnd = Math.min(i + BATCH_SIZE, directFjMintCount)
+          const hashes: `0x${string}`[] = []
+          for (let j = i; j < batchEnd; j++) {
+            hashes.push(await feeHandler.write.mint([seederAddr]))
+          }
+          await Promise.all(hashes.map(h => l1Client.waitForTransactionReceipt({ hash: h, timeout: 180_000 })))
+          logger.info(`  ... minted ${batchEnd}/${directFjMintCount}`)
         }
       }
 
