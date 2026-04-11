@@ -2,7 +2,7 @@ import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { EthAddress } from '@aztec/foundation/eth-address'
 import { Fr } from '@aztec/aztec.js/fields'
 import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
-import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
+import { SetPublicAuthwitContractInteraction } from '@aztec/aztec.js/authorization'
 import type { Wallet } from '@aztec/aztec.js/wallet'
 import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
 import { aztecNode } from '@/aztec'
@@ -350,14 +350,14 @@ class WalletAdapter {
     const bridge = await Contract.at(bridgeAddr, bridgeArtifact, this.wallet)
 
     // Create private auth witness: allow TokenMinterProxy to burn_private on behalf of user.
-    // Call chain: Bridge → TokenMinterProxy → Token.burn_private, so Token sees
-    // msg_sender = TokenMinterProxy. The authwit consumer must match that.
+    // Call chain: Bridge → TokenMinterProxy → Token.burn_private.
+    // Token calls verify_private_authwit as a static call → msg_sender inside verify = Token contract.
+    // So consumer (outer hash) = tokenAddr, caller (inner hash) = proxyAddr.
     const proxyAddr = AztecAddress.fromString(this.proxyAddress)
     const burnCall = await token.methods.burn_private(user, amount, nonce).getFunctionCall()
-    const innerHash = await computeInnerAuthWitHashFromAction(proxyAddr, burnCall)
-    await this.wallet.createAuthWit(this.account, {
-      consumer: proxyAddr,
-      innerHash,
+    const authWit = await this.wallet.createAuthWit(this.account, {
+      caller: proxyAddr,
+      call: burnCall, // consumer = call.to = tokenAddr
     })
 
     // Send exit transaction — bridge contract params: (recipient, amount, caller_on_l1, nonce, ...)
@@ -369,6 +369,7 @@ class WalletAdapter {
     const exitMethod = cleanHandsData && passportData ? 'exit_to_l1_private' : 'exit_to_l1_public'
     const { receipt } = await bridge.methods[exitMethod](...exitArgs).send({
       from: this.account,
+      authWitnesses: [authWit],
     })
     assertReceiptSuccess(receipt)
 
