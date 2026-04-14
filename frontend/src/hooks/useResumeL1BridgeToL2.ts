@@ -500,16 +500,19 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     if (privateFuelSecret && privateFuelSalt && fuelMessageLeafIndex && fuelAmount && BRIDGED_FPC_ADDRESS) {
       // Private fuel path: PrivateMintAndPayFeePaymentMethod
       try {
-        const { PrivateMintAndPayFeePaymentMethod, REASONABLE_GAS_LIMITS, maxFeesPerGasFromBaseFees } = await import(
+        const { PrivateMintAndPayFeePaymentMethod, maxFeesPerGasFromBaseFees } = await import(
           '@wonderland/aztec-fee-payment'
         )
         const { Fr: FieldFr } = await import('@aztec/aztec.js/fields')
         const { Gas, GasFees } = await import('@aztec/stdlib/gas')
         const { aztecNode } = await import('@/aztec')
 
+        // Tight limits — same reasoning as useL1Operations.ts.
+        // REASONABLE_GAS_LIMITS (6.54M) inflates max_gas_cost to ~49 FJ;
+        // actual usage is ~1.5M (Azguard), so 2M covers it with buffer.
+        const gasLimits = Gas.from({ l2Gas: 2_000_000, daGas: 50_000 })
         const baseFees = await aztecNode.getCurrentMinFees()
         const maxFeesPerGas = maxFeesPerGasFromBaseFees(baseFees)
-        const gasLimits = REASONABLE_GAS_LIMITS
         const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
 
         console.log('[Resume L1→L2] Building PrivateMintAndPayFeePaymentMethod (private fuel)')

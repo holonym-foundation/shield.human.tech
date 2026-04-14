@@ -91,7 +91,7 @@ function useV4FuelQuote(
  * Hook that checks whether the expected FJ output is sufficient to cover L2 claim gas costs.
  * Debounced: only runs when fjOutput changes and is non-null.
  */
-function useFuelSufficiency(fjOutput: bigint | null): {
+function useFuelSufficiency(fjOutput: bigint | null, fuelType: 'public' | 'private'): {
   sufficient: boolean | null
   feeLimitFj: string | null
   loading: boolean
@@ -112,7 +112,7 @@ function useFuelSufficiency(fjOutput: bigint | null): {
     ;(async () => {
       try {
         const { checkFuelSufficiency } = await import('@/utils/fuelGasEstimate')
-        const result = await checkFuelSufficiency(fjOutput)
+        const result = await checkFuelSufficiency(fjOutput, fuelType)
         if (!cancelled) {
           setSufficient(result.sufficient)
           setFeeLimitFj(result.feeLimitFj)
@@ -131,7 +131,7 @@ function useFuelSufficiency(fjOutput: bigint | null): {
     return () => {
       cancelled = true
     }
-  }, [fjOutput])
+  }, [fjOutput, fuelType])
 
   return { sufficient, feeLimitFj, loading }
 }
@@ -179,7 +179,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   const { prices, isLoading: pricesLoading, error: pricesError } = useTokenPrices()
 
   const { fjOutput, loading, error } = useV4FuelQuote(isValid ? fuelAmount : '', tokenAddress, tokenDecimals)
-  const { sufficient: fuelSufficient, feeLimitFj, loading: sufficiencyLoading } = useFuelSufficiency(fjOutput)
+  const { sufficient: fuelSufficient, feeLimitFj, loading: sufficiencyLoading } = useFuelSufficiency(fjOutput, fuelType)
 
   useEffect(() => {
     if (!fuelEnabled || !isValid) {

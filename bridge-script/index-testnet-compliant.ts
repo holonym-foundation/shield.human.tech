@@ -396,9 +396,13 @@ const L2_PASSPORT_SIGNER_PRIVATE_KEY = process.env.L2_PASSPORT_SIGNER_PRIVATE_KE
 // ─── Run mode ────────────────────────────────────────────────────────────────
 // RUN_TESTS_ONLY=true  — skip deployment, only run tests against existing tokens
 // DEPLOY_ONLY=true     — deploy tokens but skip tests
+// SEED_ONLY=true       — reseed pools only; skip token deployment, infra deploy, and tests.
+//                        Loads existing tokens from the active deployment file so the
+//                        daily date-suffix in the deployment ID does not trigger a full redeploy.
 // DEPLOY_TOKEN=USDC    — only deploy this specific token (others skipped even if new)
 const RUN_TESTS_ONLY = process.env.RUN_TESTS_ONLY === 'true'
 const DEPLOY_ONLY = process.env.DEPLOY_ONLY === 'true'
+const SEED_ONLY = process.env.SEED_ONLY === 'true'
 const DEPLOY_TOKEN = process.env.DEPLOY_TOKEN || '' // e.g. 'USDC'
 const PROFILE_ENABLED = process.env.PROFILE === 'true'
 const FORCE_REDEPLOY_ALL = process.env.FORCE_REDEPLOY_ALL === 'true'
@@ -1650,7 +1654,7 @@ async function testPublicFuelFlow(
       // Pool liquidity check
       const pmUsdcBal = await l1Public.readContract({ address: tokenAddr, abi: ERC20_ABI, functionName: 'balanceOf', args: [POOL_MANAGER] }) as bigint
       const pmWethBal = await l1Public.readContract({ address: WETH_ADDRESS, abi: ERC20_ABI, functionName: 'balanceOf', args: [POOL_MANAGER] }) as bigint
-      const pmFjBal = await l1Public.readContract({ address: AZTEC_TOKEN, abi: ERC20_ABI, functionName: 'balanceOf', args: [POOL_MANAGER] }) as bigint
+      const pmFjBal = await l1Public.readContract({ address: feeJuiceAddr, abi: ERC20_ABI, functionName: 'balanceOf', args: [POOL_MANAGER] }) as bigint
       const pmEth = await l1Public.getBalance({ address: POOL_MANAGER })
 
       logger.info(`  ── Pre-flight diagnostics ──`)
@@ -2047,9 +2051,12 @@ async function testPrivateFuelFlow(
     await waitForNextL2Block(node, logger)
 
     // 3. Query base fees → build explicit gasSettings (same as frontend)
+    // Use tight limits, not REASONABLE_GAS_LIMITS (6.54M): mint_and_pay_fee asserts
+    // amount >= max_gas_cost, so oversized limits inflate max_gas_cost beyond the
+    // swap output. Actual usage is ~1.5M L2 (Azguard); 2M gives a safety buffer.
     const baseFees = await node.getCurrentMinFees()
     const maxFeesPerGas = maxFeesPerGasFromBaseFees(baseFees)
-    const gasLimits = REASONABLE_GAS_LIMITS
+    const gasLimits = Gas.from({ l2Gas: 2_000_000, daGas: 50_000 })
     const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
     const estimatedMaxGasCost = maxGasCostFor(maxFeesPerGas, gasLimits)
     logger.info(`  Gas diagnostics:`)
@@ -3341,13 +3348,11 @@ async function main() {
   logger.info(`Circuit ID:       ${CLEAN_HANDS_CIRCUIT_ID}`)
   if (RUN_TESTS_ONLY) logger.info('Mode: RUN_TESTS_ONLY — skipping deployment')
   if (DEPLOY_ONLY) logger.info('Mode: DEPLOY_ONLY — skipping tests')
+  if (SEED_ONLY) logger.info('Mode: SEED_ONLY — reseeding pools only, no deployment or tests')
   if (DEPLOY_TOKEN) logger.info(`Mode: DEPLOY_TOKEN=${DEPLOY_TOKEN} — only deploying this token`)
   if (FORCE_REDEPLOY_ALL) logger.info('Mode: FORCE_REDEPLOY_ALL — redeploying tokens, fuel infra, and reseeding pools')
 
-  // Setup wallet
-  const wallet = await setupWallet()
-
-  // Setup L1 client
+  // Setup L1 client (needed for all modes including SEED_ONLY)
   const nodeUrl = getAztecNodeUrl()
   const node = createAztecNodeClient(nodeUrl)
   const nodeInfo = await node.getNodeInfo()
@@ -3361,9 +3366,35 @@ async function main() {
   logger.info(`L1 Wallet: ${ownerEthAddress}`)
   logger.info(`Environment: ${process.env.AZTEC_ENV ?? 'sandbox'}`)
 
+  // ── SEED_ONLY fast path ───────────────────────────────────────────────────
+  // Bypasses createDeployment (whose date-suffix would create a new empty deployment
+  // and make loadExistingTokens() return nothing, triggering a full token redeploy).
+  if (SEED_ONLY) {
+    const balance = await l1Client.getBalance({ address: ownerEthAddress as `0x${string}` })
+    logger.info(`L1 Balance: ${(Number(balance) / 1e18).toFixed(4)} ETH`)
+
+    const existingTokens = loadExistingTokens()
+    if (existingTokens.length === 0) {
+      logger.error('SEED_ONLY: no tokens found in active deployment. Run the full deploy first.')
+      process.exit(1)
+    }
+    logger.info(`SEED_ONLY: loaded ${existingTokens.length} token(s) from active deployment: ${existingTokens.map(t => t.symbol).join(', ')}`)
+
+    const feeJuiceAddrForSeed = ((l1ContractAddresses as any).feeJuiceAddress?.toString() || AZTEC_TOKEN) as `0x${string}`
+    const feeAssetHandlerAddrForSeed = ((l1ContractAddresses as any).feeAssetHandlerAddress?.toString() || FEE_ASSET_HANDLER_ADDR) as `0x${string}`
+
+    await logPoolBalances(l1Client, existingTokens as any, 'BEFORE reseeding', logger, feeJuiceAddrForSeed)
+    await seedAllTokenPools(existingTokens as any, l1Client, logger, feeJuiceAddrForSeed, feeAssetHandlerAddrForSeed)
+    await logPoolBalances(l1Client, existingTokens as any, 'AFTER reseeding', logger, feeJuiceAddrForSeed)
+    return
+  }
+
   // Check L1 balance
   const balance = await l1Client.getBalance({ address: ownerEthAddress as `0x${string}` })
   logger.info(`L1 Balance: ${(Number(balance) / 1e18).toFixed(4)} ETH`)
+
+  // Setup wallet (L2 — not needed for SEED_ONLY, which returns early above)
+  const wallet = await setupWallet()
 
   // Setup sponsored FPC
   logger.info('Setting up sponsored fee payment...')

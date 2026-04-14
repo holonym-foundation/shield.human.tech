@@ -581,7 +581,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
           // Pre-flight check: verify the expected FJ output covers L2 claim gas costs
           const { checkFuelSufficiency } = await import('@/utils/fuelGasEstimate')
-          const sufficiency = await checkFuelSufficiency(fuelQuote.expectedOutput)
+          const sufficiency = await checkFuelSufficiency(fuelQuote.expectedOutput, 'private')
           console.log('[L1→L2] Private fuel sufficiency check:', sufficiency)
           if (!sufficiency.sufficient) {
             throw new Error(
@@ -610,7 +610,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
 
           // Pre-flight check: verify the expected FJ output covers L2 claim gas costs
           const { checkFuelSufficiency } = await import('@/utils/fuelGasEstimate')
-          const sufficiency = await checkFuelSufficiency(fuelQuote.expectedOutput)
+          const sufficiency = await checkFuelSufficiency(fuelQuote.expectedOutput, 'public')
           console.log('[L1→L2] Fuel sufficiency check:', sufficiency)
           if (!sufficiency.sufficient) {
             throw new Error(
@@ -909,7 +909,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           try {
             const {
               PrivateMintAndPayFeePaymentMethod,
-              REASONABLE_GAS_LIMITS,
               maxFeesPerGasFromBaseFees,
               maxGasCostFor,
             } = await import('@wonderland/aztec-fee-payment')
@@ -917,11 +916,14 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             const { Gas, GasFees } = await import('@aztec/stdlib/gas')
             const { aztecNode } = await import('@/aztec')
 
-            // Query current base fees and compute gas settings
-            // (mirrors getGasSetup in aztec-fee-payment tests)
+            // Tight gas limits for the mint_and_pay_fee cold-start flow.
+            // REASONABLE_GAS_LIMITS (6.54M L2) inflates max_gas_cost to ~49 FJ at testnet
+            // fees — far more than a typical $5–10 fuel swap produces. Actual gas usage:
+            // ~500K (Schnorr) to ~1.5M (Azguard) for token claim + FPC setup calls.
+            // 2M L2 / 50K DA gives ~33% headroom over the heaviest wallet.
+            const gasLimits = Gas.from({ l2Gas: 2_000_000, daGas: 50_000 })
             const baseFees = await aztecNode.getCurrentMinFees()
             const maxFeesPerGas = maxFeesPerGasFromBaseFees(baseFees)
-            const gasLimits = REASONABLE_GAS_LIMITS
             const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 }) // no teardown for pay_fee
 
             const estimatedMaxGasCost = maxGasCostFor(maxFeesPerGas, gasLimits)

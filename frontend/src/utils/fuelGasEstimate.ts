@@ -72,15 +72,26 @@ export async function buildClaimGasSettings() {
  *
  * feeLimit = (maxFeePerL2Gas × l2GasLimit) + (maxFeePerDaGas × daGasLimit)
  *
+ * For private fuel (BridgedFPC / mint_and_pay_fee), we use a 3× multiplier to
+ * match exactly what useL1Operations passes in gasSettings — so the pre-flight
+ * threshold aligns with the contract's `assert(amount >= max_gas_cost)` check.
+ *
+ * For public fuel (FeeJuicePaymentMethodWithClaim), we use 2× (wallet estimates
+ * gas limits via preflight simulation; the 2× fee-rate cap is a practical middle
+ * ground between Wonderland's 3× and the wallet's 1.5×).
+ *
+ * @param fuelType - 'private' (BridgedFPC) or 'public' (FeeJuice direct)
  * @returns The fee limit in FeeJuice wei (18 decimals)
  */
-export async function estimateClaimFeeLimit(): Promise<bigint> {
+export async function estimateClaimFeeLimit(fuelType: 'public' | 'private' = 'public'): Promise<bigint> {
   const { createAztecNodeClient } = await import('@aztec/aztec.js/node')
 
   const node = createAztecNodeClient(L2_NODE_URL)
   const baseFees = await node.getCurrentMinFees()
 
-  const FEE_MULTIPLIER = 2n
+  // Private fuel: 3× matches maxFeesPerGasFromBaseFees default in useL1Operations.
+  // Public fuel: 2× (wallet handles gas limits via preflight; we only bound the fee rate).
+  const FEE_MULTIPLIER = fuelType === 'private' ? 3n : 2n
   const maxFeePerL2Gas = BigInt(baseFees.feePerL2Gas) * FEE_MULTIPLIER
   const maxFeePerDaGas = BigInt(baseFees.feePerDaGas) * FEE_MULTIPLIER
 
@@ -92,16 +103,20 @@ export async function estimateClaimFeeLimit(): Promise<bigint> {
  * to cover L2 claim gas costs.
  *
  * @param expectedFjOutput - Expected FJ from the swap (in wei, 18 decimals)
+ * @param fuelType - 'private' (BridgedFPC, 3× multiplier) or 'public' (FeeJuice, 2× multiplier)
  * @returns Object with sufficiency status and details
  */
-export async function checkFuelSufficiency(expectedFjOutput: bigint): Promise<{
+export async function checkFuelSufficiency(
+  expectedFjOutput: bigint,
+  fuelType: 'public' | 'private' = 'public',
+): Promise<{
   sufficient: boolean
   feeLimit: bigint
   feeLimitFj: string
   expectedFj: string
   shortfallFj: string | null
 }> {
-  const feeLimit = await estimateClaimFeeLimit()
+  const feeLimit = await estimateClaimFeeLimit(fuelType)
   const feeLimitFj = (Number(feeLimit) / 1e18).toFixed(4)
   const expectedFj = (Number(expectedFjOutput) / 1e18).toFixed(4)
   const sufficient = expectedFjOutput >= feeLimit
