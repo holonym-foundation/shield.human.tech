@@ -60,7 +60,7 @@ import { useBridgeStore } from '@/stores/bridgeStore'
 import { useRouter } from 'next/navigation'
 import MaintenanceOverlay from '@/components/MaintenanceOverlay'
 import FuelToggle from '@/components/FuelToggle'
-import { MAINTENANCE_MODE, MAINTENANCE_MESSAGE, MAINTENANCE_TITLE, SWAP_BRIDGE_ROUTER_ADDRESS } from '@/config'
+import { BRIDGED_FPC_ADDRESS, MAINTENANCE_MODE, MAINTENANCE_MESSAGE, MAINTENANCE_TITLE, SWAP_BRIDGE_ROUTER_ADDRESS } from '@/config'
 
 const variants = {
   hidden: { opacity: 0, y: 100 },
@@ -552,8 +552,8 @@ export default function Home() {
                     passportMaxAmount={attestationData?.passportMaxAmount}
                   />
                   {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
-                    !isPrivacyModeEnabled &&
-                    !!SWAP_BRIDGE_ROUTER_ADDRESS && (
+                    !!SWAP_BRIDGE_ROUTER_ADDRESS &&
+                    (!isPrivacyModeEnabled || !!BRIDGED_FPC_ADDRESS) && (
                       <FuelToggle
                         fuelEnabled={fuelEnabled}
                         fuelAmount={fuelAmount}
@@ -570,6 +570,7 @@ export default function Home() {
                         fuelType={fuelType}
                         onFuelTypeChange={setFuelType}
                         onSufficiencyChange={setFuelSufficient}
+                        isPrivacyModeEnabled={isPrivacyModeEnabled}
                       />
                     )}
                   <TransactionBreakdown isOpen={false} onToggle={() => setShowBreakdown(true)} />

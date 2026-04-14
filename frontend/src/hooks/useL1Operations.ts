@@ -560,10 +560,13 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     const { amountL1, amountL2, amountDisplayL1, amountDisplayL2 } = params
     const amount = BigInt(amountL1)
 
-    // Build fuel params if fuel is enabled (public L1→L2 only)
+    // Build fuel params if fuel is enabled.
+    // In public mode: both public and private fuel types are available.
+    // In private mode: only private fuel (BridgedFPC) is allowed — public fuel would leak the
+    // user's L2 address on-chain via the FeeJuicePortal.depositToAztecPublic recipient field.
     let fuel: FuelParams | undefined
     let privateFuel: PrivateFuelParams | undefined
-    if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr) {
+    if (fuelEnabled && fuelAmountStr && (!isPrivacyModeEnabled || fuelType === 'private')) {
       const { parseUnits } = await import('viem')
       const fuelAmountTokenUnits = parseUnits(fuelAmountStr, selectedToken?.decimals ?? 6)
       const hasSwapTarget = UNISWAP_FUEL_SWAP_ADDRESS

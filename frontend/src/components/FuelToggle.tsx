@@ -23,6 +23,7 @@ interface FuelToggleProps {
   fuelType: 'public' | 'private'
   onFuelTypeChange: (type: 'public' | 'private') => void
   onSufficiencyChange?: (sufficient: boolean) => void
+  isPrivacyModeEnabled?: boolean
 }
 
 const USD_PRESETS = [1, 5, 10]
@@ -160,12 +161,20 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   fuelType,
   onFuelTypeChange,
   onSufficiencyChange,
+  isPrivacyModeEnabled = false,
 }) => {
   const bridgeNum = Number(bridgeAmount) || 0
   const fuelNum = Number(fuelAmount) || 0
   const isValid = fuelNum > 0 && fuelNum < bridgeNum
   const netBridge = bridgeNum - fuelNum
   const hasBridgedFpc = !!BRIDGED_FPC_ADDRESS
+
+  // In private mode, fuel is always via BridgedFPC (private). Sync the store if needed.
+  useEffect(() => {
+    if (isPrivacyModeEnabled && fuelType !== 'private') {
+      onFuelTypeChange('private')
+    }
+  }, [isPrivacyModeEnabled, fuelType, onFuelTypeChange])
 
   const { prices, isLoading: pricesLoading, error: pricesError } = useTokenPrices()
 
@@ -237,7 +246,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
           >
             <div className="mt-3 space-y-2">
               {pricesError && <p className="text-xs text-amber-600">Live prices unavailable — using fallback prices</p>}
-              {hasBridgedFpc && (
+              {hasBridgedFpc && !isPrivacyModeEnabled && (
                 <div className="flex rounded-md overflow-hidden border border-gray-200 text-xs">
                   <button
                     onClick={() => onFuelTypeChange('public')}
