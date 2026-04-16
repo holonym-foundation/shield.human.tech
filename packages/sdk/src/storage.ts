@@ -153,7 +153,7 @@ export function getPendingWithdrawals(): any[] {
 const FAILED_PATCHES_KEY = 'bridge:failedPatches'
 
 export interface FailedPatch {
-  operationId: number
+  operationId: number | string
   data: Record<string, unknown>
   label: string
   timestamp: number
@@ -170,7 +170,7 @@ export function getFailedPatches(): FailedPatch[] {
 }
 
 /** Remove a failed PATCH after successful retry (by operationId + label). */
-export function removeFailedPatch(operationId: number, label: string): void {
+export function removeFailedPatch(operationId: number | string, label: string): void {
   if (!isLocalStorageAvailable()) return
   try {
     const arr = getArray(FAILED_PATCHES_KEY)

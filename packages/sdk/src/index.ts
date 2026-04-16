@@ -20,6 +20,7 @@ export type {
   BridgeEvent,
   BridgeEventCallback,
   FuelQuote,
+  PoolKeyParam,
   BridgeDirection,
   RecoveryClaimData,
   RecoveryWithdrawalData,
@@ -87,4 +88,4 @@ export {
 } from './storage'
 
 // Fuel
-export { getMockFuelQuote, computeSwapOutput } from './fuel'
+export { getUniswapFuelQuote } from './fuel'

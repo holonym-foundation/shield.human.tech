@@ -97,7 +97,7 @@ export class HumanTechBridge {
    * Resume an incomplete bridge operation.
    */
   async resume(
-    operationId: number,
+    operationId: number | string,
     params: ResumeParams,
   ): Promise<BridgeResult> {
     return resumeBridge(

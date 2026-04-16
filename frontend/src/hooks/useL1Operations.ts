@@ -16,27 +16,19 @@ import {
   L1_CHAIN_ID,
   L1_TOKENS,
   L2_CHAIN_ID,
-  BRIDGE_AND_FUEL_ADDRESS,
-  MOCK_FUEL_SWAP_ADDRESS,
+  SWAP_BRIDGE_ROUTER_ADDRESS,
+  UNISWAP_FUEL_SWAP_ADDRESS,
 } from '@/config'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, parseUnits, encodeFunctionData } from 'viem'
 import PortalSBTJson from '../constants/PortalSBT.json'
 import { useToast, useToastMutation, useToastQuery } from './useToast'
-import {
-  requestWaapWallet,
-  useWalletStore,
-  WAAP_METHOD,
-} from '@/stores/walletStore'
-import {
-  I_UserTokenBalance,
-  T_AlchemyTokenBalanceResponse,
-  T_UserTokenType,
-} from '@/types/token.balances.types'
+import { requestWaapWallet, useWalletStore, WAAP_METHOD } from '@/stores/walletStore'
+import { I_UserTokenBalance, T_AlchemyTokenBalanceResponse, T_UserTokenType } from '@/types/token.balances.types'
 import { axiosErrorMessage } from './helper'
 import { networkConfig } from '@/config/l1.config'
-import { getMockFuelQuote } from '@/utils/fuelQuote'
+import { getUniswapFuelQuote } from '@/utils/fuelQuote'
 import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent, StepStatus, FuelQuote } from '@human.tech/aztec-bridge-sdk'
 import { STORAGE_KEYS } from '@human.tech/aztec-bridge-sdk'
@@ -93,45 +85,38 @@ export function useL1TokenBalances() {
     try {
       const tokens = await bridge.getL1TokenBalances(l1Address!, [L1_CHAIN_ID])
 
-      const tokenBalnces = tokens?.map(
-        (token: T_AlchemyTokenBalanceResponse) => {
-          let tokenType: T_UserTokenType
+      const tokenBalnces = tokens?.map((token: T_AlchemyTokenBalanceResponse) => {
+        let tokenType: T_UserTokenType
 
-          if (!token.tokenAddress || token.tokenAddress === null) {
-            tokenType = 'native'
-          } else {
-            tokenType = 'erc20'
-          }
+        if (!token.tokenAddress || token.tokenAddress === null) {
+          tokenType = 'native'
+        } else {
+          tokenType = 'erc20'
+        }
 
-          const formattedBalance = formatUnits(
-            BigInt(token.tokenBalance),
-            token?.tokenMetadata?.decimals ?? 18,
-          )
-          const balance_formatted = truncateDecimals(formattedBalance)
+        const formattedBalance = formatUnits(BigInt(token.tokenBalance), token?.tokenMetadata?.decimals ?? 18)
+        const balance_formatted = truncateDecimals(formattedBalance)
 
-          const usdExchangeRate =
-            token.tokenPrices?.find((price: any) => price.currency === 'usd')
-              ?.value || '0'
+        const usdExchangeRate = token.tokenPrices?.find((price: any) => price.currency === 'usd')?.value || '0'
 
-          const usdValue = Number(balance_formatted) * Number(usdExchangeRate)
-          const usdValueTruncated = truncateDecimals(usdValue, 2)
+        const usdValue = Number(balance_formatted) * Number(usdExchangeRate)
+        const usdValueTruncated = truncateDecimals(usdValue, 2)
 
-          return {
-            address: token.tokenAddress,
-            name: token.tokenMetadata.name,
-            symbol: token.tokenMetadata.symbol,
-            decimals: token.tokenMetadata.decimals,
-            chain: networkConfig[token.chainId]?.name || '',
-            network: networkConfig[token.chainId],
-            logo: token.tokenMetadata.logo || undefined,
-            type: tokenType,
-            balance: token.tokenBalance,
-            balance_formatted: balance_formatted,
-            balance_usd_value: usdValueTruncated,
-            exchange_rate: Number(usdExchangeRate),
-          }
-        },
-      ) as I_UserTokenBalance[]
+        return {
+          address: token.tokenAddress,
+          name: token.tokenMetadata.name,
+          symbol: token.tokenMetadata.symbol,
+          decimals: token.tokenMetadata.decimals,
+          chain: networkConfig[token.chainId]?.name || '',
+          network: networkConfig[token.chainId],
+          logo: token.tokenMetadata.logo || undefined,
+          type: tokenType,
+          balance: token.tokenBalance,
+          balance_formatted: balance_formatted,
+          balance_usd_value: usdValueTruncated,
+          exchange_rate: Number(usdExchangeRate),
+        }
+      }) as I_UserTokenBalance[]
 
       return tokenBalnces
     } catch (error) {
@@ -171,18 +156,10 @@ export function useL1Faucet() {
   const bridge = useBridge()
 
   // Get wallet information from useWalletStore
-  const {
-    waapLoginMethod: loginMethod,
-    waapWalletProvider: walletProvider,
-    waapChainId: chainId,
-  } = useWalletStore()
+  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
 
   // L1 (Ethereum) balances and operations
-  const {
-    data: l1TokenBalances = [],
-    isLoading: l1BalanceLoading,
-    refetch: refetchL1Balance,
-  } = useL1TokenBalances()
+  const { data: l1TokenBalances = [], isLoading: l1BalanceLoading, refetch: refetchL1Balance } = useL1TokenBalances()
 
   // native token
   const sepoliaNativeTokens = l1TokenBalances.find(
@@ -203,16 +180,12 @@ export function useL1Faucet() {
   const mintTokenAmount = 10
 
   // Helper function to check if user has gas
-  const hasGas =
-    !!l1NativeBalance && Number(l1NativeBalance || 0) > mintNativeAmount
+  const hasGas = !!l1NativeBalance && Number(l1NativeBalance || 0) > mintNativeAmount
 
   // Check balances - only if balance data is loaded
   const balancesLoaded = !l1BalanceLoading
-  const needsGas =
-    balancesLoaded &&
-    (!l1NativeBalance || Number(l1NativeBalance || 0) <= mintNativeAmount)
-  const needsTokens =
-    balancesLoaded && Number(l1Balance || 0) <= mintTokenAmount
+  const needsGas = balancesLoaded && (!l1NativeBalance || Number(l1NativeBalance || 0) <= mintNativeAmount)
+  const needsTokens = balancesLoaded && Number(l1Balance || 0) <= mintTokenAmount
 
   // User is eligible for faucet if they need gas OR tokens
   // Check if user has gas but still needs tokens - they should be eligible for tokens only
@@ -262,9 +235,7 @@ export function useL1Faucet() {
         try {
           // Check if we should use external faucet for ETH
           // For now, we'll skip internal ETH faucet since it's disabled
-          console.log(
-            'ETH needed but internal faucet is disabled. User should get ETH from external source.',
-          )
+          console.log('ETH needed but internal faucet is disabled. User should get ETH from external source.')
           result.gasProvided = false // Mark as not provided by internal API
         } catch (error) {
           console.log('Error requesting gas:', error)
@@ -278,14 +249,11 @@ export function useL1Faucet() {
         // Always try to mint tokens if user needs them
         console.log('Checking if tokens need to be minted...')
 
-        const currentNativeBalance =
-          result?.balances?.recipient?.after || l1NativeBalance
+        const currentNativeBalance = result?.balances?.recipient?.after || l1NativeBalance
 
         // If user only needs tokens (has gas), proceed directly
         // If user needs both gas and tokens, check if they have enough gas
-        const hasEnoughGas =
-          needsTokensOnly ||
-          Number(currentNativeBalance || 0) >= mintNativeAmount
+        const hasEnoughGas = needsTokensOnly || Number(currentNativeBalance || 0) >= mintNativeAmount
 
         if (hasEnoughGas) {
           console.log('User has gas. Requesting tokens from API...')
@@ -293,9 +261,7 @@ export function useL1Faucet() {
             // notify('info', 'Getting tokens...')
             // await wait(30000) // 30 seconds
 
-            const mintResult = await bridge.mintTestTokens(
-              l1Address, L1_TOKENS[0]?.l1TokenContract ?? '',
-            )
+            const mintResult = await bridge.mintTestTokens(l1Address, L1_TOKENS[0]?.l1TokenContract ?? '')
             result.tokensMinted = true
             result.tokenHash = mintResult.txHash
             console.log('Tokens minted successfully via API:', mintResult)
@@ -310,9 +276,7 @@ export function useL1Faucet() {
             throw error
           }
         } else {
-          console.log(
-            'User still does not have enough gas for receiving tokens',
-          )
+          console.log('User still does not have enough gas for receiving tokens')
           throw new Error('Not enough ETH for gas to receive tokens')
         }
       }
@@ -411,15 +375,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
   } = useWalletStore()
 
   // Get wallet information from useWalletStore
-  const {
-    waapLoginMethod: loginMethod,
-    waapWalletProvider: walletProvider,
-    waapChainId: chainId,
-  } = useWalletStore()
+  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
 
   const queryClient = useQueryClient()
-  const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled, bridgeConfig, fuelEnabled, fuelAmount: fuelAmountStr } =
-    useBridgeStore()
+  const {
+    setProgressStep,
+    setTransactionUrls,
+    isPrivacyModeEnabled,
+    bridgeConfig,
+    fuelEnabled,
+    fuelAmount: fuelAmountStr,
+  } = useBridgeStore()
   const notify = useToast()
 
   const walletAdapter = useWalletAdapter()
@@ -441,14 +407,23 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     // Build fuel params if fuel is enabled (public L1→L2 only)
     let fuel: { enabled: boolean; amount: string } | undefined
     let fuelQuote: FuelQuote | undefined
-    if (fuelEnabled && !isPrivacyModeEnabled && fuelAmountStr && BRIDGE_AND_FUEL_ADDRESS && MOCK_FUEL_SWAP_ADDRESS) {
+    if (
+      fuelEnabled &&
+      !isPrivacyModeEnabled &&
+      fuelAmountStr &&
+      SWAP_BRIDGE_ROUTER_ADDRESS &&
+      UNISWAP_FUEL_SWAP_ADDRESS
+    ) {
       const fuelAmountTokenUnits = parseUnits(fuelAmountStr, selectedToken?.decimals ?? 6)
-      if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < parseUnits(amountDisplayL1, selectedToken?.decimals ?? 6)) {
-        fuelQuote = getMockFuelQuote({
-          mockFuelSwapAddress: MOCK_FUEL_SWAP_ADDRESS,
-          bridgeTokenAddress: (selectedToken?.l1TokenContract ?? '') as `0x${string}`,
-          fuelAmount: fuelAmountTokenUnits,
-          inputDecimals: selectedToken?.decimals ?? 6,
+      if (
+        fuelAmountTokenUnits > 0n &&
+        fuelAmountTokenUnits < parseUnits(amountDisplayL1, selectedToken?.decimals ?? 6)
+      ) {
+        fuelQuote = getUniswapFuelQuote({
+          expectedOutput: fuelAmountTokenUnits,
+          slippageBps: 300,
+          poolKeys: [],
+          zeroForOnes: [],
         })
         fuel = { enabled: true, amount: fuelAmountStr }
       }
@@ -463,14 +438,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       fuel,
       fuelQuote,
       sendTransaction: async (tx) => {
-        return await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx]) as string
+        return (await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx])) as string
       },
-      walletAdapter,
+      walletAdapter: walletAdapter as any,
       signMessage: async (msg: string) => {
         verifyEncryptionDomain()
         const sig = await signWaapMessage(msg)
         if (!sig) throw new Error('Failed to sign message')
         return sig
+      },
+      signTypedData: async (address: string, typedDataJson: string) => {
+        return (await requestWaapWallet(WAAP_METHOD.eth_signTypedData_v4, [address, typedDataJson])) as string
       },
       onStep: (step: number, status: StepStatus) => {
         setProgressStep(step, status)
@@ -480,24 +458,29 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           // Persist encrypted payload on secrets_generated (recovery-critical)
           case 'secrets_generated':
             console.log('[L1→L2] Secrets generated, encrypted payload persisted to localStorage via SDK')
-            notify('warn', {
-              heading: 'Backup Available',
-              message: 'Your deposit data is encrypted and backed up — only you can access it. For extra safety, click here to export a local copy — useful if you ever need to recover manually',
-            }, {
-              autoClose: false,
-              onClick: () => {
-                try {
-                  const claims = localStorage.getItem(STORAGE_KEYS.deposits)
-                  if (claims) {
-                    const parsed = JSON.parse(claims)
-                    const latest = parsed.filter((c: any) => !c.success).pop()
-                    if (latest) exportClaimData(latest)
-                  }
-                } catch (e) {
-                  console.error('[L1→L2] Failed to export claim data on toast click:', e)
-                }
+            notify(
+              'warn',
+              {
+                heading: 'Backup Available',
+                message:
+                  'Your deposit data is encrypted and backed up — only you can access it. For extra safety, click here to export a local copy — useful if you ever need to recover manually',
               },
-            })
+              {
+                autoClose: false,
+                onClick: () => {
+                  try {
+                    const claims = localStorage.getItem(STORAGE_KEYS.deposits)
+                    if (claims) {
+                      const parsed = JSON.parse(claims)
+                      const latest = parsed.filter((c: any) => !c.success).pop()
+                      if (latest) exportClaimData(latest)
+                    }
+                  } catch (e) {
+                    console.error('[L1→L2] Failed to export claim data on toast click:', e)
+                  }
+                },
+              },
+            )
             break
           // Track operation ID for correlation
           case 'operation_created':
@@ -505,43 +488,63 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             break
           case 'deposit_sent':
             setTransactionUrls(event.l1TxUrl, null)
-            notify('warn', {
-              heading: 'Deposit In Progress',
-              message: 'Please keep this page open while your deposit completes. Your data is encrypted and backed up — only you can access it.',
-            }, { autoClose: false })
+            notify(
+              'warn',
+              {
+                heading: 'Deposit In Progress',
+                message:
+                  'Please keep this page open while your deposit completes. Your data is encrypted and backed up — only you can access it.',
+              },
+              { autoClose: false },
+            )
             break
           case 'deposit_confirmed':
             setTransactionUrls(event.l1TxUrl, null)
             // Prompt user to backup their claim secret (matches old flow)
-            notify('warn', {
-              heading: 'Deposit Confirmed',
-              message: 'Your deposit is confirmed on L1. Click here to export a full backup — this includes all the data needed to resume if anything interrupts the process.',
-            }, {
-              autoClose: false,
-              onClick: () => {
-                try {
-                  const claims = localStorage.getItem(STORAGE_KEYS.deposits)
-                  if (claims) {
-                    const parsed = JSON.parse(claims)
-                    // Find the most recent pending claim
-                    const latest = parsed.filter((c: any) => !c.success).pop()
-                    if (latest) exportClaimData(latest)
-                  }
-                } catch (e) {
-                  console.error('[L1→L2] Failed to export claim data on toast click:', e)
-                }
+            notify(
+              'warn',
+              {
+                heading: 'Deposit Confirmed',
+                message:
+                  'Your deposit is confirmed on L1. Click here to export a full backup — this includes all the data needed to resume if anything interrupts the process.',
               },
-            })
+              {
+                autoClose: false,
+                onClick: () => {
+                  try {
+                    const claims = localStorage.getItem(STORAGE_KEYS.deposits)
+                    if (claims) {
+                      const parsed = JSON.parse(claims)
+                      // Find the most recent pending claim
+                      const latest = parsed.filter((c: any) => !c.success).pop()
+                      if (latest) exportClaimData(latest)
+                    }
+                  } catch (e) {
+                    console.error('[L1→L2] Failed to export claim data on toast click:', e)
+                  }
+                },
+              },
+            )
             break
           // Show sync progress to prevent users from force-closing
           case 'sync_poll':
-            notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, { toastId: 'l1-to-l2-progress', autoClose: 15000 })
+            notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, {
+              toastId: 'l1-to-l2-progress',
+              autoClose: 15000,
+            })
             break
           case 'claim_attempt':
-            notify('info', `Claiming tokens on L2 (attempt ${event.attempt}/${event.maxAttempts})...`, { toastId: 'l1-to-l2-progress', autoClose: 15000 })
+            notify('info', `Claiming tokens on L2 (attempt ${event.attempt}/${event.maxAttempts})...`, {
+              toastId: 'l1-to-l2-progress',
+              autoClose: 15000,
+            })
             break
           case 'claim_retry':
-            notify('info', `L2 node hasn't synced this message yet. Retrying in ${Math.round(event.delayMs / 60_000)} min (${event.attempt}/${event.maxAttempts})...`, { toastId: 'l1-to-l2-progress', autoClose: 15000 })
+            notify(
+              'info',
+              `L2 node hasn't synced this message yet. Retrying in ${Math.round(event.delayMs / 60_000)} min (${event.attempt}/${event.maxAttempts})...`,
+              { toastId: 'l1-to-l2-progress', autoClose: 15000 },
+            )
             break
           case 'operation_completed': {
             const l1Url = event.l1TxHash ? `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${event.l1TxHash}` : null
@@ -556,17 +559,26 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             console.log(`[L1→L2] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
             break
           case 'patch_failed':
-            notify('warn', {
-              heading: 'Backup Warning',
-              message: 'Could not save recovery data to server. Please do not close this page until the bridge completes.',
-            }, { autoClose: false })
+            notify(
+              'warn',
+              {
+                heading: 'Backup Warning',
+                message:
+                  'Could not save recovery data to server. Please do not close this page until the bridge completes.',
+              },
+              { autoClose: false },
+            )
             break
           case 'error':
             if (event.fundsAtRisk) {
-              notify('warn', {
-                heading: 'L2 Claim Failed — Funds Are Safe',
-                message: 'Your deposit confirmed on L1 but the L2 claim did not complete. Go to Activity to resume.',
-              }, { autoClose: false })
+              notify(
+                'warn',
+                {
+                  heading: 'L2 Claim Failed — Funds Are Safe',
+                  message: 'Your deposit confirmed on L1 but the L2 claim did not complete. Go to Activity to resume.',
+                },
+                { autoClose: false },
+              )
             } else {
               // Skip generic toast for backup failures — onError handler shows a more specific one
               const errorMsg = event.error?.message ?? 'Unknown error'
@@ -575,12 +587,14 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               if (errorMsg.includes('Contract artifact not found') || errorMsg.includes('artifact not found')) {
                 notify('error', {
                   heading: 'Contract Artifact Not Found',
-                  message: 'The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.',
+                  message:
+                    'The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.',
                 })
               } else {
                 notify('error', {
                   heading: 'Deposit Failed — No Funds Moved',
-                  message: 'The transaction was not sent. Your balance is unchanged and no recovery is needed. You can safely retry.',
+                  message:
+                    'The transaction was not sent. Your balance is unchanged and no recovery is needed. You can safely retry.',
                 })
               }
             }
@@ -634,12 +648,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     onError: (error) => {
       // The onEvent 'error' handler already shows a toast for most errors.
       // Only show here for backup failures (which are skipped in onEvent).
-      const errorMessage = error instanceof Error ? error.message : (typeof error === 'object' ? JSON.stringify(error) : String(error))
+      const errorMessage =
+        error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
       if (errorMessage.includes('Failed to backup')) {
-        notify('error', {
-          heading: 'Backup Failed — Bridge Aborted',
-          message: errorMessage.length > 200 ? errorMessage.slice(0, 200) + '...' : errorMessage,
-        }, { autoClose: false })
+        notify(
+          'error',
+          {
+            heading: 'Backup Failed — Bridge Aborted',
+            message: errorMessage.length > 200 ? errorMessage.slice(0, 200) + '...' : errorMessage,
+          },
+          { autoClose: false },
+        )
       }
     },
   })
@@ -673,13 +692,9 @@ export function useExportClaimData() {
       }
 
       exportClaimData(claim)
-      notify(
-        'success',
-        'Claim data exported successfully! Save this file in a safe place.',
-      )
+      notify('success', 'Claim data exported successfully! Save this file in a safe place.')
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       notify('error', `Failed to export claim data: ${errorMessage}`)
     }
   }
@@ -690,7 +705,7 @@ export function useExportClaimData() {
         STORAGE_KEYS.deposits,
         claimId,
         'claimSecret',
-        async (msg, addr) => await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, addr]) as string,
+        async (msg, addr) => (await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, addr])) as string,
       )
 
       if (!result) {
@@ -715,8 +730,7 @@ export function useExportClaimData() {
         return false
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       notify('error', `Failed to copy claim secret: ${errorMessage}`)
       return false
     }
@@ -775,8 +789,7 @@ export function useL1HasSoulboundToken() {
       return Boolean(hasSBT)
     } catch (error) {
       console.error('Error checking L1 SBT status:', error)
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
       // Don't toast for wallet-locked errors — user just needs to unlock
       if (!errorMessage.includes('locked')) {
         notify('error', 'Failed to check SBT status on Ethereum: ' + errorMessage)
@@ -834,24 +847,17 @@ export function useL1MintSoulboundToken(onSuccess: (data: any) => void) {
       ])
 
       // Wait for confirmation
-      const receipt = await requestWaapWallet(
-        WAAP_METHOD.eth_getTransactionReceipt,
-        [txHash],
-      )
+      const receipt = await requestWaapWallet(WAAP_METHOD.eth_getTransactionReceipt, [txHash])
       const txHashStr = receipt?.transactionHash?.toString()
 
       const etherscanUrl = `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${txHashStr}`
-      notify(
-        'info',
-        `SBT minted successfully on Ethereum! Click to view on Ethereum`,
-        {
-          onClick: () => {
-            window.open(etherscanUrl, '_blank')
-          },
-          closeOnClick: false,
-          style: { cursor: 'pointer' },
+      notify('info', `SBT minted successfully on Ethereum! Click to view on Ethereum`, {
+        onClick: () => {
+          window.open(etherscanUrl, '_blank')
         },
-      )
+        closeOnClick: false,
+        style: { cursor: 'pointer' },
+      })
 
       console.log('SBT minted successfully on L1', { receipt })
       return receipt
@@ -867,8 +873,7 @@ export function useL1MintSoulboundToken(onSuccess: (data: any) => void) {
       onSuccess(data)
     },
     onError: (error) => {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
       notify('error', errorMessage)
     },
     // toastMessages: {

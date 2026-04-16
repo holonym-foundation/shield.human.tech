@@ -101,6 +101,19 @@ model AttestationNonce {
 }
 
 // ---------------------------------------------------------------------------
+// AuthNonce: server-managed SIWE nonces with TTL for replay protection
+// ---------------------------------------------------------------------------
+
+model AuthNonce {
+  id        String   @id @default(cuid(2))
+  nonce     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("auth_nonces")
+}
+
+// ---------------------------------------------------------------------------
 // BridgeActivity: one bridge activity (L1→L2 or L2→L1) with encrypted backup
 // ---------------------------------------------------------------------------
 

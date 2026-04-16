@@ -128,6 +128,15 @@ export const getAztecscanUrl = (chainId: number): string => {
   return AZTECSCAN_URLS[chainId] || activeEnvConfig.aztecscanUrl
 }
 
+const ETHERSCAN_URLS: Record<number, string> = {
+  1: 'https://etherscan.io',
+  11155111: 'https://sepolia.etherscan.io',
+}
+
+export const getEtherscanUrl = (chainId: number): string => {
+  return ETHERSCAN_URLS[chainId] || 'https://sepolia.etherscan.io'
+}
+
 export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` = (activeDeployment.nodeInfo?.l1ContractAddresses
   ?.feeJuicePortalAddress ?? '') as `0x${string}`
 export const FEE_JUICE_ADDRESS: `0x${string}` = (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ??

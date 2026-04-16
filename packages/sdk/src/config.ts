@@ -11,6 +11,15 @@
 import type { ResolvedConfig, TokenConfig, L1ContractAddresses } from './types'
 import deploymentsData from './contracts/deployments.json'
 
+// ─── Hardcoded Protocol Constants ──────────────────────────────────
+// These addresses are the same across all deployments on the same L1.
+
+/** Uniswap Permit2 contract (canonical deployment, same on all EVM chains) */
+export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
+
+/** Wrapped ETH on Sepolia */
+export const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as const
+
 // ─── Deployment Data Types ──────────────────────────────────────────
 
 export type DeploymentData = (typeof deploymentsData.deployments)[number]
@@ -52,15 +61,18 @@ export function createConfig(
     l1ChainId: dep.network.l1ChainId,
     l2ChainId: dep.network.l2ChainId,
     l1RpcUrl: overrides?.l1RpcUrl ?? '',
-    l2NodeUrl: overrides?.l2NodeUrl ?? dep.network.aztecNodeUrl,
+    l2NodeUrl: overrides?.l2NodeUrl ?? dep.network.nodeUrl,
     rollupVersion: dep.network.rollupVersion,
     aztecVersion: dep.network.aztecVersion,
     tokens: dep.tokens as TokenConfig[],
     l1ContractAddresses: dep.l1ContractAddresses as L1ContractAddresses,
-    bridgeAndFuelAddress: dep.bridgeAndFuelAddress ?? '',
-    mockFuelSwapAddress: dep.mockFuelSwapAddress ?? '',
-    feeJuicePortalAddress: nodeInfoAddresses.feeJuicePortalAddress ?? '',
-    feeJuiceAddress: nodeInfoAddresses.feeJuiceAddress ?? '',
+    swapBridgeRouterAddress: dep.swapBridgeRouterAddress ?? '',
+    uniswapFuelSwapAddress: dep.uniswapFuelSwapAddress ?? '',
+    bridgedFpcAddress: dep.bridgedFpcAddress ?? '',
+    permit2Address: PERMIT2_ADDRESS,
+    wethAddress: WETH_ADDRESS,
+    feeJuicePortalAddress: (nodeInfoAddresses as any).feeJuicePortalAddress ?? '',
+    feeJuiceAddress: (nodeInfoAddresses as any).feeJuiceAddress ?? '',
     sponsoredFeeAddress: dep.sponsoredFeeAddress ?? '',
   }
 }
@@ -105,7 +117,7 @@ export function resolveToken(
 // ─── URL Helpers ────────────────────────────────────────────────────
 
 const AZTECSCAN_URLS: Record<number, string> = {
-  604129785: 'https://devnet.aztecscan.xyz',
+  604129785: 'https://testnet.aztecscan.xyz',
 }
 
 export function getAztecscanUrl(chainId: number): string {

@@ -301,7 +301,7 @@ function BridgeActionButton({
             ),
             React.createElement('br'),
             'Or switch to public mode.',
-          ),
+          ) as unknown as string,
         })
         return
       }
@@ -332,7 +332,7 @@ function BridgeActionButton({
                 'Mint a POCH SBT',
               ),
               ' to remove this limit.',
-            ),
+            ) as unknown as string,
           })
           return
         }

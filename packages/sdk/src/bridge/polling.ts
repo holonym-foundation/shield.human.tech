@@ -3,11 +3,13 @@
  */
 
 import { Fr } from '@aztec/aztec.js/fields'
-import { RollupAbi } from '@aztec/l1-artifacts'
 import { wait } from './utils'
 
 /**
- * Poll aztecNode.getL1ToL2MessageBlock() until the message is synced on L2.
+ * Poll aztecNode.getL1ToL2MessageCheckpoint() until the message is synced on L2.
+ *
+ * Uses the 4.2 API (getL1ToL2MessageCheckpoint) instead of the deprecated
+ * getL1ToL2MessageBlock.
  *
  * Does NOT include the final buffer wait — the caller should add
  * that if needed (so the caller can update progress between poll and wait).
@@ -15,18 +17,25 @@ import { wait } from './utils'
 export async function pollL1ToL2MessageSync(
   aztecNode: any,
   messageHash: string,
-  options?: { pollIntervalMs?: number; maxWaitMs?: number },
+  options?: {
+    pollIntervalMs?: number
+    maxWaitMs?: number
+    onPoll?: (elapsedSec: number, pollCount: number) => void
+  },
 ): Promise<{ synced: boolean; elapsedMinutes: number }> {
-  const pollIntervalMs = options?.pollIntervalMs ?? 30_000
-  const maxWaitMs = options?.maxWaitMs ?? 40 * 60 * 1000
+  const pollIntervalMs = options?.pollIntervalMs ?? 15_000
+  const maxWaitMs = options?.maxWaitMs ?? 25 * 60 * 1000
   const messageHashFr = Fr.fromString(messageHash)
   const startWait = Date.now()
+  let pollCount = 0
 
   while (Date.now() - startWait < maxWaitMs) {
+    pollCount++
+    const elapsedSec = Math.round((Date.now() - startWait) / 1000)
     try {
-      const messageBlock =
-        await aztecNode.getL1ToL2MessageBlock(messageHashFr)
-      if (messageBlock !== undefined) {
+      const messageCheckpoint =
+        await aztecNode.getL1ToL2MessageCheckpoint(messageHashFr)
+      if (messageCheckpoint !== undefined) {
         return {
           synced: true,
           elapsedMinutes: (Date.now() - startWait) / 60_000,
@@ -35,6 +44,7 @@ export async function pollL1ToL2MessageSync(
     } catch {
       // retry
     }
+    options?.onPoll?.(elapsedSec, pollCount)
     await wait(pollIntervalMs)
   }
 
@@ -45,13 +55,19 @@ export async function pollL1ToL2MessageSync(
 }
 
 /**
- * Poll L1 Rollup.getProvenCheckpointNumber() until our L2 block is proven.
- * Falls back to a fixed wait if rollupAddress is unavailable or polling fails.
+ * Poll aztecNode.getProvenBlockNumber() until our L2 block is proven.
+ *
+ * NOTE: Do NOT use the L1 Rollup contract's getProvenCheckpointNumber() here.
+ * That function returns a checkpoint counter — a sequential index that resets
+ * to 0 on each rollup redeployment — which is a different scale from the L2
+ * block number. aztecNode.getProvenBlockNumber() returns the proven L2 block
+ * number directly and is the correct thing to compare against blockNumberForProof.
+ *
+ * Falls back to a fixed wait if the node call fails.
  */
 export async function waitForBlockProven(params: {
-  publicClient: any
+  aztecNode: any
   blockNumberForProof: number
-  rollupAddress: string | null | undefined
   pollIntervalMs?: number
   maxWaitMs?: number
   fixedFallbackMs?: number
@@ -59,9 +75,8 @@ export async function waitForBlockProven(params: {
   onFallback?: (fixedWaitMs: number) => void
 }): Promise<{ proven: boolean; usedPoll: boolean }> {
   const {
-    publicClient,
+    aztecNode,
     blockNumberForProof,
-    rollupAddress,
     pollIntervalMs = 120_000,
     maxWaitMs = 50 * 60 * 1000,
     fixedFallbackMs = 40 * 60 * 1000,
@@ -72,32 +87,24 @@ export async function waitForBlockProven(params: {
   let blockProven = false
   let usedPoll = false
 
-  if (rollupAddress) {
-    try {
-      usedPoll = true
-      const startWait = Date.now()
-      while (Date.now() - startWait < maxWaitMs) {
-        const proven = await publicClient.readContract({
-          address: rollupAddress as `0x${string}`,
-          abi: RollupAbi,
-          functionName: 'getProvenCheckpointNumber',
-        })
-        const provenBlock =
-          typeof proven === 'bigint' ? Number(proven) : (proven as number)
-        if (provenBlock >= blockNumberForProof) {
-          blockProven = true
-          break
-        }
-        onPoll?.(provenBlock, blockNumberForProof, Date.now() - startWait)
-        await wait(pollIntervalMs)
+  try {
+    usedPoll = true
+    const startWait = Date.now()
+    while (Date.now() - startWait < maxWaitMs) {
+      const provenBlock = await aztecNode.getProvenBlockNumber()
+      if (provenBlock >= blockNumberForProof) {
+        blockProven = true
+        break
       }
-    } catch {
-      usedPoll = false
+      onPoll?.(provenBlock, blockNumberForProof, Date.now() - startWait)
+      await wait(pollIntervalMs)
     }
+  } catch {
+    usedPoll = false
   }
 
   if (!blockProven && !usedPoll) {
-    // Fixed fallback wait when polling failed or rollupAddress unavailable.
+    // Fixed fallback wait when polling failed.
     onFallback?.(fixedFallbackMs)
     await wait(fixedFallbackMs)
   }

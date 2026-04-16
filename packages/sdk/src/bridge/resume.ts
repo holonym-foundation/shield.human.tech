@@ -57,7 +57,7 @@ export async function resume(
   apiClient: BridgeApiClient,
   aztecNode: any,
   domain: string,
-  operationId: number,
+  operationId: number | string,
   params: ResumeParams,
 ): Promise<BridgeResult> {
   const { signMessage, onStep, onEvent } = params
@@ -273,19 +273,19 @@ async function resumeL1ToL2(
 
   // If fuelSecret exists but fuel receipt data is missing (receipt PATCH failed),
   // attempt to recover it from the L1 transaction receipt.
-  if (data.fuelSecret && (!fuelMessageLeafIndex || !fuelAmount) && op.l1TxHash && config.bridgeAndFuelAddress) {
+  if (data.fuelSecret && (!fuelMessageLeafIndex || !fuelAmount) && op.l1TxHash && config.swapBridgeRouterAddress) {
     try {
-      const { BridgeAndFuelAbi } = await import('../contracts/abis/BridgeAndFuelAbi')
+      const { SwapBridgeRouterAbi } = await import('../contracts/abis/SwapBridgeRouterAbi')
       const publicClient = createL1PublicClient(config)
       const receipt = await publicClient.waitForTransactionReceipt({
         hash: op.l1TxHash as `0x${string}`,
         timeout: 300_000,
       })
       for (const log of receipt.logs) {
-        if (log.address.toLowerCase() !== config.bridgeAndFuelAddress.toLowerCase()) continue
+        if (log.address.toLowerCase() !== config.swapBridgeRouterAddress.toLowerCase()) continue
         try {
           const decoded = decodeEventLog({
-            abi: BridgeAndFuelAbi,
+            abi: SwapBridgeRouterAbi,
             data: log.data,
             topics: log.topics,
           })
@@ -354,25 +354,25 @@ async function resumeL1ToL2(
 
     if (op.l1TxHash) {
       // Path A: We have the L1 tx hash — get receipt and extract event.
-      // For fuel-enabled deposits, try BridgeAndFuel contract first, then fall back to portal.
+      // For fuel-enabled deposits, try SwapBridgeRouter contract first, then fall back to portal.
       emit({ type: 'recovery_from_receipt', l1TxHash: op.l1TxHash })
       let recovered: { messageHash: string; messageLeafIndex: string; l1BlockNumber?: string } | null = null
 
-      if (data.fuelSecret && config.bridgeAndFuelAddress) {
-        // Fuel path: the deposit went through BridgeAndFuel, not the portal directly.
-        // Try extracting from BridgeAndFuel receipt first.
+      if (data.fuelSecret && config.swapBridgeRouterAddress) {
+        // Fuel path: the deposit went through SwapBridgeRouter, not the portal directly.
+        // Try extracting from SwapBridgeRouter receipt first.
         try {
-          const { BridgeAndFuelAbi } = await import('../contracts/abis/BridgeAndFuelAbi')
+          const { SwapBridgeRouterAbi } = await import('../contracts/abis/SwapBridgeRouterAbi')
           const fuelReceipt = await publicClient.waitForTransactionReceipt({
             hash: op.l1TxHash as `0x${string}`,
             timeout: 300_000,
           })
           for (const log of fuelReceipt.logs) {
-            // BridgeAndFuel emits BridgeWithFuel which includes the token message data
-            if (log.address.toLowerCase() !== config.bridgeAndFuelAddress.toLowerCase()) continue
+            // SwapBridgeRouter emits BridgeWithFuel which includes the token message data
+            if (log.address.toLowerCase() !== config.swapBridgeRouterAddress.toLowerCase()) continue
             try {
               const decoded = decodeEventLog({
-                abi: BridgeAndFuelAbi,
+                abi: SwapBridgeRouterAbi,
                 data: log.data,
                 topics: log.topics,
               })
@@ -383,12 +383,12 @@ async function resumeL1ToL2(
                   messageLeafIndex: args.tokenIndex.toString(),
                   l1BlockNumber: fuelReceipt.blockNumber != null ? String(fuelReceipt.blockNumber) : undefined,
                 }
-                console.log('[SDK Resume L1→L2] Recovered from BridgeAndFuel receipt:', recovered)
+                console.log('[SDK Resume L1→L2] Recovered from SwapBridgeRouter receipt:', recovered)
                 break
               }
             } catch { /* Not our event */ }
           }
-          // Also try portal events in the same receipt (BridgeAndFuel calls portal internally)
+          // Also try portal events in the same receipt (SwapBridgeRouter calls portal internally)
           if (!recovered) {
             recovered = await recoverFromReceipt(
               publicClient, op.l1TxHash, portalAddress, claimSecretHash,
@@ -396,7 +396,7 @@ async function resumeL1ToL2(
             )
           }
         } catch (err) {
-          console.warn('[SDK Resume L1→L2] BridgeAndFuel recovery failed, trying portal:', err)
+          console.warn('[SDK Resume L1→L2] SwapBridgeRouter recovery failed, trying portal:', err)
         }
       }
 
@@ -754,7 +754,7 @@ async function resumeL2ToL1(
       let foundBlock: number | undefined
       for (let b = startBlock; b <= currentBlock; b++) {
         try {
-          const result = await computeWitness(aztecNode, publicClient, b, msgLeaf, l1RollupAddress!)
+          const result = await computeWitness(aztecNode, b, msgLeaf, op.l2TxHash!)
           if (result.leafIndex != null) {
             foundBlock = b
             l2ToL1MessageIndex = result.leafIndex
@@ -826,7 +826,7 @@ async function resumeL2ToL1(
         chainId: op.chainIdL1 ?? config.l1ChainId,
       })
 
-      const witnessResult = await computeWitness(aztecNode, publicClient, blockNum, msgLeaf, l1RollupAddress)
+      const witnessResult = await computeWitness(aztecNode, blockNum, msgLeaf, op.l2TxHash!)
       l2ToL1MessageIndex = witnessResult.leafIndex
       siblingPath = witnessResult.siblingPath
       withdrawEpoch = witnessResult.epoch
@@ -928,9 +928,8 @@ async function resumeL2ToL1(
 
   // Check return value — don't proceed if block isn't proven
   const provenResult = await waitForBlockProven({
-    publicClient,
+    aztecNode,
     blockNumberForProof,
-    rollupAddress: l1RollupAddress,
     onPoll: (provenBlock, neededBlock, elapsedMs) => {
       emit({ type: 'proven_poll', provenBlock, neededBlock, elapsedMs })
     },

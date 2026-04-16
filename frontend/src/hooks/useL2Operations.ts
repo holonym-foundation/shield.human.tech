@@ -1,10 +1,4 @@
-import {
-  L1_TOKENS,
-  L1_CHAIN_ID,
-  L2_CHAIN_ID,
-  getAztecscanUrl,
-  getEtherscanUrl,
-} from '@/config'
+import { L1_TOKENS, L1_CHAIN_ID, L2_CHAIN_ID, getAztecscanUrl, getEtherscanUrl } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
@@ -49,40 +43,31 @@ export const useL2TokenBalance = () => {
         throw new Error('Aztec address not found')
       }
       if (!walletAdapter) {
-        throw new Error(
-          'Aztec wallet not connected or contracts not initialized',
-        )
+        throw new Error('Aztec wallet not connected or contracts not initialized')
       }
 
       const userAddress = AztecAddress.fromString(aztecAddress)
 
       // Single simulate_views call for both balances
       const tokenAddr = l2TokenAddress || walletAdapter.tokenAddress
-      const [privateBalanceResult, publicBalanceResult] =
-        await walletAdapter.simulateViews([
-          {
-            contract: tokenAddr,
-            method: 'balance_of_private',
-            args: [userAddress],
-          },
-          {
-            contract: tokenAddr,
-            method: 'balance_of_public',
-            args: [userAddress],
-          },
-        ])
+      const [privateBalanceResult, publicBalanceResult] = await walletAdapter.simulateViews([
+        {
+          contract: tokenAddr,
+          method: 'balance_of_private',
+          args: [userAddress],
+        },
+        {
+          contract: tokenAddr,
+          method: 'balance_of_public',
+          args: [userAddress],
+        },
+      ])
 
       const privateBalance = BigInt(privateBalanceResult.result.toString())
       const publicBalance = BigInt(publicBalanceResult.result.toString())
 
-      const publicBalanceFormat = formatUnits(
-        publicBalance,
-        tokenDecimals,
-      )
-      const privateBalanceFormat = formatUnits(
-        privateBalance,
-        tokenDecimals,
-      )
+      const publicBalanceFormat = formatUnits(publicBalance, tokenDecimals)
+      const privateBalanceFormat = formatUnits(privateBalance, tokenDecimals)
 
       return {
         publicBalance: publicBalanceFormat,
@@ -105,8 +90,7 @@ export const useL2TokenBalance = () => {
   })
 }
 
-const FEE_JUICE_ADDRESS =
-  '0x0000000000000000000000000000000000000000000000000000000000000005'
+const FEE_JUICE_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
 const FEE_JUICE_DECIMALS = 18
 
 export const useL2FeeJuiceBalance = () => {
@@ -122,9 +106,7 @@ export const useL2FeeJuiceBalance = () => {
         throw new Error('Aztec address not found')
       }
       if (!walletAdapter) {
-        throw new Error(
-          'Aztec wallet not connected or contracts not initialized',
-        )
+        throw new Error('Aztec wallet not connected or contracts not initialized')
       }
 
       const userAddress = AztecAddress.fromString(aztecAddress)
@@ -139,6 +121,48 @@ export const useL2FeeJuiceBalance = () => {
 
       const publicBalance = BigInt(publicBalanceResult.result.toString())
       return formatUnits(publicBalance, FEE_JUICE_DECIMALS)
+    } catch (error) {
+      handleL2Error<string>(error, 'BALANCE')
+      throw error
+    }
+  }
+
+  return useQuery<string, Error>({
+    queryKey,
+    queryFn,
+    enabled: !!aztecAddress && !!walletAdapter,
+    refetchInterval: 30_000,
+  })
+}
+
+export const useL2PrivateFeeJuiceBalance = () => {
+  const { aztecAddress } = useWalletStore()
+  const handleL2Error = useL2ErrorHandler()
+  const walletAdapter = useWalletAdapter()
+
+  const queryKey = ['l2PrivateFeeJuiceBalance', aztecAddress]
+
+  const queryFn = async (): Promise<string> => {
+    try {
+      if (!aztecAddress) {
+        throw new Error('Aztec address not found')
+      }
+      if (!walletAdapter) {
+        throw new Error('Aztec wallet not connected or contracts not initialized')
+      }
+
+      const userAddress = AztecAddress.fromString(aztecAddress)
+
+      const [privateBalanceResult] = await walletAdapter.simulateViews([
+        {
+          contract: FEE_JUICE_ADDRESS,
+          method: 'balance_of_private',
+          args: [userAddress],
+        },
+      ])
+
+      const privateBalance = BigInt(privateBalanceResult.result.toString())
+      return formatUnits(privateBalance, FEE_JUICE_DECIMALS)
     } catch (error) {
       handleL2Error<string>(error, 'BALANCE')
       throw error
@@ -234,14 +258,15 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
   const { aztecAddress, aztecLoginMethod } = useWalletStore()
   const queryClient = useQueryClient()
   const notify = useToast()
-  const { setProgressStep, setTransactionUrls, isPrivacyModeEnabled, bridgeConfig, l2TxUrl: currentL2TxUrl } =
-    useBridgeStore()
-
   const {
-    waapLoginMethod: loginMethod,
-    waapWalletProvider: walletProvider,
-    waapChainId: chainId,
-  } = useWalletStore()
+    setProgressStep,
+    setTransactionUrls,
+    isPrivacyModeEnabled,
+    bridgeConfig,
+    l2TxUrl: currentL2TxUrl,
+  } = useBridgeStore()
+
+  const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
   const walletAdapter = useWalletAdapter()
   const selectedToken = bridgeConfig.from.token ?? undefined
   const bridge = useBridge()
@@ -265,12 +290,12 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       l2Address: aztecAddress,
       isPrivate: isPrivacyModeEnabled ?? false,
       sendTransaction: async (tx) => {
-        return await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx]) as string
+        return (await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx])) as string
       },
-      walletAdapter,
+      walletAdapter: walletAdapter as any,
       signMessage: async (msg: string) => {
         verifyEncryptionDomain()
-        return await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, l1Address]) as string
+        return (await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, l1Address])) as string
       },
       onStep: (step: number, status: StepStatus) => {
         setProgressStep(step, status)
@@ -280,56 +305,71 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
           // Persist encrypted nonce payload (recovery-critical)
           case 'nonce_generated':
             console.log('[L2→L1] Nonce generated, encrypted payload persisted to localStorage via SDK')
-            notify('warn', {
-              heading: 'Backup Available',
-              message: 'Your withdrawal data is encrypted and backed up — only you can access it. For extra safety, click here to export a local copy — useful if you ever need to recover manually',
-            }, {
-              autoClose: false,
-              onClick: () => {
-                try {
-                  const withdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
-                  if (withdrawals) {
-                    const parsed = JSON.parse(withdrawals)
-                    const latest = parsed.filter((w: any) => !w.success).pop()
-                    if (latest) exportWithdrawalData(latest)
-                  }
-                } catch (e) {
-                  console.error('[L2→L1] Failed to export withdrawal data on toast click:', e)
-                }
+            notify(
+              'warn',
+              {
+                heading: 'Backup Available',
+                message:
+                  'Your withdrawal data is encrypted and backed up — only you can access it. For extra safety, click here to export a local copy — useful if you ever need to recover manually',
               },
-            })
+              {
+                autoClose: false,
+                onClick: () => {
+                  try {
+                    const withdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
+                    if (withdrawals) {
+                      const parsed = JSON.parse(withdrawals)
+                      const latest = parsed.filter((w: any) => !w.success).pop()
+                      if (latest) exportWithdrawalData(latest)
+                    }
+                  } catch (e) {
+                    console.error('[L2→L1] Failed to export withdrawal data on toast click:', e)
+                  }
+                },
+              },
+            )
             break
           // Track operation ID for correlation
           case 'operation_created':
             console.log('[L2→L1] Operation created:', event.operationId)
             break
           case 'burn_sent':
-            notify('warn', {
-              heading: 'Withdrawal In Progress',
-              message: 'Please keep this page open while your withdrawal completes. Your data is encrypted and backed up — only you can access it.',
-            }, { autoClose: false })
+            notify(
+              'warn',
+              {
+                heading: 'Withdrawal In Progress',
+                message:
+                  'Please keep this page open while your withdrawal completes. Your data is encrypted and backed up — only you can access it.',
+              },
+              { autoClose: false },
+            )
             break
           case 'burn_confirmed':
             setTransactionUrls(null, event.l2TxUrl)
             // Prompt user to backup their withdrawal data (matches old flow pattern)
-            notify('warn', {
-              heading: 'Withdrawal Confirmed',
-              message: 'Your withdrawal is confirmed on L2. Click here to export a full backup — this includes all the data needed to resume if anything interrupts the process.',
-            }, {
-              autoClose: false,
-              onClick: () => {
-                try {
-                  const withdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
-                  if (withdrawals) {
-                    const parsed = JSON.parse(withdrawals)
-                    const latest = parsed.filter((w: any) => !w.success).pop()
-                    if (latest) exportWithdrawalData(latest)
-                  }
-                } catch (e) {
-                  console.error('[L2→L1] Failed to export withdrawal data on toast click:', e)
-                }
+            notify(
+              'warn',
+              {
+                heading: 'Withdrawal Confirmed',
+                message:
+                  'Your withdrawal is confirmed on L2. Click here to export a full backup — this includes all the data needed to resume if anything interrupts the process.',
               },
-            })
+              {
+                autoClose: false,
+                onClick: () => {
+                  try {
+                    const withdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
+                    if (withdrawals) {
+                      const parsed = JSON.parse(withdrawals)
+                      const latest = parsed.filter((w: any) => !w.success).pop()
+                      if (latest) exportWithdrawalData(latest)
+                    }
+                  } catch (e) {
+                    console.error('[L2→L1] Failed to export withdrawal data on toast click:', e)
+                  }
+                },
+              },
+            )
             break
           // Handle recovery_l2_block event
           case 'recovery_l2_block':
@@ -340,10 +380,17 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             console.log('[L2→L1] Witness computed: leafIndex=', event.leafIndex, 'epoch=', event.epoch)
             break
           case 'proven_poll':
-            notify('info', `Waiting for L2 block to be proven on L1 (${Math.round(event.elapsedMs / 60_000)} min elapsed)...`, { toastId: 'l2-to-l1-progress', autoClose: 15000 })
+            notify(
+              'info',
+              `Waiting for L2 block to be proven on L1 (${Math.round(event.elapsedMs / 60_000)} min elapsed)...`,
+              { toastId: 'l2-to-l1-progress', autoClose: 15000 },
+            )
             break
           case 'proven_fallback':
-            notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, { toastId: 'l2-to-l1-progress', autoClose: 15000 })
+            notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, {
+              toastId: 'l2-to-l1-progress',
+              autoClose: 15000,
+            })
             break
           case 'l1_withdraw_sent':
             setTransactionUrls(event.l1TxUrl, currentL2TxUrl)
@@ -361,19 +408,29 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             console.log(`[L2→L1] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
             break
           case 'patch_failed':
-            notify('warn', {
-              heading: 'Backup Warning',
-              message: 'Could not save withdrawal proof to server. Please do not close this page until the withdrawal completes.',
-            }, { autoClose: false })
+            notify(
+              'warn',
+              {
+                heading: 'Backup Warning',
+                message:
+                  'Could not save withdrawal proof to server. Please do not close this page until the withdrawal completes.',
+              },
+              { autoClose: false },
+            )
             break
           case 'error':
             console.log('[L2→L1] Error event raw:', event.error)
             console.log('[L2→L1] Error message:', event.error?.message)
             if (event.fundsAtRisk) {
-              notify('warn', {
-                heading: 'L1 Withdraw Failed — Funds Burned on L2',
-                message: 'Your tokens were burned on L2 but the L1 withdrawal did not complete. Go to Activity to resume.',
-              }, { autoClose: false })
+              notify(
+                'warn',
+                {
+                  heading: 'L1 Withdraw Failed — Funds Burned on L2',
+                  message:
+                    'Your tokens were burned on L2 but the L1 withdrawal did not complete. Go to Activity to resume.',
+                },
+                { autoClose: false },
+              )
             } else {
               // Skip generic toast for backup failures — onError handler shows a more specific one
               const errorMsg = event.error?.message ?? 'Unknown error'
@@ -383,12 +440,14 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               if (errorMsg.includes('Contract artifact not found') || errorMsg.includes('artifact not found')) {
                 notify('error', {
                   heading: 'Contract Artifact Not Found',
-                  message: 'The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.',
+                  message:
+                    'The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.',
                 })
               } else {
                 notify('error', {
                   heading: 'Withdrawal Failed — No Funds Moved',
-                  message: 'The transaction was not sent. Your balance is unchanged and no recovery is needed. You can safely retry.',
+                  message:
+                    'The transaction was not sent. Your balance is unchanged and no recovery is needed. You can safely retry.',
                 })
               }
             }
@@ -459,12 +518,17 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
     onError: (error) => {
       // The onEvent 'error' handler already shows a toast for most errors.
       // Only show here for backup failures (which are skipped in onEvent).
-      const errorMessage = error instanceof Error ? error.message : (typeof error === 'object' ? JSON.stringify(error) : String(error))
+      const errorMessage =
+        error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
       if (errorMessage.includes('Failed to backup')) {
-        notify('error', {
-          heading: 'Backup Failed — Withdrawal Aborted',
-          message: errorMessage.length > 200 ? errorMessage.slice(0, 200) + '...' : errorMessage,
-        }, { autoClose: false })
+        notify(
+          'error',
+          {
+            heading: 'Backup Failed — Withdrawal Aborted',
+            message: errorMessage.length > 200 ? errorMessage.slice(0, 200) + '...' : errorMessage,
+          },
+          { autoClose: false },
+        )
       }
     },
   })
@@ -479,13 +543,7 @@ export function useL2RecoverWithdrawal() {
   const bridge = useBridge()
   const notify = useToast()
 
-  const mutationFn = async ({
-    l2TxHash,
-    l1Address: paramL1Address,
-  }: {
-    l2TxHash: string
-    l1Address: string
-  }) => {
+  const mutationFn = async ({ l2TxHash, l1Address: paramL1Address }: { l2TxHash: string; l1Address: string }) => {
     const resolvedL1Address = paramL1Address || l1Address
 
     const storedWithdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
@@ -503,11 +561,11 @@ export function useL2RecoverWithdrawal() {
 
     await bridge.resume(operationId, {
       sendTransaction: async (tx) => {
-        return await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx]) as string
+        return (await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx])) as string
       },
       signMessage: async (msg: string) => {
         verifyEncryptionDomain()
-        return await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, resolvedL1Address]) as string
+        return (await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, resolvedL1Address])) as string
       },
       l1Address: resolvedL1Address ?? undefined,
       l2Address: aztecAddress ?? undefined,
@@ -515,10 +573,17 @@ export function useL2RecoverWithdrawal() {
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
           case 'proven_poll':
-            notify('info', `Waiting for L2 block to be proven (proven: ${event.provenBlock}, need: ${event.neededBlock}, ${Math.round(event.elapsedMs / 60_000)} min)...`, { toastId: 'resume-l2-to-l1-progress', autoClose: false })
+            notify(
+              'info',
+              `Waiting for L2 block to be proven (proven: ${event.provenBlock}, need: ${event.neededBlock}, ${Math.round(event.elapsedMs / 60_000)} min)...`,
+              { toastId: 'resume-l2-to-l1-progress', autoClose: false },
+            )
             break
           case 'proven_fallback':
-            notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, { toastId: 'resume-l2-to-l1-progress', autoClose: false })
+            notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, {
+              toastId: 'resume-l2-to-l1-progress',
+              autoClose: false,
+            })
             break
           case 'l1_withdraw_sent':
             setTransactionUrls(event.l1TxUrl, currentL2TxUrl)
@@ -530,17 +595,25 @@ export function useL2RecoverWithdrawal() {
             }
             break
           case 'patch_failed':
-            notify('warn', {
-              heading: 'Backup Warning',
-              message: `Could not save ${event.label} to server. Do not close this page.`,
-            }, { autoClose: false })
+            notify(
+              'warn',
+              {
+                heading: 'Backup Warning',
+                message: `Could not save ${event.label} to server. Do not close this page.`,
+              },
+              { autoClose: false },
+            )
             break
           case 'error':
             if (event.fundsAtRisk) {
-              notify('error', {
-                heading: 'Recovery Error — Funds Safe',
-                message: 'Your withdrawal proof is saved. Go to Activity to try again.',
-              }, { autoClose: false })
+              notify(
+                'error',
+                {
+                  heading: 'Recovery Error — Funds Safe',
+                  message: 'Your withdrawal proof is saved. Go to Activity to try again.',
+                },
+                { autoClose: false },
+              )
             }
             break
         }
@@ -582,10 +655,7 @@ export function useExportWithdrawalData() {
         return
       }
       exportWithdrawalData(w)
-      notify(
-        'success',
-        'Withdrawal data exported successfully! Save this file in a safe place.',
-      )
+      notify('success', 'Withdrawal data exported successfully! Save this file in a safe place.')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Unknown error'
       notify('error', `Failed to export: ${msg}`)
@@ -598,7 +668,7 @@ export function useExportWithdrawalData() {
         STORAGE_KEYS.withdrawals,
         withdrawalId,
         'nonce',
-        async (msg, addr) => await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, addr]) as string,
+        async (msg, addr) => (await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, addr])) as string,
       )
 
       if (!result) {
@@ -734,23 +804,13 @@ export const useL2TokenTransfer = () => {
   const walletAdapter = useWalletAdapter()
 
   const mutation = useMutation({
-    mutationFn: async ({
-      amount,
-      recipient,
-      isPrivate,
-    }: {
-      amount: string
-      recipient: string
-      isPrivate: boolean
-    }) => {
+    mutationFn: async ({ amount, recipient, isPrivate }: { amount: string; recipient: string; isPrivate: boolean }) => {
       try {
         if (!aztecAddress) {
           throw new Error('Aztec address not found')
         }
         if (!walletAdapter) {
-          throw new Error(
-            'Aztec wallet not connected or contracts not initialized',
-          )
+          throw new Error('Aztec wallet not connected or contracts not initialized')
         }
 
         const amountInWei = parseUnits(amount, L1_TOKENS[0]?.decimals ?? 6)
@@ -759,19 +819,12 @@ export const useL2TokenTransfer = () => {
         // Use wallet adapter to execute transfer
         const method = isPrivate ? 'transfer_to_private' : 'transfer'
         const args = isPrivate
-          ? [
-              AztecAddress.fromString(aztecAddress),
-              recipientAddress,
-              amountInWei,
-            ]
+          ? [AztecAddress.fromString(aztecAddress), recipientAddress, amountInWei]
           : [recipientAddress, amountInWei]
 
-        const result = await walletAdapter.executeCall(
-          walletAdapter.tokenAddress,
-          method,
-          args,
-          { contractType: 'token' },
-        )
+        const result = await walletAdapter.executeCall(walletAdapter.tokenAddress, method, args, {
+          contractType: 'token',
+        })
 
         // Return a receipt-like object for compatibility
         return { txHash: result.txHash, status: 'mined' }

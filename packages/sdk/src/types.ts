@@ -34,8 +34,11 @@ export interface ResolvedConfig {
   aztecVersion: string
   tokens: TokenConfig[]
   l1ContractAddresses: L1ContractAddresses
-  bridgeAndFuelAddress: string
-  mockFuelSwapAddress: string
+  swapBridgeRouterAddress: string
+  uniswapFuelSwapAddress: string
+  bridgedFpcAddress: string
+  permit2Address: string
+  wethAddress: string
   feeJuicePortalAddress: string
   feeJuiceAddress: string
   sponsoredFeeAddress: string
@@ -83,8 +86,8 @@ export type StepStatus = 'pending' | 'active' | 'completed' | 'error'
  */
 export type BridgeEvent =
   // Lifecycle
-  | { type: 'operation_created'; operationId: number; data: Record<string, unknown> }
-  | { type: 'operation_completed'; operationId: number; l1TxHash?: string; l2TxHash?: string }
+  | { type: 'operation_created'; operationId: number | string; data: Record<string, unknown> }
+  | { type: 'operation_completed'; operationId: number | string; l1TxHash?: string; l2TxHash?: string }
   // L1→L2 deposit
   | { type: 'deposit_sent'; l1TxHash: string; l1TxUrl: string }
   | { type: 'deposit_confirmed'; l1TxHash: string; l1TxUrl: string; messageHash: string; messageLeafIndex: string; fuelMessageHash?: string; fuelMessageLeafIndex?: string; fuelAmount?: string }
@@ -104,7 +107,7 @@ export type BridgeEvent =
   | { type: 'recovery_from_block_scan'; l1BlockNumberBeforeTx: string }
   | { type: 'recovery_l2_block'; l2TxHash: string; l2BlockNumber: number }
   // Server backup warnings
-  | { type: 'patch_failed'; operationId: number; label: string; data: Record<string, unknown> }
+  | { type: 'patch_failed'; operationId: number | string; label: string; data: Record<string, unknown> }
   // Errors (with context for depositConfirmed/burnConfirmed guard)
   | { type: 'error'; error: Error; fundsAtRisk: boolean; operationId?: number }
   // Attestation
@@ -155,7 +158,7 @@ export const BRIDGE_STATUS_INFO: Record<BridgeOperationStatus, { label: string; 
 
 /** Shape returned by GET /api/bridge/operations */
 export interface BridgeOperation {
-  id: number
+  id: string
   direction: BridgeDirection
   status: string
   amountL1: string | null
@@ -198,6 +201,8 @@ export interface BridgeOperation {
   tokenSymbol: string | null
   tokenAddressL1: string | null
   tokenAddressL2: string | null
+  tokenDecimalsL1: number | null
+  tokenDecimalsL2: number | null
   // Progress tracking
   currentStep: number | null
   // Common
@@ -237,6 +242,8 @@ export interface BridgeL1ToL2Params {
   walletAdapter: WalletAdapterInterface
   /** Callback to sign a message with the L1 wallet */
   signMessage: (msg: string) => Promise<string>
+  /** Callback to sign EIP-712 typed data with the L1 wallet (for Permit2) */
+  signTypedData: (address: string, typedDataJson: string) => Promise<string>
   /** Called when a bridge step changes status */
   onStep?: (step: number, status: StepStatus) => void
   /** Called when a lifecycle event occurs (for localStorage, toasts, telemetry) */
@@ -293,7 +300,7 @@ export interface TransactionRequest {
 // ─── Bridge Results ─────────────────────────────────────────────────
 
 export interface BridgeResult {
-  operationId: number
+  operationId: number | string
   l1TxHash?: string
   l2TxHash?: string
   l1TxUrl?: string
@@ -304,12 +311,13 @@ export interface BridgeResult {
 
 /** Data needed to resume an incomplete L1→L2 bridge operation */
 export interface RecoveryClaimData {
-  operationId: number
+  operationId: string
   claimSecret: string
   claimSecretHash: string
   messageHash: string | null
   messageLeafIndex: string | null
   amount: string
+  claimAmount: string | null
   l1Address: string
   l2Address: string
   l1TxHash: string | null
@@ -323,11 +331,18 @@ export interface RecoveryClaimData {
   bridgeAddressL2: string | null
   tokenAddressL1: string | null
   tokenAddressL2: string | null
+  // Fuel recovery fields
+  fuelSecret: string | null
+  privateFuelSalt: string | null
+  privateFuelSecret: string | null
+  fuelMessageHash: string | null
+  fuelMessageLeafIndex: string | null
+  fuelAmount: string | null
 }
 
 /** Data needed to resume an incomplete L2→L1 withdrawal */
 export interface RecoveryWithdrawalData {
-  operationId: number
+  operationId: string
   amount: string
   l1Address: string
   l2Address: string
@@ -369,6 +384,12 @@ export interface BridgeActivityData {
   fuelSecretHash?: string
   fuelAmount?: string
   fuelDecimals?: number
+  // For L1→L2 private fuel
+  privateFuelSalt?: string
+  privateFuelSecret?: string
+  privateFuelSecretHash?: string
+  // Portal address snapshot (for resume/recovery)
+  portalAddressL1?: string
   // For L2→L1
   nonce?: string
   l2BlockNumber?: string
@@ -446,7 +467,7 @@ export interface CaptureBlocksResult {
 }
 
 export interface BackupResult {
-  operationId: number
+  operationId: number | string
   claimSecret: any // Fr
   claimSecretHash: any // Fr
   nodeInfoSnapshot: any
@@ -493,7 +514,7 @@ export interface CaptureBlocksL2Result {
 }
 
 export interface WithdrawalBackupResult {
-  operationId: number
+  operationId: number | string
   nonce: any // Fr
   l2BridgeAddress: string
 }
@@ -528,13 +549,21 @@ export interface BridgeLogContext {
   aztecAddress: string
 }
 
-/** Fuel quote from swap router */
+/** Pool key for Uniswap V4 routing */
+export interface PoolKeyParam {
+  currency0: string
+  currency1: string
+  fee: number
+  tickSpacing: number
+  hooks: string
+}
+
+/** Fuel quote from Uniswap V4 quoter */
 export interface FuelQuote {
-  swapTarget: string
-  swapAllowanceTarget: string
-  swapData: string
   expectedOutput: bigint
   minOutput: bigint
+  poolKeys?: PoolKeyParam[]
+  zeroForOnes?: boolean[]
 }
 
 /** Optional fuel parameters threaded through deposit steps */
@@ -642,7 +671,6 @@ export interface PassportStruct {
 /** L2 clean-hands struct for executeWithdrawToL1Private (snake_case matches Noir ABI) */
 export interface L2CleanHandsStruct {
   nonce: bigint
-  action_id: bigint
   signature: number[]
 }
 

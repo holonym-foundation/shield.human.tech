@@ -528,10 +528,9 @@ export async function withdrawL2ToL1(
     try {
       witnessResult = await computeWitness(
         aztecNode,
-        publicClient,
         l2BlockNumber,
         msgLeaf,
-        rollupAddress,
+        l2TxHash,
       )
     } catch (err) {
       // User-friendly error for BlockNotProven
@@ -605,9 +604,8 @@ export async function withdrawL2ToL1(
 
     // Check return value — don't proceed to L1 withdraw if block isn't proven
     const provenResult = await waitForBlockProven({
-      publicClient,
+      aztecNode,
       blockNumberForProof: l2BlockNumber,
-      rollupAddress,
       onPoll: (provenBlock, neededBlock, elapsedMs) => {
         emit({ type: 'proven_poll', provenBlock, neededBlock, elapsedMs })
       },

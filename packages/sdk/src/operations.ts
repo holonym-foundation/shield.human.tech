@@ -48,7 +48,7 @@ export async function getOperations(
  */
 export async function getOperation(
   apiClient: BridgeApiClient,
-  operationId: number,
+  operationId: number | string,
 ): Promise<BridgeOperation> {
   return apiClient.get<BridgeOperation>(
     `/api/bridge/operations/${operationId}`,
@@ -67,7 +67,7 @@ export async function getOperation(
  */
 export async function patchOperationWithRetry(
   apiClient: BridgeApiClient,
-  operationId: number,
+  operationId: number | string,
   data: Record<string, unknown>,
   options?: { maxAttempts?: number; retryDelayMs?: number; label?: string },
 ): Promise<boolean> {
@@ -155,7 +155,7 @@ export async function retryFailedPatches(
  */
 export function patchOperationAsync(
   apiClient: BridgeApiClient,
-  operationId: number | undefined,
+  operationId: number | string | undefined,
   data: Record<string, unknown>,
 ): void {
   if (!operationId) return

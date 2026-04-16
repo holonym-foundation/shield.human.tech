@@ -56,7 +56,7 @@ export async function deriveEncryptionKey(
   signature: string,
   domain: string,
 ): Promise<Uint8Array> {
-  const keyDerivationInput = `Aztec Bridge Encryption Key\nDomain: ${domain}\nL1 Address: ${l1Address.toLowerCase()}\nSignature: ${signature}`
+  const keyDerivationInput = `Aztec Bridge Encryption Key\nDomain: ${domain}\nL1 Address: ${l1Address}\nSignature: ${signature}`
   const te = new TextEncoder()
   const ikm = te.encode(keyDerivationInput)
   const salt = te.encode(domain)

@@ -6,6 +6,35 @@
  * attempts, and accidental whitespace issues.
  */
 
+import { z } from 'zod'
+
+// ─── Zod Schemas ──────────────────────────────────────────────────────
+
+/** Schema for POST /api/auth/authenticate */
+export const AuthenticateSchema = z.object({
+  message: z.string().min(1),
+  signature: z.string().min(1),
+  l1LoginMethod: z.string().optional(),
+  l1WalletProvider: z.string().optional(),
+  l2LoginMethod: z.string().optional(),
+  l2WalletProvider: z.string().optional(),
+})
+
+/** Schema for POST /api/attestation/passport */
+export const PassportAttestationSchema = z.object({
+  l2Address: z.string().min(1),
+  isPrivate: z.boolean().optional().default(false),
+  bridgeAddress: z.string().optional(),
+  portalAddress: z.string().optional(),
+  deadline: z.number().optional(),
+})
+
+/** Schema for POST /api/attestation/poch */
+export const PochAttestationSchema = z.object({
+  l2Address: z.string().min(1),
+  isPrivate: z.boolean().optional().default(false),
+})
+
 // ─── Length limits ──────────────────────────────────────────────────────
 
 /** Max length for standard string fields (tx hashes, addresses, URLs). */

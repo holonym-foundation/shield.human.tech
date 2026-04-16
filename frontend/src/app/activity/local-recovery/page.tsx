@@ -6,11 +6,7 @@ import RootStyle from '@/components/RootStyle'
 import BridgeHeader from '@/components/BridgeHeader'
 import TextButton from '@/components/TextButton'
 import { getDeposits, getWithdrawals } from '@human.tech/aztec-bridge-sdk'
-import type {
-  BridgeOperation,
-  RecoveryClaimData,
-  RecoveryWithdrawalData,
-} from '@human.tech/aztec-bridge-sdk'
+import type { BridgeOperation, RecoveryClaimData, RecoveryWithdrawalData } from '@human.tech/aztec-bridge-sdk'
 import { decryptOperationPayload } from '@/hooks/useBridgeOperations'
 import { isResumable, hasPossibleLockedFunds } from '@/utils/resumability'
 import { useBridgeStore } from '@/stores/bridgeStore'
@@ -27,7 +23,7 @@ import { formatUnits } from 'viem'
 type LocalRecoverySource = 'localStorage' | 'jsonUpload'
 
 interface LocalRecoveryEntry {
-  operationId: number
+  operationId: string
   source: LocalRecoverySource
   direction: 'L1_TO_L2' | 'L2_TO_L1'
   // Plaintext metadata
@@ -97,12 +93,8 @@ function toLocalRecoveryEntry(
   source: LocalRecoverySource,
   direction: 'L1_TO_L2' | 'L2_TO_L1',
 ): LocalRecoveryEntry | null {
-  const operationId =
-    typeof raw.operationId === 'number'
-      ? raw.operationId
-      : typeof raw.id === 'number'
-        ? raw.id
-        : null
+  const rawId = raw.operationId ?? raw.id ?? null
+  const operationId = rawId != null ? String(rawId) : null
 
   if (operationId === null) return null
 
@@ -133,12 +125,8 @@ function toLocalRecoveryEntry(
     l1BlockNumberBeforeTx: raw.l1BlockNumberBeforeTx ?? null,
     messageLeafIndex: raw.messageLeafIndex ?? null,
     l2BlockNumber: raw.l2BlockNumber != null ? String(raw.l2BlockNumber) : null,
-    l2BlockNumberBeforeTx:
-      raw.l2BlockNumberBeforeTx != null
-        ? String(raw.l2BlockNumberBeforeTx)
-        : null,
-    l2ToL1MessageIndex:
-      raw.l2ToL1MessageIndex != null ? String(raw.l2ToL1MessageIndex) : null,
+    l2BlockNumberBeforeTx: raw.l2BlockNumberBeforeTx != null ? String(raw.l2BlockNumberBeforeTx) : null,
+    l2ToL1MessageIndex: raw.l2ToL1MessageIndex != null ? String(raw.l2ToL1MessageIndex) : null,
     siblingPath: Array.isArray(raw.siblingPath) ? raw.siblingPath : null,
     epoch: raw.epoch != null ? Number(raw.epoch) : null,
     recipientL1Address: raw.recipientL1Address ?? null,
@@ -188,21 +176,17 @@ function toBridgeOperationShape(entry: LocalRecoveryEntry): BridgeOperation {
     l1BlockNumber: server?.l1BlockNumber ?? null,
     messageHash: server?.messageHash ?? entry.messageHash,
     messageLeafIndex: server?.messageLeafIndex ?? entry.messageLeafIndex,
-    l1BlockNumberBeforeTx:
-      server?.l1BlockNumberBeforeTx ?? entry.l1BlockNumberBeforeTx,
+    l1BlockNumberBeforeTx: server?.l1BlockNumberBeforeTx ?? entry.l1BlockNumberBeforeTx,
     amountAfterFee: server?.amountAfterFee ?? null,
     fuelMessageHash: server?.fuelMessageHash ?? null,
     fuelMessageLeafIndex: server?.fuelMessageLeafIndex ?? null,
     fuelAmount: server?.fuelAmount ?? null,
     l2BlockNumber: server?.l2BlockNumber ?? entry.l2BlockNumber,
-    l2BlockNumberBeforeTx:
-      server?.l2BlockNumberBeforeTx ?? entry.l2BlockNumberBeforeTx,
-    l2ToL1MessageIndex:
-      server?.l2ToL1MessageIndex ?? entry.l2ToL1MessageIndex,
+    l2BlockNumberBeforeTx: server?.l2BlockNumberBeforeTx ?? entry.l2BlockNumberBeforeTx,
+    l2ToL1MessageIndex: server?.l2ToL1MessageIndex ?? entry.l2ToL1MessageIndex,
     siblingPath: server?.siblingPath ?? entry.siblingPath,
     epoch: server?.epoch ?? entry.epoch,
-    recipientL1Address:
-      server?.recipientL1Address ?? entry.recipientL1Address,
+    recipientL1Address: server?.recipientL1Address ?? entry.recipientL1Address,
     rollupVersion: server?.rollupVersion ?? entry.rollupVersion,
     chainIdL1: server?.chainIdL1 ?? entry.chainIdL1,
     portalAddressL1: server?.portalAddressL1 ?? entry.portalAddressL1,
@@ -213,21 +197,17 @@ function toBridgeOperationShape(entry: LocalRecoveryEntry): BridgeOperation {
     tokenAddressL1: server?.tokenAddressL1 ?? entry.tokenAddressL1,
     tokenAddressL2: server?.tokenAddressL2 ?? entry.tokenAddressL2,
     currentStep: server?.currentStep ?? entry.currentStep,
-    isPrivacyModeEnabled:
-      server?.isPrivacyModeEnabled ?? entry.isPrivacyModeEnabled,
+    isPrivacyModeEnabled: server?.isPrivacyModeEnabled ?? entry.isPrivacyModeEnabled,
     lastErrorMessage: server?.lastErrorMessage ?? null,
     nodeInfo: server?.nodeInfo ?? entry.nodeInfo,
     createdAt: server?.createdAt ?? entry.createdAt ?? new Date().toISOString(),
     completedAt: server?.completedAt ?? null,
-    encryptedCiphertext:
-      server?.encryptedCiphertext ?? entry.encryptedCiphertext,
+    encryptedCiphertext: server?.encryptedCiphertext ?? entry.encryptedCiphertext,
     encryptedIv: server?.encryptedIv ?? entry.encryptedIv,
     encryptedTag: server?.encryptedTag ?? entry.encryptedTag,
-    keyDerivationMessage:
-      server?.keyDerivationMessage ?? entry.keyDerivationMessage,
-    keyDerivationDomain:
-      server?.keyDerivationDomain ?? entry.keyDerivationDomain,
-  }
+    keyDerivationMessage: server?.keyDerivationMessage ?? entry.keyDerivationMessage,
+    keyDerivationDomain: server?.keyDerivationDomain ?? entry.keyDerivationDomain,
+  } as BridgeOperation
 }
 
 // ─── STATUS_STYLES (shared with ActivityCard) ───────────────────────
@@ -251,12 +231,7 @@ function StatusBadge({ status }: { status: string }) {
     label: status,
     className: 'bg-gray-100 text-gray-800',
   }
-  return (
-    <span
-      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.className}`}>
-      {style.label}
-    </span>
-  )
+  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.className}`}>{style.label}</span>
 }
 
 // ─── RecoveryEntryCard ───────────────────────────────────────────────
@@ -267,14 +242,9 @@ interface RecoveryEntryCardProps {
   resuming: boolean
 }
 
-function RecoveryEntryCard({
-  entry,
-  onResume,
-  resuming,
-}: RecoveryEntryCardProps) {
+function RecoveryEntryCard({ entry, onResume, resuming }: RecoveryEntryCardProps) {
   const effectiveStatus = entry.serverStatus ?? entry.status ?? 'unknown'
-  const directionLabel =
-    entry.direction === 'L1_TO_L2' ? 'L1 -> L2' : 'L2 -> L1'
+  const directionLabel = entry.direction === 'L1_TO_L2' ? 'L1 -> L2' : 'L2 -> L1'
 
   const rawAmount =
     entry.amountDisplayL1 ??
@@ -293,33 +263,30 @@ function RecoveryEntryCard({
   const lockedFunds = hasPossibleLockedFunds(opShape)
   const showResume = resumable || lockedFunds
 
-  const sourceLabel =
-    entry.source === 'localStorage' ? 'Browser storage' : 'Uploaded file'
+  const sourceLabel = entry.source === 'localStorage' ? 'Browser storage' : 'Uploaded file'
 
   return (
-    <div className='bg-white rounded-lg p-4 shadow-sm border border-gray-100'>
-      <div className='flex items-center justify-between'>
-        <div className='flex items-center gap-2'>
-          <span className='text-sm font-medium text-gray-600'>
-            {directionLabel}
-          </span>
+    <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-gray-600">{directionLabel}</span>
           {entry.serverStatusLoading ? (
-            <span className='text-xs text-gray-400'>Checking...</span>
+            <span className="text-xs text-gray-400">Checking...</span>
           ) : (
             <StatusBadge status={effectiveStatus} />
           )}
         </div>
-        <span className='text-xs text-gray-400 italic'>{sourceLabel}</span>
+        <span className="text-xs text-gray-400 italic">{sourceLabel}</span>
       </div>
 
-      <p className='text-xl font-semibold mt-2'>
+      <p className="text-xl font-semibold mt-2">
         {amountDisplay} {tokenDisplay}
       </p>
 
-      <p className='text-xs text-gray-400 mt-1'>Operation #{entry.operationId}</p>
+      <p className="text-xs text-gray-400 mt-1">Operation #{entry.operationId}</p>
 
       {entry.createdAt && (
-        <p className='text-xs text-gray-400'>
+        <p className="text-xs text-gray-400">
           {new Date(entry.createdAt).toLocaleDateString(undefined, {
             month: 'short',
             day: 'numeric',
@@ -330,22 +297,24 @@ function RecoveryEntryCard({
         </p>
       )}
 
-      <div className='flex items-center gap-3 mt-3'>
+      <div className="flex items-center gap-3 mt-3">
         {(entry.l1TxUrl ?? entry.serverEntry?.l1TxUrl) && (
           <a
             href={entry.l1TxUrl ?? entry.serverEntry?.l1TxUrl ?? '#'}
-            target='_blank'
-            rel='noopener noreferrer'
-            className='text-xs font-medium text-blue-600 hover:text-blue-800'>
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium text-blue-600 hover:text-blue-800"
+          >
             L1 Tx
           </a>
         )}
         {(entry.l2TxUrl ?? entry.serverEntry?.l2TxUrl) && (
           <a
             href={entry.l2TxUrl ?? entry.serverEntry?.l2TxUrl ?? '#'}
-            target='_blank'
-            rel='noopener noreferrer'
-            className='text-xs font-medium text-purple-600 hover:text-purple-800'>
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium text-purple-600 hover:text-purple-800"
+          >
             L2 Tx
           </a>
         )}
@@ -354,15 +323,14 @@ function RecoveryEntryCard({
           <button
             onClick={() => onResume(entry)}
             disabled={resuming}
-            className='ml-auto text-xs font-semibold text-white bg-black hover:bg-gray-800 disabled:bg-gray-400 px-3 py-1 rounded-lg'>
+            className="ml-auto text-xs font-semibold text-white bg-black hover:bg-gray-800 disabled:bg-gray-400 px-3 py-1 rounded-lg"
+          >
             {resuming ? 'Decrypting...' : 'Resume'}
           </button>
         )}
 
         {!showResume && effectiveStatus !== 'completed' && (
-          <span className='ml-auto text-xs text-gray-400'>
-            Not resumable ({effectiveStatus})
-          </span>
+          <span className="ml-auto text-xs text-gray-400">Not resumable ({effectiveStatus})</span>
         )}
       </div>
     </div>
@@ -380,17 +348,10 @@ const REQUIRED_FIELDS = [
 ]
 
 // Also accept legacy field names
-const LEGACY_REQUIRED_FIELDS = [
-  'ciphertext',
-  'iv',
-  'tag',
-  'keyDerivationMessage',
-  'keyDerivationDomain',
-]
+const LEGACY_REQUIRED_FIELDS = ['ciphertext', 'iv', 'tag', 'keyDerivationMessage', 'keyDerivationDomain']
 
 function validateUploadedEntry(obj: any): string | null {
-  const hasOperationId =
-    typeof obj.operationId === 'number' || typeof obj.id === 'number'
+  const hasOperationId = obj.operationId != null || obj.id != null
   if (!hasOperationId) return 'Missing operationId or id'
 
   const hasNewFields = REQUIRED_FIELDS.every((f) => obj[f] != null)
@@ -414,11 +375,11 @@ export default function LocalRecoveryPage() {
   const { setRecovery, setWithdrawalRecovery, setDirection } = useBridgeStore()
 
   const [entries, setEntries] = useState<LocalRecoveryEntry[]>([])
-  const [resumingId, setResumingId] = useState<number | null>(null)
+  const [resumingId, setResumingId] = useState<number | string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
 
   // Track which operation IDs we've already attempted to fetch server status for
-  const fetchedIds = useRef<Set<number>>(new Set())
+  const fetchedIds = useRef<Set<string>>(new Set())
 
   // Prefetch resume route
   useEffect(() => {
@@ -447,7 +408,7 @@ export default function LocalRecoveryPage() {
     }
 
     // Deduplicate by operationId — keep first occurrence
-    const seen = new Set<number>()
+    const seen = new Set<string>()
     const all: LocalRecoveryEntry[] = []
     for (const e of [...depositEntries, ...withdrawalEntries]) {
       if (!seen.has(e.operationId)) {
@@ -463,9 +424,7 @@ export default function LocalRecoveryPage() {
   useEffect(() => {
     if (!l1Address || !token) return
 
-    const unfetched = entries.filter(
-      (e) => !fetchedIds.current.has(e.operationId),
-    )
+    const unfetched = entries.filter((e) => !fetchedIds.current.has(e.operationId))
     if (unfetched.length === 0) return
 
     // Mark as fetching
@@ -476,16 +435,14 @@ export default function LocalRecoveryPage() {
     // Set loading state
     setEntries((prev) =>
       prev.map((e) =>
-        unfetched.some((u) => u.operationId === e.operationId)
-          ? { ...e, serverStatusLoading: true }
-          : e,
+        unfetched.some((u) => u.operationId === e.operationId) ? { ...e, serverStatusLoading: true } : e,
       ),
     )
 
     // Fetch each independently
     for (const entry of unfetched) {
       bridge
-        .getOperation(entry.operationId)
+        .getOperation(entry.operationId as any)
         .then((serverEntry: BridgeOperation | null) => {
           setEntries((prev) =>
             prev.map((e) =>
@@ -503,11 +460,7 @@ export default function LocalRecoveryPage() {
         .catch(() => {
           // Server fetch failed — clear loading, keep local status
           setEntries((prev) =>
-            prev.map((e) =>
-              e.operationId === entry.operationId
-                ? { ...e, serverStatusLoading: false }
-                : e,
-            ),
+            prev.map((e) => (e.operationId === entry.operationId ? { ...e, serverStatusLoading: false } : e)),
           )
         })
     }
@@ -515,70 +468,63 @@ export default function LocalRecoveryPage() {
 
   // ─── File upload ──────────────────────────────────────────────────
 
-  const handleFileUpload = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setUploadError(null)
-      const file = e.target.files?.[0]
-      if (!file) return
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setUploadError(null)
+    const file = e.target.files?.[0]
+    if (!file) return
 
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        try {
-          const text = ev.target?.result as string
-          const parsed = JSON.parse(text)
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target?.result as string
+        const parsed = JSON.parse(text)
 
-          const raws: any[] = Array.isArray(parsed) ? parsed : [parsed]
-          const newEntries: LocalRecoveryEntry[] = []
+        const raws: any[] = Array.isArray(parsed) ? parsed : [parsed]
+        const newEntries: LocalRecoveryEntry[] = []
 
-          for (const raw of raws) {
-            const validationError = validateUploadedEntry(raw)
-            if (validationError) {
-              setUploadError(`Invalid entry: ${validationError}`)
-              return
-            }
-
-            const dir = inferDirection(raw)
-            if (!dir) {
-              setUploadError(
-                'Could not determine bridge direction. Make sure the file has a "direction", "claimSecretHash", or "l2BridgeAddress" field.',
-              )
-              return
-            }
-
-            const entry = toLocalRecoveryEntry(raw, 'jsonUpload', dir)
-            if (!entry) {
-              setUploadError('Entry is missing required fields (operationId/id).')
-              return
-            }
-
-            newEntries.push(entry)
+        for (const raw of raws) {
+          const validationError = validateUploadedEntry(raw)
+          if (validationError) {
+            setUploadError(`Invalid entry: ${validationError}`)
+            return
           }
 
-          // Deduplicate against existing entries
-          setEntries((prev) => {
-            const existingIds = new Set(prev.map((e) => e.operationId))
-            const deduplicated = newEntries.filter(
-              (e) => !existingIds.has(e.operationId),
+          const dir = inferDirection(raw)
+          if (!dir) {
+            setUploadError(
+              'Could not determine bridge direction. Make sure the file has a "direction", "claimSecretHash", or "l2BridgeAddress" field.',
             )
-            if (deduplicated.length === 0) {
-              setUploadError(
-                'All entries in this file are already in the list.',
-              )
-              return prev
-            }
-            return [...prev, ...deduplicated]
-          })
-        } catch {
-          setUploadError('Failed to parse JSON file. Make sure it is valid JSON.')
-        }
-      }
-      reader.readAsText(file)
+            return
+          }
 
-      // Reset input so same file can be re-uploaded
-      e.target.value = ''
-    },
-    [],
-  )
+          const entry = toLocalRecoveryEntry(raw, 'jsonUpload', dir)
+          if (!entry) {
+            setUploadError('Entry is missing required fields (operationId/id).')
+            return
+          }
+
+          newEntries.push(entry)
+        }
+
+        // Deduplicate against existing entries
+        setEntries((prev) => {
+          const existingIds = new Set(prev.map((e) => e.operationId))
+          const deduplicated = newEntries.filter((e) => !existingIds.has(e.operationId))
+          if (deduplicated.length === 0) {
+            setUploadError('All entries in this file are already in the list.')
+            return prev
+          }
+          return [...prev, ...deduplicated]
+        })
+      } catch {
+        setUploadError('Failed to parse JSON file. Make sure it is valid JSON.')
+      }
+    }
+    reader.readAsText(file)
+
+    // Reset input so same file can be re-uploaded
+    e.target.value = ''
+  }, [])
 
   // ─── Resume flow ─────────────────────────────────────────────────
 
@@ -593,11 +539,7 @@ export default function LocalRecoveryPage() {
       try {
         const op = toBridgeOperationShape(entry)
 
-        const decrypted = await decryptOperationPayload(
-          op,
-          l1Address,
-          signWaapMessage,
-        )
+        const decrypted = await decryptOperationPayload(op, l1Address, signWaapMessage)
 
         if (!decrypted) {
           throw new Error(
@@ -608,8 +550,7 @@ export default function LocalRecoveryPage() {
         if (entry.direction === 'L2_TO_L1') {
           const recoveryData: RecoveryWithdrawalData = {
             operationId: entry.operationId,
-            amount:
-              decrypted.amount ?? op.amountL2 ?? op.amountL1 ?? '0',
+            amount: decrypted.amount ?? op.amountL2 ?? op.amountL1 ?? '0',
             l1Address: decrypted.l1Address ?? l1Address,
             l2Address: decrypted.l2Address ?? '',
             l2TxHash: op.l2TxHash,
@@ -642,7 +583,7 @@ export default function LocalRecoveryPage() {
             )
           }
 
-          const recoveryData: RecoveryClaimData = {
+          const recoveryData = {
             operationId: entry.operationId,
             claimSecret: decrypted.claimSecret,
             claimSecretHash: decrypted.claimSecretHash,
@@ -662,7 +603,15 @@ export default function LocalRecoveryPage() {
             bridgeAddressL2: op.bridgeAddressL2,
             tokenAddressL1: op.tokenAddressL1,
             tokenAddressL2: op.tokenAddressL2,
-          }
+            claimAmount: null,
+            fuelSecret: null,
+            privateFuelSalt: null,
+            privateFuelSecret: null,
+            privateFuelSecretHash: null,
+            fuelMessageHash: null,
+            fuelMessageLeafIndex: null,
+            fuelAmount: null,
+          } as RecoveryClaimData
 
           setDirection(BridgeDirection.L1_TO_L2)
           setRecovery(entry.operationId, recoveryData)
@@ -675,15 +624,7 @@ export default function LocalRecoveryPage() {
         setResumingId(null)
       }
     },
-    [
-      l1Address,
-      signWaapMessage,
-      setRecovery,
-      setWithdrawalRecovery,
-      setDirection,
-      router,
-      notify,
-    ],
+    [l1Address, signWaapMessage, setRecovery, setWithdrawalRecovery, setDirection, router, notify],
   )
 
   // ─── Auth gate ────────────────────────────────────────────────────
@@ -691,22 +632,21 @@ export default function LocalRecoveryPage() {
   const isAuthed = !!l1Address && !!token
 
   return (
-    <RootStyle className='overflow-y-auto'>
-      <div className='px-5 pt-5 pb-5 flex flex-col h-full'>
-        <div className='flex items-center gap-4'>
+    <RootStyle className="overflow-y-auto">
+      <div className="px-5 pt-5 pb-5 flex flex-col h-full">
+        <div className="flex items-center gap-4">
           <BridgeHeader />
         </div>
 
-        <h2 className='text-lg font-semibold mt-4'>Local Recovery</h2>
-        <p className='text-xs text-gray-500 mt-1'>
-          Resume incomplete bridge operations from browser storage or a backup
-          file.
+        <h2 className="text-lg font-semibold mt-4">Local Recovery</h2>
+        <p className="text-xs text-gray-500 mt-1">
+          Resume incomplete bridge operations from browser storage or a backup file.
         </p>
 
         {/* Auth warning */}
         {!isAuthed && (
-          <div className='mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3'>
-            <p className='text-xs text-yellow-800 font-medium'>
+          <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+            <p className="text-xs text-yellow-800 font-medium">
               Connect your wallet and sign in to load recovery data.
             </p>
           </div>
@@ -716,12 +656,12 @@ export default function LocalRecoveryPage() {
         {isAuthed && (
           <>
             {entries.length === 0 && (
-              <p className='text-sm text-gray-400 mt-4 text-center'>
+              <p className="text-sm text-gray-400 mt-4 text-center">
                 No local recovery data found. Upload a backup file below.
               </p>
             )}
 
-            <div className='flex flex-col gap-3 mt-3 flex-1 overflow-y-auto'>
+            <div className="flex flex-col gap-3 mt-3 flex-1 overflow-y-auto">
               {entries.map((entry) => (
                 <RecoveryEntryCard
                   key={`${entry.source}-${entry.operationId}`}
@@ -735,33 +675,18 @@ export default function LocalRecoveryPage() {
         )}
 
         {/* File upload zone */}
-        <div className='mt-4'>
-          <p className='text-xs text-gray-500 mb-2 font-medium'>
-            Upload backup file (.json)
-          </p>
-          <label className='flex flex-col items-center justify-center w-full h-20 border-2 border-dashed border-gray-200 rounded-lg cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-colors'>
-            <span className='text-xs text-gray-400'>
-              Click to select or drag &amp; drop a .json file
-            </span>
-            <input
-              type='file'
-              accept='.json'
-              className='hidden'
-              onChange={handleFileUpload}
-            />
+        <div className="mt-4">
+          <p className="text-xs text-gray-500 mb-2 font-medium">Upload backup file (.json)</p>
+          <label className="flex flex-col items-center justify-center w-full h-20 border-2 border-dashed border-gray-200 rounded-lg cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-colors">
+            <span className="text-xs text-gray-400">Click to select or drag &amp; drop a .json file</span>
+            <input type="file" accept=".json" className="hidden" onChange={handleFileUpload} />
           </label>
-          {uploadError && (
-            <p className='text-xs text-red-500 mt-1'>{uploadError}</p>
-          )}
+          {uploadError && <p className="text-xs text-red-500 mt-1">{uploadError}</p>}
         </div>
 
-        <div className='mt-4 flex flex-col gap-2'>
-          <TextButton onClick={() => router.push('/activity')}>
-            Back to Activity
-          </TextButton>
-          <TextButton onClick={() => router.push('/')}>
-            Back to Bridge
-          </TextButton>
+        <div className="mt-4 flex flex-col gap-2">
+          <TextButton onClick={() => router.push('/activity')}>Back to Activity</TextButton>
+          <TextButton onClick={() => router.push('/')}>Back to Bridge</TextButton>
         </div>
       </div>
     </RootStyle>

@@ -10,8 +10,6 @@ import {
   useL1Faucet,
   useL1HasSoulboundToken,
   useL1MintSoulboundToken,
-  useL1MintTokens,
-  useL1NativeBalance,
   useL1TokenBalance,
   useL1TokenBalances,
 } from '@/hooks/useL1Operations'
@@ -60,7 +58,13 @@ import { useBridgeStore } from '@/stores/bridgeStore'
 import { useRouter } from 'next/navigation'
 import MaintenanceOverlay from '@/components/MaintenanceOverlay'
 import FuelToggle from '@/components/FuelToggle'
-import { BRIDGED_FPC_ADDRESS, MAINTENANCE_MODE, MAINTENANCE_MESSAGE, MAINTENANCE_TITLE, SWAP_BRIDGE_ROUTER_ADDRESS } from '@/config'
+import {
+  BRIDGED_FPC_ADDRESS,
+  MAINTENANCE_MODE,
+  MAINTENANCE_MESSAGE,
+  MAINTENANCE_TITLE,
+  SWAP_BRIDGE_ROUTER_ADDRESS,
+} from '@/config'
 
 const variants = {
   hidden: { opacity: 0, y: 100 },

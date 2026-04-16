@@ -27,7 +27,7 @@ export function buildEmptyPassport(): PassportStruct {
 }
 
 export function buildEmptyL2CleanHands(): L2CleanHandsStruct {
-  return { nonce: 0n, action_id: 0n, signature: new Array(64).fill(0) }
+  return { nonce: 0n, signature: new Array(64).fill(0) }
 }
 
 export function buildEmptyL2Passport(): L2PassportStruct {
@@ -135,7 +135,6 @@ export async function fetchAttestationsForWithdrawal(
     return {
       cleanHands: {
         nonce: BigInt(poch.nonce),
-        action_id: BigInt(poch.actionId),
         signature: poch.l2Signature,
       },
       passport: buildEmptyL2Passport(),

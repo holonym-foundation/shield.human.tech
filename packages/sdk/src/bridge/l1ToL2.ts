@@ -14,11 +14,11 @@
  */
 
 import { Fr } from '@aztec/aztec.js/fields'
-import { computeSecretHash } from '@aztec/aztec.js/crypto'
+import { computeSecretHash } from '@aztec/stdlib/hash'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { extractEvent } from '@aztec/ethereum/utils'
-import { encodeFunctionData, decodeEventLog, parseUnits } from 'viem'
+import { encodeFunctionData, decodeEventLog, parseUnits, keccak256, encodeAbiParameters } from 'viem'
 import { CustomTokenPortalAbi } from '../contracts/abis/CustomTokenPortalAbi'
 
 import type { BridgeApiClient } from '../api'
@@ -32,7 +32,7 @@ import {
   deriveEncryptionKey,
   encryptData,
 } from '../encryption'
-import { BridgeAndFuelAbi } from '../contracts/abis/BridgeAndFuelAbi'
+import { SwapBridgeRouterAbi } from '../contracts/abis/SwapBridgeRouterAbi'
 import type {
   ResolvedConfig,
   BridgeL1ToL2Params,
@@ -40,8 +40,168 @@ import type {
   L2ClaimDeps,
   L2ClaimResult,
   BridgeEventCallback,
-  FuelQuote,
 } from '../types'
+
+// ─── Permit2 Constants ──────────────────────────────────────────────
+
+const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
+
+const BRIDGE_WITNESS_TYPE = {
+  BridgeWitness: [
+    { name: 'tokenPortal', type: 'address' },
+    { name: 'bridgeToken', type: 'address' },
+    { name: 'totalAmount', type: 'uint256' },
+    { name: 'fuelAmount', type: 'uint256' },
+    { name: 'aztecRecipient', type: 'bytes32' },
+    { name: 'fuelRecipient', type: 'bytes32' },
+    { name: 'tokenSecretHash', type: 'bytes32' },
+    { name: 'fuelSecretHash', type: 'bytes32' },
+    { name: 'minFuelOutput', type: 'uint256' },
+    { name: 'routeHash', type: 'bytes32' },
+    { name: 'isPrivate', type: 'bool' },
+  ],
+  PermitWitnessTransferFrom: [
+    { name: 'permitted', type: 'TokenPermissions' },
+    { name: 'spender', type: 'address' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+    { name: 'witness', type: 'BridgeWitness' },
+  ],
+  TokenPermissions: [
+    { name: 'token', type: 'address' },
+    { name: 'amount', type: 'uint256' },
+  ],
+} as const
+
+/** Permit2 SignatureTransfer params returned from signing step. */
+interface Permit2Params {
+  nonce: bigint
+  deadline: bigint
+  signature: `0x${string}`
+}
+
+/**
+ * Sign a Permit2 witness-bound SignatureTransfer via signTypedData.
+ */
+async function signPermit2Transfer(params: {
+  signTypedData: (address: string, typedDataJson: string) => Promise<string>
+  l1Address: string
+  swapBridgeRouterAddress: string
+  l1ChainId: number
+  tokenPortal: `0x${string}`
+  bridgeToken: `0x${string}`
+  totalAmount: bigint
+  fuelAmount: bigint
+  aztecRecipient: `0x${string}`
+  fuelRecipient: `0x${string}`
+  tokenSecretHash: `0x${string}`
+  fuelSecretHash: `0x${string}`
+  minFuelOutput: bigint
+  poolKeys: readonly {
+    currency0: `0x${string}`
+    currency1: `0x${string}`
+    fee: number
+    tickSpacing: number
+    hooks: `0x${string}`
+  }[]
+  zeroForOnes: readonly boolean[]
+  isPrivate: boolean
+}): Promise<Permit2Params> {
+  const {
+    signTypedData,
+    swapBridgeRouterAddress,
+    l1ChainId,
+    tokenPortal,
+    bridgeToken,
+    totalAmount,
+    fuelAmount,
+    aztecRecipient,
+    fuelRecipient,
+    tokenSecretHash,
+    fuelSecretHash,
+    minFuelOutput,
+    poolKeys,
+    zeroForOnes,
+    isPrivate,
+  } = params
+
+  // Random unordered nonce -- any unused uint256 works with Permit2
+  const nonceBytes = new Uint8Array(32)
+  crypto.getRandomValues(nonceBytes)
+  const nonce = BigInt('0x' + Array.from(nonceBytes).map(b => b.toString(16).padStart(2, '0')).join(''))
+
+  // 30-minute deadline
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 30 * 60)
+
+  const domain = {
+    name: 'Permit2',
+    chainId: l1ChainId,
+    verifyingContract: PERMIT2_ADDRESS,
+  }
+
+  // When there's no swap route (simple bridge, no fuel), the contract uses bytes32(0)
+  // as the routeHash. Only compute the keccak256 when there are actual pool keys.
+  const zeroBytes32Route = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
+  const routeHash = poolKeys.length > 0
+    ? keccak256(encodeAbiParameters(
+        [
+          {
+            name: 'path',
+            type: 'tuple[]',
+            components: [
+              { name: 'currency0', type: 'address' },
+              { name: 'currency1', type: 'address' },
+              { name: 'fee', type: 'uint24' },
+              { name: 'tickSpacing', type: 'int24' },
+              { name: 'hooks', type: 'address' },
+            ],
+          },
+          { name: 'zeroForOnes', type: 'bool[]' },
+        ],
+        [poolKeys as any, zeroForOnes as any],
+      ))
+    : zeroBytes32Route
+
+  const message = {
+    permitted: {
+      token: bridgeToken,
+      amount: totalAmount.toString(),
+    },
+    spender: swapBridgeRouterAddress,
+    nonce: nonce.toString(),
+    deadline: deadline.toString(),
+    witness: {
+      tokenPortal,
+      bridgeToken,
+      totalAmount: totalAmount.toString(),
+      fuelAmount: fuelAmount.toString(),
+      aztecRecipient,
+      fuelRecipient,
+      tokenSecretHash,
+      fuelSecretHash,
+      minFuelOutput: minFuelOutput.toString(),
+      routeHash,
+      isPrivate,
+    },
+  }
+
+  const typedData = {
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      ...BRIDGE_WITNESS_TYPE,
+    },
+    primaryType: 'PermitWitnessTransferFrom' as const,
+    domain,
+    message,
+  }
+
+  const signature = await signTypedData(params.l1Address, JSON.stringify(typedData)) as `0x${string}`
+  return { nonce, deadline, signature }
+}
 import { createL1PublicClient, serializeNodeInfo, wait, extractErrorString } from './utils'
 import { getEtherscanUrl as getEtherscanBaseUrl, getAztecscanUrl as getAztecscanBaseUrl } from '../config'
 import { pollL1ToL2MessageSync } from './polling'
@@ -74,7 +234,7 @@ export async function executeL2Claim(
 ): Promise<L2ClaimResult> {
   const { walletAdapter, aztecAddress, isPrivacyModeEnabled } = deps
   const { amount, claimSecret, messageLeafIndex } = params
-  const maxAttempts = options?.maxAttempts ?? 5
+  const maxAttempts = options?.maxAttempts ?? 10
   const retryDelayMs = options?.retryDelayMs ?? 120_000
   const bruteForceMaxIndex = options?.bruteForceMaxIndex ?? 64
 
@@ -98,7 +258,17 @@ export async function executeL2Claim(
         )
         break
       } catch (err) {
-        // Retry on any error — the claim is idempotent and most failures are transient
+        // Don't retry user rejections — they are intentional
+        const errMsg = err instanceof Error ? err.message : String(err)
+        const errCode = (err as any)?.code
+        const isUserRejection =
+          errCode === 4001 ||
+          errMsg.includes('user rejected') ||
+          errMsg.includes('User denied') ||
+          errMsg.includes('ACTION_REJECTED')
+        if (isUserRejection) throw err
+
+        // Retry on transient errors — the claim is idempotent
         // (reorgs, block header not found, message not synced, PXE lag, network errors, etc.)
         if (attempt < maxAttempts) {
           options?.onRetry?.(attempt, maxAttempts, retryDelayMs)
@@ -180,6 +350,7 @@ export async function bridgeL1ToL2(
     sendTransaction,
     walletAdapter,
     signMessage,
+    signTypedData,
     onStep,
     onEvent,
   } = params
@@ -396,29 +567,19 @@ export async function bridgeL1ToL2(
       status: 'pending',
     })
 
-    // Guard: private deposits with fuel are not supported.
-    // BridgeAndFuel always calls depositToAztecPublic on the portal.
-    if (isPrivate && fuel?.enabled) {
-      throw new Error(
-        'Private deposits with fuel are not currently supported. ' +
-        'BridgeAndFuel uses depositToAztecPublic. Disable fuel or use public mode.',
-      )
-    }
-
     // Resolve fuel amount in token units (needed for approval + tx encoding)
     const isFuelEnabled = fuel?.enabled && fuelSecretHash && fuelQuote
     const fuelAmountTokenUnits = isFuelEnabled ? parseUnits(fuel!.amount, tokenConfig.decimals) : 0n
 
     if (fuel?.enabled && !fuelQuote) {
-      throw new Error('fuel.enabled is true but fuelQuote was not provided. Use getMockFuelQuote() to generate one.')
+      throw new Error('fuel.enabled is true but fuelQuote was not provided. Use getUniswapFuelQuote() to generate one.')
     }
 
-    // Check and approve allowance
-    // When fuel is enabled, approve BridgeAndFuel (which pulls totalAmount).
-    // Otherwise, approve TokenPortal directly.
-    const spender = isFuelEnabled
-      ? config.bridgeAndFuelAddress
-      : tokenConfig.l1PortalContract
+    // Check and approve allowance for Permit2 (one-time per token).
+    // All deposits go through SwapBridgeRouter with Permit2 — approve the
+    // canonical Permit2 contract with max uint256 (one-time).
+    const spender = PERMIT2_ADDRESS
+    const totalApprovalNeeded = amount + fuelAmountTokenUnits
 
     const allowance = await publicClient.readContract({
       address: tokenConfig.l1TokenContract as `0x${string}`,
@@ -427,14 +588,11 @@ export async function bridgeL1ToL2(
       args: [l1Address as `0x${string}`, spender as `0x${string}`],
     })
 
-    // When fuel is enabled, BridgeAndFuel pulls totalAmount = amount + fuelAmountTokenUnits
-    const totalApprovalNeeded = amount + fuelAmountTokenUnits
-
     if (BigInt(allowance as bigint) < totalApprovalNeeded) {
       const approveData = encodeFunctionData({
         abi: TestERC20Abi,
         functionName: 'approve',
-        args: [spender as `0x${string}`, totalApprovalNeeded],
+        args: [spender as `0x${string}`, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')],
       })
 
       const approveTxHash = await sendTransaction({
@@ -446,74 +604,133 @@ export async function bridgeL1ToL2(
       await publicClient.waitForTransactionReceipt({ hash: approveTxHash as `0x${string}` })
     }
 
-    // Send L1 deposit transaction
+    // Send L1 deposit transaction — all paths go through SwapBridgeRouter with Permit2
     let txHash: string
+    const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
+
+    // Fetch attestation for private deposits (both fuel and standard paths)
+    let cleanHandsData = { nonce: 0n, signature: '0x' as `0x${string}` }
+    let passportData = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
+    if (isPrivate) {
+      const { cleanHands: attestCleanHands, passport: attestPassport } =
+        await fetchAttestationsForDeposit(apiClient, tokenConfig.l1PortalContract, amount, tokenConfig.decimals, emit)
+      cleanHandsData = {
+        nonce: attestCleanHands.nonce,
+        signature: attestCleanHands.signature as `0x${string}`,
+      }
+      passportData = {
+        maxAmount: attestPassport.maxAmount,
+        nonce: attestPassport.nonce,
+        deadline: attestPassport.deadline,
+        signature: attestPassport.signature as `0x${string}`,
+      }
+    }
 
     if (isFuelEnabled) {
-      // ── Fuel path: call BridgeAndFuel.bridgeWithFuel ──
+      // ── Fuel path: call SwapBridgeRouter.bridgeWithFuel via Permit2 ──
+      const totalAmount = amount + fuelAmountTokenUnits
+
+      // Sign Permit2 witness-bound transfer
+      const permit2 = await signPermit2Transfer({
+        signTypedData,
+        l1Address,
+        swapBridgeRouterAddress: config.swapBridgeRouterAddress,
+        l1ChainId: config.l1ChainId,
+        tokenPortal: tokenConfig.l1PortalContract as `0x${string}`,
+        bridgeToken: tokenConfig.l1TokenContract as `0x${string}`,
+        totalAmount,
+        fuelAmount: fuelAmountTokenUnits,
+        aztecRecipient: l2Address as `0x${string}`,
+        fuelRecipient: l2Address as `0x${string}`,
+        tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
+        fuelSecretHash: fuelSecretHash!.toString() as `0x${string}`,
+        minFuelOutput: fuelQuote!.minOutput,
+        poolKeys: (fuelQuote!.poolKeys ?? []) as any,
+        zeroForOnes: fuelQuote!.zeroForOnes ?? [],
+        isPrivate,
+      })
+
       const bridgeData = encodeFunctionData({
-        abi: BridgeAndFuelAbi,
+        abi: SwapBridgeRouterAbi,
         functionName: 'bridgeWithFuel',
         args: [
           {
             tokenPortal: tokenConfig.l1PortalContract as `0x${string}`,
             bridgeToken: tokenConfig.l1TokenContract as `0x${string}`,
-            totalAmount: amount + fuelAmountTokenUnits,
+            totalAmount,
             fuelAmount: fuelAmountTokenUnits,
             aztecRecipient: l2Address as `0x${string}`,
+            fuelRecipient: l2Address as `0x${string}`,
             tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
             fuelSecretHash: fuelSecretHash!.toString() as `0x${string}`,
-            feeJuicePortal: config.feeJuicePortalAddress as `0x${string}`,
-            swapTarget: fuelQuote!.swapTarget as `0x${string}`,
-            swapAllowanceTarget: fuelQuote!.swapAllowanceTarget as `0x${string}`,
             minFuelOutput: fuelQuote!.minOutput,
+            path: (fuelQuote!.poolKeys ?? []) as any,
+            zeroForOnes: fuelQuote!.zeroForOnes ?? [],
+            isPrivate,
+            cleanHands: cleanHandsData,
+            passport: passportData,
           },
-          fuelQuote!.swapData as `0x${string}`,
+          {
+            nonce: permit2.nonce,
+            deadline: permit2.deadline,
+            signature: permit2.signature,
+          },
         ],
       })
 
       txHash = await sendTransaction({
         from: l1Address,
-        to: config.bridgeAndFuelAddress,
+        to: config.swapBridgeRouterAddress,
         data: bridgeData,
       })
     } else {
-      // ── Standard path: call TokenPortal directly ──
-      let bridgeData: `0x${string}`
-      if (isPrivate) {
-        // Our custom TokenPortal.depositToAztecPrivate requires 4 args:
-        // (amount, secretHash, CleanHandsData, PassportData). The @aztec/l1-artifacts
-        // ABI only has the 2-arg version, so we use a local ABI fragment.
-        // Fetch attestation (POCH → Passport fallback) for private deposit
-        const { cleanHands: attestCleanHands, passport: attestPassport } =
-          await fetchAttestationsForDeposit(apiClient, tokenConfig.l1PortalContract, amount, tokenConfig.decimals, emit)
-        const emptyCleanHands = {
-          nonce: attestCleanHands.nonce,
-          actionId: attestCleanHands.actionId,
-          signature: attestCleanHands.signature as `0x${string}`,
-        }
-        const emptyPassport = {
-          maxAmount: attestPassport.maxAmount,
-          nonce: attestPassport.nonce,
-          deadline: attestPassport.deadline,
-          signature: attestPassport.signature as `0x${string}`,
-        }
-        bridgeData = encodeFunctionData({
-          abi: CustomTokenPortalAbi,
-          functionName: 'depositToAztecPrivate',
-          args: [amount, claimSecretHash.toString() as `0x${string}`, emptyCleanHands, emptyPassport],
-        })
-      } else {
-        bridgeData = encodeFunctionData({
-          abi: CustomTokenPortalAbi,
-          functionName: 'depositToAztecPublic',
-          args: [l2Address as `0x${string}`, amount, claimSecretHash.toString() as `0x${string}`],
-        })
-      }
+      // ── Standard path: call SwapBridgeRouter.bridge via Permit2 ──
+
+      // Sign Permit2 witness-bound transfer (no fuel — zero fields)
+      const permit2 = await signPermit2Transfer({
+        signTypedData,
+        l1Address,
+        swapBridgeRouterAddress: config.swapBridgeRouterAddress,
+        l1ChainId: config.l1ChainId,
+        tokenPortal: tokenConfig.l1PortalContract as `0x${string}`,
+        bridgeToken: tokenConfig.l1TokenContract as `0x${string}`,
+        totalAmount: amount,
+        fuelAmount: 0n,
+        aztecRecipient: l2Address as `0x${string}`,
+        fuelRecipient: zeroBytes32,
+        tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
+        fuelSecretHash: zeroBytes32,
+        minFuelOutput: 0n,
+        poolKeys: [],
+        zeroForOnes: [],
+        isPrivate,
+      })
+
+      const bridgeData = encodeFunctionData({
+        abi: SwapBridgeRouterAbi,
+        functionName: 'bridge',
+        args: [
+          {
+            tokenPortal: tokenConfig.l1PortalContract as `0x${string}`,
+            bridgeToken: tokenConfig.l1TokenContract as `0x${string}`,
+            amount,
+            aztecRecipient: l2Address as `0x${string}`,
+            secretHash: claimSecretHash.toString() as `0x${string}`,
+            isPrivate,
+            cleanHands: cleanHandsData,
+            passport: passportData,
+          },
+          {
+            nonce: permit2.nonce,
+            deadline: permit2.deadline,
+            signature: permit2.signature,
+          },
+        ],
+      })
 
       txHash = await sendTransaction({
         from: l1Address,
-        to: tokenConfig.l1PortalContract,
+        to: config.swapBridgeRouterAddress,
         data: bridgeData,
       })
     }
@@ -579,13 +796,13 @@ export async function bridgeL1ToL2(
     let amountAfterFee: bigint | undefined
 
     if (isFuelEnabled) {
-      // ── Fuel path: extract BridgeWithFuel event from BridgeAndFuel contract ──
+      // ── Fuel path: extract BridgeWithFuel event from SwapBridgeRouter contract ──
       let bridgeWithFuelLog: any = null
       for (const log of txReceipt.logs) {
-        if (log.address.toLowerCase() !== config.bridgeAndFuelAddress.toLowerCase()) continue
+        if (log.address.toLowerCase() !== config.swapBridgeRouterAddress.toLowerCase()) continue
         try {
           const decoded = decodeEventLog({
-            abi: BridgeAndFuelAbi,
+            abi: SwapBridgeRouterAbi,
             data: log.data,
             topics: log.topics,
           })
@@ -610,7 +827,7 @@ export async function bridgeL1ToL2(
       fuelAmountReceived = args.fuelAmount as bigint
 
       // Also extract amountAfterFee from the portal's DepositToAztecPublic event.
-      // BridgeAndFuel calls the portal internally, which emits this event with the post-fee amount.
+      // SwapBridgeRouter calls the portal internally, which emits this event with the post-fee amount.
       try {
         const portalLog = extractEvent(
           txReceipt.logs,
@@ -761,7 +978,7 @@ export async function bridgeL1ToL2(
       feeOption = { fee: { paymentMethod } }
     }
 
-    // When fuel is enabled, BridgeAndFuel splits totalAmount into amount (token) + fuel.
+    // When fuel is enabled, SwapBridgeRouter splits totalAmount into amount (token) + fuel.
     // The L2 claim is always for `amount` (the token portion).
     // For standard (non-fuel) deposits, the custom TokenPortal deducts fees before
     // creating the L2 message. The `amountAfterFee` extracted from the receipt event

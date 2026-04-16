@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
           threshold: getPassportScoreThreshold(),
           passing: false,
         },
-        { status: 403 }
+        { status: 403 },
       )
     }
 
@@ -74,16 +74,14 @@ export async function POST(request: NextRequest) {
     const nonce = await getNextNonce(l1Address, 'passport')
 
     // Default deadline: 1 hour from now
-    const deadlineSeconds = data.deadline
-      ? BigInt(data.deadline)
-      : BigInt(Math.floor(Date.now() / 1000) + 3600)
+    const deadlineSeconds = data.deadline ? BigInt(data.deadline) : BigInt(Math.floor(Date.now() / 1000) + 3600)
 
     const l1Signature = await signPassportAttestation({
       userAddress: l1Address,
       maxAmount,
       nonce: BigInt(nonce),
       deadline: deadlineSeconds,
-      portalAddress: data.portalAddress,
+      portalAddress: data.portalAddress ?? '',
     })
 
     // L2 Schnorr signature (only if bridgeAddress provided)
@@ -109,9 +107,6 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('[attestation/passport]', error)
-    return NextResponse.json(
-      { error: 'Failed to issue passport attestation' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to issue passport attestation' }, { status: 500 })
   }
 }

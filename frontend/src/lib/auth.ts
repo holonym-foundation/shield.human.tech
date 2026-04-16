@@ -3,7 +3,7 @@ import { verifyJWT, extractTokenFromHeader, type JWTPayload } from './jwt'
 import { prisma } from './prisma'
 
 export interface AuthUser {
-  id: number
+  id: string
   l1Address: string
   l2Address: string
   l1LoginMethod: string | null
@@ -72,7 +72,7 @@ export async function authenticateRequest(request: NextRequest): Promise<{
     const isPrismaError =
       error instanceof Error &&
       (error.constructor.name.startsWith('Prisma') ||
-        error.message.includes('Can\'t reach database server') ||
+        error.message.includes("Can't reach database server") ||
         error.message.includes('Connection refused'))
 
     if (isPrismaError) {

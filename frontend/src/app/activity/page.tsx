@@ -6,10 +6,7 @@ import RootStyle from '@/components/RootStyle'
 import BridgeHeader from '@/components/BridgeHeader'
 import ActivityCard from '@/components/ActivityCard'
 import TextButton from '@/components/TextButton'
-import {
-  useBridgeOperations,
-  decryptOperationPayload,
-} from '@/hooks/useBridgeOperations'
+import { useBridgeOperations, decryptOperationPayload } from '@/hooks/useBridgeOperations'
 import type { BridgeOperation, RecoveryClaimData, RecoveryWithdrawalData } from '@human.tech/aztec-bridge-sdk'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useWalletStore } from '@/stores/walletStore'
@@ -19,7 +16,7 @@ import { BridgeDirection } from '@/types/bridge'
 export default function ActivityPage() {
   const router = useRouter()
   const notify = useToast()
-  const [resumingId, setResumingId] = useState<number | null>(null)
+  const [resumingId, setResumingId] = useState<string | null>(null)
 
   const { waapAddress: l1Address, signWaapMessage } = useWalletStore()
   const { setRecovery, setWithdrawalRecovery, setDirection } = useBridgeStore()
@@ -31,12 +28,7 @@ export default function ActivityPage() {
     router.prefetch('/')
   }, [router])
 
-  const {
-    data: operations,
-    isLoading,
-    isError,
-    error,
-  } = useBridgeOperations()
+  const { data: operations, isLoading, isError, error } = useBridgeOperations()
 
   const handleResume = useCallback(
     async (operation: BridgeOperation) => {
@@ -48,11 +40,7 @@ export default function ActivityPage() {
       setResumingId(operation.id)
       try {
         // Decrypt the encrypted payload to verify wallet ownership
-        const decrypted = await decryptOperationPayload(
-          operation,
-          l1Address,
-          signWaapMessage,
-        )
+        const decrypted = await decryptOperationPayload(operation, l1Address, signWaapMessage)
 
         if (!decrypted) {
           throw new Error(
@@ -106,7 +94,7 @@ export default function ActivityPage() {
             messageHash: operation.messageHash,
             messageLeafIndex: operation.messageLeafIndex,
             amount: decrypted.amount ?? operation.amountL1 ?? '0',
-            claimAmount: operation.claimAmount ?? null,
+            claimAmount: operation.amountAfterFee ?? null,
             l1Address: decrypted.l1Address ?? l1Address,
             l2Address: decrypted.l2Address ?? '',
             l1TxHash: operation.l1TxHash,
@@ -145,50 +133,38 @@ export default function ActivityPage() {
   )
 
   return (
-    <RootStyle className='overflow-y-auto'>
-      <div className='px-5 pt-5 pb-5 flex flex-col h-full'>
-        <div className='flex items-center gap-4'>
+    <RootStyle className="overflow-y-auto">
+      <div className="px-5 pt-5 pb-5 flex flex-col h-full">
+        <div className="flex items-center gap-4">
           <BridgeHeader />
         </div>
 
-        <h2 className='text-lg font-semibold mt-4'>Bridge Activity</h2>
+        <h2 className="text-lg font-semibold mt-4">Bridge Activity</h2>
 
-        {isLoading && (
-          <p className='text-sm text-gray-400 mt-4 text-center'>
-            Loading operations...
-          </p>
-        )}
+        {isLoading && <p className="text-sm text-gray-400 mt-4 text-center">Loading operations...</p>}
 
         {isError && (
-          <p className='text-sm text-red-500 mt-4 text-center'>
+          <p className="text-sm text-red-500 mt-4 text-center">
             {error instanceof Error ? error.message : 'Failed to load'}
           </p>
         )}
 
         {!isLoading && operations && operations.length === 0 && (
-          <p className='text-sm text-gray-400 mt-4 text-center'>
-            No bridge operations yet.
-          </p>
+          <p className="text-sm text-gray-400 mt-4 text-center">No bridge operations yet.</p>
         )}
 
-        <div className='flex flex-col gap-3 mt-3 flex-1 overflow-y-auto'>
+        <div className="flex flex-col gap-3 mt-3 flex-1 overflow-y-auto">
           {operations?.map((op) => (
-            <ActivityCard
-              key={op.id}
-              operation={op}
-              onResume={handleResume}
-              resuming={resumingId === op.id}
-            />
+            <ActivityCard key={op.id} operation={op} onResume={handleResume} resuming={resumingId === op.id} />
           ))}
         </div>
 
-        <div className='mt-4 flex flex-col gap-2'>
-          <TextButton onClick={() => router.push('/')}>
-            Back to Bridge
-          </TextButton>
+        <div className="mt-4 flex flex-col gap-2">
+          <TextButton onClick={() => router.push('/')}>Back to Bridge</TextButton>
           <TextButton
             onClick={() => router.push('/activity/local-recovery')}
-            className='!bg-transparent !text-gray-600 hover:!text-gray-900 !font-medium'>
+            className="!bg-transparent !text-gray-600 hover:!text-gray-900 !font-medium"
+          >
             Recover from local data
           </TextButton>
         </div>

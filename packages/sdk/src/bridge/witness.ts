@@ -11,7 +11,7 @@ import { EthAddress } from '@aztec/foundation/eth-address'
 import { sha256ToField } from '@aztec/foundation/crypto/sha256'
 import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
 import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
-import { RollupAbi } from '@aztec/l1-artifacts'
+import { TxHash } from '@aztec/stdlib/tx'
 import { toFunctionSelector } from 'viem'
 
 import type { WitnessResult } from '../types'
@@ -53,57 +53,71 @@ export function computeL2ToL1MessageLeaf(params: {
 }
 
 /**
- * Compute L2-to-L1 membership witness (leaf index + sibling path) for a block.
+ * Compute L2-to-L1 membership witness (leaf index + sibling path) for a message.
  *
- * Converts blockNumber → epoch via the L1 Rollup's `getEpochForCheckpoint`,
- * then calls `computeL2ToL1MembershipWitness(node, epoch, msgLeaf)`.
+ * Uses `computeL2ToL1MembershipWitness(node, message, txHash)` (4.2 API) which
+ * internally resolves the block/epoch from the tx receipt.
+ *
+ * @param aztecNode - Aztec node client
+ * @param blockNumber - L2 block number (used for error messages only)
+ * @param msgLeaf - The L2-to-L1 message leaf hash
+ * @param l2TxHash - The L2 transaction hash (required for 4.2+ witness computation)
  */
 export async function computeWitness(
   aztecNode: any,
-  publicClient: any,
   blockNumber: number,
   msgLeaf: Fr,
-  rollupAddress: string,
+  l2TxHash: string,
 ): Promise<WitnessResult> {
-  // Convert block number → epoch.
-  // The checkpoint may not be available immediately after the block is proven,
-  // so retry up to 5 times with a 30 s delay (matches old frontend behavior).
-  let epoch!: bigint
+  if (!l2TxHash) {
+    throw new Error(
+      'l2TxHash is required for computing L2→L1 membership witness in SDK 4.2+',
+    )
+  }
+
+  const txHash = TxHash.fromString(l2TxHash)
+
+  // Retry — the epoch proof may not be available yet
   const maxRetries = 5
   const retryDelayMs = 30_000
+  let witness: Awaited<ReturnType<typeof computeL2ToL1MembershipWitness>> | undefined
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const epochRaw = await publicClient.readContract({
-        address: rollupAddress as `0x${string}`,
-        abi: RollupAbi,
-        functionName: 'getEpochForCheckpoint',
-        args: [BigInt(blockNumber)],
-      })
-      epoch = typeof epochRaw === 'bigint' ? epochRaw : BigInt(epochRaw as number)
-      break
-    } catch (err) {
-      if (attempt === maxRetries) {
-        throw new Error(
-          `Failed to get epoch for block ${blockNumber} after ${maxRetries} attempts: ${err instanceof Error ? err.message : String(err)}`
+      witness = await computeL2ToL1MembershipWitness(
+        aztecNode,
+        msgLeaf,
+        txHash,
+      )
+      if (witness) break
+      if (attempt < maxRetries) {
+        console.warn(
+          `[SDK Witness] Witness not found (attempt ${attempt}/${maxRetries}), retrying in ${retryDelayMs / 1000}s...`,
         )
+        await new Promise((r) => setTimeout(r, retryDelayMs))
       }
-      console.warn(`[SDK Witness] getEpochForCheckpoint attempt ${attempt}/${maxRetries} failed, retrying in ${retryDelayMs / 1000}s...`)
-      await new Promise((r) => setTimeout(r, retryDelayMs))
+    } catch (err) {
+      if (attempt < maxRetries) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.warn(
+          `[SDK Witness] computeL2ToL1MembershipWitness failed (attempt ${attempt}/${maxRetries}), retrying in ${retryDelayMs / 1000}s...`,
+          msg,
+        )
+        await new Promise((r) => setTimeout(r, retryDelayMs))
+        continue
+      }
+      throw err
     }
   }
 
-  const witness = await computeL2ToL1MembershipWitness(
-    aztecNode,
-    epoch as unknown as Parameters<typeof computeL2ToL1MembershipWitness>[1],
-    msgLeaf,
-  )
-
   if (!witness) {
     throw new Error(
-      `L2→L1 message not found in epoch ${epoch} (block ${blockNumber}). ` +
+      `L2→L1 message not found (block ${blockNumber}, txHash ${l2TxHash}). ` +
         'The block may not be finalized yet, or the message leaf does not match.',
     )
   }
+
+  // Get epoch from witness (4.2 API returns epochNumber on the witness object)
+  const epoch = witness.epochNumber
 
   const leafIndex =
     typeof witness.leafIndex === 'bigint'
@@ -114,5 +128,5 @@ export async function computeWitness(
     .toBufferArray()
     .map((buf: Buffer) => `0x${buf.toString('hex')}`)
 
-  return { leafIndex, siblingPath, epoch }
+  return { leafIndex, siblingPath, epoch: BigInt(epoch) }
 }

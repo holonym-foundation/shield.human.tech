@@ -9,7 +9,6 @@ import type { BridgeEvent } from '@human.tech/aztec-bridge-sdk'
 import { getAztecscanUrl, L2_CHAIN_ID } from '@/config'
 import { verifyEncryptionDomain } from '@/utils'
 
-
 export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
   const { setProgressStep, setTransactionUrls, clearRecovery } = useBridgeStore()
   const { aztecAddress, aztecLoginMethod } = useWalletStore()
@@ -22,7 +21,8 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     if (!walletAdapter) throw new Error('Aztec wallet adapter not initialized. Please wait for wallet to connect.')
 
     const l1Address = claimData.l1Address
-    if (!l1Address) throw new Error('L1 address not available for decryption. Cannot resume without the original L1 wallet address.')
+    if (!l1Address)
+      throw new Error('L1 address not available for decryption. Cannot resume without the original L1 wallet address.')
 
     // Warn if resume wallet differs from deposit wallet — decryption will fail
     const { waapAddress } = useWalletStore.getState()
@@ -31,11 +31,11 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
     }
 
     const result = await bridge.resume(claimData.operationId, {
-      walletAdapter,
+      walletAdapter: walletAdapter as any,
       l1Address,
       l2Address: aztecAddress,
       sendTransaction: async (tx) => {
-        return await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx]) as string
+        return (await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx])) as string
       },
       signMessage: async (msg: string) => {
         verifyEncryptionDomain()
@@ -49,19 +49,32 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
             notify('info', 'Recovering from L1 receipt...', { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
             break
           case 'recovery_from_block_scan':
-            notify('info', 'Scanning L1 blocks for deposit...', { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
+            notify('info', 'Scanning L1 blocks for deposit...', {
+              toastId: 'resume-l1-to-l2-progress',
+              autoClose: 15000,
+            })
             break
           case 'sync_poll':
-            notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
+            notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, {
+              toastId: 'resume-l1-to-l2-progress',
+              autoClose: 15000,
+            })
             break
           case 'deposit_confirmed':
             if ('l1TxUrl' in event) setTransactionUrls(event.l1TxUrl, null)
             break
           case 'claim_attempt':
-            notify('info', `Claiming tokens on L2 (attempt ${event.attempt}/${event.maxAttempts})...`, { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
+            notify('info', `Claiming tokens on L2 (attempt ${event.attempt}/${event.maxAttempts})...`, {
+              toastId: 'resume-l1-to-l2-progress',
+              autoClose: 15000,
+            })
             break
           case 'claim_retry':
-            notify('info', `L2 node hasn't synced this message yet. Retrying in ${Math.round(event.delayMs / 60_000)} min (${event.attempt}/${event.maxAttempts})...`, { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
+            notify(
+              'info',
+              `L2 node hasn't synced this message yet. Retrying in ${Math.round(event.delayMs / 60_000)} min (${event.attempt}/${event.maxAttempts})...`,
+              { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 },
+            )
             break
           case 'operation_completed':
             if ('l2TxHash' in event && event.l2TxHash) {
@@ -76,17 +89,25 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
             console.log(`[Resume L1→L2] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
             break
           case 'patch_failed':
-            notify('warn', {
-              heading: 'Backup Warning',
-              message: `Could not save ${event.label} to server. Please do not close this page until the bridge completes.`,
-            }, { autoClose: false })
+            notify(
+              'warn',
+              {
+                heading: 'Backup Warning',
+                message: `Could not save ${event.label} to server. Please do not close this page until the bridge completes.`,
+              },
+              { autoClose: false },
+            )
             break
           case 'error':
             if (event.fundsAtRisk) {
-              notify('error', {
-                heading: 'Resume Error — Funds Safe',
-                message: 'Your deposit is safe on L1. Go to Activity to try again.',
-              }, { autoClose: false })
+              notify(
+                'error',
+                {
+                  heading: 'Resume Error — Funds Safe',
+                  message: 'Your deposit is safe on L1. Go to Activity to try again.',
+                },
+                { autoClose: false },
+              )
             }
             break
         }
