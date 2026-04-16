@@ -1,5 +1,5 @@
-import type { NextConfig } from "next";
-import webpack from 'webpack';
+import type { NextConfig } from 'next'
+import webpack from 'webpack'
 
 const nextConfig: NextConfig = {
   // NOTE: COOP/COEP headers were removed because 'same-origin' COOP blocks
@@ -20,6 +20,16 @@ const nextConfig: NextConfig = {
         ],
       },
     ]
+  },
+  outputFileTracingIncludes: {
+    '/api/**/*': [
+      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz',
+      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.js',
+    ],
+    '/**/*': [
+      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz',
+      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.js',
+    ],
   },
   // Keep @aztec/bb.js as external on the server so the WASM file resolves
   // from node_modules instead of being broken by webpack bundling.
@@ -53,19 +63,19 @@ const nextConfig: NextConfig = {
         fs: false,
         net: false,
         tls: false,
-      };
+      }
 
       // Provide Buffer globally
       config.plugins.push(
         new webpack.ProvidePlugin({
           Buffer: ['buffer', 'Buffer'],
           process: 'process/browser',
-        })
-      );
+        }),
+      )
     }
 
-    return config;
+    return config
   },
-};
+}
 
-export default nextConfig;
+export default nextConfig

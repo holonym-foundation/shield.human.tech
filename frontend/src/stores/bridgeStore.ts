@@ -4,7 +4,6 @@ import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { BridgeDirection, BridgeState, Network, Token } from '@/types/bridge'
 import { L1_NETWORKS, L2_NETWORKS, L1_TOKENS, L2_TOKENS } from '@/config'
-import type { RecoveryClaimData, RecoveryWithdrawalData } from '@human.tech/aztec-bridge-sdk'
 
 // Types
 export interface LoadingStep {
@@ -30,8 +29,67 @@ interface TransactionState {
   l2TxUrl: string | null
 }
 
+/** Data needed to resume an incomplete L1→L2 bridge operation */
+export interface RecoveryClaimData {
+  operationId: string
+  claimSecret: string
+  claimSecretHash: string
+  messageHash: string | null
+  messageLeafIndex: string | null
+  amount: string
+  claimAmount: string | null // Post-fee amount from deposit event; must match L2 content hash
+  l1Address: string
+  l2Address: string
+  l1TxHash: string | null
+  l1TxUrl: string | null
+  l1BlockNumberBeforeTx: string | null
+  isPrivacyModeEnabled: boolean
+  nodeInfo: Record<string, unknown> | null
+  status: string
+  currentStep: number | null
+  // Recovery-critical contract snapshot (multi-token support)
+  portalAddressL1: string | null
+  bridgeAddressL2: string | null
+  tokenAddressL1: string | null
+  tokenAddressL2: string | null
+  // Fuel recovery fields (from decrypted blob — secrets needed to claim FeeJuice on L2)
+  fuelSecret: string | null
+  privateFuelSalt: string | null
+  privateFuelSecret: string | null
+  // Fuel receipt fields (from DB — extracted from BridgeWithFuel event)
+  fuelMessageHash: string | null
+  fuelMessageLeafIndex: string | null
+  fuelAmount: string | null
+}
+
+/** Data needed to resume an incomplete L2→L1 withdrawal */
+export interface RecoveryWithdrawalData {
+  operationId: string
+  amount: string
+  l1Address: string
+  l2Address: string
+  l2TxHash: string | null
+  l2TxUrl: string | null
+  l2BlockNumber: string | null
+  l2BlockNumberBeforeTx: string | null
+  l2ToL1MessageIndex: string | null
+  siblingPath: string[] | null
+  recipientL1Address: string | null
+  // Recovery-critical contract & version snapshot
+  rollupVersion: number | null
+  chainIdL1: number | null
+  portalAddressL1: string | null
+  bridgeAddressL2: string | null
+  l1RollupAddress: string | null
+  l1OutboxAddress: string | null
+  isPrivacyModeEnabled: boolean
+  nodeInfo: Record<string, unknown> | null
+  status: string
+  currentStep: number | null
+}
+
 interface RecoveryState {
-  recoveryOperationId: number | null
+  recoveryOperationId: string | null
   recoveryClaimData: RecoveryClaimData | null
   recoveryWithdrawalData: RecoveryWithdrawalData | null
 }
@@ -50,8 +108,10 @@ interface BridgeStoreState
   // Fuel (gas funding) state
   fuelEnabled: boolean
   fuelAmount: string
+  fuelType: 'public' | 'private'
   setFuelEnabled: (enabled: boolean) => void
   setFuelAmount: (amount: string) => void
+  setFuelType: (type: 'public' | 'private') => void
 
   // Step actions
   setHeaderStep: (
@@ -74,8 +134,8 @@ interface BridgeStoreState
   setTransactionUrls: (l1TxUrl: string | null, l2TxUrl: string | null) => void
 
   // Recovery actions
-  setRecovery: (operationId: number, claimData: RecoveryClaimData) => void
-  setWithdrawalRecovery: (operationId: number, withdrawalData: RecoveryWithdrawalData) => void
+  setRecovery: (operationId: string, claimData: RecoveryClaimData) => void
+  setWithdrawalRecovery: (operationId: string, withdrawalData: RecoveryWithdrawalData) => void
   clearRecovery: () => void
 
   // Reset
@@ -88,7 +148,7 @@ const DEFAULT_BRIDGE_STATE: BridgeState = {
   from: { network: L1_NETWORKS[0], token: L1_TOKENS[0] },
   to: { network: L2_NETWORKS[0], token: L2_TOKENS[0] },
   direction: BridgeDirection.L1_TO_L2,
-  amount: '',
+  amount: '1',
 }
 
 const initialStepState: StepState = {
@@ -176,6 +236,7 @@ const initialState = {
   isPrivacyModeEnabled: getInitialPrivacyMode(),
   fuelEnabled: false,
   fuelAmount: '',
+  fuelType: 'public' as const,
 } as const
 
 const bridgeStore = create<BridgeStoreState>((set, get) => ({
@@ -198,8 +259,10 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   // Fuel (gas funding) actions
   fuelEnabled: false,
   fuelAmount: '',
+  fuelType: 'public' as const,
   setFuelEnabled: (enabled: boolean) => set({ fuelEnabled: enabled, fuelAmount: '' }),
   setFuelAmount: (amount: string) => set({ fuelAmount: amount }),
+  setFuelType: (type: 'public' | 'private') => set({ fuelType: type }),
 
   // Step actions
   setHeaderStep: (
@@ -319,9 +382,9 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   setTransactionUrls: (l1TxUrl, l2TxUrl) => set({ l1TxUrl, l2TxUrl }),
 
   // Recovery actions
-  setRecovery: (operationId: number, claimData: RecoveryClaimData) =>
+  setRecovery: (operationId: string, claimData: RecoveryClaimData) =>
     set({ recoveryOperationId: operationId, recoveryClaimData: claimData, recoveryWithdrawalData: null }),
-  setWithdrawalRecovery: (operationId: number, withdrawalData: RecoveryWithdrawalData) =>
+  setWithdrawalRecovery: (operationId: string, withdrawalData: RecoveryWithdrawalData) =>
     set({ recoveryOperationId: operationId, recoveryWithdrawalData: withdrawalData, recoveryClaimData: null }),
   clearRecovery: () =>
     set({ recoveryOperationId: null, recoveryClaimData: null, recoveryWithdrawalData: null }),
@@ -337,6 +400,7 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
     recoveryWithdrawalData: null,
     fuelEnabled: false,
     fuelAmount: '',
+    fuelType: 'public' as const,
   })),
 }))
 
@@ -386,8 +450,10 @@ export const useBridgeStore = () =>
       // Fuel (gas funding)
       fuelEnabled: state.fuelEnabled,
       fuelAmount: state.fuelAmount,
+      fuelType: state.fuelType,
       setFuelEnabled: state.setFuelEnabled,
       setFuelAmount: state.setFuelAmount,
+      setFuelType: state.setFuelType,
 
       // Recovery
       recoveryOperationId: state.recoveryOperationId,

@@ -3,36 +3,35 @@ import type { Prisma } from '@prisma/client'
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
-import { CreateOperationSchema } from '@/lib/validation'
+import {
+  sanitizeString,
+  sanitizeEthAddress,
+  sanitizeHexString,
+  sanitizeNumericString,
+  sanitizeInt,
+  sanitizeBoolean,
+  sanitizeNodeInfo,
+  sanitizeCiphertext,
+  MAX_STRING_LENGTH,
+} from '@/lib/validation'
 
-/**
- * Validate keyDerivationMessage matches the expected format from `createSigningMessage()`.
- * Must start with the known header and contain a valid wallet address.
- * Prevents garbage data that would break resume decryption.
- */
-const KEY_DERIVATION_MESSAGE_PATTERN = /^Aztec Bridge - Unlock My Secrets\n[\s\S]*Wallet: 0x[a-f0-9]{40}$/i
+const KEY_DERIVATION_DOMAIN = 'https://bridge.human.tech/'
 
-function isValidKeyDerivationMessage(message: string): boolean {
-  return KEY_DERIVATION_MESSAGE_PATTERN.test(message)
-}
+/** Valid direction values. */
+const VALID_DIRECTIONS = new Set(['L1_TO_L2', 'L2_TO_L1'])
 
-/**
- * Validate keyDerivationDomain is a well-formed HTTPS origin (or localhost in dev).
- * The SDK can be used by any dapp on any domain — we do NOT enforce a specific domain.
- * We only check it's a valid URL to prevent garbage data in the DB.
- */
-function isValidKeyDerivationDomain(domain: string): boolean {
-  try {
-    const u = new URL(domain)
-    // Must be https in production, allow http for localhost in dev
-    if (u.protocol === 'https:') return true
-    if (process.env.NODE_ENV !== 'production' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) {
-      return true
+/** Allow localhost in development for key derivation domain */
+function isAllowedKeyDerivationDomain(domain: string): boolean {
+  if (domain === KEY_DERIVATION_DOMAIN) return true
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const u = new URL(domain)
+      return u.hostname === 'localhost' || u.hostname === '127.0.0.1'
+    } catch {
+      return false
     }
-    return false
-  } catch {
-    return false
   }
+  return false
 }
 
 /**
@@ -65,14 +64,11 @@ export async function GET(request: NextRequest) {
         l1TxUrl: true,
         l2TxHash: true,
         l2TxUrl: true,
-        // Confirmed block numbers
-        l1BlockNumber: true,
         // L1→L2 recovery fields
         messageHash: true,
         messageLeafIndex: true,
         l1BlockNumberBeforeTx: true,
-        // L1→L2 post-fee amount (for correct claim on resume)
-        amountAfterFee: true,
+        claimAmount: true,
         // L1→L2 fuel recovery fields
         fuelMessageHash: true,
         fuelMessageLeafIndex: true,
@@ -101,19 +97,24 @@ export async function GET(request: NextRequest) {
         l1OutboxAddress: true,
         // Token info for activity display
         tokenSymbol: true,
-        tokenNameL1: true,
-        tokenNameL2: true,
-        tokenDecimalsL1: true,
-        tokenDecimalsL2: true,
-        tokenLogoUrlL1: true,
-        tokenLogoUrlL2: true,
         tokenAddressL1: true,
         tokenAddressL2: true,
+        tokenDecimalsL1: true,
+        tokenDecimalsL2: true,
+        tokenNameL1: true,
+        tokenNameL2: true,
+        // Network names
+        fromNetworkName: true,
+        toNetworkName: true,
+        // Additional contract snapshot
+        chainIdL2: true,
+        l1InboxAddress: true,
+        l1RegistryAddress: true,
         // Encrypted fields for client-side decryption
         encryptedCiphertext: true,
         encryptedIv: true,
         encryptedTag: true,
-        keyDerivationMessage: true,
+        // keyDerivationMessage omitted — client can reconstruct from createSigningMessage(l1Address)
         keyDerivationDomain: true,
       },
     })
@@ -148,73 +149,131 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
 
-    // ── Validate + sanitize all inputs via Zod ────────────────────────────
-    const parsed = CreateOperationSchema.safeParse(body)
-    if (!parsed.success) {
-      const firstError = parsed.error.issues[0]
+    // ── Sanitize all inputs ─────────────────────────────────────────────
+    const encryptedCiphertext = sanitizeCiphertext(body.encryptedCiphertext)
+    const encryptedIv = sanitizeString(body.encryptedIv, 128)
+    const encryptedTag = sanitizeString(body.encryptedTag, 128)
+    const keyDerivationMessage = sanitizeString(
+      body.keyDerivationMessage,
+      MAX_STRING_LENGTH,
+    )
+    const keyDerivationDomain = sanitizeString(
+      body.keyDerivationDomain,
+      MAX_STRING_LENGTH,
+    )
+    const direction = sanitizeString(body.direction, 10)
+    const l1Address = sanitizeEthAddress(body.l1Address)
+    const l2Address = sanitizeHexString(body.l2Address, 130) // Aztec addresses are longer than ETH
+    const amountL1 = sanitizeNumericString(body.amountL1)
+    const amountL2 = sanitizeNumericString(body.amountL2)
+    const amountDisplayL1 = sanitizeString(body.amountDisplayL1, 64)
+    const amountDisplayL2 = sanitizeString(body.amountDisplayL2, 64)
+    const claimId = sanitizeString(body.claimId, 64)
+    const isPrivacyModeEnabled = sanitizeBoolean(body.isPrivacyModeEnabled)
+    const l1BlockNumberBeforeTx = sanitizeNumericString(
+      body.l1BlockNumberBeforeTx,
+    )
+    const l2BlockNumberBeforeTx = sanitizeNumericString(
+      body.l2BlockNumberBeforeTx,
+    )
+    const recipientL1Address = sanitizeEthAddress(body.recipientL1Address)
+    const nodeInfo = sanitizeNodeInfo(body.nodeInfo)
+    // Recovery-critical contract & version snapshot
+    const rollupVersion = sanitizeInt(body.rollupVersion, 0, 2_000_000_000)
+    const chainIdL1 = sanitizeInt(body.chainIdL1, 1, 1_000_000_000)
+    const chainIdL2 = sanitizeInt(body.chainIdL2, 1, 1_000_000_000)
+    const portalAddressL1 = sanitizeEthAddress(body.portalAddressL1)
+    const bridgeAddressL2 = sanitizeHexString(body.bridgeAddressL2, 130)
+    const l1RollupAddress = sanitizeEthAddress(body.l1RollupAddress)
+    const l1OutboxAddress = sanitizeEthAddress(body.l1OutboxAddress)
+    const l1InboxAddress = sanitizeEthAddress(body.l1InboxAddress)
+    const l1RegistryAddress = sanitizeEthAddress(body.l1RegistryAddress)
+    // Token info
+    const tokenSymbol = sanitizeString(body.tokenSymbol, 20)
+    const tokenSymbolL1 = sanitizeString(body.tokenSymbolL1, 20)
+    const tokenSymbolL2 = sanitizeString(body.tokenSymbolL2, 20)
+    const tokenNameL1 = sanitizeString(body.tokenNameL1, 100)
+    const tokenNameL2 = sanitizeString(body.tokenNameL2, 100)
+    const tokenAddressL1 = sanitizeEthAddress(body.tokenAddressL1)
+    const tokenAddressL2 = sanitizeHexString(body.tokenAddressL2, 130)
+    const tokenDecimalsL1 = sanitizeInt(body.tokenDecimalsL1, 0, 77)
+    const tokenDecimalsL2 = sanitizeInt(body.tokenDecimalsL2, 0, 77)
+    const currentStep = sanitizeInt(body.currentStep, 0, 10)
+    // Secret hashes (plaintext for querying; actual secrets are in encrypted blob)
+    const claimSecretHash = sanitizeHexString(body.claimSecretHash, 130)
+    const fuelSecretHash = sanitizeHexString(body.fuelSecretHash, 130)
+    const privateFuelSecretHash = sanitizeHexString(body.privateFuelSecretHash, 130)
+
+    // ── Validate required fields ────────────────────────────────────────
+    if (!encryptedCiphertext || !encryptedIv || !encryptedTag) {
       return NextResponse.json(
-        { error: `Validation error: ${firstError.path.join('.')} — ${firstError.message}` },
+        {
+          error:
+            'Missing encrypted payload (encryptedCiphertext, encryptedIv, encryptedTag)',
+        },
         { status: 400 },
       )
     }
-
-    const data = parsed.data
-
-    // ── Business logic validations ────────────────────────────────────────
-    if (!isValidKeyDerivationDomain(data.keyDerivationDomain)) {
+    if (!keyDerivationMessage || !keyDerivationDomain) {
+      return NextResponse.json(
+        {
+          error:
+            'Missing key derivation (keyDerivationMessage, keyDerivationDomain)',
+        },
+        { status: 400 },
+      )
+    }
+    if (!isAllowedKeyDerivationDomain(keyDerivationDomain)) {
       return NextResponse.json(
         { error: 'Invalid keyDerivationDomain' },
         { status: 400 },
       )
     }
-    if (!isValidKeyDerivationMessage(data.keyDerivationMessage)) {
+    if (!l1Address) {
       return NextResponse.json(
-        { error: 'Invalid keyDerivationMessage format' },
+        { error: 'Invalid l1Address (must be 0x + 40 hex chars)' },
         { status: 400 },
       )
     }
-    if (data.l1Address !== authResult.user.l1Address) {
+    if (!l2Address) {
+      return NextResponse.json(
+        { error: 'Invalid l2Address (must be a hex string)' },
+        { status: 400 },
+      )
+    }
+    if (l1Address !== authResult.user.l1Address) {
       return NextResponse.json(
         { error: 'l1Address does not match authenticated wallet' },
         { status: 403 },
       )
     }
-    if (data.l2Address !== authResult.user.l2Address) {
+    if (l2Address !== authResult.user.l2Address) {
       return NextResponse.json(
         { error: 'l2Address does not match authenticated Aztec address' },
         { status: 403 },
       )
     }
+    if (!amountL1) {
+      return NextResponse.json(
+        { error: 'Invalid amountL1 (must be a numeric string)' },
+        { status: 400 },
+      )
+    }
+    if (!amountL2) {
+      return NextResponse.json(
+        { error: 'Invalid amountL2 (must be a numeric string)' },
+        { status: 400 },
+      )
+    }
+    if (!direction || !VALID_DIRECTIONS.has(direction)) {
+      return NextResponse.json(
+        { error: 'Invalid direction (must be L1_TO_L2 or L2_TO_L1)' },
+        { status: 400 },
+      )
+    }
 
-    const isL2ToL1 = data.direction === 'L2_TO_L1'
+    const isL2ToL1 = direction === 'L2_TO_L1'
 
-    console.log('[bridge/operations POST] Creating operation →', {
-      direction: data.direction,
-      amountL1: data.amountL1,
-      amountL2: data.amountL2,
-      amountDisplayL1: data.amountDisplayL1,
-      amountDisplayL2: data.amountDisplayL2,
-      tokenSymbol: data.tokenSymbol,
-      tokenSymbolL1: data.tokenSymbolL1,
-      tokenSymbolL2: data.tokenSymbolL2,
-      tokenNameL1: data.tokenNameL1,
-      tokenNameL2: data.tokenNameL2,
-      tokenDecimalsL1: data.tokenDecimalsL1,
-      tokenDecimalsL2: data.tokenDecimalsL2,
-      tokenLogoUrlL1: data.tokenLogoUrlL1,
-      tokenLogoUrlL2: data.tokenLogoUrlL2,
-      tokenAddressL1: data.tokenAddressL1,
-      tokenAddressL2: data.tokenAddressL2,
-      l1BlockNumberBeforeTx: data.l1BlockNumberBeforeTx,
-      l2BlockNumberBeforeTx: data.l2BlockNumberBeforeTx,
-      rollupVersion: data.rollupVersion,
-      chainIdL1: data.chainIdL1,
-      chainIdL2: data.chainIdL2,
-      portalAddressL1: data.portalAddressL1,
-      bridgeAddressL2: data.bridgeAddressL2,
-      recipientL1Address: data.recipientL1Address,
-      currentStep: data.currentStep,
-    })
     const operation = await prisma.bridgeActivity.create({
       data: {
         fkUserId: authResult.user.id,
@@ -222,45 +281,47 @@ export async function POST(request: NextRequest) {
           ? BridgeDirection.L2_TO_L1
           : BridgeDirection.L1_TO_L2,
         status: BridgeOperationStatus.pending,
-        encryptedCiphertext: data.encryptedCiphertext,
-        encryptedIv: data.encryptedIv,
-        encryptedTag: data.encryptedTag,
-        keyDerivationMessage: data.keyDerivationMessage,
-        keyDerivationDomain: data.keyDerivationDomain,
-        amountL1: data.amountL1,
-        amountL2: data.amountL2,
-        amountDisplayL1: data.amountDisplayL1 ?? undefined,
-        amountDisplayL2: data.amountDisplayL2 ?? undefined,
-        isPrivacyModeEnabled: data.isPrivacyModeEnabled ?? null,
-        l1BlockNumberBeforeTx: data.l1BlockNumberBeforeTx ?? undefined,
-        l2BlockNumberBeforeTx: data.l2BlockNumberBeforeTx ?? undefined,
-        recipientL1Address: isL2ToL1 ? data.recipientL1Address : undefined,
-        nodeInfo: (data.nodeInfo ?? undefined) as Prisma.InputJsonValue | undefined,
+        encryptedCiphertext,
+        encryptedIv,
+        encryptedTag,
+        keyDerivationMessage,
+        keyDerivationDomain,
+        amountL1,
+        amountL2,
+        amountDisplayL1: amountDisplayL1 ?? undefined,
+        amountDisplayL2: amountDisplayL2 ?? undefined,
+        isPrivacyModeEnabled: isPrivacyModeEnabled ?? null,
+        l1BlockNumberBeforeTx: l1BlockNumberBeforeTx ?? undefined,
+        l2BlockNumberBeforeTx: l2BlockNumberBeforeTx ?? undefined,
+        recipientL1Address: isL2ToL1 ? recipientL1Address : undefined,
+        nodeInfo: (nodeInfo ?? undefined) as Prisma.InputJsonValue | undefined,
         fromNetworkName: isL2ToL1 ? 'Aztec' : 'Ethereum',
         toNetworkName: isL2ToL1 ? 'Ethereum' : 'Aztec',
         // Recovery-critical contract & version snapshot
-        rollupVersion: data.rollupVersion ?? undefined,
-        chainIdL1: data.chainIdL1 ?? undefined,
-        chainIdL2: data.chainIdL2 ?? undefined,
-        portalAddressL1: data.portalAddressL1 ?? undefined,
-        bridgeAddressL2: data.bridgeAddressL2 ?? undefined,
-        l1RollupAddress: data.l1RollupAddress ?? undefined,
-        l1OutboxAddress: data.l1OutboxAddress ?? undefined,
-        l1InboxAddress: data.l1InboxAddress ?? undefined,
-        l1RegistryAddress: data.l1RegistryAddress ?? undefined,
+        rollupVersion: rollupVersion ?? undefined,
+        chainIdL1: chainIdL1 ?? undefined,
+        chainIdL2: chainIdL2 ?? undefined,
+        portalAddressL1: portalAddressL1 ?? undefined,
+        bridgeAddressL2: bridgeAddressL2 ?? undefined,
+        l1RollupAddress: l1RollupAddress ?? undefined,
+        l1OutboxAddress: l1OutboxAddress ?? undefined,
+        l1InboxAddress: l1InboxAddress ?? undefined,
+        l1RegistryAddress: l1RegistryAddress ?? undefined,
         // Token info for activity page display
-        tokenSymbol: data.tokenSymbol ?? undefined,
-        tokenSymbolL1: data.tokenSymbolL1 ?? undefined,
-        tokenSymbolL2: data.tokenSymbolL2 ?? undefined,
-        tokenNameL1: data.tokenNameL1 ?? undefined,
-        tokenNameL2: data.tokenNameL2 ?? undefined,
-        tokenAddressL1: data.tokenAddressL1 ?? undefined,
-        tokenAddressL2: data.tokenAddressL2 ?? undefined,
-        tokenDecimalsL1: data.tokenDecimalsL1 ?? undefined,
-        tokenDecimalsL2: data.tokenDecimalsL2 ?? undefined,
-        tokenLogoUrlL1: data.tokenLogoUrlL1 ?? undefined,
-        tokenLogoUrlL2: data.tokenLogoUrlL2 ?? undefined,
-        currentStep: (data.currentStep != null && data.currentStep >= 1) ? data.currentStep : 1,
+        tokenSymbol: tokenSymbol ?? undefined,
+        tokenSymbolL1: tokenSymbolL1 ?? undefined,
+        tokenSymbolL2: tokenSymbolL2 ?? undefined,
+        tokenNameL1: tokenNameL1 ?? undefined,
+        tokenNameL2: tokenNameL2 ?? undefined,
+        tokenAddressL1: tokenAddressL1 ?? undefined,
+        tokenAddressL2: tokenAddressL2 ?? undefined,
+        tokenDecimalsL1: tokenDecimalsL1 ?? undefined,
+        tokenDecimalsL2: tokenDecimalsL2 ?? undefined,
+        currentStep: currentStep ?? 1,
+        // Secret hashes (plaintext for querying; actual secrets in encrypted blob)
+        claimSecretHash: claimSecretHash ?? undefined,
+        fuelSecretHash: fuelSecretHash ?? undefined,
+        privateFuelSecretHash: privateFuelSecretHash ?? undefined,
         // Client IP for audit trail
         clientIp:
           request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
@@ -272,6 +333,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       operationId: operation.id,
+      claimId: claimId ?? operation.id,
     })
   } catch (error) {
     console.error('[bridge/operations]', error)

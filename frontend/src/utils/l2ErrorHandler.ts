@@ -1,11 +1,6 @@
 import { useToast } from '@/hooks/useToast'
 
-export type L2ErrorType =
-  | 'BALANCE'
-  | 'NODE'
-  | 'CONTRACT'
-  | 'TRANSACTION'
-  | 'GENERAL'
+export type L2ErrorType = 'BALANCE' | 'NODE' | 'CONTRACT' | 'TRANSACTION' | 'GENERAL'
 
 function getDefaultValue<T>(type: L2ErrorType): T {
   switch (type) {
@@ -22,7 +17,17 @@ export const useL2ErrorHandler = () => {
   const notify = useToast()
 
   const handleError = <T>(error: unknown, type: L2ErrorType = 'GENERAL'): T => {
-    const errorMessage = error instanceof Error ? error.message : String(error)
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'object' &&
+            error !== null &&
+            'message' in error &&
+            typeof (error as { message: unknown }).message === 'string'
+          ? (error as { message: string }).message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error'
 
     // Log the error for debugging
     console.error(`L2 ${type} Error:`, error)
@@ -41,8 +46,7 @@ export const useL2ErrorHandler = () => {
     // Check for wallet disconnect errors — silently return defaults.
     // The disconnect handler in walletStore already shows a toast when
     // the disconnection is unexpected; showing it again per-query is noisy.
-    const isWalletDisconnected =
-      /wallet.*disconnect|disconnect.*wallet|backend.*disconnect/i.test(errorMessage)
+    const isWalletDisconnected = /wallet.*disconnect|disconnect.*wallet|backend.*disconnect/i.test(errorMessage)
     if (isWalletDisconnected) {
       return getDefaultValue<T>(type)
     }

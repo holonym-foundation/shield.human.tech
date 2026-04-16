@@ -4,21 +4,21 @@ import StyledImage from './StyledImage'
 import { Oval } from 'react-loader-spinner'
 import { BridgeDirection } from '@/types/bridge'
 import { useToast } from '@/hooks/useToast'
-import { useAuthStore } from '@/stores/useAuthStore'
+import { extractErrorMessage } from '@/utils'
 import { parseUnits } from 'viem'
 import CongestionWarningModal from './model/CongestionWarningModal'
 import { useL2PendingTxCount, useNetworkHealth } from '@/hooks/useL2Operations'
 
 function LoadingContent({ label }: { label: string }) {
   return (
-    <div className='flex justify-center gap-2'>
+    <div className="flex justify-center gap-2">
       <Oval
-        height='20'
-        width='20'
-        color='#ccc'
+        height="20"
+        width="20"
+        color="#ccc"
         visible={true}
-        ariaLabel='oval-loading'
-        secondaryColor='#ccc'
+        ariaLabel="oval-loading"
+        secondaryColor="#ccc"
         strokeWidth={6}
         strokeWidthSecondary={6}
       />
@@ -29,8 +29,6 @@ function LoadingContent({ label }: { label: string }) {
 
 interface BridgeActionButtonProps {
   isDisabled?: boolean
-  isAuthenticated?: boolean
-  authFailed?: boolean
 
   // Connection states
   isWaapConnected: boolean
@@ -91,6 +89,7 @@ interface BridgeActionButtonProps {
   bridgeCompleted?: boolean
   l2NodeError?: boolean
   l2NodeIsReadyLoading?: boolean
+  feeJuiceBalanceLoading?: boolean
 }
 
 function BridgeActionButton({
@@ -134,11 +133,10 @@ function BridgeActionButton({
   passportMaxAmount,
   passportScore,
   passportThreshold,
-  isAuthenticated = false,
-  authFailed = false,
   bridgeCompleted = false,
   l2NodeError = false,
   l2NodeIsReadyLoading = false,
+  feeJuiceBalanceLoading = false,
 }: BridgeActionButtonProps) {
   const [isConnecting, setIsConnecting] = useState(false)
   const [isOperationPending, setIsOperationPending] = useState(false)
@@ -150,20 +148,16 @@ function BridgeActionButton({
   const isNetworkDown = networkHealth?.isNetworkDown ?? false
 
   const bothWalletsConnected = isWaapConnected && isAztecConnected
-  const balancesActuallyLoading = bothWalletsConnected && (!isStateInitialized || l1BalanceLoading || l2BalanceLoading || feeJuiceLoading)
-  const authInProgress = bothWalletsConnected && !isAuthenticated && !authFailed
-  // Show balance loading only after auth is done (balances load in parallel, but auth takes priority in UI)
-  const balancesLoading = balancesActuallyLoading && isAuthenticated && !authInProgress
+  const balancesLoading =
+    bothWalletsConnected && (!isStateInitialized || l1BalanceLoading || l2BalanceLoading || feeJuiceLoading)
 
   // Helper functions
-  const getOperationType = (dir: BridgeDirection) =>
-    dir === BridgeDirection.L2_TO_L1 ? 'withdrawal' : 'bridge'
+  const getOperationType = (dir: BridgeDirection) => (dir === BridgeDirection.L2_TO_L1 ? 'withdrawal' : 'bridge')
 
   const getOperationLabel = (dir: BridgeDirection) =>
     dir === BridgeDirection.L2_TO_L1 ? 'Withdraw Tokens' : 'Bridge Tokens'
 
-  const getSBTChainForDirection = (dir: BridgeDirection) =>
-    dir === BridgeDirection.L2_TO_L1 ? 'Aztec' : 'Ethereum'
+  const getSBTChainForDirection = (dir: BridgeDirection) => (dir === BridgeDirection.L2_TO_L1 ? 'Aztec' : 'Ethereum')
 
   // Process operations for bridging or withdrawing
   const processBridgeOperation = async () => {
@@ -183,17 +177,14 @@ function BridgeActionButton({
       }
     } catch (error) {
       const operationType = getOperationType(direction)
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+      const errorMsg = extractErrorMessage(error)
 
       if (errorMsg.includes('insufficient')) {
         notify('error', `Insufficient funds for ${operationType} operation`)
       } else if (errorMsg.includes('rejected') || errorMsg.includes('denied')) {
         notify('error', `Transaction rejected by user`)
       } else {
-        notify(
-          'error',
-          `${operationType.charAt(0).toUpperCase() + operationType.slice(1)} failed: ${errorMsg}`
-        )
+        notify('error', `${operationType.charAt(0).toUpperCase() + operationType.slice(1)} failed: ${errorMsg}`)
       }
     } finally {
       setIsOperationPending(false)
@@ -250,17 +241,7 @@ function BridgeActionButton({
       return
     }
 
-    // Step 3: Auth check — bridge requires authentication
-    if (authFailed) {
-      useAuthStore.getState().triggerRetryAuth()
-      return
-    }
-    if (!isAuthenticated) {
-      notify('info', 'Authenticating... please wait')
-      return
-    }
-
-    // Step 4: Faucet if needed
+    // Step 3: Faucet if needed
     if (isStateInitialized && isEligibleForFaucet) {
       if (useExternalFaucet && handleExternalFaucet && needsGas && !needsTokensOnly) {
         handleExternalFaucet()
@@ -278,30 +259,56 @@ function BridgeActionButton({
       }
     }
 
-    // Step 5: SBT check
+    // Step 4: SBT check
     if (!checkSBTRequirements()) {
       return
     }
 
-    // Step 6: Attestation check (privacy mode, both directions)
+    // Step 5: Attestation check (privacy mode, both directions)
     if (isPrivacyModeEnabled) {
       if (pochLoading) {
         notify('info', 'Checking eligibility...')
         return
       }
       if (!pochEligible) {
-        const reason = pochReason ? `${pochReason}. ` : 'Cannot use private mode. '
-        const scoreInfo = passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''
         notify('error', {
           heading: 'Attestation Required',
-          message: `${reason}Mint your POCH SBT at id.human.tech/sandbox/clean-hands or build your Passport score${scoreInfo} at app.passport.xyz. Or switch to public mode.`,
+          message: React.createElement(
+            'span',
+            null,
+            React.createElement('span', null, pochReason ? `${pochReason}. ` : 'Cannot use private mode. '),
+            React.createElement('br'),
+            React.createElement(
+              'a',
+              {
+                href: 'https://id.human.tech/sandbox/clean-hands',
+                target: '_blank',
+                rel: 'noopener noreferrer',
+                style: { color: '#2563eb', textDecoration: 'underline' },
+              },
+              'Mint your POCH SBT here',
+            ),
+            React.createElement('br'),
+            React.createElement(
+              'a',
+              {
+                href: 'https://app.passport.xyz/',
+                target: '_blank',
+                rel: 'noopener noreferrer',
+                style: { color: '#2563eb', textDecoration: 'underline' },
+              },
+              `Build your Passport score${passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''}`,
+            ),
+            React.createElement('br'),
+            'Or switch to public mode.',
+          ),
         })
         return
       }
     }
 
-    // Step 7: Validate amount
-    // Step 7a: Passport amount limit check
+    // Step 6: Validate amount
+    // Step 6a: Passport amount limit check
     if (isPrivacyModeEnabled && attestationMethod === 'passport' && passportMaxAmount != null) {
       try {
         const decimals = 6 // USDC decimals
@@ -310,7 +317,22 @@ function BridgeActionButton({
           const maxFormatted = (Number(passportMaxAmount) / 10 ** decimals).toFixed(2)
           notify('error', {
             heading: 'Amount Exceeds Passport Limit',
-            message: `Passport allows up to ${maxFormatted} USDC per transaction. Mint a POCH SBT at id.human.tech/sandbox/clean-hands to remove this limit.`,
+            message: React.createElement(
+              'span',
+              null,
+              `Passport allows up to ${maxFormatted} USDC per transaction. `,
+              React.createElement(
+                'a',
+                {
+                  href: 'https://id.human.tech/sandbox/clean-hands',
+                  target: '_blank',
+                  rel: 'noopener noreferrer',
+                  style: { color: '#2563eb', textDecoration: 'underline' },
+                },
+                'Mint a POCH SBT',
+              ),
+              ' to remove this limit.',
+            ),
           })
           return
         }
@@ -324,13 +346,13 @@ function BridgeActionButton({
       return
     }
 
-    // Step 8: Congestion check
+    // Step 7: Congestion check
     if (isCongested) {
       setShowCongestionWarning(true)
       return
     }
 
-    // Step 9: Execute
+    // Step 8: Execute
     processBridgeOperation()
   }
 
@@ -347,7 +369,6 @@ function BridgeActionButton({
     isNetworkDown ||
     balancesLoading ||
     isConnecting ||
-    authInProgress ||
     requestFaucetPending ||
     withdrawTokensToL1Pending ||
     bridgeTokensToL2Pending ||
@@ -355,25 +376,19 @@ function BridgeActionButton({
     bridgeCompleted
 
   const isOperationInFlight =
-    isConnecting ||
-    requestFaucetPending ||
-    withdrawTokensToL1Pending ||
-    bridgeTokensToL2Pending ||
-    isOperationPending
+    isConnecting || requestFaucetPending || withdrawTokensToL1Pending || bridgeTokensToL2Pending || isOperationPending
 
   const showLoadingSpinner =
     l2NodeIsReadyLoading ||
     balancesLoading ||
     isOperationInFlight ||
-    authInProgress ||
     (isPrivacyModeEnabled && pochLoading && bothWalletsConnected)
 
   const getLoadingText = () => {
     if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...'
     if (balancesLoading) return 'Loading balances...'
     if (isConnecting) return 'Connecting...'
-    if (authInProgress) return 'Authenticating...'
-    if (requestFaucetPending) return 'Getting Testnet tokens...'
+    if (requestFaucetPending) return 'Getting Eth & Testnet USDC...'
     if (pochLoading && isPrivacyModeEnabled) return 'Checking eligibility...'
     if (withdrawTokensToL1Pending) return 'Withdrawing Tokens...'
     if (bridgeTokensToL2Pending) return 'Bridging Tokens...'
@@ -390,10 +405,6 @@ function BridgeActionButton({
     // Connection states
     if (!isWaapConnected) return 'Connect Ethereum Wallet'
     if (!isAztecConnected) return 'Connect Aztec Wallet'
-
-    // Auth check
-    if (authFailed) return 'Sign in to Bridge'
-    if (authInProgress) return 'Authenticating...'
 
     // Faucet
     if (needsGas || needsTokensOnly) {
@@ -419,20 +430,13 @@ function BridgeActionButton({
 
   return (
     <>
-      <div className='w-full'>
-        <TextButton
-          onClick={handleButtonClick}
-          disabled={isButtonDisabled || isDisabled}
-          className=''>
+      <div className="w-full">
+        <TextButton onClick={handleButtonClick} disabled={isButtonDisabled || isDisabled} className="">
           {showLoadingSpinner ? (
             <LoadingContent label={getLoadingText()} />
           ) : bridgeCompleted ? (
-            <div className='flex items-center gap-2'>
-              <StyledImage
-                src='/assets/svg/check-circle.svg'
-                alt=''
-                className='h-5 w-5'
-              />
+            <div className="flex items-center gap-2">
+              <StyledImage src="/assets/svg/check-circle.svg" alt="" className="h-5 w-5" />
               <span>Bridge Complete!</span>
             </div>
           ) : (

@@ -1,171 +1,87 @@
-# Aztec Bridge UI
+# Aztec Bridge UI — Project Rules
 
-Privacy-preserving cross-chain bridge between Ethereum (L1) and Aztec (L2). Monorepo with a Next.js frontend and a standalone SDK package.
+## Project Overview
 
-## Project Structure
+This is the **Aztec Token Bridge** — a full-stack system for bridging ERC-20 tokens from Ethereum L1 to Aztec L2 with optional atomic fuel swaps (swap a portion of bridged tokens into FeeJuice for L2 gas).
+
+### Architecture
 
 ```
-aztec-bridge/
-├── frontend/          # Next.js 16, React 19, Tailwind, Zustand, Prisma
-├── packages/sdk/      # @human.tech/aztec-bridge-sdk (ESM + CJS via tsup)
-├── bridge-script/     # Deployment automation scripts
-├── l1-contracts/      # Foundry Solidity contracts
-├── aztec-contracts/   # Noir L2 contracts
-└── docs/              # Design specs and plans
-``
- console.log("Add it to the global ~/.claude/CLAUDE.md — So it applies across all your projects.
-
-Both — Belt and suspenders. ", Add it to the global ~/.claude/CLAUDE.md — So it applies across all your projects.
-
-Both — Belt and suspenders.);`
-
-**Monorepo tooling:** pnpm workspaces + Turbo. SDK builds first, frontend depends on it.
-
-## Commands
-
-```bash
-# Root (all packages via Turbo)
-pnpm build              # Build SDK then frontend
-pnpm dev                # Dev all packages
-pnpm typecheck          # TypeScript check all packages
-
-# Frontend
-cd frontend
-pnpm dev                # Next.js dev (uses --webpack flag)
-pnpm build              # prisma generate + next build
-pnpm lint               # ESLint
-pnpm db:push            # prisma db push
-pnpm db:migrate         # prisma migrate dev
-pnpm db:studio          # prisma studio
-
-# SDK
-cd packages/sdk
-pnpm build              # tsup → dist/ (ESM + CJS + .d.ts)
-pnpm dev                # tsup --watch
-pnpm typecheck          # tsc --noEmit
-
-# Contracts
-cd l1-contracts && forge test
+frontend/                    — Next.js app (bridge UI)
+packages/sdk/                — @human.tech/aztec-bridge-sdk (core bridge logic, env-agnostic)
+bridge-script/               — Deployment & testing scripts (TypeScript + viem)
+  ├── index-testnet-compliant.ts — Main deployment + test script (deploy, seed, test all flows)
+  ├── seed-pools.ts          — Standalone pool seeding script (direct USDC/FJ pool primary)
+  ├── test-fuel-swap.ts      — Standalone fuel swap E2E test
+  ├── recover-liquidity.ts   — Recover ETH/tokens from old pool positions
+  ├── constants/tokens.ts    — Token configurations (USDC, USDT, DAI, HUMN, GOAT, WBTC, WETH)
+  └── deployments/           — Persisted deployment state (JSON)
+l1-contracts/                — Solidity contracts (Foundry)
+  ├── src/UniswapFuelSwap.sol    — Multi-hop V4 swap: ERC20 → WETH → ETH → FeeJuice
+  ├── src/SwapBridgeRouter.sol   — Permit2-based atomic bridge + fuel swap
+  ├── src/TokenPortal.sol        — L1↔L2 token bridging
+  └── script/SeedUniswapPools.s.sol — PoolSeeder contract (idempotent pool init + liquidity)
 ```
 
-## Tech Stack
+### Key Flows
 
-- **Frontend:** Next.js 16, React 19, TypeScript 5 (strict), Tailwind CSS 3
-- **State:** Zustand 5 (with persist) for client state, @tanstack/react-query 5 for server state
-- **Web3:** viem 2, wagmi 2, @aztec packages (devnet), siwe 3
-- **Backend:** Next.js API routes, Prisma 6 + PostgreSQL, JWT auth
-- **SDK:** tsup build, exports HumanTechBridge client class
-- **Monitoring:** Datadog RUM + Logs
-- **Hosting:** Vercel (serverless functions, auto-deploy from main)
+- **Bridge only**: User deposits ERC-20 via TokenPortal → claims on L2
+- **Bridge + Fuel**: User deposits via SwapBridgeRouter → splits into token deposit + fuel swap → claims both on L2 using FeeJuice for gas
+- **Fuel swap route**: `USDC → [USDC/WETH pool] → WETH → unwrap → ETH → [ETH/AZTEC pool] → FeeJuice`
 
-## Architecture
+### Tech Stack
 
-### SDK is single source of truth
-`packages/sdk/src/deployments.json` owns all token addresses, contract addresses, and network config. Frontend imports from the SDK — never duplicate deployment config.
+- **L1**: Solidity, Uniswap V4, Permit2, Foundry
+- **L2**: Aztec (Noir contracts), `@aztec/*` packages
+- **Scripts**: TypeScript, viem, `@aztec/ethereum`
+- **Frontend**: Next.js, React
+- **Network**: Aztec Alpha (settles on Ethereum mainnet), Aztec v4.2.0-aztecnr-rc.2
 
-```ts
-import { getDeployment, ALL_DEPLOYMENTS } from '@human.tech/aztec-bridge-sdk'
-```
+### L1 Contract Addresses (Ethereum Mainnet)
 
-### Bridge context pattern
-`frontend/src/hooks/useBridge.ts` provides `BridgeProvider` wrapping the app. SDK client uses `apiUrl=""` (relative URLs) so same-origin auth works automatically.
+- PoolManager: `0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`
+- WETH: `0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14`
+- AZTEC (FeeJuice): `0x35d0186d1FD53b72996475D965C5Ed171D52b986`
+- FeeAssetHandler: `0xED9c5557d2E0abCc7c7FCA958eE4292199413494`
+- Permit2: `0x000000000022D473030F116dDEE9F6B43aC78BA3`
 
-### Authentication flow (SIWE)
-1. `GET /api/auth/nonce` → server generates nonce, stores in DB (`AuthNonce` table)
-2. Client builds SIWE message with L1 address + L2 address in `resources` field
-3. Client signs with wallet → `POST /api/auth/authenticate`
-4. Server verifies SIWE signature, consumes nonce, issues JWT
-5. JWT stored in Zustand `useAuthStore` (persisted to localStorage)
+## Debugging & Code Trust Rules
 
-### Bridge operations
-- **L1→L2 deposits:** pending → deposited → claimed → completed
-- **L2→L1 withdrawals:** pending → submitted → ready → pending_finalize → completed
-- Recovery data encrypted client-side, backed up to DB via `BridgeActivity` table
+**NEVER trust ANY existing code when debugging — not the Solidity contracts, not the Aztec L2 contracts, not the scripts, not the frontend.** Always re-read and audit every layer from scratch. This project has L1 Solidity contracts, L2 Aztec/Noir contracts, TypeScript deployment scripts, and test files that must stay in sync. When something fails:
 
-## Key Directories
+1. **Debug in source-of-truth order: Smart Contracts → Database → APIs → Scripts → Frontend** — Always start from the lowest, most authoritative layer. Don't assume scripts, wrappers, or helper code are correct. Read the actual implementation (Solidity contracts, DB schemas, API endpoints) before forming hypotheses. Work upward only after verifying each layer.
 
-### Frontend (`frontend/src/`)
-- `app/` — Pages + API routes (Next.js App Router)
-- `app/api/auth/` — SIWE nonce + authenticate endpoints
-- `app/api/bridge/` — Bridge operation CRUD
-- `components/` — React components (`'use client'` where needed)
-- `hooks/` — `useBridge`, `useL1Operations`, `useL2Operations`, resume hooks
-- `stores/` — Zustand stores: `walletStore`, `useAuthStore`, `bridgeStore`
-- `config/` — Imports from SDK deployments, derives UI config
-- `lib/` — `prisma.ts`, `jwt.ts`, `siweNonceStore.ts`, `validation.ts`
-- `types/` — TypeScript interfaces for bridge, wallet, tokens
+2. **Never trust L1 contracts (Solidity) as correct** — Always re-read `l1-contracts/src/` when debugging. Check for: incorrect settlement logic, missing edge cases in multi-hop swaps, wrong token ordering assumptions, unsafe ETH handling, reentrancy vectors, missing access controls. The contracts may have bugs too — don't assume they're correct just because they compiled.
 
-### SDK (`packages/sdk/src/`)
-- `client.ts` — `HumanTechBridge` class (main entry point)
-- `bridge/` — L1→L2, L2→L1 operations, polling, witness, resume
-- `auth.ts` — SIWE authentication
-- `encryption.ts` — Client-side encryption key derivation
-- `config.ts` — Deployment resolution, URL helpers
-- `api.ts` — REST client for backend
+3. **Never trust L2 contracts (Aztec/Noir) as correct** — Re-read the Aztec contract interactions when debugging L2 claims, note handling, or fee payment. Check for: incorrect secret hashing, wrong message formats, stale L2 contract registrations, missing authwit approvals.
 
-## Code Conventions
+4. **Verify on-chain state directly** — Don't infer pool state from aggregate balances. Uniswap V4's PoolManager holds assets for ALL pools globally. Use pool-specific queries (slot0, position state) to check individual pool health.
 
-### Naming
-- Components: `PascalCase.tsx`
-- Hooks: `useCamelCase.ts`
-- Stores: `camelCaseStore.ts`
-- Constants: `UPPER_SNAKE_CASE`
-- Files: camelCase for utilities, PascalCase for components
+5. **Audit skip/cache logic aggressively** — Silent skips caused a multi-session bug where pool seeding was skipped because a global balance check passed. Skip logic that "optimizes" by avoiding redundant work is the #1 source of deployment bugs in this project.
 
-### Imports
-- Use `type` keyword for type-only imports
-- Frontend path alias: `@/*` → `frontend/src/*`
-- SDK: `import { ... } from '@human.tech/aztec-bridge-sdk'`
+6. **Trace the full execution path on errors** — `CurrencyNotSettled` doesn't mean the swap logic is wrong — it can mean the pool has no liquidity. Always trace upstream to find the real cause.
 
-## Memory Files
+7. **Security audit every change** — Before completing any task that touches contracts or scripts, check for:
+   - Reentrancy (especially in unlock callbacks and ETH transfers)
+   - Access control (who can call setup/sweep/setSwapTarget?)
+   - Token approval issues (Permit2 witness validation, allowance checks)
+   - Integer overflow/underflow in liquidity and swap math
+   - Front-running / sandwich attack vectors on swaps
+   - Missing slippage protection (minOutput = 0 is dangerous on mainnet)
+   - Funds stuck in contracts (can all tokens be swept/recovered?)
 
-- ALWAYS write memory files to the **project-local** `.claude/memory/` directory, NEVER to the global `~/.claude/projects/` path.
+8. **When a fix spans multiple sessions: reset** — Re-read ALL contracts (L1 and L2) from scratch. Don't build on assumptions from previous (possibly wrong) sessions. The user's instruction "forget everything, check the real contracts" is the default approach.
+
+9. **Recheck everything before claiming done** — Before saying work is complete, re-read every changed file with fresh eyes as if you're a new reviewer seeing it for the first time. Check consistency across all files (same values in scripts, tests, and contracts?). Verify against the original request. Run tests/builds. Never claim "done" without evidence it works.
+
+## Project-Specific Notes
+
+- `PoolSeeder.setup()` is idempotent — no skip logic needed, ever
+- Pool keys are passed per-call to `UniswapFuelSwap.swap()` and `SwapBridgeRouter.bridgeWithFuel()` — they are NOT hardcoded in contracts
+- `PoolSeeder` locks liquidity permanently (no withdraw) — use PositionManager for mainnet
+- Token configs live in `bridge-script/constants/tokens.ts`
+- Deployment state persists in `bridge-script/deployments/` — scripts skip already-deployed tokens
 
 ## Git & Commits
-
 - Do NOT commit code — user reviews and commits manually
 - Do NOT include `Co-Authored-By` lines in commit messages
-- Commit message format: `<type>: <lowercase description>`
-- Types: `feat`, `fix`, `chore`, `refactor`, `docs`
-
-### Linting
-ESLint flat config with: next/core-web-vitals, react, react-hooks, prettier. `no-explicit-any` is off, `no-unused-vars` is warn-only.
-
-## Database (Prisma)
-
-Schema at `frontend/prisma/schema.prisma`. Models:
-- **User** — Composite unique on `(l1Address, l2Address)`. Stores login methods, wallet providers.
-- **AuthNonce** — One-time SIWE nonces with TTL. Consumed on authenticate.
-- **BridgeActivity** — Encrypted bridge operation backups with full recovery metadata.
-
-Run `pnpm db:push` after schema changes. Prisma client auto-generates on `pnpm build`.
-
-## Environment Variables
-
-Required in `.env.local` (frontend):
-```
-DATABASE_URL              # PostgreSQL connection string
-ALLOWED_DOMAIN            # SIWE domain verification (e.g. bridge.human.tech)
-JWT_SECRET                # For signing auth tokens
-ETHEREUM_RPC_URL          # Backend RPC
-ALCHEMY_API_KEY           # NFT/balance APIs
-FAUCET_PRIVATE_KEY        # Testnet faucet (server-only, sensitive)
-NEXT_PUBLIC_DATADOG_*     # Datadog RUM config
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
-```
-
-Root `.env`:
-```
-L1_URL                    # Ethereum RPC for scripts
-BOOTNODE                  # Aztec node URL
-L1_CHAIN_ID               # 11155111 (Sepolia)
-```
-
-## Important Notes
-
-- **Vercel deployment:** All API routes run as serverless functions — no shared in-memory state between invocations. Nonces must be in DB, not in-memory.
-- **Next.js build requires `--webpack` flag** due to Node.js polyfill config for Aztec WASM modules.
-- **No COOP/COEP headers** — they break WaaP iframe wallet communication.
-- **No test framework configured** for frontend/SDK. L1 contracts use Forge, L2 contracts use Aztec CLI.
-- **Aztec version:** devnet 4 (`4.0.0-devnet.2-patch.3`). Check `packages/sdk/package.json` for pinned versions.
-- **EIP-55 checksums:** Always use `getAddress()` from viem before passing addresses to SIWE.

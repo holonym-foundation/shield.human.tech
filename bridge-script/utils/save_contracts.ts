@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join, resolve } from 'path';
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
@@ -16,6 +16,8 @@ export interface DeployedToken {
   // Fee infrastructure
   feeAssetHandler: string;
   sponsoredFee: string;
+  // Migration state: true when deposits are paused on this portal (rollup upgrade window)
+  depositsPaused?: boolean;
 }
 
 export interface L1ContractAddresses {
@@ -27,7 +29,8 @@ export interface L1ContractAddresses {
 
 export interface DeploymentNetwork {
   name: string;
-  aztecNodeUrl: string;
+  nodeUrl: string;
+  l1RpcUrl: string;
   l1ChainId: number;
   l2ChainId: number;
   aztecVersion: string;
@@ -41,9 +44,11 @@ export interface DeploymentFile {
   l1ContractAddresses: L1ContractAddresses;
   nodeInfo: Record<string, unknown>;
   sponsoredFeeAddress: string;
-  bridgeAndFuelAddress?: string;
-  mockFuelSwapAddress?: string;
   tokens: DeployedToken[];
+  // Fuel swap infrastructure
+  uniswapFuelSwapAddress?: string;
+  swapBridgeRouterAddress?: string;
+  bridgedFpcAddress?: string;
 }
 
 export interface RegistryEntry {
@@ -64,45 +69,17 @@ export interface DeploymentRegistry {
 
 const DEPLOYMENTS_DIR = join('deployments');
 const REGISTRY_FILE = join(DEPLOYMENTS_DIR, 'registry.json');
-const SDK_CONTRACTS_DIR = resolve('..', 'packages', 'sdk', 'src', 'contracts');
-const SDK_DEPLOYMENTS = join(SDK_CONTRACTS_DIR, 'deployments.json');
-const SDK_ABIS_DIR = join(SDK_CONTRACTS_DIR, 'abis');
-const SDK_ARTIFACTS_DIR = join(SDK_CONTRACTS_DIR, 'artifacts');
-const L1_OUT = resolve('..', 'l1-contracts', 'out');
-const AZTEC_CONTRACTS = resolve('..', 'aztec-contracts');
+const FRONTEND_DEPLOYMENTS = resolve('..', 'frontend', 'src', 'constants', 'deployments.json');
+const FRONTEND_ARTIFACTS_DIR = resolve('..', 'frontend', 'src', 'constants', 'aztec', 'artifacts');
 
-// L1 Forge build output → SDK ABI JSON mappings
-// Each entry: { src: forge JSON path, dest: SDK output path }
-const L1_ABI_SOURCES: { src: string; dest: string }[] = [
-  {
-    src: join(L1_OUT, 'TokenPortal.sol', 'TokenPortal.json'),
-    dest: join(SDK_ABIS_DIR, 'TokenPortal.json'),
-  },
-  {
-    src: join(L1_OUT, 'BridgeAndFuel.sol', 'BridgeAndFuel.json'),
-    dest: join(SDK_ABIS_DIR, 'BridgeAndFuel.json'),
-  },
-  {
-    src: join(L1_OUT, 'MockFuelSwap.sol', 'MockFuelSwap.json'),
-    dest: join(SDK_ABIS_DIR, 'MockFuelSwap.json'),
-  },
-];
-
-// Aztec (Noir) contract artifacts → SDK
-// These are full Noir artifacts (not Solidity ABIs) — copied as-is
-const AZTEC_ARTIFACT_SOURCES: { src: string; dest: string }[] = [
-  {
-    src: join(AZTEC_CONTRACTS, 'token_bridge', 'target', 'token_contract-Token.json'),
-    dest: join(SDK_ARTIFACTS_DIR, 'Token.json'),
-  },
-  {
-    src: join(AZTEC_CONTRACTS, 'token_bridge', 'target', 'token_bridge_contract-TokenBridge.json'),
-    dest: join(SDK_ARTIFACTS_DIR, 'TokenBridge.json'),
-  },
-  {
-    src: join(AZTEC_CONTRACTS, 'token_minter_proxy', 'target', 'token_minter_proxy-TokenMinterProxy.json'),
-    dest: join(SDK_ARTIFACTS_DIR, 'TokenMinterProxy.json'),
-  },
+// Source artifact paths (compiled Noir contracts + codegen)
+const ARTIFACT_SOURCES = [
+  // Token artifact (Wonderland compliant token — from bridge-script codegen)
+  { src: resolve('constants', 'aztec', 'artifacts', 'token-Token.json'), dest: 'token-Token.json' },
+  // TokenBridge artifact (custom contract — from aztec-contracts build)
+  { src: resolve('..', 'aztec-contracts', 'token_bridge', 'target', 'token_bridge_contract-TokenBridge.json'), dest: 'token_bridge_contract-TokenBridge.json' },
+  // TokenMinterProxy artifact (custom contract — from aztec-contracts build)
+  { src: resolve('..', 'aztec-contracts', 'token_minter_proxy', 'target', 'token_minter_proxy-TokenMinterProxy.json'), dest: 'token_minter_proxy-TokenMinterProxy.json' },
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -162,7 +139,8 @@ export function loadDeploymentById(id: string): DeploymentFile | null {
  * Call this once at the start of a deployment run (before deploying tokens).
  */
 export function createDeployment(params: {
-  aztecNodeUrl: string;
+  nodeUrl: string;
+  l1RpcUrl: string;
   l1ChainId: number;
   l2ChainId: number;
   aztecVersion: string;
@@ -187,7 +165,8 @@ export function createDeployment(params: {
     deployedAt: existing?.deployedAt ?? new Date().toISOString(),
     network: {
       name: params.networkName,
-      aztecNodeUrl: params.aztecNodeUrl,
+      nodeUrl: params.nodeUrl,
+      l1RpcUrl: '', // not saved — frontend uses NEXT_PUBLIC_ETHEREUM_RPC_URL env var
       l1ChainId: params.l1ChainId,
       l2ChainId: params.l2ChainId,
       aztecVersion: params.aztecVersion,
@@ -197,6 +176,10 @@ export function createDeployment(params: {
     nodeInfo: params.nodeInfo,
     sponsoredFeeAddress: params.sponsoredFeeAddress,
     tokens: existingTokens,
+    // Preserve fuel swap infra addresses across re-runs
+    ...(existing?.uniswapFuelSwapAddress && { uniswapFuelSwapAddress: existing.uniswapFuelSwapAddress }),
+    ...(existing?.swapBridgeRouterAddress && { swapBridgeRouterAddress: existing.swapBridgeRouterAddress }),
+    ...(existing?.bridgedFpcAddress && { bridgedFpcAddress: existing.bridgedFpcAddress }),
   };
 
   writeJson(filePath, deployment);
@@ -254,31 +237,6 @@ export function saveTokenToDeployment(token: DeployedToken, deploymentId?: strin
 }
 
 /**
- * Save BridgeAndFuel / MockFuelSwap addresses to the active deployment.
- */
-export function saveFuelInfraToDeployment(params: {
-  bridgeAndFuelAddress: string;
-  mockFuelSwapAddress: string;
-}, deploymentId?: string): void {
-  const id = deploymentId ?? loadRegistry()?.activeDeploymentId;
-  if (!id) throw new Error('No active deployment to save fuel infra to');
-
-  const registry = loadRegistry();
-  const entry = registry?.deployments.find(d => d.id === id);
-  if (!entry) throw new Error(`Deployment ${id} not found in registry`);
-
-  const filePath = join(DEPLOYMENTS_DIR, entry.file);
-  const deployment = readJson<DeploymentFile>(filePath);
-  if (!deployment) throw new Error(`Deployment file not found: ${filePath}`);
-
-  deployment.bridgeAndFuelAddress = params.bridgeAndFuelAddress;
-  deployment.mockFuelSwapAddress = params.mockFuelSwapAddress;
-
-  writeJson(filePath, deployment);
-  console.log(`✅ Saved fuel infra to deployment ${id}`);
-}
-
-/**
  * Load existing tokens from the active deployment (for skip-if-deployed checks).
  */
 export function loadExistingTokens(): DeployedToken[] {
@@ -287,83 +245,65 @@ export function loadExistingTokens(): DeployedToken[] {
 }
 
 /**
- * Copy all deployment data, contract ABIs, and Aztec artifacts to the SDK.
- *
- * - Deployments: bundles all deployment files into packages/sdk/src/deployments.json
- * - L1 ABIs (Forge): extracts `abi` array, strips `internalType` fields
- * - Aztec artifacts (Noir): copies full artifact JSON as-is
- *
- * Call this at the end of a deployment run.
+ * Bundle all deployments + registry into a single JSON for the frontend.
+ * Format: { activeDeploymentId, deployments: DeploymentFile[] }
  */
-export function copyToSdk(): void {
-  // ── Deployments ──
+export function copyToFrontend(): void {
   const registry = loadRegistry();
   if (!registry || registry.deployments.length === 0) {
     console.warn('⚠️  No deployments to copy');
-  } else {
-    const allDeployments: DeploymentFile[] = [];
-    for (const entry of registry.deployments) {
-      const deployment = readJson<DeploymentFile>(join(DEPLOYMENTS_DIR, entry.file));
-      if (deployment) allDeployments.push(deployment);
-    }
-
-    const bundle = {
-      activeDeploymentId: registry.activeDeploymentId,
-      deployments: allDeployments,
-    };
-
-    writeJson(SDK_DEPLOYMENTS, bundle);
-    console.log(`📋 Synced ${allDeployments.length} deployment(s) to SDK: ${SDK_DEPLOYMENTS}`);
+    return;
   }
 
-  // ── L1 Forge ABIs ──
-  ensureDir(SDK_CONTRACTS_DIR);
-  ensureDir(SDK_ABIS_DIR);
-  ensureDir(SDK_ARTIFACTS_DIR);
+  const allDeployments: DeploymentFile[] = [];
+  for (const entry of registry.deployments) {
+    const deployment = readJson<DeploymentFile>(join(DEPLOYMENTS_DIR, entry.file));
+    if (deployment) allDeployments.push(deployment);
+  }
 
-  // Strip internalType fields — Solidity compiler metadata, not needed at runtime
-  const strip = (obj: unknown): unknown => {
-    if (Array.isArray(obj)) return obj.map(strip);
-    if (obj && typeof obj === 'object') {
-      const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-        if (k !== 'internalType') out[k] = strip(v);
-      }
-      return out;
-    }
-    return obj;
+  const bundle = {
+    activeDeploymentId: registry.activeDeploymentId,
+    deployments: allDeployments,
   };
 
-  for (const { src, dest } of L1_ABI_SOURCES) {
-    if (!existsSync(src)) {
-      console.warn(`⚠️  L1 ABI source not found (run forge build?): ${src}`);
-      continue;
+  writeJson(FRONTEND_DEPLOYMENTS, bundle);
+  console.log(`📋 Synced ${allDeployments.length} deployment(s) to frontend: ${FRONTEND_DEPLOYMENTS}`);
+
+  // Sync contract artifacts to frontend
+  ensureDir(FRONTEND_ARTIFACTS_DIR);
+  for (const { src, dest } of ARTIFACT_SOURCES) {
+    if (existsSync(src)) {
+      copyFileSync(src, join(FRONTEND_ARTIFACTS_DIR, dest));
+      console.log(`📦 Synced artifact: ${dest}`);
+    } else {
+      console.warn(`⚠️  Artifact not found, skipping: ${src}`);
     }
-
-    const raw = JSON.parse(readFileSync(src, 'utf8'));
-    const abi = raw.abi;
-    if (!abi) {
-      console.warn(`⚠️  No "abi" key in: ${src}`);
-      continue;
-    }
-
-    writeJson(dest, strip(abi));
-    console.log(`✅ Synced L1 ABI: ${src} → ${dest}`);
-  }
-
-  // ── Aztec (Noir) artifacts ──
-  for (const { src, dest } of AZTEC_ARTIFACT_SOURCES) {
-    if (!existsSync(src)) {
-      console.warn(`⚠️  Aztec artifact not found (run aztec codegen?): ${src}`);
-      continue;
-    }
-
-    // Copy as-is — Noir artifacts are consumed whole by the Aztec SDK
-    const content = readFileSync(src, 'utf8');
-    writeFileSync(dest, content, 'utf8');
-    console.log(`✅ Synced Aztec artifact: ${src} → ${dest}`);
   }
 }
 
-/** @deprecated Use copyToSdk() instead */
-export const copyToFrontend = copyToSdk;
+/**
+ * Save fuel swap infrastructure addresses to the active deployment.
+ * These contracts are deployed via Forge scripts (not the TS deployer):
+ *   - UniswapFuelSwap: Uniswap V4 swap contract for token→FeeJuice
+ *   - SwapBridgeRouter: Permit2-enabled bridge + fuel router
+ *   - BridgedFPC: L2 private fee payment contract
+ */
+export function saveFuelSwapInfraToDeployment(params: {
+  uniswapFuelSwapAddress?: string;
+  swapBridgeRouterAddress?: string;
+  bridgedFpcAddress?: string;
+}, deploymentId?: string): void {
+  const registry = loadRegistry();
+  if (!registry) throw new Error('No registry found');
+  const id = deploymentId ?? registry.activeDeploymentId;
+  const deployment = loadDeploymentById(id);
+  if (!deployment) throw new Error(`Deployment ${id} not found`);
+
+  if (params.uniswapFuelSwapAddress) deployment.uniswapFuelSwapAddress = params.uniswapFuelSwapAddress;
+  if (params.swapBridgeRouterAddress) deployment.swapBridgeRouterAddress = params.swapBridgeRouterAddress;
+  if (params.bridgedFpcAddress) deployment.bridgedFpcAddress = params.bridgedFpcAddress;
+
+  const filePath = join(DEPLOYMENTS_DIR, `${id}.json`);
+  writeJson(filePath, deployment);
+  console.log(`✅ Saved fuel swap infra to deployment ${id}`);
+}

@@ -26,43 +26,65 @@ export function verifyEncryptionDomain(): void {
   )
 }
 
-export const truncateDecimals = (
-  value: number | string,
-  decimals = 6
-): number => {
+export const truncateDecimals = (value: number | string, decimals = 6): number => {
   const [integerPart, decimalPart] = value.toString().split('.')
 
-  return parseFloat(
-    `${integerPart}.${decimalPart?.slice(0, decimals) || '0000'}`
-  )
+  return parseFloat(`${integerPart}.${decimalPart?.slice(0, decimals) || '0000'}`)
 }
 
-export const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+export const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Extract a human-readable error message from any thrown value.
+ * Handles Error instances, wallet provider objects (plain { message, code } objects),
+ * and falls back to String() for primitives.
+ */
+export function extractErrorMessage(error: unknown, fallback = 'Unknown error'): string {
+  if (error instanceof Error) return error.message
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as { message: unknown }).message === 'string'
+  ) {
+    return (error as { message: string }).message
+  }
+  if (typeof error === 'string') return error
+  return fallback
+}
 
 /**
  * Serialize Aztec NodeInfo to a plain JSON-serializable object for storage/export.
  * Converts address-like values (EthAddress, etc.) to string.
  */
-export function serializeNodeInfo(nodeInfo: {
-  nodeVersion?: string
-  l1ChainId?: number
-  rollupVersion?: number
-  enr?: string
-  l1ContractAddresses?: Record<string, unknown>
-  protocolContractAddresses?: Record<string, unknown>
-} | null | undefined): Record<string, unknown> | null {
+export function serializeNodeInfo(
+  nodeInfo:
+    | {
+        nodeVersion?: string
+        l1ChainId?: number
+        rollupVersion?: number
+        enr?: string
+        l1ContractAddresses?: Record<string, unknown>
+        protocolContractAddresses?: Record<string, unknown>
+      }
+    | null
+    | undefined,
+): Record<string, unknown> | null {
   if (nodeInfo == null) return null
   const toPlain = (obj: unknown): unknown => {
     if (obj == null) return obj
-    if (typeof obj === 'object' && obj !== null && 'toString' in obj && typeof (obj as { toString: () => string }).toString === 'function') {
+    if (
+      typeof obj === 'object' &&
+      obj !== null &&
+      'toString' in obj &&
+      typeof (obj as { toString: () => string }).toString === 'function'
+    ) {
       const s = (obj as { toString: () => string }).toString()
       if (s && s !== '[object Object]') return s
     }
     if (Array.isArray(obj)) return obj.map(toPlain)
     if (typeof obj === 'object' && obj !== null) {
-      return Object.fromEntries(
-        Object.entries(obj).map(([k, v]) => [k, toPlain(v)])
-      )
+      return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, toPlain(v)]))
     }
     return obj
   }
@@ -71,8 +93,14 @@ export function serializeNodeInfo(nodeInfo: {
     l1ChainId: nodeInfo.l1ChainId,
     rollupVersion: nodeInfo.rollupVersion,
     enr: nodeInfo.enr,
-    l1ContractAddresses: nodeInfo.l1ContractAddresses != null ? toPlain(nodeInfo.l1ContractAddresses) as Record<string, unknown> : undefined,
-    protocolContractAddresses: nodeInfo.protocolContractAddresses != null ? toPlain(nodeInfo.protocolContractAddresses) as Record<string, unknown> : undefined,
+    l1ContractAddresses:
+      nodeInfo.l1ContractAddresses != null
+        ? (toPlain(nodeInfo.l1ContractAddresses) as Record<string, unknown>)
+        : undefined,
+    protocolContractAddresses:
+      nodeInfo.protocolContractAddresses != null
+        ? (toPlain(nodeInfo.protocolContractAddresses) as Record<string, unknown>)
+        : undefined,
   } as Record<string, unknown>
 }
 
@@ -165,7 +193,8 @@ export const exportClaimData = (claimData: any) => {
   const exportData = {
     type: BridgeDirection.L1_TO_L2,
     timestamp: new Date().toISOString(),
-    warning: '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
+    warning:
+      '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
     data: {
       id: claimData.id,
       claimSecretHash: claimData.claimSecretHash,
@@ -184,6 +213,12 @@ export const exportClaimData = (claimData: any) => {
       nodeInfo: claimData.nodeInfo ?? undefined,
       isPrivacyModeEnabled: claimData.isPrivacyModeEnabled,
       status: claimData.status,
+      // Contract snapshot (required for manual recovery)
+      portalAddressL1: claimData.portalAddressL1 ?? undefined,
+      bridgeAddressL2: claimData.bridgeAddressL2 ?? undefined,
+      tokenAddressL1: claimData.tokenAddressL1 ?? undefined,
+      tokenAddressL2: claimData.tokenAddressL2 ?? undefined,
+      // Fuel recovery fields
       fuelMessageHash: claimData.fuelMessageHash ?? undefined,
       fuelMessageLeafIndex: claimData.fuelMessageLeafIndex ?? undefined,
       fuelAmount: claimData.fuelAmount ?? undefined,
@@ -202,26 +237,30 @@ export const exportWithdrawalData = (withdrawalData: any) => {
   const exportData = {
     type: BridgeDirection.L2_TO_L1,
     timestamp: new Date().toISOString(),
-    warning: '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
+    warning:
+      '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
     data: {
       encryptedCiphertext: withdrawalData.encryptedCiphertext,
       encryptedIv: withdrawalData.encryptedIv,
       encryptedTag: withdrawalData.encryptedTag,
       keyDerivationDomain: withdrawalData.keyDerivationDomain,
       l2TxHash: withdrawalData.l2TxHash,
-      l2BlockNumber:
-        withdrawalData.l2BlockNumber ??
-        withdrawalData.l2TxReceipt?.blockNumber,
+      l2BlockNumber: withdrawalData.l2BlockNumber ?? withdrawalData.l2TxReceipt?.blockNumber,
       l2BlockNumberBeforeTx: withdrawalData.l2BlockNumberBeforeTx ?? undefined,
       nodeInfo: withdrawalData.nodeInfo ?? undefined,
-      l2ToL1MessageIndex:
-        withdrawalData.l2ToL1MessageIndex ?? withdrawalData.leafIndex,
+      l2ToL1MessageIndex: withdrawalData.l2ToL1MessageIndex ?? withdrawalData.leafIndex,
       siblingPath: withdrawalData.siblingPath,
       amount: withdrawalData.amount,
       l1Address: withdrawalData.l1Address,
       l2Address: withdrawalData.l2Address,
-      l2BridgeAddress: withdrawalData.l2BridgeAddress,
+      bridgeAddressL2: withdrawalData.bridgeAddressL2 ?? withdrawalData.l2BridgeAddress,
+      recipientL1Address: withdrawalData.recipientL1Address ?? withdrawalData.l1Address,
       status: withdrawalData.status,
+      // Contract & version snapshot (required for manual recovery)
+      portalAddressL1: withdrawalData.portalAddressL1 ?? undefined,
+      rollupVersion: withdrawalData.rollupVersion ?? undefined,
+      chainIdL1: withdrawalData.chainIdL1 ?? undefined,
+      l1RollupAddress: withdrawalData.l1RollupAddress ?? undefined,
     },
   }
 

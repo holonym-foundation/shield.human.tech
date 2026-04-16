@@ -37,7 +37,6 @@ pub contract TokenBridge {
     #[derive(Deserialize, Serialize)]
     pub struct CleanHandsData {
         pub nonce: Field,
-        pub action_id: Field,
         pub signature: [u8; 64],
     }
 
@@ -64,6 +63,7 @@ pub contract TokenBridge {
         // clean hands and passport verification vars
         human_id_attester_pubkey: DelayedPublicMutable<GrumpkinPubKey, 600, Context>,
         clean_hands_circuit_id: DelayedPublicMutable<Field, 600, Context>,
+        clean_hands_action_id: DelayedPublicMutable<Field, 600, Context>,
         passport_signer_pubkey: DelayedPublicMutable<GrumpkinPubKey, 600, Context>,
         // Mapping: user address => nonce => consumed status
         clean_hands_nonces: Map<AztecAddress, Map<Field, PublicMutable<bool, Context>, Context>, Context>,
@@ -80,6 +80,7 @@ pub contract TokenBridge {
         human_id_attester_x: Field,
         human_id_attester_y: Field,
         circuit_id: Field,
+        action_id: Field,
         passport_signer_x: Field,
         passport_signer_y: Field,
     ) {
@@ -92,6 +93,7 @@ pub contract TokenBridge {
             GrumpkinPubKey { x: human_id_attester_x, y: human_id_attester_y },
         );
         self.storage.clean_hands_circuit_id.schedule_value_change(circuit_id);
+        self.storage.clean_hands_action_id.schedule_value_change(action_id);
         // Basic on-curve check: y^2 = x^3 - 17 (Grumpkin)
         assert(passport_signer_y * passport_signer_y == passport_signer_x * passport_signer_x * passport_signer_x - 17, "passport pubkey not on Grumpkin curve");
         self.storage.passport_signer_pubkey.schedule_value_change(
@@ -105,6 +107,7 @@ pub contract TokenBridge {
         attester_x: Field,
         attester_y: Field,
         circuit_id: Field,
+        action_id: Field,
         passport_x: Field,
         passport_y: Field,
     ) {
@@ -115,6 +118,7 @@ pub contract TokenBridge {
             GrumpkinPubKey { x: attester_x, y: attester_y },
         );
         self.storage.clean_hands_circuit_id.schedule_value_change(circuit_id);
+        self.storage.clean_hands_action_id.schedule_value_change(action_id);
         // Basic on-curve check: y^2 = x^3 - 17 (Grumpkin)
         assert(passport_y * passport_y == passport_x * passport_x * passport_x - 17, "passport pubkey not on Grumpkin curve");
         self.storage.passport_signer_pubkey.schedule_value_change(
@@ -348,11 +352,12 @@ pub contract TokenBridge {
         if has_clean_hands_sig {
             let attester_pubkey = self.storage.human_id_attester_pubkey.get_current_value();
             let circuit_id = self.storage.clean_hands_circuit_id.get_current_value();
+            let action_id = self.storage.clean_hands_action_id.get_current_value();
 
             is_clean_hands = verify_clean_hands_signature(
                 attester_pubkey,
                 circuit_id,
-                clean_hands.action_id,
+                action_id,
                 clean_hands.nonce,
                 sender,
                 clean_hands.signature,

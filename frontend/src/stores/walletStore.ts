@@ -1,5 +1,5 @@
-import { L1_CHAIN_ID } from '@/config'
-import { waapConfig } from '@/config/l1.config'
+import { L1_CHAIN_ID, L1_RPC_URL } from '@/config'
+import { networkConfig, waapConfig } from '@/config/l1.config'
 import { showToast } from '@/hooks/useToast'
 import {
   detectWalletByProvider,
@@ -11,6 +11,7 @@ import {
   handleWaapError,
 } from '@/stores/waapWalletHelpers'
 import { AztecLoginMethod, LOGIN_METHODS, WaapLoginMethod, WalletType } from '@/types/wallet'
+import { extractErrorMessage } from '@/utils'
 import { logError, logInfo } from '@/utils/datadog'
 import {
   discoverWallets,
@@ -42,16 +43,14 @@ const AZTEC_WALLET_KEY = 'aztecLoginMethod'
 const DISCOVERY_TIMEOUT_MS = 60000
 const DISCONNECT_GRACE_MS = 1000
 
-
 export type WalletConnectionPhase =
   | 'idle'
   | 'discovering'
   | 'selecting'
   | 'verifying'
-  | 'requesting'       // requestCapabilities in progress
-  | 'account-select'   // user picks which account
+  | 'requesting' // requestCapabilities in progress
+  | 'account-select' // user picks which account
   | 'connected'
-
 
 interface WalletState {
   showWalletModal: boolean
@@ -152,7 +151,6 @@ interface WalletState {
   reset: () => void
 }
 
-
 const getInitialWalletType = (): AztecLoginMethod | null => {
   if (typeof window === 'undefined') return null
   const stored = localStorage.getItem(AZTEC_WALLET_KEY)
@@ -170,15 +168,12 @@ export const WAAP_METHOD = {
   eth_call: 'eth_call',
   eth_getBalance: 'eth_getBalance',
   eth_getTransactionReceipt: 'eth_getTransactionReceipt',
+  eth_signTypedData_v4: 'eth_signTypedData_v4',
 } as const
 
-export const requestWaapWallet = async (
-  method: string,
-  params?: any[]
-) => {
+export const requestWaapWallet = async (method: string, params?: any[]) => {
   return window.waap.request({ method, params })
 }
-
 
 const initialState = {
   // UI State
@@ -219,13 +214,11 @@ const initialState = {
   isWaapInitialized: false,
 }
 
-
 const walletStore = create<WalletState>((set, get) => ({
   ...initialState,
 
   setShowWalletModal: (show) => set({ showWalletModal: show }),
   setShowWalletInstallPrompt: (show) => set({ showWalletInstallPrompt: show }),
-
 
   // State management
   setAztecLoginMethod: (type) => {
@@ -239,9 +232,7 @@ const walletStore = create<WalletState>((set, get) => ({
 
   setAztecState: (state) => {
     // Get wallet type from localStorage if not already set
-    const storedWalletType = localStorage.getItem(
-      AZTEC_WALLET_KEY
-    ) as AztecLoginMethod | null
+    const storedWalletType = localStorage.getItem(AZTEC_WALLET_KEY) as AztecLoginMethod | null
 
     set({
       aztecAddress: state.address,
@@ -259,7 +250,11 @@ const walletStore = create<WalletState>((set, get) => ({
 
     // Cancel any stale session
     if (activeDiscoverySession) {
-      try { activeDiscoverySession.cancel() } catch { /* ignore */ }
+      try {
+        activeDiscoverySession.cancel()
+      } catch {
+        /* ignore */
+      }
       activeDiscoverySession = null
     }
 
@@ -270,7 +265,6 @@ const walletStore = create<WalletState>((set, get) => ({
       discoveredWallets: [],
       isAztecConnecting: true,
     })
-
     logInfo('Aztec wallet discovery started', {
       walletType: WalletType.AZTEC,
       loginMethod: 'wallet-sdk',
@@ -300,34 +294,42 @@ const walletStore = create<WalletState>((set, get) => ({
     // selectWallet cancels the session once the user picks a wallet.
     // We only need to handle the "no wallets found" timeout case.
     const session = activeDiscoverySession
-    session.done.catch(() => { /* cancelled or timed out — that's fine */ }).finally(() => {
-      // Only clean up if this is still the active session (not replaced by a new one)
-      if (activeDiscoverySession === session) {
-        isDiscoveryInProgress = false
-        activeDiscoverySession = null
-      }
+    session.done
+      .catch(() => {
+        /* cancelled or timed out — that's fine */
+      })
+      .finally(() => {
+        // Only clean up if this is still the active session (not replaced by a new one)
+        if (activeDiscoverySession === session) {
+          isDiscoveryInProgress = false
+          activeDiscoverySession = null
+        }
 
-      // If still in discovering/selecting phase and no wallets found, show install prompt
-      const { walletConnectionPhase, discoveredWallets } = get()
-      if (
-        (walletConnectionPhase === 'discovering' || walletConnectionPhase === 'selecting') &&
-        discoveredWallets.length === 0
-      ) {
-        set({
-          walletConnectionPhase: 'idle',
-          isAztecConnecting: false,
-          showWalletInstallPrompt: true,
-          showWalletModal: false,
-        })
-      }
-    })
+        // If still in discovering/selecting phase and no wallets found, show install prompt
+        const { walletConnectionPhase, discoveredWallets } = get()
+        if (
+          (walletConnectionPhase === 'discovering' || walletConnectionPhase === 'selecting') &&
+          discoveredWallets.length === 0
+        ) {
+          set({
+            walletConnectionPhase: 'idle',
+            isAztecConnecting: false,
+            showWalletInstallPrompt: true,
+            showWalletModal: false,
+          })
+        }
+      })
   },
 
   selectWallet: async (provider: WalletProvider) => {
     try {
       // Cancel discovery — user already picked a wallet, no need to wait
       if (activeDiscoverySession) {
-        try { activeDiscoverySession.cancel() } catch { /* ignore */ }
+        try {
+          activeDiscoverySession.cancel()
+        } catch {
+          /* ignore */
+        }
         activeDiscoverySession = null
         isDiscoveryInProgress = false
       }
@@ -344,7 +346,7 @@ const walletStore = create<WalletState>((set, get) => ({
         sdkProvider: provider,
       })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       logError('Failed to establish secure channel', {
         walletType: WalletType.AZTEC,
         loginMethod: 'wallet-sdk',
@@ -387,12 +389,19 @@ const walletStore = create<WalletState>((set, get) => ({
 
     // Show loading state while confirming
     set({ isAztecConnecting: true })
-
     try {
-      // Await confirm() directly — no timeout. The timeout interferes with
-      // the SDK's internal channel state. User can cancel manually if needed.
-      const wallet = await pendingConnection.confirm()
-
+      // Generous timeout — only fires when the connection is truly stuck.
+      // Short timeouts interfere with the SDK's internal channel state,
+      // but 60s is well above normal connection time.
+      const wallet = await Promise.race([
+        pendingConnection.confirm(),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Wallet connection timed out after 60 seconds. Please try again.')),
+            60_000,
+          ),
+        ),
+      ])
       // Transition to 'requesting' phase while we request capabilities
       set({
         walletConnectionPhase: 'requesting',
@@ -406,13 +415,25 @@ const walletStore = create<WalletState>((set, get) => ({
       // Fall back to getAccounts if requestCapabilities is not supported.
       let rawAccounts: Array<{ item?: unknown; address?: unknown; alias?: string } | unknown> = []
       try {
-        const capabilities = await wallet.requestCapabilities(buildCapabilityManifest())
-        const accountsCap = capabilities.granted.find(
-          (c: { type: string }) => c.type === 'accounts'
-        ) as { type: 'accounts'; accounts: Array<{ item?: unknown; address?: unknown; alias?: string }> } | undefined
+        const capabilities = await Promise.race([
+          wallet.requestCapabilities(buildCapabilityManifest()),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('requestCapabilities timed out')), 15_000),
+          ),
+        ])
+        const accountsCap = capabilities.granted.find((c: { type: string }) => c.type === 'accounts') as
+          | {
+              type: 'accounts'
+              accounts: Array<{
+                item?: unknown
+                address?: unknown
+                alias?: string
+              }>
+            }
+          | undefined
         rawAccounts = accountsCap?.accounts ?? []
       } catch (capErr) {
-        console.warn('[walletStore] requestCapabilities failed, falling back to getAccounts:', capErr)
+        console.warn('[walletStore] requestCapabilities failed/timed out, falling back to getAccounts:', capErr)
       }
 
       // Fall back to getAccounts if requestCapabilities didn't yield accounts
@@ -429,13 +450,14 @@ const walletStore = create<WalletState>((set, get) => ({
       const parsedAccounts = rawAccounts.map((raw) => {
         const obj = raw as Record<string, unknown> | undefined
         const aztecAddr = obj?.item ?? obj?.address ?? raw
-        const address = typeof aztecAddr === 'string'
-          ? aztecAddr
-          : typeof (aztecAddr as { toString?: () => string })?.toString === 'function'
-            ? (aztecAddr as { toString: () => string }).toString()
-            : String(aztecAddr)
+        const address =
+          typeof aztecAddr === 'string'
+            ? aztecAddr
+            : typeof (aztecAddr as { toString?: () => string })?.toString === 'function'
+              ? (aztecAddr as { toString: () => string }).toString()
+              : String(aztecAddr)
         // Extract alias from Aliased<T> wrapper or use empty string
-        const rawAlias = (typeof obj?.alias === 'string' ? obj.alias.trim() : '')
+        const rawAlias = typeof obj?.alias === 'string' ? obj.alias.trim() : ''
         // Treat generic placeholder names as empty so the UI falls back to truncated address
         const alias = rawAlias && rawAlias.toLowerCase() !== 'account' ? rawAlias : ''
         return { alias, address }
@@ -469,7 +491,7 @@ const walletStore = create<WalletState>((set, get) => ({
         set({ walletConnectionPhase: 'account-select' })
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       console.error('[walletStore] confirmWalletConnection failed:', errorMessage)
       logError('Failed to confirm wallet connection', {
         walletType: WalletType.AZTEC,
@@ -510,7 +532,11 @@ const walletStore = create<WalletState>((set, get) => ({
     }
     // Clean up module-level state
     if (activeDiscoverySession) {
-      try { activeDiscoverySession.cancel() } catch { /* ignore */ }
+      try {
+        activeDiscoverySession.cancel()
+      } catch {
+        /* ignore */
+      }
       activeDiscoverySession = null
     }
     isDiscoveryInProgress = false
@@ -570,7 +596,7 @@ const walletStore = create<WalletState>((set, get) => ({
         userAction: 'aztec_wallet_connection_success',
       })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       console.error('[walletStore] selectAccount failed:', errorMessage)
       set({
         walletConnectionPhase: 'idle',
@@ -625,7 +651,7 @@ const walletStore = create<WalletState>((set, get) => ({
       // Start the wallet-sdk discovery flow
       await get().startWalletDiscovery()
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorMessage = extractErrorMessage(error)
       logError('Failed to connect Aztec wallet', {
         walletType: WalletType.AZTEC,
         loginMethod: 'wallet-sdk',
@@ -665,7 +691,11 @@ const walletStore = create<WalletState>((set, get) => ({
 
       // Clean up module-level state
       if (activeDiscoverySession) {
-        try { activeDiscoverySession.cancel() } catch { /* ignore */ }
+        try {
+          activeDiscoverySession.cancel()
+        } catch {
+          /* ignore */
+        }
         activeDiscoverySession = null
       }
       isDiscoveryInProgress = false
@@ -708,13 +738,12 @@ const walletStore = create<WalletState>((set, get) => ({
         address: get().aztecAddress || '',
         chainId: null,
         userAction: 'aztec_wallet_disconnection_failure',
-        error
+        error,
       })
 
       showToast('error', `Failed to disconnect Aztec wallet: ${error.message}`)
     }
   },
-
 
   // Initialization
   initializeWaapWallet: async () => {
@@ -740,7 +769,10 @@ const walletStore = create<WalletState>((set, get) => ({
       // Set up event listeners
       window.waap.on('accountsChanged', async (accounts: string[]) => {
         const isConnected = accounts.length > 0
-        set({ waapAddress: accounts[0] as `0x${string}` || null, isWaapConnected: isConnected })
+        set({
+          waapAddress: (accounts[0] as `0x${string}`) || null,
+          isWaapConnected: isConnected,
+        })
 
         // If wallet is connected, retrieve the login method
         if (isConnected) {
@@ -781,17 +813,13 @@ const walletStore = create<WalletState>((set, get) => ({
 
       // Check if login method is 'injected' but no wallet extension is available
       if (result === LOGIN_METHODS.INJECTED && !window.ethereum) {
-        throw new Error(
-          'No Ethereum wallet extension detected. Please install MetaMask or another Ethereum wallet.'
-        )
+        throw new Error('No Ethereum wallet extension detected. Please install MetaMask or another Ethereum wallet.')
       }
 
       // For injected wallets, force account selection if multiple wallets are available
       if (result === LOGIN_METHODS.INJECTED && window.ethereum) {
         const hasMultipleWallets = discoveredProviders.length > 1
-        const hasMultipleProviders =
-          Array.isArray(window.ethereum.providers) &&
-          window.ethereum.providers.length > 1
+        const hasMultipleProviders = Array.isArray(window.ethereum.providers) && window.ethereum.providers.length > 1
 
         if (hasMultipleWallets || hasMultipleProviders) {
           try {
@@ -815,7 +843,7 @@ const walletStore = create<WalletState>((set, get) => ({
       const walletIcon = getEIP6963WalletIcon(address || '')
 
       const state = {
-        waapAddress: address as `0x${string}` || null,
+        waapAddress: (address as `0x${string}`) || null,
         waapChainId: chainId,
         isWaapConnected: !!address,
         waapError: null,
@@ -841,23 +869,12 @@ const walletStore = create<WalletState>((set, get) => ({
         handleWaapError(
           err,
           'No Ethereum wallet extension found. Please install MetaMask or another Ethereum wallet to continue.',
-          set
+          set,
         )
-      } else if (
-        errorMessage.includes('rejected') ||
-        errorMessage.includes('denied')
-      ) {
-        handleWaapError(
-          err,
-          'Ethereum wallet connection was rejected by user.',
-          set
-        )
+      } else if (errorMessage.includes('rejected') || errorMessage.includes('denied')) {
+        handleWaapError(err, 'Ethereum wallet connection was rejected by user.', set)
       } else if (errorMessage.includes('install')) {
-        handleWaapError(
-          err,
-          'Please install an Ethereum wallet extension to continue.',
-          set
-        )
+        handleWaapError(err, 'Please install an Ethereum wallet extension to continue.', set)
       } else {
         handleWaapError(err, 'Failed to connect Ethereum wallet', set)
       }
@@ -870,7 +887,7 @@ const walletStore = create<WalletState>((set, get) => ({
         address: waapAddress || '',
         chainId: waapChainId,
         userAction: 'waap_wallet_connection_failure',
-        error: err
+        error: err,
       })
 
       const errorMessageForToast = err instanceof Error ? err.message : String(err)
@@ -893,7 +910,7 @@ const walletStore = create<WalletState>((set, get) => ({
       })
 
       await window.waap.logout()
-    set({
+      set({
         waapAddress: null,
         waapChainId: null,
         isWaapConnected: false,
@@ -920,7 +937,7 @@ const walletStore = create<WalletState>((set, get) => ({
         address: waapAddress || '',
         chainId: waapChainId,
         userAction: 'waap_wallet_disconnection_failure',
-        error: err
+        error: err,
       })
       showToast('error', 'Failed to disconnect Ethereum wallet')
     }
@@ -931,13 +948,14 @@ const walletStore = create<WalletState>((set, get) => ({
     const chainIdHex = `0x${chainId.toString(16)}`
 
     try {
-      await requestWaapWallet(WAAP_METHOD.wallet_switchEthereumChain, [
-        { chainId: chainIdHex },
-      ])
+      await requestWaapWallet(WAAP_METHOD.wallet_switchEthereumChain, [{ chainId: chainIdHex }])
       set({ waapChainId: chainId })
     } catch (err: any) {
-      if (err?.code === 4902 || err?.code === -32603 ||
-          (err?.message && err.message.includes('Unrecognized chain ID'))) {
+      if (
+        err?.code === 4902 ||
+        err?.code === -32603 ||
+        (err?.message && err.message.includes('Unrecognized chain ID'))
+      ) {
         try {
           await requestWaapWallet(WAAP_METHOD.wallet_addEthereumChain, [
             {
@@ -948,8 +966,11 @@ const walletStore = create<WalletState>((set, get) => ({
                 symbol: 'ETH',
                 decimals: 18,
               },
-              rpcUrls: chainId === L1_CHAIN_ID ? [process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL || 'https://sepolia.infura.io/'] : [],
-              blockExplorerUrls: chainId === L1_CHAIN_ID ? ['https://sepolia.etherscan.io'] : [],
+              rpcUrls: chainId === L1_CHAIN_ID ? [L1_RPC_URL || 'https://sepolia.infura.io/'] : [],
+              blockExplorerUrls:
+                chainId === L1_CHAIN_ID
+                  ? [(networkConfig[L1_CHAIN_ID]?.blockExplorer ?? 'https://etherscan.io/').replace(/\/+$/, '')]
+                  : [],
             },
           ])
           set({ waapChainId: chainId })
@@ -986,7 +1007,10 @@ const walletStore = create<WalletState>((set, get) => ({
         return null
       }
 
-      set({ waapAddress: address as `0x${string}`, isWaapConnected: !!address })
+      set({
+        waapAddress: address as `0x${string}`,
+        isWaapConnected: !!address,
+      })
       return address
     } catch (err) {
       console.error('getWaapAccount: Error getting account:', err)
@@ -1002,17 +1026,10 @@ const walletStore = create<WalletState>((set, get) => ({
         throw new Error('No wallet connected')
       }
 
-      const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [
-        message,
-        waapAddress,
-      ])
+      const signature = await requestWaapWallet(WAAP_METHOD.personal_sign, [message, waapAddress])
       return signature as string
     } catch (err) {
-      return handleWaapError(
-        err,
-        'Failed to sign message with Ethereum wallet',
-        set
-      )
+      return handleWaapError(err, 'Failed to sign message with Ethereum wallet', set)
     }
   },
 
@@ -1020,8 +1037,7 @@ const walletStore = create<WalletState>((set, get) => ({
   getWaapLoginMethod: async () => {
     try {
       if (typeof window !== 'undefined' && window.waap) {
-        const loginMethod =
-          (await window.waap.getLoginMethod()) as WaapLoginMethod
+        const loginMethod = (await window.waap.getLoginMethod()) as WaapLoginMethod
 
         set({ waapLoginMethod: loginMethod })
 
@@ -1114,7 +1130,6 @@ const walletStore = create<WalletState>((set, get) => ({
       await getWaapLoginMethod()
       getWaapWalletProvider()
       getWaapWalletIcon()
-
     } catch (err) {
       console.error('Error refreshing wallet info:', err)
     }
@@ -1125,7 +1140,6 @@ const walletStore = create<WalletState>((set, get) => ({
     set(initialState)
   },
 }))
-
 
 export const useWalletStore = walletStore
 export { walletStore }

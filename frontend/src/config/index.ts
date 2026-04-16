@@ -1,13 +1,4 @@
 import { Network, Token } from '@/types/bridge'
-import {
-  ALL_DEPLOYMENTS,
-  ACTIVE_DEPLOYMENT_ID as SDK_ACTIVE_DEPLOYMENT_ID,
-  getDeployment,
-  getAztecscanUrl as sdkGetAztecscanUrl,
-  getEtherscanUrl as sdkGetEtherscanUrl,
-  type DeploymentData,
-} from '@human.tech/aztec-bridge-sdk'
-
 // -------------------------------------
 
 // Maintenance mode flag - set to true to enable maintenance overlay
@@ -18,47 +9,158 @@ export const MAINTENANCE_MESSAGE =
 
 export const MAINTENANCE_TITLE = 'Bridge Under Maintenance'
 
+// -------------------------------------
+
+// Import bundled deployments (auto-synced by deployment script)
+import deploymentsData from '@/constants/deployments.json'
+
 // ─── Deployment Selection ─────────────────────────────────────────────
 // On the server, always uses the active deployment.
 // On the client, checks localStorage for a user override.
 
-export type { DeploymentData }
+export type DeploymentData = (typeof deploymentsData.deployments)[number]
 
-export { ALL_DEPLOYMENTS }
-export const ACTIVE_DEPLOYMENT_ID = SDK_ACTIVE_DEPLOYMENT_ID
+/** All available deployments (for the version selector) */
+export const ALL_DEPLOYMENTS = deploymentsData.deployments
+export const ACTIVE_DEPLOYMENT_ID = deploymentsData.activeDeploymentId
 
 function getSelectedDeployment(): DeploymentData {
-  let selectedId = SDK_ACTIVE_DEPLOYMENT_ID
-  if (typeof window !== 'undefined') {
+  let selectedId = deploymentsData.activeDeploymentId
+  // Allow deployment override only in development (prevents localStorage manipulation
+  // from redirecting users to old/compromised contract addresses in production).
+  const isDev = process.env.NODE_ENV === 'development'
+  if (isDev && typeof window !== 'undefined') {
     try {
       const override = localStorage.getItem('selectedDeploymentId')
-      if (override && ALL_DEPLOYMENTS.some((d) => d.id === override)) {
+      if (override) {
+        console.warn('[Config] Using deployment override from localStorage:', override)
         selectedId = override
       }
     } catch {
       // Ignore localStorage errors (SSR, security restrictions)
     }
   }
-  return getDeployment(selectedId) ?? ALL_DEPLOYMENTS[0]
+  return deploymentsData.deployments.find((d) => d.id === selectedId) ?? deploymentsData.deployments[0]
 }
 
 const activeDeployment = getSelectedDeployment()
 
-// ─── Network Constants (from selected deployment) ─────────────────────
+// ─── Environment-aware Network Config ────────────────────────────────
+// Reads all RPC/node URLs from env vars. The active network is determined
+// by the deployment's l1ChainId — switch networks by changing the active
+// deployment (or NEXT_PUBLIC_AZTEC_ENV override), not by editing env var names.
+
+type AztecEnv = 'devnet' | 'testnet' | 'mainnet'
+
+import {
+  AZTEC_ENV as AZTEC_ENV_OVERRIDE,
+  L1_RPC_SEPOLIA,
+  L1_RPC_MAINNET,
+  AZTEC_NODE_DEVNET,
+  AZTEC_NODE_TESTNET,
+  AZTEC_NODE_MAINNET,
+} from './env.config'
+
+function resolveAztecEnv(): AztecEnv {
+  if (AZTEC_ENV_OVERRIDE && ['devnet', 'testnet', 'mainnet'].includes(AZTEC_ENV_OVERRIDE)) {
+    return AZTEC_ENV_OVERRIDE as AztecEnv
+  }
+  const name = activeDeployment.network.name?.toLowerCase() ?? ''
+  if (name.includes('mainnet')) return 'mainnet'
+  if (name.includes('devnet')) return 'devnet'
+  return 'testnet'
+}
+
+const AZTEC_ENV = resolveAztecEnv()
+
+const ENV_CONFIG = {
+  devnet: {
+    l1RpcUrl: L1_RPC_SEPOLIA,
+    l1ChainId: 11155111,
+    aztecNodeUrl: AZTEC_NODE_DEVNET,
+    aztecscanUrl: 'https://devnet.aztecscan.xyz',
+    aztecExplorerUrl: 'https://aztecexplorer.xyz/?network=devnet',
+    chainName: 'Aztec Devnet',
+  },
+  testnet: {
+    l1RpcUrl: L1_RPC_SEPOLIA,
+    l1ChainId: 11155111,
+    aztecNodeUrl: AZTEC_NODE_TESTNET,
+    aztecscanUrl: 'https://testnet.aztecscan.xyz',
+    aztecExplorerUrl: 'https://aztecexplorer.xyz/?network=testnet',
+    chainName: 'Aztec Testnet',
+  },
+  mainnet: {
+    l1RpcUrl: L1_RPC_MAINNET,
+    l1ChainId: 1,
+    aztecNodeUrl: AZTEC_NODE_MAINNET,
+    aztecscanUrl: 'https://aztecscan.xyz',
+    aztecExplorerUrl: 'https://aztecexplorer.xyz/?network=mainnet',
+    chainName: 'Aztec Mainnet',
+  },
+} as const
+
+const activeEnvConfig = ENV_CONFIG[AZTEC_ENV]
+
+// ─── Network Constants ───────────────────────────────────────────────
 
 export const L1_CHAIN_ID = activeDeployment.network.l1ChainId
 export const L2_CHAIN_ID = activeDeployment.network.l2ChainId
-export const L2_NODE_URL = activeDeployment.network.aztecNodeUrl
+export const L2_CHAIN_KEY = `aztec:${L2_CHAIN_ID}`
+export const L1_RPC_URL = activeEnvConfig.l1RpcUrl
+export const L2_NODE_URL = activeEnvConfig.aztecNodeUrl
 export const DEPLOYMENT_ID = activeDeployment.id
 export const ROLLUP_VERSION = activeDeployment.network.rollupVersion
+export const AZTEC_VERSION = activeDeployment.network.aztecVersion
 
-export const getAztecscanUrl = sdkGetAztecscanUrl
-export const getEtherscanUrl = sdkGetEtherscanUrl
+// L1 Aztec protocol contract addresses (from deployment snapshot)
+export const L1_CONTRACT_ADDRESSES = activeDeployment.l1ContractAddresses
 
-export const BRIDGE_AND_FUEL_ADDRESS: `0x${string}` =
-  (activeDeployment.bridgeAndFuelAddress ?? '') as `0x${string}`
-export const MOCK_FUEL_SWAP_ADDRESS: `0x${string}` =
-  (activeDeployment.mockFuelSwapAddress ?? '') as `0x${string}`
+// Explorer URLs (derived from active environment)
+export const AZTECSCAN_URL = activeEnvConfig.aztecscanUrl
+export const AZTEC_EXPLORER_URL = activeEnvConfig.aztecExplorerUrl
+
+export const AZTECSCAN_URLS: Record<number, string> = {
+  [L2_CHAIN_ID]: activeEnvConfig.aztecscanUrl,
+}
+
+export const getAztecscanUrl = (chainId: number): string => {
+  return AZTECSCAN_URLS[chainId] || activeEnvConfig.aztecscanUrl
+}
+
+export const FEE_JUICE_PORTAL_ADDRESS: `0x${string}` = (activeDeployment.nodeInfo?.l1ContractAddresses
+  ?.feeJuicePortalAddress ?? '') as `0x${string}`
+export const FEE_JUICE_ADDRESS: `0x${string}` = (activeDeployment.nodeInfo?.l1ContractAddresses?.feeJuiceAddress ??
+  '') as `0x${string}`
+export const BRIDGED_FPC_ADDRESS: string = ((activeDeployment as any).bridgedFpcAddress ?? '') as string
+
+// ─── Permit2 + SwapBridgeRouter ──────────────────────────────────────
+export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
+export const SWAP_BRIDGE_ROUTER_ADDRESS: `0x${string}` = ((activeDeployment as any).swapBridgeRouterAddress ??
+  '') as `0x${string}`
+
+// ─── Uniswap V4 Sepolia Constants ───────────────────────────────────
+export const V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as const
+export const V4_QUOTER = '0x61b3f2011a92d183c7dbadbda940a7555ccf9227' as const
+export const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as const
+export const NATIVE_ETH = '0x0000000000000000000000000000000000000000' as const
+
+// UniswapFuelSwap — deployed swap contract (set after running DeployUniswapFuelSwap)
+export const UNISWAP_FUEL_SWAP_ADDRESS: `0x${string}` = ((activeDeployment as any).uniswapFuelSwapAddress ??
+  '') as `0x${string}`
+
+// Pool parameters for route building
+// Intermediate hops (e.g. USDC/WETH) — 0.3% fee, 60 tick spacing
+export const INTERMEDIATE_POOL_FEE = 3000 as const
+export const INTERMEDIATE_POOL_TICK_SPACING = 60 as const
+// Final hop (ETH/AZTEC pool) — 0.3% fee, 60 tick spacing
+export const FEE_POOL_FEE = 3000 as const
+export const FEE_POOL_TICK_SPACING = 60 as const
+// Native ETH pool: mainnet uses native ETH (address(0)), Sepolia too
+export const FEE_POOL_USES_NATIVE_ETH = true as const
+// Direct pool (e.g. USDC/FeeJuice) — for smart routing when a direct path exists
+export const DIRECT_POOL_FEE = 3000 as const
+export const DIRECT_POOL_TICK_SPACING = 60 as const
 
 // Non-token protocol addresses (SBT)
 export const ADDRESS = {
@@ -71,7 +173,7 @@ export const ADDRESS = {
   },
   [L2_CHAIN_ID]: {
     CHAIN_ID: L2_CHAIN_ID,
-    CHAIN_NAME: 'Aztec Devnet',
+    CHAIN_NAME: activeEnvConfig.chainName,
     L2: {},
   },
 } as Record<number, any>
@@ -113,7 +215,7 @@ export const L1_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
   l2TokenContract: t.l2TokenContract,
   l1PortalContract: t.l1PortalContract,
   l2BridgeContract: t.l2BridgeContract,
-  l2ProxyContract: t.l2ProxyContract,
+  l2ProxyContract: (t as any).l2ProxyContract ?? '',
   feeAssetHandler: t.feeAssetHandler,
   pairedSymbol: `c${t.symbol}`,
 }))
@@ -129,7 +231,7 @@ export const L2_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
   l2TokenContract: t.l2TokenContract,
   l1PortalContract: t.l1PortalContract,
   l2BridgeContract: t.l2BridgeContract,
-  l2ProxyContract: t.l2ProxyContract,
+  l2ProxyContract: (t as any).l2ProxyContract ?? '',
   feeAssetHandler: t.feeAssetHandler,
   pairedSymbol: t.symbol,
 }))
@@ -159,7 +261,7 @@ export function getTokenContracts(symbol: string) {
   }
 }
 
-// ─── Token Metadata (derived from first token) ──
+// ─── Token Metadata (derived from first token for backward compat) ──
 
 export const L1_TOKEN_METADATA = {
   name: activeDeployment.tokens[0]?.symbol || 'USDC',

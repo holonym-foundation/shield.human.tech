@@ -2,12 +2,11 @@ import { parseUnits } from 'viem'
 import { InitWaaPOptions } from '@human.tech/waap-sdk'
 import { logo } from './logo'
 import { L1_CHAIN_ID } from '@/config'
+import { WALLETCONNECT_PROJECT_ID } from '@/config/env.config'
 
 export const useStagingWaap = false
 
-export const waapUrl = useStagingWaap
-  ? 'https://staging-waap.xyz'
-  : 'https://waap.xyz'
+export const waapUrl = useStagingWaap ? 'https://staging-waap.xyz' : 'https://waap.xyz'
 
 export const waapConfig: InitWaaPOptions = {
   config: {
@@ -21,8 +20,7 @@ export const waapConfig: InitWaaPOptions = {
     entryTitle: 'Welcome Human',
     logo: logo,
   },
-  walletConnectProjectId:
-    process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '',
+  walletConnectProjectId: WALLETCONNECT_PROJECT_ID,
 }
 
 // Legacy exports for backward compatibility

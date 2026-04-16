@@ -1,49 +1,61 @@
 'use client'
 
-import type { BridgeOperation, BridgeOperationStatus } from '@human.tech/aztec-bridge-sdk'
-import { BRIDGE_STATUS_INFO } from '@human.tech/aztec-bridge-sdk'
+import React from 'react'
+import type { BridgeOperation } from '@/hooks/useBridgeOperations'
 import { formatUnits } from 'viem'
 import { L1_TOKEN_METADATA } from '@/config'
-import { isResumable } from '@/utils/resumability'
-import { exportToJsonFile } from '@/utils'
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  deposited: 'bg-blue-100 text-blue-800',
-  claimed: 'bg-purple-100 text-purple-800',
-  submitted: 'bg-blue-100 text-blue-800',
-  ready: 'bg-indigo-100 text-indigo-800',
-  pending_finalize: 'bg-indigo-100 text-indigo-800',
-  completed: 'bg-green-100 text-green-800',
-  failed: 'bg-red-100 text-red-800',
+const STATUS_STYLES: Record<string, { label: string; className: string }> = {
+  pending: { label: 'Pending', className: 'bg-yellow-100 text-yellow-800' },
+  deposited: { label: 'Deposited', className: 'bg-blue-100 text-blue-800' },
+  claimed: { label: 'Claimed', className: 'bg-purple-100 text-purple-800' },
+  submitted: { label: 'Submitted', className: 'bg-blue-100 text-blue-800' },
+  ready: { label: 'Ready', className: 'bg-indigo-100 text-indigo-800' },
+  pending_finalize: { label: 'Finalizing', className: 'bg-indigo-100 text-indigo-800' },
+  completed: { label: 'Completed', className: 'bg-green-100 text-green-800' },
+  failed: { label: 'Failed', className: 'bg-red-100 text-red-800' },
 }
 
-function formatErrorMessage(msg: unknown): string {
-  if (!msg) return ''
-  if (typeof msg === 'string') {
-    if (msg === '[object Object]') return 'Operation failed'
-    return msg
+function StatusBadge({ status }: { status: string }) {
+  const style = STATUS_STYLES[status] ?? {
+    label: status,
+    className: 'bg-gray-100 text-gray-800',
   }
-  if (msg instanceof Error) return msg.message
-  if (typeof msg === 'object') {
-    const obj = msg as Record<string, unknown>
-    if (typeof obj.message === 'string') return obj.message
-    if (typeof obj.error === 'string') return obj.error
-    return JSON.stringify(msg)
-  }
-  return String(msg)
+  return (
+    <span
+      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.className}`}>
+      {style.label}
+    </span>
+  )
 }
 
-function exportOperationData(operation: BridgeOperation) {
-  const direction = operation.direction === 'L1_TO_L2' ? 'deposit' : 'withdrawal'
-  const exportData = {
-    type: operation.direction,
-    timestamp: new Date().toISOString(),
-    warning: 'Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
-    data: operation,
+/** True for statuses where the user's funds are locked and can be resumed */
+function isResumable(op: BridgeOperation): boolean {
+  if (op.direction === 'L1_TO_L2') {
+    // L1→L2: resumable if deposited/claimed AND we have at least one recovery path:
+    // - Best: messageHash + messageLeafIndex already stored
+    // - Fallback: l1TxHash → scan receipt for portal events
+    // - Last resort: l1BlockNumberBeforeTx → scan L1 blocks for portal events
+    // Also allow 'pending' if l1TxHash exists (L1 tx mined but status PATCH failed)
+    const resumableStatus =
+      op.status === 'deposited' ||
+      op.status === 'claimed' ||
+      (op.status === 'pending' && !!op.l1TxHash)
+    return (
+      resumableStatus &&
+      (!!op.messageHash || !!op.l1TxHash || !!op.l1BlockNumberBeforeTx)
+    )
   }
-  const filename = `aztec-bridge-${direction}-${operation.id}-${Date.now()}.json`
-  exportToJsonFile(exportData, filename)
+  if (op.direction === 'L2_TO_L1') {
+    // L2→L1: resumable when tokens are burned on L2 but L1 withdraw isn't complete.
+    // leafIndex/siblingPath can be recomputed from l2BlockNumber if missing.
+    return (
+      op.status === 'submitted' ||
+      op.status === 'ready' ||
+      op.status === 'pending_finalize'
+    )
+  }
+  return false
 }
 
 interface ActivityCardProps {
@@ -57,8 +69,10 @@ export default function ActivityCard({
   onResume,
   resuming,
 }: ActivityCardProps) {
+  const decimals = operation.tokenDecimalsL1 ?? L1_TOKEN_METADATA.decimals
+  const tokenSymbol = operation.tokenSymbol ?? operation.tokenSymbolL1 ?? L1_TOKEN_METADATA.symbol
   const amount = operation.amountDisplayL1
-    ?? (operation.amountL1 ? formatUnits(BigInt(operation.amountL1), L1_TOKEN_METADATA.decimals) : '?')
+    ?? (operation.amountL1 ? formatUnits(BigInt(operation.amountL1), decimals) : '?')
   const date = new Date(operation.createdAt).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -69,10 +83,6 @@ export default function ActivityCard({
   const directionLabel =
     operation.direction === 'L1_TO_L2' ? 'L1 → L2' : 'L2 → L1'
 
-  const statusInfo = BRIDGE_STATUS_INFO[operation.status as BridgeOperationStatus]
-  const colorClass = STATUS_COLORS[operation.status] ?? 'bg-gray-100 text-gray-800'
-  const errorText = operation.lastErrorMessage ? formatErrorMessage(operation.lastErrorMessage) : null
-
   return (
     <div className='bg-white rounded-lg p-4 shadow-sm border border-gray-100'>
       <div className='flex items-center justify-between'>
@@ -80,22 +90,16 @@ export default function ActivityCard({
           <span className='text-sm font-medium text-gray-600'>
             {directionLabel}
           </span>
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${colorClass}`}>
-            {statusInfo?.label ?? operation.status}
-          </span>
+          <StatusBadge status={operation.status} />
         </div>
         <span className='text-xs text-gray-400'>{date}</span>
       </div>
 
-      <p className='text-xl font-semibold mt-2'>{amount} USDC</p>
+      <p className='text-xl font-semibold mt-2'>{amount} {tokenSymbol}</p>
 
-      <p className='text-xs text-gray-500 mt-1'>
-        {statusInfo?.description ?? operation.status}
-      </p>
-
-      {errorText && (
+      {operation.lastErrorMessage && (
         <p className='text-xs text-red-500 mt-1 truncate'>
-          {errorText}
+          {operation.lastErrorMessage}
         </p>
       )}
 
@@ -118,16 +122,6 @@ export default function ActivityCard({
             L2 Tx ↗
           </a>
         )}
-
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            exportOperationData(operation)
-          }}
-          className='text-xs font-medium text-[#047857] hover:text-[#065f46] transition-colors'
-          title='Download backup'>
-          Export ↓
-        </button>
 
         {isResumable(operation) && (
           <button

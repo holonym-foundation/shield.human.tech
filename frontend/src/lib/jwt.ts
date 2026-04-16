@@ -1,13 +1,10 @@
 import jwt from 'jsonwebtoken'
-
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
+import { JWT_SECRET, JWT_EXPIRES_IN } from '@/config/env.config'
 
 function getSecret(): string {
-  const secret = process.env.JWT_SECRET
+  const secret = JWT_SECRET
   if (!secret) {
-    throw new Error(
-      'JWT_SECRET environment variable is required. Please set it in your .env file.'
-    )
+    throw new Error('JWT_SECRET environment variable is required. Please set it in your .env file.')
   }
   return secret
 }

@@ -2,7 +2,7 @@
   "name": "sandbox",
   "environment": "local",
   "network": {
-    "aztecNodeUrl": "http://localhost:8080",
+    "nodeUrl": "http://localhost:8080",
     "l1RpcUrl": "http://localhost:8545",
     "l1ChainId": 31337
   },
