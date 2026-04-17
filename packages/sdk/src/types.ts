@@ -564,11 +564,11 @@ export interface BridgeLogContext {
 
 /** Pool key for Uniswap V4 routing */
 export interface PoolKeyParam {
-  currency0: string
-  currency1: string
+  currency0: `0x${string}`
+  currency1: `0x${string}`
   fee: number
   tickSpacing: number
-  hooks: string
+  hooks: `0x${string}`
 }
 
 /** Fuel quote from Uniswap V4 quoter */

@@ -20,6 +20,30 @@ export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as c
 /** Wrapped ETH on Sepolia */
 export const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as const
 
+// ─── Uniswap V4 Constants ──────────────────────────────────────────
+// Used by the on-chain fuel quoter (fuelPricing.ts) and the SwapBridgeRouter
+// callers. Kept in sync with main's frontend/src/config/index.ts.
+
+/** Uniswap V4 Quoter (canonical on Sepolia) */
+export const V4_QUOTER = '0x61b3f2011a92d183c7dbadbda940a7555ccf9227' as const
+
+/** Native ETH sentinel in V4 pools (currency0 can be zero address) */
+export const NATIVE_ETH = '0x0000000000000000000000000000000000000000' as const
+
+/** Fees and tick spacings for the canonical fuel swap pools */
+export const INTERMEDIATE_POOL_FEE = 3000 as const
+export const INTERMEDIATE_POOL_TICK_SPACING = 60 as const
+export const FEE_POOL_FEE = 3000 as const
+export const FEE_POOL_TICK_SPACING = 60 as const
+export const DIRECT_POOL_FEE = 3000 as const
+export const DIRECT_POOL_TICK_SPACING = 60 as const
+
+/**
+ * When true, the fuel pool pairs AZTEC/FeeJuice with NATIVE ETH rather than WETH.
+ * Matches main's deployment (Uniswap V4 Sepolia pool was seeded against ETH).
+ */
+export const FEE_POOL_USES_NATIVE_ETH = true as const
+
 // ─── Deployment Data Types ──────────────────────────────────────────
 
 export type DeploymentData = (typeof deploymentsData.deployments)[number]

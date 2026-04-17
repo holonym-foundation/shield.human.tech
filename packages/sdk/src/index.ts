@@ -87,5 +87,20 @@ export {
   getWithdrawalById,
 } from './storage'
 
-// Fuel
+// Fuel — slippage wrapper
 export { getUniswapFuelQuote } from './fuel'
+
+// Fuel — V4 Quoter, route discovery, USD pricing helpers
+export {
+  FEE_JUICE_DECIMALS,
+  getTokenPriceUsd,
+  getFeeJuicePriceUsd,
+  formatFjAmount,
+  formatFuelDisplay,
+  usdToTokenAmount,
+  buildSwapCandidates,
+  buildSwapRoute,
+  getV4Quote,
+  getBestRoute,
+} from './fuelPricing'
+export type { CandidateRoute, RouteResult } from './fuelPricing'
