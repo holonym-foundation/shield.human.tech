@@ -77,6 +77,49 @@ export function wait(ms: number): Promise<void> {
 }
 
 /**
+ * ABI for TokenPortal.calculateFee(uint256) → uint256.
+ * Used as a last-resort fallback when neither the DB nor the receipt event
+ * provides an authoritative post-fee amount.
+ */
+const calculateFeeAbi = [
+  {
+    name: 'calculateFee',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '_amount', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
+/**
+ * Query TokenPortal.calculateFee to derive the post-fee claim amount from the
+ * pre-fee input amount. The custom TokenPortal deducts a fee before producing
+ * the L1→L2 content hash, so the L2 claim must use `amount - fee` or the
+ * content hash won't match.
+ */
+export async function getPostFeeClaimAmount(
+  config: ResolvedConfig,
+  portalAddress: string,
+  amount: bigint,
+): Promise<bigint> {
+  const publicClient = createL1PublicClient(config)
+  try {
+    const fee = (await publicClient.readContract({
+      address: portalAddress as `0x${string}`,
+      abi: calculateFeeAbi,
+      functionName: 'calculateFee',
+      args: [amount],
+    } as any)) as bigint
+    return amount - fee
+  } catch (err) {
+    throw new Error(
+      `Failed to query portal fee at ${portalAddress}. Cannot safely determine the claim amount. ` +
+        'Please check your RPC connection and try again.',
+    )
+  }
+}
+
+/**
  * Extract a human-readable error string from an unknown thrown value.
  * Prevents `String({...})` from producing "[object Object]" in error messages.
  */

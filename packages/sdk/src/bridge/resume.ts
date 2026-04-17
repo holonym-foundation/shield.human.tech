@@ -272,14 +272,27 @@ async function resumeL1ToL2(
 
   // Use the post-fee amount when available — the custom TokenPortal deducts fees before
   // creating the L2 message. The L2 claim must use the actual amount in the message.
-  // Priority: amountAfterFee (exact post-fee) > amountL2 (input amount) > encrypted data.
-  const amount = BigInt(op.amountAfterFee ?? op.amountL2 ?? data.amount ?? op.amountL1 ?? '0')
+  // Priority:
+  //   1. amountAfterFee (exact post-fee, persisted by happy-path from the receipt event)
+  //   2. On-chain calculateFee(amountL1) — covers the case where the receipt event
+  //      was never persisted. Without this fallback the SDK would send the pre-fee
+  //      amount, which fails the portal's L1→L2 content-hash check.
+  //   3. amountL2 / data.amount / amountL1 (last resort, may be pre-fee)
+  let amount: bigint
+  if (op.amountAfterFee) {
+    amount = BigInt(op.amountAfterFee)
+  } else if (op.amountL1 && op.portalAddressL1) {
+    const { getPostFeeClaimAmount } = await import('./utils')
+    amount = await getPostFeeClaimAmount(config, op.portalAddressL1, BigInt(op.amountL1))
+  } else {
+    amount = BigInt(op.amountL2 ?? data.amount ?? op.amountL1 ?? '0')
+  }
   if (amount === 0n) {
     throw new Error('Cannot resume: operation amount is zero. The operation data may be corrupted.')
   }
 
   // Prepare fuel fee option for L2 claim if fuel was used
-  let fuelFeeOption: { fee: { paymentMethod: any } } | undefined
+  let fuelFeeOption: { fee: { paymentMethod: any; gasSettings?: any } } | undefined
   let fuelMessageLeafIndex = op.fuelMessageLeafIndex
   let fuelMessageHash = op.fuelMessageHash
   let fuelAmount = op.fuelAmount
