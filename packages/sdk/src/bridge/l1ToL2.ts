@@ -603,6 +603,10 @@ export async function bridgeL1ToL2(
       tokenDecimalsL2: tokenConfig.decimals,
       tokenLogoUrlL1: tokenConfig.logo || undefined,
       tokenLogoUrlL2: tokenConfig.logo || undefined,
+      // Secret hashes (plaintext for server-side querying; actual secrets in encrypted blob)
+      claimSecretHash: claimSecretHash.toString(),
+      fuelSecretHash: fuelSecretHash?.toString(),
+      privateFuelSecretHash: privateFuelSecretHash?.toString(),
       currentStep: 1,
     }
 
@@ -857,6 +861,9 @@ export async function bridgeL1ToL2(
         from: l1Address,
         to: config.swapBridgeRouterAddress,
         data: bridgeData,
+        // 16M — bridge tx can be complex with Permit2 + portal deposit.
+        // Main sets this override on both bridge and bridgeWithFuel.
+        gas: '0xF42400',
       })
     }
 
@@ -951,21 +958,28 @@ export async function bridgeL1ToL2(
       fuelMessageLeafIndexStr = args.fuelIndex.toString()
       fuelAmountReceived = args.fuelAmount as bigint
 
-      // Also extract amountAfterFee from the portal's DepositToAztecPublic event.
-      // SwapBridgeRouter calls the portal internally, which emits this event with the post-fee amount.
-      try {
-        const portalLog = extractEvent(
-          txReceipt.logs,
-          tokenConfig.l1PortalContract as `0x${string}`,
-          CustomTokenPortalAbi,
-          'DepositToAztecPublic',
-          (log: any) => log.args.secretHash?.toString() === claimSecretHash.toString(),
-        )
-        amountAfterFee = portalLog.args.amount as bigint
-      } catch (e) {
-        // Non-fatal — fall back to using `amount` for the claim.
-        // Log because if the secretHash filter missed, the claim may use the wrong amount.
-        console.warn('[SDK L1→L2] Could not extract amountAfterFee from portal event — using original amount for claim:', e)
+      // SwapBridgeRouter's own BridgeWithFuel event carries tokenAmountAfterFee
+      // (the router forwards whatever the portal returned). Use that as the
+      // primary source — it's always present when this log decoded successfully.
+      if (args.tokenAmount != null) {
+        amountAfterFee = args.tokenAmount as bigint
+      } else {
+        // Fallback: extract from the portal event. Must branch on isPrivate —
+        // depositToAztecPublic emits DepositToAztecPublic; depositToAztecPrivateFor
+        // emits DepositToAztecPrivate.
+        try {
+          const portalEventName = isPrivate ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
+          const portalLog = extractEvent(
+            txReceipt.logs,
+            tokenConfig.l1PortalContract as `0x${string}`,
+            CustomTokenPortalAbi,
+            portalEventName,
+            (log: any) => log.args.secretHash?.toString() === claimSecretHash.toString(),
+          )
+          amountAfterFee = portalLog.args.amount as bigint
+        } catch (e) {
+          console.warn('[SDK L1→L2] Could not extract amountAfterFee from portal event — using pre-fee amount for claim:', e)
+        }
       }
     } else {
       // ── Standard path: extract DepositToAztec event from TokenPortal ──
