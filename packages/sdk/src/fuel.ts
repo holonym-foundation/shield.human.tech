@@ -22,7 +22,9 @@ export function getUniswapFuelQuote(params: {
   poolKeys?: PoolKeyParam[]
   zeroForOnes?: boolean[]
 }): FuelQuote {
-  const { expectedOutput, slippageBps = 50, poolKeys, zeroForOnes } = params
+  // Default 300 bps (3%) matches main. On testnet, V4 pool slippage can easily
+  // exceed 50 bps for small fuel swaps; a tighter default causes spurious reverts.
+  const { expectedOutput, slippageBps = 300, poolKeys, zeroForOnes } = params
 
   const minOutput = expectedOutput - (expectedOutput * BigInt(slippageBps)) / 10000n
 
