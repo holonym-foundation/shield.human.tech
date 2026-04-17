@@ -85,6 +85,8 @@ export {
   getPendingWithdrawals,
   getDepositById,
   getWithdrawalById,
+  buildDepositExport,
+  buildWithdrawalExport,
 } from './storage'
 
 // Fuel — slippage wrapper

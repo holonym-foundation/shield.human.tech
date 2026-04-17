@@ -12,7 +12,7 @@ import { requestWaapWallet, WAAP_METHOD, useWalletStore } from '@/stores/walletS
 import { useWalletAdapter } from './useWalletAdapter'
 import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent, StepStatus } from '@human.tech/aztec-bridge-sdk'
-import { STORAGE_KEYS } from '@human.tech/aztec-bridge-sdk'
+import { getPendingWithdrawals, getWithdrawalById, getWithdrawals } from '@human.tech/aztec-bridge-sdk'
 
 // Define types for balance queries
 export interface L2TokenBalanceData {
@@ -316,12 +316,9 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
                 autoClose: false,
                 onClick: () => {
                   try {
-                    const withdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
-                    if (withdrawals) {
-                      const parsed = JSON.parse(withdrawals)
-                      const latest = parsed.filter((w: any) => !w.success).pop()
-                      if (latest) exportWithdrawalData(latest)
-                    }
+                    const pending = getPendingWithdrawals()
+                    const latest = pending[pending.length - 1]
+                    if (latest) exportWithdrawalData(latest)
                   } catch (e) {
                     console.error('[L2→L1] Failed to export withdrawal data on toast click:', e)
                   }
@@ -358,12 +355,9 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
                 autoClose: false,
                 onClick: () => {
                   try {
-                    const withdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
-                    if (withdrawals) {
-                      const parsed = JSON.parse(withdrawals)
-                      const latest = parsed.filter((w: any) => !w.success).pop()
-                      if (latest) exportWithdrawalData(latest)
-                    }
+                    const pending = getPendingWithdrawals()
+                    const latest = pending[pending.length - 1]
+                    if (latest) exportWithdrawalData(latest)
                   } catch (e) {
                     console.error('[L2→L1] Failed to export withdrawal data on toast click:', e)
                   }
@@ -546,9 +540,7 @@ export function useL2RecoverWithdrawal() {
   const mutationFn = async ({ l2TxHash, l1Address: paramL1Address }: { l2TxHash: string; l1Address: string }) => {
     const resolvedL1Address = paramL1Address || l1Address
 
-    const storedWithdrawals = localStorage.getItem(STORAGE_KEYS.withdrawals)
-    const list = storedWithdrawals ? JSON.parse(storedWithdrawals) : []
-    const w = list.find(
+    const w = getWithdrawals().find(
       (x: any) => x.l2TxHash === l2TxHash && x.l1Address?.toLowerCase() === resolvedL1Address?.toLowerCase(),
     )
 
@@ -643,13 +635,7 @@ export function useExportWithdrawalData() {
 
   const exportWithdrawal = (withdrawalId: string) => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEYS.withdrawals)
-      if (!raw) {
-        notify('error', 'No withdrawal data found')
-        return
-      }
-      const withdrawals = JSON.parse(raw)
-      const w = withdrawals.find((x: any) => x.id === withdrawalId)
+      const w = getWithdrawalById(withdrawalId)
       if (!w) {
         notify('error', 'Withdrawal not found')
         return
@@ -665,7 +651,7 @@ export function useExportWithdrawalData() {
   const copyNonce = async (withdrawalId: string) => {
     try {
       const result = await decryptStorageEntry(
-        STORAGE_KEYS.withdrawals,
+        'withdrawals',
         withdrawalId,
         'nonce',
         async (msg, addr) => (await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, addr])) as string,
@@ -695,16 +681,7 @@ export function useExportWithdrawalData() {
     }
   }
 
-  const getAllPendingWithdrawals = () => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.withdrawals)
-      if (!raw) return []
-      const withdrawals = JSON.parse(raw)
-      return withdrawals.filter((x: any) => !x.success)
-    } catch {
-      return []
-    }
-  }
+  const getAllPendingWithdrawals = () => getPendingWithdrawals()
 
   return {
     exportWithdrawal,

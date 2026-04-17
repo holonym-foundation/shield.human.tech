@@ -1,5 +1,12 @@
-import { BridgeDirection } from '@prisma/client'
-import { createSigningMessage, deriveEncryptionKey, decryptData } from '@human.tech/aztec-bridge-sdk'
+import {
+  createSigningMessage,
+  deriveEncryptionKey,
+  decryptData,
+  buildDepositExport,
+  buildWithdrawalExport,
+  getDepositById,
+  getWithdrawalById,
+} from '@human.tech/aztec-bridge-sdk'
 
 // Frontend-only anti-phishing guard: only prompt for encryption signatures on our domain.
 // This is NOT an SDK concern — the SDK is domain-agnostic.
@@ -22,7 +29,7 @@ export function verifyEncryptionDomain(): void {
   if (origin === ALLOWED_ENCRYPTION_DOMAIN || isDevelopmentOrigin()) return
   throw new Error(
     `Security Error: Encryption key derivation is only allowed on ${ALLOWED_ENCRYPTION_DOMAIN}. ` +
-    `Current origin: ${origin}. Please access the bridge at ${ALLOWED_ENCRYPTION_DOMAIN}`,
+      `Current origin: ${origin}. Please access the bridge at ${ALLOWED_ENCRYPTION_DOMAIN}`,
   )
 }
 
@@ -150,6 +157,10 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
 /**
  * Decrypt a field from an encrypted localStorage entry.
  * Shared by copyClaimSecret (L1→L2) and copyNonce (L2→L1).
+ *
+ * Looks up the entry via the SDK's storage helpers (getDepositById /
+ * getWithdrawalById) rather than reading localStorage directly — matches the
+ * canonical storage shape the SDK writes.
  */
 export async function decryptStorageEntry(
   storageKey: string,
@@ -157,27 +168,16 @@ export async function decryptStorageEntry(
   fieldName: string,
   signMessage: (message: string, address: string) => Promise<string>,
 ): Promise<{ value: string; entry: any } | null> {
-  // Verify encryption domain before prompting for signature
   verifyEncryptionDomain()
 
-  const raw = localStorage.getItem(storageKey)
-  if (!raw) return null
-
-  // Wrap JSON.parse in try/catch for malformed localStorage data
-  let entries: any[]
-  try {
-    entries = JSON.parse(raw)
-  } catch {
-    return null
-  }
-  const entry = entries.find((e: any) => e.id === entryId)
+  const entry = storageKey.includes('deposits') ? getDepositById(entryId) : getWithdrawalById(entryId)
   if (!entry?.encryptedCiphertext) return null
 
   const signingMessage = createSigningMessage(entry.l1Address, entry.keyDerivationDomain)
   const signature = await signMessage(signingMessage, entry.l1Address)
   const encryptionKey = await deriveEncryptionKey(entry.l1Address, signature, entry.keyDerivationDomain)
   const decrypted = JSON.parse(
-    await decryptData(entry.encryptedCiphertext, entry.encryptedIv, entry.encryptedTag, encryptionKey)
+    await decryptData(entry.encryptedCiphertext, entry.encryptedIv, entry.encryptedTag, encryptionKey),
   )
 
   const value = decrypted[fieldName]
@@ -186,84 +186,14 @@ export async function decryptStorageEntry(
   return { value, entry }
 }
 
-/**
- * Export L1→L2 claim data for backup
- */
+/** Trigger a browser download of the L1→L2 claim recovery JSON. */
 export const exportClaimData = (claimData: any) => {
-  const exportData = {
-    type: BridgeDirection.L1_TO_L2,
-    timestamp: new Date().toISOString(),
-    warning:
-      '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
-    data: {
-      id: claimData.id,
-      claimSecretHash: claimData.claimSecretHash,
-      encryptedCiphertext: claimData.encryptedCiphertext,
-      encryptedIv: claimData.encryptedIv,
-      encryptedTag: claimData.encryptedTag,
-      keyDerivationDomain: claimData.keyDerivationDomain,
-      messageHash: claimData.messageHash,
-      messageLeafIndex: claimData.messageLeafIndex,
-      claimAmount: claimData.claimAmount,
-      l1Address: claimData.l1Address,
-      l2Address: claimData.l2Address,
-      l1TxHash: claimData.l1TxHash,
-      l1TxUrl: claimData.l1TxUrl,
-      l1BlockNumberBeforeTx: claimData.l1BlockNumberBeforeTx,
-      nodeInfo: claimData.nodeInfo ?? undefined,
-      isPrivacyModeEnabled: claimData.isPrivacyModeEnabled,
-      status: claimData.status,
-      // Contract snapshot (required for manual recovery)
-      portalAddressL1: claimData.portalAddressL1 ?? undefined,
-      bridgeAddressL2: claimData.bridgeAddressL2 ?? undefined,
-      tokenAddressL1: claimData.tokenAddressL1 ?? undefined,
-      tokenAddressL2: claimData.tokenAddressL2 ?? undefined,
-      // Fuel recovery fields
-      fuelMessageHash: claimData.fuelMessageHash ?? undefined,
-      fuelMessageLeafIndex: claimData.fuelMessageLeafIndex ?? undefined,
-      fuelAmount: claimData.fuelAmount ?? undefined,
-    },
-  }
-
-  const filename = `aztec-bridge-claim-${claimData.id}-${Date.now()}.json`
-  exportToJsonFile(exportData, filename)
+  const payload = buildDepositExport(claimData)
+  exportToJsonFile(payload, `aztec-bridge-claim-${claimData.id}-${Date.now()}.json`)
 }
 
-/**
- * Export L2→L1 withdrawal data for backup
- * Supports both storage shapes: top-level l2BlockNumber / l2TxReceipt.blockNumber, leafIndex / l2ToL1MessageIndex
- */
+/** Trigger a browser download of the L2→L1 withdrawal recovery JSON. */
 export const exportWithdrawalData = (withdrawalData: any) => {
-  const exportData = {
-    type: BridgeDirection.L2_TO_L1,
-    timestamp: new Date().toISOString(),
-    warning:
-      '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
-    data: {
-      encryptedCiphertext: withdrawalData.encryptedCiphertext,
-      encryptedIv: withdrawalData.encryptedIv,
-      encryptedTag: withdrawalData.encryptedTag,
-      keyDerivationDomain: withdrawalData.keyDerivationDomain,
-      l2TxHash: withdrawalData.l2TxHash,
-      l2BlockNumber: withdrawalData.l2BlockNumber ?? withdrawalData.l2TxReceipt?.blockNumber,
-      l2BlockNumberBeforeTx: withdrawalData.l2BlockNumberBeforeTx ?? undefined,
-      nodeInfo: withdrawalData.nodeInfo ?? undefined,
-      l2ToL1MessageIndex: withdrawalData.l2ToL1MessageIndex ?? withdrawalData.leafIndex,
-      siblingPath: withdrawalData.siblingPath,
-      amount: withdrawalData.amount,
-      l1Address: withdrawalData.l1Address,
-      l2Address: withdrawalData.l2Address,
-      bridgeAddressL2: withdrawalData.bridgeAddressL2 ?? withdrawalData.l2BridgeAddress,
-      recipientL1Address: withdrawalData.recipientL1Address ?? withdrawalData.l1Address,
-      status: withdrawalData.status,
-      // Contract & version snapshot (required for manual recovery)
-      portalAddressL1: withdrawalData.portalAddressL1 ?? undefined,
-      rollupVersion: withdrawalData.rollupVersion ?? undefined,
-      chainIdL1: withdrawalData.chainIdL1 ?? undefined,
-      l1RollupAddress: withdrawalData.l1RollupAddress ?? undefined,
-    },
-  }
-
-  const filename = `aztec-bridge-withdrawal-${withdrawalData.id}-${Date.now()}.json`
-  exportToJsonFile(exportData, filename)
+  const payload = buildWithdrawalExport(withdrawalData)
+  exportToJsonFile(payload, `aztec-bridge-withdrawal-${withdrawalData.id}-${Date.now()}.json`)
 }

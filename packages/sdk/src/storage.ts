@@ -118,13 +118,13 @@ export function getWithdrawals(): any[] {
   return getArray(WITHDRAWALS_KEY)
 }
 
-/** Get a single deposit by operationId. */
-export function getDepositById(operationId: number): any | undefined {
+/** Get a single deposit by operationId. Accepts string or number (cuid IDs). */
+export function getDepositById(operationId: string | number): any | undefined {
   return getArray(DEPOSITS_KEY).find((d: any) => d.id === operationId)
 }
 
-/** Get a single withdrawal by operationId. */
-export function getWithdrawalById(operationId: number): any | undefined {
+/** Get a single withdrawal by operationId. Accepts string or number (cuid IDs). */
+export function getWithdrawalById(operationId: string | number): any | undefined {
   return getArray(WITHDRAWALS_KEY).find((w: any) => w.id === operationId)
 }
 
@@ -199,3 +199,95 @@ export const STORAGE_KEYS = {
   withdrawals: WITHDRAWALS_KEY,
   failedPatches: FAILED_PATCHES_KEY,
 } as const
+
+// ─── Export Builders ────────────────────────────────────────────────
+//
+// Pure helpers that build the JSON payload for a user-downloadable recovery
+// file. The consumer handles the actual download (Blob + click) — these just
+// shape the data. Keeping this in the SDK means every field needed for
+// manual recovery lives next to the canonical type definitions.
+
+/**
+ * Build the L1→L2 deposit recovery export payload.
+ * Includes only fields needed to recover the operation off-line.
+ */
+export function buildDepositExport(deposit: any): {
+  type: 'L1_TO_L2'
+  timestamp: string
+  warning: string
+  data: Record<string, unknown>
+} {
+  return {
+    type: 'L1_TO_L2',
+    timestamp: new Date().toISOString(),
+    warning:
+      '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
+    data: {
+      id: deposit.id,
+      claimSecretHash: deposit.claimSecretHash,
+      encryptedCiphertext: deposit.encryptedCiphertext,
+      encryptedIv: deposit.encryptedIv,
+      encryptedTag: deposit.encryptedTag,
+      keyDerivationDomain: deposit.keyDerivationDomain,
+      messageHash: deposit.messageHash,
+      messageLeafIndex: deposit.messageLeafIndex,
+      claimAmount: deposit.claimAmount,
+      l1Address: deposit.l1Address,
+      l2Address: deposit.l2Address,
+      l1TxHash: deposit.l1TxHash,
+      l1TxUrl: deposit.l1TxUrl,
+      l1BlockNumberBeforeTx: deposit.l1BlockNumberBeforeTx,
+      nodeInfo: deposit.nodeInfo ?? undefined,
+      isPrivacyModeEnabled: deposit.isPrivacyModeEnabled,
+      status: deposit.status,
+      portalAddressL1: deposit.portalAddressL1 ?? undefined,
+      bridgeAddressL2: deposit.bridgeAddressL2 ?? undefined,
+      tokenAddressL1: deposit.tokenAddressL1 ?? undefined,
+      tokenAddressL2: deposit.tokenAddressL2 ?? undefined,
+      fuelMessageHash: deposit.fuelMessageHash ?? undefined,
+      fuelMessageLeafIndex: deposit.fuelMessageLeafIndex ?? undefined,
+      fuelAmount: deposit.fuelAmount ?? undefined,
+    },
+  }
+}
+
+/**
+ * Build the L2→L1 withdrawal recovery export payload.
+ * Handles legacy storage shapes (l2ToL1MessageIndex vs leafIndex, l2BlockNumber
+ * vs l2TxReceipt.blockNumber) so older entries still export cleanly.
+ */
+export function buildWithdrawalExport(withdrawal: any): {
+  type: 'L2_TO_L1'
+  timestamp: string
+  warning: string
+  data: Record<string, unknown>
+} {
+  return {
+    type: 'L2_TO_L1',
+    timestamp: new Date().toISOString(),
+    warning:
+      '⚠️ CRITICAL: Keep this file safe! To decrypt, sign the same message with the same wallet on the same domain.',
+    data: {
+      encryptedCiphertext: withdrawal.encryptedCiphertext,
+      encryptedIv: withdrawal.encryptedIv,
+      encryptedTag: withdrawal.encryptedTag,
+      keyDerivationDomain: withdrawal.keyDerivationDomain,
+      l2TxHash: withdrawal.l2TxHash,
+      l2BlockNumber: withdrawal.l2BlockNumber ?? withdrawal.l2TxReceipt?.blockNumber,
+      l2BlockNumberBeforeTx: withdrawal.l2BlockNumberBeforeTx ?? undefined,
+      nodeInfo: withdrawal.nodeInfo ?? undefined,
+      l2ToL1MessageIndex: withdrawal.l2ToL1MessageIndex ?? withdrawal.leafIndex,
+      siblingPath: withdrawal.siblingPath,
+      amount: withdrawal.amount,
+      l1Address: withdrawal.l1Address,
+      l2Address: withdrawal.l2Address,
+      bridgeAddressL2: withdrawal.bridgeAddressL2 ?? withdrawal.l2BridgeAddress,
+      recipientL1Address: withdrawal.recipientL1Address ?? withdrawal.l1Address,
+      status: withdrawal.status,
+      portalAddressL1: withdrawal.portalAddressL1 ?? undefined,
+      rollupVersion: withdrawal.rollupVersion ?? undefined,
+      chainIdL1: withdrawal.chainIdL1 ?? undefined,
+      l1RollupAddress: withdrawal.l1RollupAddress ?? undefined,
+    },
+  }
+}
