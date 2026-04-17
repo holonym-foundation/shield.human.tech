@@ -30,11 +30,15 @@ import type {
 const DEFAULT_API_URL = 'https://bridge.human.tech'
 
 function resolveDomain(domain?: string): string {
-  if (domain) return domain
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin
+  const raw =
+    domain ??
+    (typeof window !== 'undefined' && window.location?.origin
+      ? window.location.origin
+      : undefined)
+  if (!raw) {
+    throw new Error('domain is required when not running in a browser')
   }
-  throw new Error('domain is required when not running in a browser')
+  return raw.endsWith('/') ? raw : `${raw}/`
 }
 
 export class HumanTechBridge {
