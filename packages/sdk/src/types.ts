@@ -232,8 +232,16 @@ export interface BridgeL1ToL2Params {
   l2Address: string
   /** Whether to use private claiming on L2 */
   isPrivate: boolean
-  /** Optional fuel (gas funding) parameters */
-  fuel?: { enabled: boolean; amount: string }
+  /**
+   * Optional fuel (gas funding) parameters.
+   *
+   * `fuelType` selects between:
+   *   - 'public' (default): L2 recipient is claimer's aztecAddress (public fuel note).
+   *     MUST NOT be used in private mode — leaks the L2 recipient on-chain.
+   *   - 'private': swap into FeeJuice held by BridgedFPC; claim + mint + pay_fee
+   *     happen privately on L2 via PrivateMintAndPayFeePaymentMethod.
+   */
+  fuel?: { enabled: boolean; amount: string; fuelType?: 'public' | 'private' }
   /** Pre-computed fuel quote (required when fuel.enabled is true) */
   fuelQuote?: FuelQuote
   /** Callback to send an L1 transaction (e.g. via wallet provider) */

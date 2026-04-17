@@ -410,6 +410,19 @@ export async function bridgeL1ToL2(
   if (amount === 0n) {
     throw new Error('Amount must be greater than zero')
   }
+
+  // Privacy mode gate: public fuel leaks the user's L2 address on-chain via
+  // the FeeJuicePortal.depositToAztecPublic `recipient` field. Private mode
+  // requires BridgedFPC-based private fuel (where fuel.fuelType === 'private').
+  // Until the private-fuel path lands we reject this combination loudly rather
+  // than silently leaking the L2 address.
+  if (isPrivate && fuel?.enabled && fuel.fuelType !== 'private') {
+    throw new Error(
+      'Private mode does not allow public fuel: FeeJuicePortal.depositToAztecPublic ' +
+        "would expose the L2 recipient on L1. Use fuel.fuelType = 'private' " +
+        '(BridgedFPC) or bridge without fuel and top up gas separately.',
+    )
+  }
   const publicClient = createL1PublicClient(config)
 
   // 🔒 Track whether L1 deposit has been confirmed (funds are locked on L1).
