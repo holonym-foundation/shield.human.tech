@@ -549,7 +549,10 @@ export async function withdrawL2ToL1(
       throw err
     }
 
-    // If epoch is null, derive it from the rollup contract so the DB always has it
+    // If epoch is null, derive it from the rollup contract so the DB always has it.
+    // Deployed Rollup exposes `getEpochForCheckpoint(uint256)` (per @aztec/l1-artifacts
+    // RollupAbi on 4.2.0-aztecnr-rc.2), NOT `getEpochForBlock` — the latter exists in
+    // the in-repo Rollup.sol but not on the deployed contract, so calling it fails.
     let resolvedEpoch = witnessResult.epoch
     if (resolvedEpoch == null || resolvedEpoch === 0n) {
       try {
@@ -557,12 +560,12 @@ export async function withdrawL2ToL1(
           address: rollupAddress as `0x${string}`,
           abi: [{
             type: 'function' as const,
-            name: 'getEpochForBlock',
-            inputs: [{ name: 'blockNumber', type: 'uint256' }],
+            name: 'getEpochForCheckpoint',
+            inputs: [{ name: '_blockNumber', type: 'uint256' }],
             outputs: [{ name: '', type: 'uint256' }],
             stateMutability: 'view' as const,
           }],
-          functionName: 'getEpochForBlock',
+          functionName: 'getEpochForCheckpoint',
           args: [BigInt(l2BlockNumber)],
         })
         resolvedEpoch = epochFromRollup as bigint
