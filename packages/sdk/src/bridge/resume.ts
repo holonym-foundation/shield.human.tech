@@ -87,7 +87,14 @@ export async function resume(
 // ─── L1→L2 Recovery Helpers ─────────────────────────────────────────
 
 /**
- * Recover messageHash and messageLeafIndex from an L1 transaction receipt.
+ * Recover messageHash, messageLeafIndex, and post-fee `claimAmount` from the
+ * portal event in an L1 transaction receipt.
+ *
+ * The `amount` field emitted by TokenPortal.DepositToAztec{Public,Private}
+ * is the POST-fee amount — the exact value used in the L1→L2 content hash.
+ * Backfilling it here means the caller can persist it to the DB and avoid
+ * a later on-chain `calculateFee()` reconstruction (which could diverge
+ * if the portal's live fee rate shifts between deposit and resume).
  */
 async function recoverFromReceipt(
   publicClient: any,
@@ -97,7 +104,7 @@ async function recoverFromReceipt(
   amount: bigint,
   l2Address: string,
   isPrivacyModeEnabled: boolean,
-): Promise<{ messageHash: string; messageLeafIndex: string; l1BlockNumber?: string }> {
+): Promise<{ messageHash: string; messageLeafIndex: string; l1BlockNumber?: string; claimAmount?: string }> {
   console.log('[SDK Resume L1→L2] Recovering from receipt (txHash=', l1TxHash, ')...')
 
   // Use waitForTransactionReceipt instead of getTransactionReceipt
@@ -113,9 +120,9 @@ async function recoverFromReceipt(
     : 'DepositToAztecPublic'
 
   // Filter by secretHash (and recipient for public). DO NOT filter by amount —
-  // the portal event's amount field is the POST-fee amount (amountAfterFee),
-  // while the caller's `amount` may be the pre-fee value, so equality filters
-  // would always miss. Matches main's recoverFromReceipt behavior.
+  // the portal event's amount field is the POST-fee claimAmount, while the
+  // caller's `amount` may be the pre-fee value, so equality filters would
+  // always miss. Matches main's recoverFromReceipt behavior.
   const privateFilter = (log: any) =>
     log.args.secretHash?.toString() === claimSecretHash.toString()
 
@@ -134,8 +141,9 @@ async function recoverFromReceipt(
   const messageHash = log.args.key.toString()
   const messageLeafIndex = log.args.index.toString()
   const l1BlockNumber = receipt.blockNumber != null ? String(receipt.blockNumber) : undefined
-  console.log('[SDK Resume L1→L2] Recovered: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
-  return { messageHash, messageLeafIndex, l1BlockNumber }
+  const claimAmount = log.args.amount != null ? log.args.amount.toString() : undefined
+  console.log('[SDK Resume L1→L2] Recovered: messageHash=', messageHash, 'leafIndex=', messageLeafIndex, 'claimAmount=', claimAmount)
+  return { messageHash, messageLeafIndex, l1BlockNumber, claimAmount }
 }
 
 /**
@@ -408,6 +416,12 @@ async function resumeL1ToL2(
   let messageHash = op.messageHash
   let messageLeafIndex = op.messageLeafIndex
   let recoveredL1BlockNumber: string | undefined
+  // Post-fee claimAmount recovered from the L1 receipt (either the portal's
+  // DepositToAztec* event or the SwapBridgeRouter.BridgeWithFuel.tokenAmount).
+  // Used to both (a) override the `amount` fallback below when we found a
+  // fresher value, and (b) backfill the DB via the recovery PATCH so future
+  // resumes don't re-query the portal's fee rate.
+  let recoveredClaimAmount: string | undefined
 
   // ═════════════════════════════════════════════════════════════════════
   // RECOVERY: Recover messageHash + messageLeafIndex if missing
@@ -423,7 +437,12 @@ async function resumeL1ToL2(
       // Path A: We have the L1 tx hash — get receipt and extract event.
       // For fuel-enabled deposits, try SwapBridgeRouter contract first, then fall back to portal.
       emit({ type: 'recovery_from_receipt', l1TxHash: op.l1TxHash })
-      let recovered: { messageHash: string; messageLeafIndex: string; l1BlockNumber?: string } | null = null
+      let recovered: {
+        messageHash: string
+        messageLeafIndex: string
+        l1BlockNumber?: string
+        claimAmount?: string
+      } | null = null
 
       if ((data.fuelSecret || data.privateFuelSecret) && config.swapBridgeRouterAddress) {
         // Fuel path (public or private): the deposit went through SwapBridgeRouter,
@@ -445,10 +464,37 @@ async function resumeL1ToL2(
               })
               if (decoded.eventName === 'BridgeWithFuel') {
                 const args = decoded.args as any
+                // BridgeWithFuel.tokenAmount IS the post-fee amount (SwapBridgeRouter.sol:304
+                // emits tokenAmountAfterFee under the name tokenAmount). Prefer it over the
+                // sibling portal event, but fall back to the portal event if tokenAmount is
+                // ever missing (defensive — old router deployments).
+                let claimAmount: string | undefined
+                if (args.tokenAmount != null) claimAmount = args.tokenAmount.toString()
+                if (!claimAmount) {
+                  const portalEventName = isPrivacyModeEnabled ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
+                  for (const portalLog of fuelReceipt.logs) {
+                    if (portalLog.address.toLowerCase() !== portalAddress.toLowerCase()) continue
+                    try {
+                      const portalDecoded = decodeEventLog({
+                        abi: CustomTokenPortalAbi,
+                        data: portalLog.data,
+                        topics: portalLog.topics,
+                      })
+                      if (portalDecoded.eventName === portalEventName) {
+                        const portalArgs = portalDecoded.args as any
+                        if (portalArgs.amount != null) {
+                          claimAmount = portalArgs.amount.toString()
+                          break
+                        }
+                      }
+                    } catch { /* skip non-portal log */ }
+                  }
+                }
                 recovered = {
                   messageHash: args.tokenKey.toString(),
                   messageLeafIndex: args.tokenIndex.toString(),
                   l1BlockNumber: fuelReceipt.blockNumber != null ? String(fuelReceipt.blockNumber) : undefined,
+                  claimAmount,
                 }
                 console.log('[SDK Resume L1→L2] Recovered from SwapBridgeRouter receipt:', recovered)
                 break
@@ -476,6 +522,7 @@ async function resumeL1ToL2(
       messageHash = recovered.messageHash
       messageLeafIndex = recovered.messageLeafIndex
       recoveredL1BlockNumber = recovered.l1BlockNumber
+      if (recovered.claimAmount) recoveredClaimAmount = recovered.claimAmount
     } else if (op.l1BlockNumberBeforeTx) {
       // Path B: No tx hash — scan L1 blocks for portal events
       emit({ type: 'recovery_from_block_scan', l1BlockNumberBeforeTx: op.l1BlockNumberBeforeTx })
@@ -511,7 +558,11 @@ async function resumeL1ToL2(
       )
     }
 
-    // Persist only missing recovery fields — don't overwrite values already in DB
+    // Persist only missing recovery fields — don't overwrite values already in DB.
+    // `claimAmount` is included because later resumes (without re-running receipt
+    // recovery) need it to avoid the on-chain `calculateFee()` fallback, which
+    // can diverge from the original post-fee amount if the portal's fee rate has
+    // shifted since the deposit.
     const recoveredPatchData: Record<string, unknown> = {
       status: 'deposited',
       currentStep: 2,
@@ -519,7 +570,15 @@ async function resumeL1ToL2(
     if (!op.messageHash) recoveredPatchData.messageHash = messageHash
     if (!op.messageLeafIndex) recoveredPatchData.messageLeafIndex = messageLeafIndex
     if (!op.l1BlockNumber && recoveredL1BlockNumber) recoveredPatchData.l1BlockNumber = recoveredL1BlockNumber
+    if (!op.claimAmount && recoveredClaimAmount) recoveredPatchData.claimAmount = recoveredClaimAmount
     await patchOperationWithRetry(apiClient, op.id, recoveredPatchData, { label: 'recovered data' })
+
+    // If we just recovered a fresher post-fee amount, use it for this run's
+    // L2 claim — the earlier `amount` resolution may have fallen back to an
+    // on-chain calculateFee() that could disagree with the receipt event.
+    if (recoveredClaimAmount) {
+      amount = BigInt(recoveredClaimAmount)
+    }
   }
 
   // Step 1 done (L1 deposit already completed)
