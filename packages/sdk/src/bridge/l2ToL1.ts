@@ -238,12 +238,16 @@ export async function withdrawL2ToL1(
     if (!sig) throw new Error('Failed to sign message for encryption key derivation')
     const encryptionKey = await deriveEncryptionKey(l1Address, sig, keyDerivationDomain)
 
+    // Include portalAddressL1 so that if only the encrypted blob survives
+    // (e.g. DB row lost, blob exported for local recovery) the resumer can
+    // still identify which L1 TokenPortal to address the withdraw at.
     const secretsPayload = JSON.stringify({
       nonce: nonce.toString(),
       amount: amount.toString(),
       l1Address,
       l2Address,
       l2BridgeAddress,
+      portalAddressL1: tokenConfig.l1PortalContract,
       isPrivacyModeEnabled: isPrivate,
       l1BlockNumberBeforeTx,
       l2BlockNumberBeforeTx: String(l2BlockNumberBeforeTx),
