@@ -233,11 +233,13 @@ async function recoverFromBlockScan(
       // value as an authoritative fallback).
       if (routerAddrLower && rawLog.address?.toLowerCase() === routerAddrLower) {
         try {
+          // SwapBridgeRouterAbi is lazy-loaded as `any`, so decodeEventLog's
+          // generic narrowing isn't available here — cast to access .eventName.
           const decoded = decodeEventLog({
             abi: SwapBridgeRouterAbi,
             data: rawLog.data,
             topics: rawLog.topics,
-          })
+          }) as { eventName: string; args: Record<string, any> }
           if (decoded.eventName === 'Bridge' || decoded.eventName === 'BridgeWithFuel') {
             const args = decoded.args as any
             const eventSecretHash = (args.secretHash ?? args.tokenSecretHash)?.toString()
