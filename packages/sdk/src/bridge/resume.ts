@@ -112,15 +112,15 @@ async function recoverFromReceipt(
     ? 'DepositToAztecPrivate'
     : 'DepositToAztecPublic'
 
-  // Normalize comparisons: viem may decode args as bigint or string,
-  // so coerce both sides to string for safe comparison.
+  // Filter by secretHash (and recipient for public). DO NOT filter by amount —
+  // the portal event's amount field is the POST-fee amount (amountAfterFee),
+  // while the caller's `amount` may be the pre-fee value, so equality filters
+  // would always miss. Matches main's recoverFromReceipt behavior.
   const privateFilter = (log: any) =>
-    log.args.amount?.toString() === amount.toString() &&
     log.args.secretHash?.toString() === claimSecretHash.toString()
 
   const publicFilter = (log: any) =>
     log.args.secretHash?.toString() === claimSecretHash.toString() &&
-    log.args.amount?.toString() === amount.toString() &&
     log.args.to?.toString() === l2Address
 
   const log = extractEvent(
@@ -202,9 +202,12 @@ async function recoverFromBlockScan(
         if (decoded.eventName !== targetEventName) continue
 
         const args = decoded.args as any
+        // Match by secretHash (and recipient for public). Do NOT filter by amount —
+        // portal event amount is POST-fee while the caller's amount may be pre-fee,
+        // so an equality filter would always miss. Matches main's behavior.
         const matches = isPrivacyModeEnabled
-          ? args.amount?.toString() === amount.toString() && args.secretHash?.toString() === claimSecretHash.toString()
-          : args.secretHash?.toString() === claimSecretHash.toString() && args.amount?.toString() === amount.toString() && args.to?.toString() === l2Address
+          ? args.secretHash?.toString() === claimSecretHash.toString()
+          : args.secretHash?.toString() === claimSecretHash.toString() && args.to?.toString() === l2Address
 
         if (matches) {
           const messageHash = args.key.toString()
@@ -297,9 +300,12 @@ async function resumeL1ToL2(
   let fuelMessageHash = op.fuelMessageHash
   let fuelAmount = op.fuelAmount
 
-  // If fuelSecret exists but fuel receipt data is missing (receipt PATCH failed),
-  // attempt to recover it from the L1 transaction receipt.
-  if (data.fuelSecret && (!fuelMessageLeafIndex || !fuelAmount) && op.l1TxHash && config.swapBridgeRouterAddress) {
+  // If any fuel secret exists but fuel receipt data is missing (receipt PATCH failed),
+  // attempt to recover it from the L1 transaction receipt. Triggers for BOTH public fuel
+  // (data.fuelSecret) and private fuel (data.privateFuelSecret) — main's BridgeWithFuel
+  // event carries fuelKey/fuelIndex/fuelAmount regardless of fuel type.
+  const hasAnyFuelSecret = !!(data.fuelSecret || data.privateFuelSecret)
+  if (hasAnyFuelSecret && (!fuelMessageLeafIndex || !fuelAmount) && op.l1TxHash && config.swapBridgeRouterAddress) {
     try {
       const { SwapBridgeRouterAbi } = await import('../contracts/abis/SwapBridgeRouterAbi')
       const publicClient = createL1PublicClient(config)
@@ -419,9 +425,9 @@ async function resumeL1ToL2(
       emit({ type: 'recovery_from_receipt', l1TxHash: op.l1TxHash })
       let recovered: { messageHash: string; messageLeafIndex: string; l1BlockNumber?: string } | null = null
 
-      if (data.fuelSecret && config.swapBridgeRouterAddress) {
-        // Fuel path: the deposit went through SwapBridgeRouter, not the portal directly.
-        // Try extracting from SwapBridgeRouter receipt first.
+      if ((data.fuelSecret || data.privateFuelSecret) && config.swapBridgeRouterAddress) {
+        // Fuel path (public or private): the deposit went through SwapBridgeRouter,
+        // not the portal directly. Try extracting from SwapBridgeRouter receipt first.
         try {
           const { SwapBridgeRouterAbi } = await import('../contracts/abis/SwapBridgeRouterAbi')
           const fuelReceipt = await publicClient.waitForTransactionReceipt({
