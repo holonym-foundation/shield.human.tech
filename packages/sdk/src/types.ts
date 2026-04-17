@@ -177,8 +177,9 @@ export interface BridgeOperation {
   messageHash: string | null
   messageLeafIndex: string | null
   l1BlockNumberBeforeTx: string | null
-  // L1→L2 post-fee amount (custom portal deducts fees before L2 message)
-  amountAfterFee: string | null
+  // L1→L2 post-fee amount from the DepositToAztec event. Must match the L2 content hash.
+  // Named to match the Prisma field + API sanitizer key (POST/PATCH `claimAmount`).
+  claimAmount: string | null
   // L1→L2 fuel recovery fields
   fuelMessageHash: string | null
   fuelMessageLeafIndex: string | null

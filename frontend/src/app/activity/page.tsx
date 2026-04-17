@@ -94,7 +94,7 @@ export default function ActivityPage() {
             messageHash: operation.messageHash,
             messageLeafIndex: operation.messageLeafIndex,
             amount: decrypted.amount ?? operation.amountL1 ?? '0',
-            claimAmount: operation.amountAfterFee ?? null,
+            claimAmount: operation.claimAmount ?? null,
             l1Address: decrypted.l1Address ?? l1Address,
             l2Address: decrypted.l2Address ?? '',
             l1TxHash: operation.l1TxHash,

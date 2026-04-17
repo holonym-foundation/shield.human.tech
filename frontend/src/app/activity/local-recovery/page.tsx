@@ -177,7 +177,7 @@ function toBridgeOperationShape(entry: LocalRecoveryEntry): BridgeOperation {
     messageHash: server?.messageHash ?? entry.messageHash,
     messageLeafIndex: server?.messageLeafIndex ?? entry.messageLeafIndex,
     l1BlockNumberBeforeTx: server?.l1BlockNumberBeforeTx ?? entry.l1BlockNumberBeforeTx,
-    amountAfterFee: server?.amountAfterFee ?? null,
+    claimAmount: server?.claimAmount ?? null,
     fuelMessageHash: server?.fuelMessageHash ?? null,
     fuelMessageLeafIndex: server?.fuelMessageLeafIndex ?? null,
     fuelAmount: server?.fuelAmount ?? null,

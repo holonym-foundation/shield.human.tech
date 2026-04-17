@@ -1067,7 +1067,7 @@ export async function bridgeL1ToL2(
         ...(fuelMessageHashStr ? { fuelMessageHash: fuelMessageHashStr } : {}),
         ...(fuelMessageLeafIndexStr ? { fuelMessageLeafIndex: fuelMessageLeafIndexStr } : {}),
         ...(fuelAmountReceived != null ? { fuelAmount: fuelAmountReceived.toString() } : {}),
-        ...(amountAfterFee != null ? { amountAfterFee: amountAfterFee.toString() } : {}),
+        ...(amountAfterFee != null ? { claimAmount: amountAfterFee.toString() } : {}),
       }),
     )
 
@@ -1083,7 +1083,7 @@ export async function bridgeL1ToL2(
     if (fuelMessageHashStr) receiptPatchData.fuelMessageHash = fuelMessageHashStr
     if (fuelMessageLeafIndexStr) receiptPatchData.fuelMessageLeafIndex = fuelMessageLeafIndexStr
     if (fuelAmountReceived != null) receiptPatchData.fuelAmount = fuelAmountReceived.toString()
-    if (amountAfterFee != null) receiptPatchData.amountAfterFee = amountAfterFee.toString()
+    if (amountAfterFee != null) receiptPatchData.claimAmount = amountAfterFee.toString()
 
     const receiptPatchOk = await patchOperationWithRetry(apiClient, operationId, receiptPatchData, { label: 'receipt data' })
     if (!receiptPatchOk) {

@@ -276,14 +276,14 @@ async function resumeL1ToL2(
   // Use the post-fee amount when available — the custom TokenPortal deducts fees before
   // creating the L2 message. The L2 claim must use the actual amount in the message.
   // Priority:
-  //   1. amountAfterFee (exact post-fee, persisted by happy-path from the receipt event)
+  //   1. claimAmount (exact post-fee, persisted by happy-path from the receipt event)
   //   2. On-chain calculateFee(amountL1) — covers the case where the receipt event
   //      was never persisted. Without this fallback the SDK would send the pre-fee
   //      amount, which fails the portal's L1→L2 content-hash check.
   //   3. amountL2 / data.amount / amountL1 (last resort, may be pre-fee)
   let amount: bigint
-  if (op.amountAfterFee) {
-    amount = BigInt(op.amountAfterFee)
+  if (op.claimAmount) {
+    amount = BigInt(op.claimAmount)
   } else if (op.amountL1 && op.portalAddressL1) {
     const { getPostFeeClaimAmount } = await import('./utils')
     amount = await getPostFeeClaimAmount(config, op.portalAddressL1, BigInt(op.amountL1))
