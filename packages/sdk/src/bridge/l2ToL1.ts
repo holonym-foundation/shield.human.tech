@@ -310,8 +310,6 @@ export async function withdrawL2ToL1(
       tokenAddressL2: tokenConfig.l2TokenContract,
       tokenDecimalsL1: tokenConfig.decimals,
       tokenDecimalsL2: tokenConfig.decimals,
-      tokenLogoUrlL1: tokenConfig.logo || undefined,
-      tokenLogoUrlL2: tokenConfig.logo || undefined,
       currentStep: 1,
     }
 

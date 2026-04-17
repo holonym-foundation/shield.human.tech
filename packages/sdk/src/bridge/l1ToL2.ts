@@ -602,8 +602,6 @@ export async function bridgeL1ToL2(
       tokenAddressL2: tokenConfig.l2TokenContract,
       tokenDecimalsL1: tokenConfig.decimals,
       tokenDecimalsL2: tokenConfig.decimals,
-      tokenLogoUrlL1: tokenConfig.logo || undefined,
-      tokenLogoUrlL2: tokenConfig.logo || undefined,
       // Secret hashes (plaintext for server-side querying; actual secrets in encrypted blob)
       claimSecretHash: claimSecretHash.toString(),
       fuelSecretHash: fuelSecretHash?.toString(),
