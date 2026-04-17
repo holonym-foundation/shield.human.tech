@@ -19,7 +19,7 @@ import type {
 // ─── Empty Structs ──────────────────────────────────────────────────
 
 export function buildEmptyCleanHands(): CleanHandsStruct {
-  return { nonce: 0n, actionId: 0n, signature: '0x' }
+  return { nonce: 0n, signature: '0x' }
 }
 
 export function buildEmptyPassport(): PassportStruct {
@@ -56,7 +56,6 @@ export async function fetchAttestationsForDeposit(
     return {
       cleanHands: {
         nonce: BigInt(poch.nonce),
-        actionId: BigInt(poch.actionId),
         signature: poch.l1Signature,
       },
       passport: buildEmptyPassport(),

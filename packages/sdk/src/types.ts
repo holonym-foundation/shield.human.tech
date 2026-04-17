@@ -653,10 +653,9 @@ export interface AttestationStatus {
   }
 }
 
-/** L1 clean-hands struct for depositToAztecPrivate */
+/** L1 clean-hands struct for depositToAztecPrivate (matches TokenPortal/SwapBridgeRouter Solidity struct) */
 export interface CleanHandsStruct {
   nonce: bigint
-  actionId: bigint
   signature: string
 }
 
