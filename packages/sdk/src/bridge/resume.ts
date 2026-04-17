@@ -40,7 +40,7 @@ import type {
 } from '../types'
 import { createL1PublicClient, wait } from './utils'
 import { getAztecscanUrl as getAztecscanBaseUrl, getEtherscanUrl as getEtherscanBaseUrl } from '../config'
-import { pollL1ToL2MessageSync, waitForBlockProven } from './polling'
+import { pollL1ToL2MessageSync, waitForBlockProven, waitForNextL2Block } from './polling'
 import { executeL2Claim } from './l1ToL2'
 import { executeL1Withdraw } from './l2ToL1'
 import { computeL2ToL1MessageLeaf, computeWitness } from './witness'
@@ -481,9 +481,11 @@ async function resumeL1ToL2(
     )
   }
 
-  // Extra buffer so the message is visible on the wallet's node
-  console.log('[SDK Resume L1→L2] Final wait before claiming (2 min)...')
-  await wait(120_000)
+  // Wait for the sequencer to include the L1→L2 message in a new L2 block.
+  // The archiver checkpoint appears quickly, but the message is only consumable
+  // after the sequencer includes it in an L2 block (can take up to ~1 epoch on testnet).
+  console.log('[SDK Resume L1→L2] Waiting for sequencer to include message in L2 block...')
+  await waitForNextL2Block(aztecNode)
 
   onStep?.(2, 'completed')
 

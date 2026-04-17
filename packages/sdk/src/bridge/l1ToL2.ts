@@ -204,7 +204,7 @@ async function signPermit2Transfer(params: {
 }
 import { createL1PublicClient, serializeNodeInfo, wait, extractErrorString } from './utils'
 import { getEtherscanUrl as getEtherscanBaseUrl, getAztecscanUrl as getAztecscanBaseUrl } from '../config'
-import { pollL1ToL2MessageSync } from './polling'
+import { pollL1ToL2MessageSync, waitForNextL2Block } from './polling'
 import { pushDeposit, updateDeposit } from '../storage'
 import { fetchAttestationsForDeposit } from '../attestation'
 
@@ -954,8 +954,10 @@ export async function bridgeL1ToL2(
       )
     }
 
-    // Brief buffer for wallet node to catch up
-    await wait(120_000)
+    // Wait for the sequencer to include the L1→L2 message in a new L2 block.
+    // The archiver checkpoint appears quickly, but the message is only consumable
+    // after the sequencer includes it in an L2 block (can take up to ~1 epoch on testnet).
+    await waitForNextL2Block(aztecNode)
 
     onStep?.(2, 'completed')
 
