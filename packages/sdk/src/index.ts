@@ -90,6 +90,13 @@ export {
 // Fuel — slippage wrapper
 export { getUniswapFuelQuote } from './fuel'
 
+// Fuel — gas estimation and sufficiency check
+export {
+  buildClaimGasSettings,
+  estimateClaimFeeLimit,
+  checkFuelSufficiency,
+} from './fuelGasEstimate'
+
 // Fuel — V4 Quoter, route discovery, USD pricing helpers
 export {
   FEE_JUICE_DECIMALS,
