@@ -14,8 +14,10 @@ import {
   getAztecscanUrl,
   getEtherscanUrl,
   L1_CHAIN_ID,
+  L1_RPC_URL,
   L1_TOKENS,
   L2_CHAIN_ID,
+  FEE_JUICE_ADDRESS,
   SWAP_BRIDGE_ROUTER_ADDRESS,
   UNISWAP_FUEL_SWAP_ADDRESS,
 } from '@/config'
@@ -385,6 +387,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     bridgeConfig,
     fuelEnabled,
     fuelAmount: fuelAmountStr,
+    fuelType,
   } = useBridgeStore()
   const notify = useToast()
 
@@ -404,28 +407,47 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     if (!aztecAddress) throw new Error('Aztec wallet not connected')
     if (!walletAdapter) throw new Error('Aztec wallet adapter not ready')
 
-    // Build fuel params if fuel is enabled (public L1→L2 only)
-    let fuel: { enabled: boolean; amount: string } | undefined
+    // Build fuel params if fuel is enabled. Both public and private mode
+    // are supported — private mode requires fuelType='private' (BridgedFPC).
+    // The privacy-mode gate lives in the SDK, so we just forward the user's
+    // selection here.
+    let fuel: { enabled: boolean; amount: string; fuelType?: 'public' | 'private' } | undefined
     let fuelQuote: FuelQuote | undefined
     if (
       fuelEnabled &&
-      !isPrivacyModeEnabled &&
       fuelAmountStr &&
       SWAP_BRIDGE_ROUTER_ADDRESS &&
-      UNISWAP_FUEL_SWAP_ADDRESS
+      UNISWAP_FUEL_SWAP_ADDRESS &&
+      selectedToken?.l1TokenContract
     ) {
-      const fuelAmountTokenUnits = parseUnits(fuelAmountStr, selectedToken?.decimals ?? 6)
-      if (
-        fuelAmountTokenUnits > 0n &&
-        fuelAmountTokenUnits < parseUnits(amountDisplayL1, selectedToken?.decimals ?? 6)
-      ) {
-        fuelQuote = getUniswapFuelQuote({
-          expectedOutput: fuelAmountTokenUnits,
-          slippageBps: 300,
-          poolKeys: [],
-          zeroForOnes: [],
+      const decimals = selectedToken?.decimals ?? 6
+      const fuelAmountTokenUnits = parseUnits(fuelAmountStr, decimals)
+      const amountTokenUnits = parseUnits(amountDisplayL1, decimals)
+      if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amountTokenUnits) {
+        // Build REAL V4 routing + quote via the SDK's fuelPricing helpers.
+        // Passing empty poolKeys here (previous behavior) made the on-chain
+        // swap call revert because the router has no path to traverse.
+        const { buildSwapCandidates, getBestRoute } = await import('@human.tech/aztec-bridge-sdk')
+        const candidates = buildSwapCandidates(
+          selectedToken.l1TokenContract as `0x${string}`,
+          FEE_JUICE_ADDRESS as `0x${string}`,
+        )
+        const best = await getBestRoute({
+          candidates,
+          inputAmount: fuelAmountTokenUnits,
+          l1RpcUrl: L1_RPC_URL,
         })
-        fuel = { enabled: true, amount: fuelAmountStr }
+        fuelQuote = getUniswapFuelQuote({
+          expectedOutput: best.expectedOutput,
+          slippageBps: 300,
+          poolKeys: best.route.poolKeys,
+          zeroForOnes: best.route.zeroForOnes,
+        })
+        fuel = {
+          enabled: true,
+          amount: fuelAmountStr,
+          fuelType: isPrivacyModeEnabled ? 'private' : fuelType,
+        }
       }
     }
 
