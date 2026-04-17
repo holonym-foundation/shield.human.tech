@@ -147,7 +147,15 @@ async function recoverFromReceipt(
 }
 
 /**
- * Recover messageHash and messageLeafIndex by scanning L1 blocks for portal events.
+ * Recover messageHash, messageLeafIndex, and (where available) claimAmount +
+ * fuel message fields by scanning L1 blocks for portal / SwapBridgeRouter events.
+ *
+ * For fuel-enabled bridges the deposit flows through SwapBridgeRouter, which
+ * emits BridgeWithFuel carrying both the token message data (tokenKey /
+ * tokenIndex / tokenAmount) AND the fuel message data (fuelKey / fuelIndex /
+ * fuelAmount) in a single log. We therefore include SwapBridgeRouter's address
+ * in the getLogs filter so a fuel-only block-scan resume can still recover the
+ * fuel fields it needs to build the FeeJuice payment method.
  */
 async function recoverFromBlockScan(
   publicClient: any,
@@ -157,7 +165,16 @@ async function recoverFromBlockScan(
   amount: bigint,
   l2Address: string,
   isPrivacyModeEnabled: boolean,
-): Promise<{ messageHash: string; messageLeafIndex: string; l1TxHash?: string }> {
+  swapBridgeRouterAddress?: string,
+): Promise<{
+  messageHash: string
+  messageLeafIndex: string
+  l1TxHash?: string
+  claimAmount?: string
+  fuelMessageHash?: string
+  fuelMessageLeafIndex?: string
+  fuelAmount?: string
+}> {
   const fromBlock = BigInt(l1BlockNumberBeforeTx)
   const toBlock = await publicClient.getBlockNumber()
 
@@ -168,8 +185,18 @@ async function recoverFromBlockScan(
     : 'DepositToAztecPublic'
 
   // Paginate in 2000-block chunks to stay within RPC provider limits.
-  // Filter by contract address (already done via `address` param).
   const CHUNK_SIZE = 2000n
+
+  // Lazy-load the router ABI only if a router address is configured — keeps the
+  // non-fuel path free of an unnecessary module import.
+  const routerAddrLower = swapBridgeRouterAddress?.toLowerCase()
+  let SwapBridgeRouterAbi: any
+  if (routerAddrLower) {
+    ;({ SwapBridgeRouterAbi } = await import('../contracts/abis/SwapBridgeRouterAbi'))
+  }
+  const scanAddresses = routerAddrLower
+    ? [portalAddress as `0x${string}`, swapBridgeRouterAddress as `0x${string}`]
+    : (portalAddress as `0x${string}`)
 
   for (let chunkFrom = fromBlock; chunkFrom <= toBlock; chunkFrom += CHUNK_SIZE) {
     const chunkTo = chunkFrom + CHUNK_SIZE - 1n > toBlock ? toBlock : chunkFrom + CHUNK_SIZE - 1n
@@ -180,7 +207,7 @@ async function recoverFromBlockScan(
     while (true) {
       try {
         logs = await publicClient.getLogs({
-          address: portalAddress as `0x${string}`,
+          address: scanAddresses,
           fromBlock: chunkFrom,
           toBlock: chunkTo,
         })
@@ -189,7 +216,6 @@ async function recoverFromBlockScan(
         chunkRetries++
         if (chunkRetries > MAX_CHUNK_RETRIES) {
           console.warn('[SDK Resume L1→L2] getLogs failed after retries for chunk', chunkFrom.toString(), '→', chunkTo.toString(), ':', err)
-          // Do NOT skip — throw so the user knows recovery needs a retry
           throw new Error(
             `Block scan failed for range ${chunkFrom}–${chunkTo} after ${MAX_CHUNK_RETRIES} retries. ` +
             'RPC may be rate-limited. Try resuming again later.'
@@ -201,6 +227,64 @@ async function recoverFromBlockScan(
     }
 
     for (const rawLog of logs) {
+      // Router path first — BridgeWithFuel carries both token and fuel message
+      // data. If this matches, we still want the portal event's claimAmount
+      // (BridgeWithFuel.tokenAmount is already post-fee but we keep the portal
+      // value as an authoritative fallback).
+      if (routerAddrLower && rawLog.address?.toLowerCase() === routerAddrLower) {
+        try {
+          const decoded = decodeEventLog({
+            abi: SwapBridgeRouterAbi,
+            data: rawLog.data,
+            topics: rawLog.topics,
+          })
+          if (decoded.eventName === 'Bridge' || decoded.eventName === 'BridgeWithFuel') {
+            const args = decoded.args as any
+            const eventSecretHash = (args.secretHash ?? args.tokenSecretHash)?.toString()
+            if (eventSecretHash && eventSecretHash !== claimSecretHash.toString()) continue
+            const messageHash = (args.key ?? args.tokenKey).toString()
+            const messageLeafIndex = (args.index ?? args.tokenIndex).toString()
+            const l1TxHash = rawLog.transactionHash?.toString()
+            let claimAmount: string | undefined
+            let fuelMessageHash: string | undefined
+            let fuelMessageLeafIndex: string | undefined
+            let fuelAmount: string | undefined
+            if (decoded.eventName === 'BridgeWithFuel') {
+              if (args.tokenAmount != null) claimAmount = args.tokenAmount.toString()
+              if (args.fuelKey) fuelMessageHash = args.fuelKey.toString()
+              if (args.fuelIndex != null) fuelMessageLeafIndex = args.fuelIndex.toString()
+              if (args.fuelAmount != null) fuelAmount = args.fuelAmount.toString()
+            }
+            // Prefer the authoritative portal event (same tx) for claimAmount
+            // if the router args didn't carry it.
+            if (!claimAmount) {
+              for (const sib of logs) {
+                if (sib.transactionHash !== rawLog.transactionHash) continue
+                if (sib.address?.toLowerCase() !== portalAddress.toLowerCase()) continue
+                try {
+                  const sibDecoded = decodeEventLog({
+                    abi: CustomTokenPortalAbi,
+                    data: sib.data,
+                    topics: sib.topics,
+                  })
+                  if (sibDecoded.eventName === targetEventName) {
+                    const sibArgs = sibDecoded.args as any
+                    if (sibArgs.amount != null) {
+                      claimAmount = sibArgs.amount.toString()
+                      break
+                    }
+                  }
+                } catch { /* skip */ }
+              }
+            }
+            console.log('[SDK Resume L1→L2] Found router event in block scan: messageHash=', messageHash, 'leafIndex=', messageLeafIndex)
+            return { messageHash, messageLeafIndex, l1TxHash, claimAmount, fuelMessageHash, fuelMessageLeafIndex, fuelAmount }
+          }
+        } catch { /* not our event */ }
+        continue
+      }
+
+      // Portal path (non-fuel OR fuel fallback when router events didn't match first)
       try {
         const decoded = decodeEventLog({
           abi: CustomTokenPortalAbi,
@@ -221,8 +305,9 @@ async function recoverFromBlockScan(
           const messageHash = args.key.toString()
           const messageLeafIndex = args.index.toString()
           const l1TxHash = rawLog.transactionHash?.toString()
+          const claimAmount = args.amount != null ? args.amount.toString() : undefined
           console.log('[SDK Resume L1→L2] Found event in block scan: messageHash=', messageHash, 'leafIndex=', messageLeafIndex, 'l1TxHash=', l1TxHash)
-          return { messageHash, messageLeafIndex, l1TxHash }
+          return { messageHash, messageLeafIndex, l1TxHash, claimAmount }
         }
       } catch {
         // Skip logs that can't be decoded with our ABI
@@ -524,7 +609,9 @@ async function resumeL1ToL2(
       recoveredL1BlockNumber = recovered.l1BlockNumber
       if (recovered.claimAmount) recoveredClaimAmount = recovered.claimAmount
     } else if (op.l1BlockNumberBeforeTx) {
-      // Path B: No tx hash — scan L1 blocks for portal events
+      // Path B: No tx hash — scan L1 blocks. Pass the SwapBridgeRouter address
+      // so fuel-enabled bridges that crashed before the receipt PATCH can
+      // still recover their fuel message fields from BridgeWithFuel events.
       emit({ type: 'recovery_from_block_scan', l1BlockNumberBeforeTx: op.l1BlockNumberBeforeTx })
       const recovered = await recoverFromBlockScan(
         publicClient,
@@ -534,12 +621,20 @@ async function resumeL1ToL2(
         amount,
         targetAddress,
         isPrivacyModeEnabled,
+        config.swapBridgeRouterAddress,
       )
       messageHash = recovered.messageHash
       messageLeafIndex = recovered.messageLeafIndex
+      if (recovered.claimAmount) recoveredClaimAmount = recovered.claimAmount
+      // Backfill fuel fields recovered from BridgeWithFuel so the public /
+      // private fuel payment method can be rebuilt further down.
+      if (recovered.fuelMessageHash && !fuelMessageHash) fuelMessageHash = recovered.fuelMessageHash
+      if (recovered.fuelMessageLeafIndex && !fuelMessageLeafIndex) fuelMessageLeafIndex = recovered.fuelMessageLeafIndex
+      if (recovered.fuelAmount && !fuelAmount) fuelAmount = recovered.fuelAmount
 
-      // Persist l1TxHash + l1TxUrl so fuel recovery (which requires op.l1TxHash) works.
-      // Also update the local `op` object so downstream code sees the recovered value.
+      // Persist l1TxHash + l1TxUrl so a follow-up resume (which requires
+      // op.l1TxHash for receipt-based recovery) can run. Also update the
+      // local `op` object so downstream code sees the recovered value.
       if (recovered.l1TxHash) {
         op.l1TxHash = recovered.l1TxHash
         const l1TxUrl = `${getEtherscanBaseUrl(config.l1ChainId)}/tx/${recovered.l1TxHash}`
@@ -550,6 +645,15 @@ async function resumeL1ToL2(
         if (!l1TxPatchOk) {
           emit({ type: 'patch_failed', operationId: op.id, label: 'recovered l1TxHash', data: { l1TxHash: recovered.l1TxHash } })
         }
+      }
+      // Persist fuel fields and claimAmount recovered from the block scan so
+      // they survive a subsequent session crash without re-scanning.
+      const scanFuelPatch: Record<string, unknown> = {}
+      if (!op.fuelMessageHash && recovered.fuelMessageHash) scanFuelPatch.fuelMessageHash = recovered.fuelMessageHash
+      if (!op.fuelMessageLeafIndex && recovered.fuelMessageLeafIndex) scanFuelPatch.fuelMessageLeafIndex = recovered.fuelMessageLeafIndex
+      if (!op.fuelAmount && recovered.fuelAmount) scanFuelPatch.fuelAmount = recovered.fuelAmount
+      if (Object.keys(scanFuelPatch).length > 0) {
+        await patchOperationWithRetry(apiClient, op.id, scanFuelPatch, { label: 'recovered fuel data from block scan' })
       }
     } else {
       throw new Error(
