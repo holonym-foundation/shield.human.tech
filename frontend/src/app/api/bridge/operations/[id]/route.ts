@@ -14,6 +14,118 @@ import {
   MAX_ERROR_LENGTH,
 } from '@/lib/validation'
 
+/**
+ * GET /api/bridge/operations/:id
+ *
+ * Fetch a single bridge operation by id. Auth required; user must own the
+ * operation. Returns the row directly (unwrapped) so the SDK's
+ * `getOperation()` can consume it as a BridgeOperation.
+ *
+ * Mirrors the collection GET's select list but ALSO includes
+ * `keyDerivationMessage` — resume relies on the exact stored signing
+ * message for bit-identical key derivation.
+ */
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params
+
+    // Cheap sanity check on id format; Prisma's parameterization handles
+    // actual injection, this just rejects obviously malformed input early.
+    if (typeof id !== 'string' || id.length < 4 || id.length > 64 || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+      return NextResponse.json({ error: 'Invalid operation id' }, { status: 400 })
+    }
+
+    const authResult = await authenticateRequest(request)
+    if (!authResult.success || !authResult.user) {
+      return createAuthErrorResponse(authResult.error ?? 'Unauthorized', 401)
+    }
+
+    const operation = await prisma.bridgeActivity.findFirst({
+      where: { id, fkUserId: authResult.user.id },
+      select: {
+        id: true,
+        direction: true,
+        status: true,
+        amountL1: true,
+        amountL2: true,
+        amountDisplayL1: true,
+        amountDisplayL2: true,
+        tokenSymbolL1: true,
+        tokenSymbolL2: true,
+        l1TxHash: true,
+        l1TxUrl: true,
+        l2TxHash: true,
+        l2TxUrl: true,
+        // L1→L2 recovery fields
+        messageHash: true,
+        messageLeafIndex: true,
+        l1BlockNumberBeforeTx: true,
+        l1BlockNumber: true,
+        claimAmount: true,
+        // L1→L2 fuel recovery fields
+        fuelMessageHash: true,
+        fuelMessageLeafIndex: true,
+        fuelAmount: true,
+        // L2→L1 recovery fields
+        l2BlockNumber: true,
+        l2BlockNumberBeforeTx: true,
+        l2ToL1MessageIndex: true,
+        siblingPath: true,
+        epoch: true,
+        recipientL1Address: true,
+        // Progress tracking
+        currentStep: true,
+        // Common
+        isPrivacyModeEnabled: true,
+        lastErrorMessage: true,
+        nodeInfo: true,
+        createdAt: true,
+        completedAt: true,
+        // Recovery-critical contract & version snapshot
+        rollupVersion: true,
+        chainIdL1: true,
+        portalAddressL1: true,
+        bridgeAddressL2: true,
+        l1RollupAddress: true,
+        l1OutboxAddress: true,
+        // Token info
+        tokenSymbol: true,
+        tokenAddressL1: true,
+        tokenAddressL2: true,
+        tokenDecimalsL1: true,
+        tokenDecimalsL2: true,
+        tokenNameL1: true,
+        tokenNameL2: true,
+        // Network names
+        fromNetworkName: true,
+        toNetworkName: true,
+        // Additional contract snapshot
+        chainIdL2: true,
+        l1InboxAddress: true,
+        l1RegistryAddress: true,
+        // Encrypted fields for client-side decryption — include
+        // keyDerivationMessage so resume uses the bit-identical stored
+        // message instead of re-deriving (which could drift if we ever
+        // change createSigningMessage).
+        encryptedCiphertext: true,
+        encryptedIv: true,
+        encryptedTag: true,
+        keyDerivationMessage: true,
+        keyDerivationDomain: true,
+      },
+    })
+
+    if (!operation) {
+      return NextResponse.json({ error: 'Operation not found or access denied' }, { status: 404 })
+    }
+
+    return NextResponse.json(operation)
+  } catch (error) {
+    console.error('[bridge/operations/[id] GET]', error)
+    return NextResponse.json({ error: 'Failed to fetch operation' }, { status: 500 })
+  }
+}
+
 /** Valid forward-only status transitions. Any status can transition to 'failed'. */
 const VALID_TRANSITIONS: Record<string, string[]> = {
   pending: ['submitted', 'deposited', 'completed', 'failed'],
