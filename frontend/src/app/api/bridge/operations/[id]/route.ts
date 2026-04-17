@@ -31,10 +31,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
  * Auth required; user must own the operation.
  * Status transitions must be forward-only (except any → failed).
  */
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
 
@@ -48,10 +45,7 @@ export async function PATCH(
     })
 
     if (!operation) {
-      return NextResponse.json(
-        { error: 'Operation not found or access denied' },
-        { status: 404 },
-      )
+      return NextResponse.json({ error: 'Operation not found or access denied' }, { status: 404 })
     }
 
     const body = await request.json()
@@ -64,9 +58,8 @@ export async function PATCH(
     const messageLeafIndex = sanitizeNumericString(body.messageLeafIndex)
     const l2TxHash = sanitizeHexString(body.l2TxHash, 130)
     const l2TxUrl = sanitizeUrl(body.l2TxUrl)
-    const lastErrorMessage = body.lastErrorMessage !== undefined
-      ? (sanitizeString(body.lastErrorMessage, MAX_ERROR_LENGTH) ?? '')
-      : undefined
+    const lastErrorMessage =
+      body.lastErrorMessage !== undefined ? (sanitizeString(body.lastErrorMessage, MAX_ERROR_LENGTH) ?? '') : undefined
     const completedAt = sanitizeString(body.completedAt, 30) // ISO date string
     // L2→L1 withdrawal fields
     const l2BlockNumber = sanitizeNumericString(body.l2BlockNumber)
@@ -79,11 +72,11 @@ export async function PATCH(
     const epoch = sanitizeInt(body.epoch, 0, 1_000_000_000)
     // L1→L2 receipt fields
     const claimAmount = sanitizeNumericString(body.claimAmount)
+    const l1BlockNumber = sanitizeNumericString(body.l1BlockNumber)
     // L1→L2 fuel recovery fields
     const fuelMessageHash = sanitizeHexString(body.fuelMessageHash, 130)
     const fuelMessageLeafIndex = sanitizeNumericString(body.fuelMessageLeafIndex)
     const fuelAmount = sanitizeNumericString(body.fuelAmount)
-
 
     // ── Immutable field guard ───────────────────────────────────────────
     // These fields are set once during operation creation and must never be
@@ -134,14 +127,17 @@ export async function PATCH(
 
     // Validate status is a known BridgeOperationStatus value
     const VALID_STATUSES = new Set([
-      'pending', 'deposited', 'claimed', 'submitted',
-      'ready', 'pending_finalize', 'completed', 'failed',
+      'pending',
+      'deposited',
+      'claimed',
+      'submitted',
+      'ready',
+      'pending_finalize',
+      'completed',
+      'failed',
     ])
     if (status && !VALID_STATUSES.has(status)) {
-      return NextResponse.json(
-        { error: `Invalid status value: ${status}` },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: `Invalid status value: ${status}` }, { status: 400 })
     }
 
     // Validate status transition if status is being changed
@@ -162,10 +158,7 @@ export async function PATCH(
     if (completedAt) {
       completedAtDate = new Date(completedAt)
       if (isNaN(completedAtDate.getTime())) {
-        return NextResponse.json(
-          { error: 'Invalid completedAt date format' },
-          { status: 400 },
-        )
+        return NextResponse.json({ error: 'Invalid completedAt date format' }, { status: 400 })
       }
     }
 
@@ -178,8 +171,7 @@ export async function PATCH(
     if (messageLeafIndex) updateData.messageLeafIndex = messageLeafIndex
     if (l2TxHash) updateData.l2TxHash = l2TxHash
     if (l2TxUrl) updateData.l2TxUrl = l2TxUrl
-    if (lastErrorMessage !== undefined)
-      updateData.lastErrorMessage = lastErrorMessage
+    if (lastErrorMessage !== undefined) updateData.lastErrorMessage = lastErrorMessage
     // Set completedAt server-side for terminal states — ignore client-supplied value
     if (status === 'completed' || status === 'failed') {
       updateData.completedAt = new Date()
@@ -208,6 +200,7 @@ export async function PATCH(
     }
     // L1→L2 receipt + fuel fields
     if (claimAmount) updateData.claimAmount = claimAmount
+    if (l1BlockNumber) updateData.l1BlockNumber = l1BlockNumber
     if (fuelMessageHash) updateData.fuelMessageHash = fuelMessageHash
     if (fuelMessageLeafIndex) updateData.fuelMessageLeafIndex = fuelMessageLeafIndex
     if (fuelAmount) updateData.fuelAmount = fuelAmount
@@ -215,10 +208,7 @@ export async function PATCH(
     if (epoch != null) updateData.epoch = epoch
 
     if (Object.keys(updateData).length === 0) {
-      return NextResponse.json(
-        { error: 'No fields to update' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
     }
 
     await prisma.bridgeActivity.update({
@@ -229,9 +219,6 @@ export async function PATCH(
     return NextResponse.json({ ok: true })
   } catch (error) {
     console.error('[bridge/operations/[id] PATCH]', error)
-    return NextResponse.json(
-      { error: 'Failed to update operation' },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: 'Failed to update operation' }, { status: 500 })
   }
 }

@@ -68,6 +68,7 @@ export async function GET(request: NextRequest) {
         messageHash: true,
         messageLeafIndex: true,
         l1BlockNumberBeforeTx: true,
+        l1BlockNumber: true,
         claimAmount: true,
         // L1→L2 fuel recovery fields
         fuelMessageHash: true,
@@ -122,10 +123,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ operations })
   } catch (error) {
     console.error('[bridge/operations GET]', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch operations' },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: 'Failed to fetch operations' }, { status: 500 })
   }
 }
 
@@ -153,14 +151,8 @@ export async function POST(request: NextRequest) {
     const encryptedCiphertext = sanitizeCiphertext(body.encryptedCiphertext)
     const encryptedIv = sanitizeString(body.encryptedIv, 128)
     const encryptedTag = sanitizeString(body.encryptedTag, 128)
-    const keyDerivationMessage = sanitizeString(
-      body.keyDerivationMessage,
-      MAX_STRING_LENGTH,
-    )
-    const keyDerivationDomain = sanitizeString(
-      body.keyDerivationDomain,
-      MAX_STRING_LENGTH,
-    )
+    const keyDerivationMessage = sanitizeString(body.keyDerivationMessage, MAX_STRING_LENGTH)
+    const keyDerivationDomain = sanitizeString(body.keyDerivationDomain, MAX_STRING_LENGTH)
     const direction = sanitizeString(body.direction, 10)
     const l1Address = sanitizeEthAddress(body.l1Address)
     const l2Address = sanitizeHexString(body.l2Address, 130) // Aztec addresses are longer than ETH
@@ -170,12 +162,8 @@ export async function POST(request: NextRequest) {
     const amountDisplayL2 = sanitizeString(body.amountDisplayL2, 64)
     const claimId = sanitizeString(body.claimId, 64)
     const isPrivacyModeEnabled = sanitizeBoolean(body.isPrivacyModeEnabled)
-    const l1BlockNumberBeforeTx = sanitizeNumericString(
-      body.l1BlockNumberBeforeTx,
-    )
-    const l2BlockNumberBeforeTx = sanitizeNumericString(
-      body.l2BlockNumberBeforeTx,
-    )
+    const l1BlockNumberBeforeTx = sanitizeNumericString(body.l1BlockNumberBeforeTx)
+    const l2BlockNumberBeforeTx = sanitizeNumericString(body.l2BlockNumberBeforeTx)
     const recipientL1Address = sanitizeEthAddress(body.recipientL1Address)
     const nodeInfo = sanitizeNodeInfo(body.nodeInfo)
     // Recovery-critical contract & version snapshot
@@ -208,8 +196,7 @@ export async function POST(request: NextRequest) {
     if (!encryptedCiphertext || !encryptedIv || !encryptedTag) {
       return NextResponse.json(
         {
-          error:
-            'Missing encrypted payload (encryptedCiphertext, encryptedIv, encryptedTag)',
+          error: 'Missing encrypted payload (encryptedCiphertext, encryptedIv, encryptedTag)',
         },
         { status: 400 },
       )
@@ -217,59 +204,34 @@ export async function POST(request: NextRequest) {
     if (!keyDerivationMessage || !keyDerivationDomain) {
       return NextResponse.json(
         {
-          error:
-            'Missing key derivation (keyDerivationMessage, keyDerivationDomain)',
+          error: 'Missing key derivation (keyDerivationMessage, keyDerivationDomain)',
         },
         { status: 400 },
       )
     }
     if (!isAllowedKeyDerivationDomain(keyDerivationDomain)) {
-      return NextResponse.json(
-        { error: 'Invalid keyDerivationDomain' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Invalid keyDerivationDomain' }, { status: 400 })
     }
     if (!l1Address) {
-      return NextResponse.json(
-        { error: 'Invalid l1Address (must be 0x + 40 hex chars)' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Invalid l1Address (must be 0x + 40 hex chars)' }, { status: 400 })
     }
     if (!l2Address) {
-      return NextResponse.json(
-        { error: 'Invalid l2Address (must be a hex string)' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Invalid l2Address (must be a hex string)' }, { status: 400 })
     }
     if (l1Address !== authResult.user.l1Address) {
-      return NextResponse.json(
-        { error: 'l1Address does not match authenticated wallet' },
-        { status: 403 },
-      )
+      return NextResponse.json({ error: 'l1Address does not match authenticated wallet' }, { status: 403 })
     }
     if (l2Address !== authResult.user.l2Address) {
-      return NextResponse.json(
-        { error: 'l2Address does not match authenticated Aztec address' },
-        { status: 403 },
-      )
+      return NextResponse.json({ error: 'l2Address does not match authenticated Aztec address' }, { status: 403 })
     }
     if (!amountL1) {
-      return NextResponse.json(
-        { error: 'Invalid amountL1 (must be a numeric string)' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Invalid amountL1 (must be a numeric string)' }, { status: 400 })
     }
     if (!amountL2) {
-      return NextResponse.json(
-        { error: 'Invalid amountL2 (must be a numeric string)' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Invalid amountL2 (must be a numeric string)' }, { status: 400 })
     }
     if (!direction || !VALID_DIRECTIONS.has(direction)) {
-      return NextResponse.json(
-        { error: 'Invalid direction (must be L1_TO_L2 or L2_TO_L1)' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Invalid direction (must be L1_TO_L2 or L2_TO_L1)' }, { status: 400 })
     }
 
     const isL2ToL1 = direction === 'L2_TO_L1'
@@ -277,9 +239,7 @@ export async function POST(request: NextRequest) {
     const operation = await prisma.bridgeActivity.create({
       data: {
         fkUserId: authResult.user.id,
-        direction: isL2ToL1
-          ? BridgeDirection.L2_TO_L1
-          : BridgeDirection.L1_TO_L2,
+        direction: isL2ToL1 ? BridgeDirection.L2_TO_L1 : BridgeDirection.L1_TO_L2,
         status: BridgeOperationStatus.pending,
         encryptedCiphertext,
         encryptedIv,
@@ -337,9 +297,6 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('[bridge/operations]', error)
-    return NextResponse.json(
-      { error: 'Failed to store encrypted backup' },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: 'Failed to store encrypted backup' }, { status: 500 })
   }
 }
