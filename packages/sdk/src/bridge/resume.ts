@@ -340,9 +340,42 @@ async function resumeL1ToL2(
     }
   }
 
-  if (data.fuelSecret && fuelMessageLeafIndex) {
-    // Throw on import failure instead of silently falling back — without the
-    // FeeJuicePaymentMethodWithClaim, the L2 claim will fail if the wallet has no FeeJuice.
+  if (data.privateFuelSecret && data.privateFuelSalt && fuelMessageLeafIndex && fuelAmount) {
+    // Private-fuel resume: rebuild PrivateMintAndPayFeePaymentMethod from the
+    // salt + derived secret persisted in the encrypted blob.
+    if (!config.bridgedFpcAddress) {
+      throw new Error(
+        'Private fuel resume requires bridgedFpcAddress in the active deployment config.',
+      )
+    }
+    const { PrivateMintAndPayFeePaymentMethod, maxFeesPerGasFromBaseFees } =
+      await import('@wonderland/aztec-fee-payment')
+    const { Gas, GasFees } = await import('@aztec/stdlib/gas')
+    const baseFees = await aztecNode.getCurrentMinFees()
+    const gasLimits = Gas.from({ l2Gas: 2_000_000, daGas: 50_000 })
+    const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
+    const maxFeesPerGas = maxFeesPerGasFromBaseFees(baseFees)
+    const paymentMethod = new PrivateMintAndPayFeePaymentMethod(
+      AztecAddress.fromString(config.bridgedFpcAddress),
+      BigInt(fuelAmount),
+      Fr.fromString(data.privateFuelSecret),
+      Fr.fromString(data.privateFuelSalt),
+      new Fr(BigInt(fuelMessageLeafIndex)),
+    )
+    fuelFeeOption = {
+      fee: {
+        paymentMethod,
+        gasSettings: {
+          gasLimits,
+          teardownGasLimits,
+          maxFeesPerGas,
+          maxPriorityFeesPerGas: GasFees.empty(),
+        },
+      },
+    }
+    console.log('[SDK Resume L1→L2] Using PrivateMintAndPayFeePaymentMethod (BridgedFPC) for private-fuel resume')
+  } else if (data.fuelSecret && fuelMessageLeafIndex) {
+    // Public-fuel resume: FeeJuicePaymentMethodWithClaim against the claimer's aztec address.
     const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
     const { buildClaimGasSettings } = await import('../fuelGasEstimate')
     const fuelClaimAmount = fuelAmount ? BigInt(fuelAmount) : 0n
@@ -356,7 +389,7 @@ async function resumeL1ToL2(
     )
     const gasSettings = await buildClaimGasSettings(aztecNode)
     fuelFeeOption = { fee: { paymentMethod, gasSettings } }
-    console.log('[SDK Resume L1→L2] Using FeeJuicePaymentMethodWithClaim for fuel-enabled resume')
+    console.log('[SDK Resume L1→L2] Using FeeJuicePaymentMethodWithClaim for public-fuel resume')
   }
 
   if (!op.portalAddressL1) {

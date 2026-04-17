@@ -483,12 +483,36 @@ export async function bridgeL1ToL2(
     if (!signature) throw new Error('Failed to sign message for encryption key derivation')
     const encryptionKey = await deriveEncryptionKey(l1Address, signature, keyDerivationDomain)
 
-    // Generate fuel secrets if applicable
+    // Generate fuel secrets if applicable.
+    //
+    // Public fuel: random secret (used with FeeJuicePaymentMethodWithClaim on L2).
+    // Private fuel (BridgedFPC): derived secret = poseidon2([salt, aztecAddress], DOM_SEP)
+    //   so BridgedFPC can recompute the secret from salt + caller when mint_and_pay_fee
+    //   is invoked during L2 claim.
+    const DOM_SEP_FPC_BRIDGE_SECRET = 3952304070
+    const isPrivateFuel = fuel?.enabled && fuel.fuelType === 'private'
     let fuelSecret: Fr | undefined
     let fuelSecretHash: Fr | undefined
+    let privateFuelSalt: Fr | undefined
+    let privateFuelSecret: Fr | undefined
+    let privateFuelSecretHash: Fr | undefined
     if (fuel?.enabled) {
-      fuelSecret = Fr.random()
-      fuelSecretHash = await computeSecretHash(fuelSecret)
+      if (isPrivateFuel) {
+        const { poseidon2HashWithSeparator } = await import('@aztec/foundation/crypto/poseidon')
+        privateFuelSalt = Fr.random()
+        const claimerFr = Fr.fromString(l2Address)
+        privateFuelSecret = await poseidon2HashWithSeparator(
+          [privateFuelSalt, claimerFr],
+          DOM_SEP_FPC_BRIDGE_SECRET,
+        )
+        privateFuelSecretHash = await computeSecretHash(privateFuelSecret)
+        // The SwapBridgeRouter still receives `fuelSecretHash` at the contract
+        // boundary; in the private case that's the hash of the derived secret.
+        fuelSecretHash = privateFuelSecretHash
+      } else {
+        fuelSecret = Fr.random()
+        fuelSecretHash = await computeSecretHash(fuelSecret)
+      }
     }
 
     const payloadToEncrypt: Record<string, unknown> = {
@@ -504,8 +528,17 @@ export async function bridgeL1ToL2(
     if (fuelSecret && fuelSecretHash) {
       payloadToEncrypt.fuelSecret = fuelSecret.toString()
       payloadToEncrypt.fuelSecretHash = fuelSecretHash.toString()
-      // Store fuel amount so resume can compute claimAmount = amount - fuelAmountTokenUnits
-      payloadToEncrypt.fuelAmount = fuel?.amount ?? '0'
+    }
+    if (privateFuelSalt && privateFuelSecret && privateFuelSecretHash) {
+      // Private fuel (BridgedFPC) needs salt + derived secret to rebuild the
+      // PrivateMintAndPayFeePaymentMethod at L2-claim time (including on resume).
+      payloadToEncrypt.privateFuelSalt = privateFuelSalt.toString()
+      payloadToEncrypt.privateFuelSecret = privateFuelSecret.toString()
+      payloadToEncrypt.privateFuelSecretHash = privateFuelSecretHash.toString()
+    }
+    if (fuel?.enabled) {
+      // Store fuel amount so resume can reconstruct the PaymentMethodWithClaim
+      payloadToEncrypt.fuelAmount = fuel.amount ?? '0'
       if (tokenConfig.decimals != null) payloadToEncrypt.fuelDecimals = tokenConfig.decimals
     }
 
@@ -707,6 +740,18 @@ export async function bridgeL1ToL2(
       // Permit2 witness hash (which binds totalAmount) validates on-chain.
       const totalAmount = amount
 
+      // Private fuel deposits the swapped FeeJuice to BridgedFPC (so BridgedFPC
+      // can mint+pay_fee privately on L2). Public fuel deposits to the claimer's
+      // aztecAddress directly. `fuelRecipient` matches that split on-chain.
+      if (isPrivateFuel && !config.bridgedFpcAddress) {
+        throw new Error(
+          'Private fuel requires bridgedFpcAddress in the active deployment config.',
+        )
+      }
+      const fuelRecipientOnchain = (
+        isPrivateFuel ? config.bridgedFpcAddress : l2Address
+      ) as `0x${string}`
+
       // Sign Permit2 witness-bound transfer
       const permit2 = await signPermit2Transfer({
         signTypedData,
@@ -718,7 +763,7 @@ export async function bridgeL1ToL2(
         totalAmount,
         fuelAmount: fuelAmountTokenUnits,
         aztecRecipient: l2Address as `0x${string}`,
-        fuelRecipient: l2Address as `0x${string}`,
+        fuelRecipient: fuelRecipientOnchain,
         tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
         fuelSecretHash: fuelSecretHash!.toString() as `0x${string}`,
         minFuelOutput: fuelQuote!.minOutput,
@@ -737,7 +782,7 @@ export async function bridgeL1ToL2(
             totalAmount,
             fuelAmount: fuelAmountTokenUnits,
             aztecRecipient: l2Address as `0x${string}`,
-            fuelRecipient: l2Address as `0x${string}`,
+            fuelRecipient: fuelRecipientOnchain,
             tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
             fuelSecretHash: fuelSecretHash!.toString() as `0x${string}`,
             minFuelOutput: fuelQuote!.minOutput,
@@ -1051,7 +1096,38 @@ export async function bridgeL1ToL2(
     // during its own preflight (different account contracts need very different
     // limits — hardcoding one breaks the others).
     let feeOption: { fee: { paymentMethod: any; gasSettings?: any } } | undefined
-    if (isFuelEnabled && fuelSecret && fuelMessageLeafIndexStr && fuelAmountReceived) {
+    if (isFuelEnabled && isPrivateFuel && privateFuelSecret && privateFuelSalt && fuelMessageLeafIndexStr && fuelAmountReceived) {
+      // Private fuel: BridgedFPC mints+pays the L2 fee from the deposited FJ.
+      // Tight gasLimits are required — BridgedFPC's mint_and_pay_fee asserts
+      // `fuelAmount >= maxGasCost`, so we need the fee-rate cap applied here
+      // to match what checkFuelSufficiency('private') validated earlier.
+      const { PrivateMintAndPayFeePaymentMethod, maxFeesPerGasFromBaseFees } =
+        await import('@wonderland/aztec-fee-payment')
+      const { Gas, GasFees } = await import('@aztec/stdlib/gas')
+      const baseFees = await aztecNode.getCurrentMinFees()
+      const gasLimits = Gas.from({ l2Gas: 2_000_000, daGas: 50_000 })
+      const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
+      const maxFeesPerGas = maxFeesPerGasFromBaseFees(baseFees)
+      const paymentMethod = new PrivateMintAndPayFeePaymentMethod(
+        AztecAddress.fromString(config.bridgedFpcAddress),
+        fuelAmountReceived,
+        privateFuelSecret,
+        privateFuelSalt,
+        new Fr(BigInt(fuelMessageLeafIndexStr)),
+      )
+      feeOption = {
+        fee: {
+          paymentMethod,
+          gasSettings: {
+            gasLimits,
+            teardownGasLimits,
+            maxFeesPerGas,
+            maxPriorityFeesPerGas: GasFees.empty(),
+          },
+        },
+      }
+    } else if (isFuelEnabled && fuelSecret && fuelMessageLeafIndexStr && fuelAmountReceived) {
+      // Public fuel: FeeJuicePortal deposited FJ directly to claimer's aztecAddress.
       const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
       const { buildClaimGasSettings } = await import('../fuelGasEstimate')
       const paymentMethod = new FeeJuicePaymentMethodWithClaim(
