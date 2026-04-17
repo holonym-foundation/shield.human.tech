@@ -567,19 +567,27 @@ export async function bridgeL1ToL2(
       status: 'pending',
     })
 
-    // Resolve fuel amount in token units (needed for approval + tx encoding)
+    // Resolve fuel amount in token units (needed for Permit2 witness + tx encoding).
+    // Fuel is carved OUT of `amount` (not additive): the SwapBridgeRouter pulls
+    // `amount` from the user, sends `fuelAmount` through the swap, and forwards
+    // `amount - fuelAmount` to the token portal. So `fuelAmount` must be < `amount`.
     const isFuelEnabled = fuel?.enabled && fuelSecretHash && fuelQuote
     const fuelAmountTokenUnits = isFuelEnabled ? parseUnits(fuel!.amount, tokenConfig.decimals) : 0n
 
     if (fuel?.enabled && !fuelQuote) {
       throw new Error('fuel.enabled is true but fuelQuote was not provided. Use getUniswapFuelQuote() to generate one.')
     }
+    if (isFuelEnabled && fuelAmountTokenUnits >= amount) {
+      throw new Error(
+        `Fuel amount (${fuel!.amount}) must be strictly less than bridge amount — fuel is carved out, not additive.`,
+      )
+    }
 
     // Check and approve allowance for Permit2 (one-time per token).
     // All deposits go through SwapBridgeRouter with Permit2 — approve the
     // canonical Permit2 contract with max uint256 (one-time).
     const spender = PERMIT2_ADDRESS
-    const totalApprovalNeeded = amount + fuelAmountTokenUnits
+    const totalApprovalNeeded = amount
 
     const allowance = await publicClient.readContract({
       address: tokenConfig.l1TokenContract as `0x${string}`,
@@ -628,7 +636,10 @@ export async function bridgeL1ToL2(
 
     if (isFuelEnabled) {
       // ── Fuel path: call SwapBridgeRouter.bridgeWithFuel via Permit2 ──
-      const totalAmount = amount + fuelAmountTokenUnits
+      // `totalAmount` is what gets pulled from the user; `fuelAmount` is carved
+      // out of it by the router for the swap. Must match main's semantics so the
+      // Permit2 witness hash (which binds totalAmount) validates on-chain.
+      const totalAmount = amount
 
       // Sign Permit2 witness-bound transfer
       const permit2 = await signPermit2Transfer({
