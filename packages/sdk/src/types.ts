@@ -240,8 +240,13 @@ export interface BridgeL1ToL2Params {
    *     MUST NOT be used in private mode — leaks the L2 recipient on-chain.
    *   - 'private': swap into FeeJuice held by BridgedFPC; claim + mint + pay_fee
    *     happen privately on L2 via PrivateMintAndPayFeePaymentMethod.
+   *
+   * `slippageBps` tolerates swap slippage in basis points (default 300 = 3%).
+   *
+   * When `fuel.enabled` is true and no `fuelQuote` is supplied alongside, the SDK
+   * auto-builds the V4 quote internally via buildSwapCandidates + getBestRoute.
    */
-  fuel?: { enabled: boolean; amount: string; fuelType?: 'public' | 'private' }
+  fuel?: { enabled: boolean; amount: string; fuelType?: 'public' | 'private'; slippageBps?: number }
   /** Pre-computed fuel quote (required when fuel.enabled is true) */
   fuelQuote?: FuelQuote
   /** Callback to send an L1 transaction (e.g. via wallet provider) */

@@ -91,6 +91,54 @@ export class HumanTechBridge {
   }
 
   /**
+   * Build a V4 fuel quote for a given token and fuel amount.
+   *
+   * Intended for UI previews (showing the user the expected FJ output before
+   * they commit to the bridge). For bridging, prefer passing `fuel` to
+   * `bridgeL1ToL2` without a pre-built quote — the SDK builds it internally
+   * and guarantees the same routing the contract call will use.
+   */
+  async getFuelQuote(params: {
+    /** Token symbol (e.g. "USDC") or L1 contract address. */
+    token: string
+    /** Human-readable fuel amount in the token's native decimals (e.g. "5"). */
+    fuelAmount: string
+    /** Slippage tolerance in basis points (default 300 = 3%). */
+    slippageBps?: number
+  }) {
+    const { parseUnits } = await import('viem')
+    const { buildSwapCandidates, getBestRoute } = await import('./fuelPricing')
+    const { getUniswapFuelQuote } = await import('./fuel')
+    const { resolveToken } = await import('./config')
+
+    if (!this.config.feeJuiceAddress) {
+      throw new Error('getFuelQuote requires feeJuiceAddress in the active deployment config.')
+    }
+    if (!this.config.l1RpcUrl) {
+      throw new Error('getFuelQuote requires l1RpcUrl on the SDK config.')
+    }
+
+    const tokenConfig = resolveToken(this.config, params.token)
+    const fuelAmountTokenUnits = parseUnits(params.fuelAmount, tokenConfig.decimals)
+
+    const candidates = buildSwapCandidates(
+      tokenConfig.l1TokenContract as `0x${string}`,
+      this.config.feeJuiceAddress as `0x${string}`,
+    )
+    const best = await getBestRoute({
+      candidates,
+      inputAmount: fuelAmountTokenUnits,
+      l1RpcUrl: this.config.l1RpcUrl,
+    })
+    return getUniswapFuelQuote({
+      expectedOutput: best.expectedOutput,
+      slippageBps: params.slippageBps ?? 300,
+      poolKeys: best.route.poolKeys,
+      zeroForOnes: best.route.zeroForOnes,
+    })
+  }
+
+  /**
    * Withdraw tokens from L2 (Aztec) to L1 (Ethereum).
    */
   async withdrawL2ToL1(params: WithdrawL2ToL1Params): Promise<BridgeResult> {

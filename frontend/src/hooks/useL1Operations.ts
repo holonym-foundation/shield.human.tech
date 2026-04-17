@@ -9,30 +9,18 @@ import {
 import { logError, logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { useWalletAdapter } from './useWalletAdapter'
-import {
-  ADDRESS,
-  getAztecscanUrl,
-  getEtherscanUrl,
-  L1_CHAIN_ID,
-  L1_RPC_URL,
-  L1_TOKENS,
-  L2_CHAIN_ID,
-  FEE_JUICE_ADDRESS,
-  SWAP_BRIDGE_ROUTER_ADDRESS,
-  UNISWAP_FUEL_SWAP_ADDRESS,
-} from '@/config'
+import { ADDRESS, getAztecscanUrl, getEtherscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { formatUnits, parseUnits, encodeFunctionData } from 'viem'
+import { formatUnits, encodeFunctionData } from 'viem'
 import PortalSBTJson from '../constants/PortalSBT.json'
 import { useToast, useToastMutation, useToastQuery } from './useToast'
 import { requestWaapWallet, useWalletStore, WAAP_METHOD } from '@/stores/walletStore'
 import { I_UserTokenBalance, T_AlchemyTokenBalanceResponse, T_UserTokenType } from '@/types/token.balances.types'
 import { axiosErrorMessage } from './helper'
 import { networkConfig } from '@/config/l1.config'
-import { getUniswapFuelQuote } from '@/utils/fuelQuote'
 import { useBridge } from '@/hooks/useBridge'
-import type { BridgeEvent, StepStatus, FuelQuote } from '@human.tech/aztec-bridge-sdk'
+import type { BridgeEvent, StepStatus } from '@human.tech/aztec-bridge-sdk'
 import { STORAGE_KEYS } from '@human.tech/aztec-bridge-sdk'
 
 // Fix the bytecode format
@@ -407,49 +395,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     if (!aztecAddress) throw new Error('Aztec wallet not connected')
     if (!walletAdapter) throw new Error('Aztec wallet adapter not ready')
 
-    // Build fuel params if fuel is enabled. Both public and private mode
-    // are supported — private mode requires fuelType='private' (BridgedFPC).
-    // The privacy-mode gate lives in the SDK, so we just forward the user's
-    // selection here.
-    let fuel: { enabled: boolean; amount: string; fuelType?: 'public' | 'private' } | undefined
-    let fuelQuote: FuelQuote | undefined
-    if (
-      fuelEnabled &&
-      fuelAmountStr &&
-      SWAP_BRIDGE_ROUTER_ADDRESS &&
-      UNISWAP_FUEL_SWAP_ADDRESS &&
-      selectedToken?.l1TokenContract
-    ) {
-      const decimals = selectedToken?.decimals ?? 6
-      const fuelAmountTokenUnits = parseUnits(fuelAmountStr, decimals)
-      const amountTokenUnits = parseUnits(amountDisplayL1, decimals)
-      if (fuelAmountTokenUnits > 0n && fuelAmountTokenUnits < amountTokenUnits) {
-        // Build REAL V4 routing + quote via the SDK's fuelPricing helpers.
-        // Passing empty poolKeys here (previous behavior) made the on-chain
-        // swap call revert because the router has no path to traverse.
-        const { buildSwapCandidates, getBestRoute } = await import('@human.tech/aztec-bridge-sdk')
-        const candidates = buildSwapCandidates(
-          selectedToken.l1TokenContract as `0x${string}`,
-          FEE_JUICE_ADDRESS as `0x${string}`,
-        )
-        const best = await getBestRoute({
-          candidates,
-          inputAmount: fuelAmountTokenUnits,
-          l1RpcUrl: L1_RPC_URL,
-        })
-        fuelQuote = getUniswapFuelQuote({
-          expectedOutput: best.expectedOutput,
-          slippageBps: 300,
-          poolKeys: best.route.poolKeys,
-          zeroForOnes: best.route.zeroForOnes,
-        })
-        fuel = {
-          enabled: true,
-          amount: fuelAmountStr,
-          fuelType: isPrivacyModeEnabled ? 'private' : fuelType,
-        }
-      }
-    }
+    // Forward the user's fuel selection to the SDK. The SDK handles V4 routing,
+    // slippage, and sufficiency internally — the frontend only needs to say
+    // "yes, use fuel, here's how much, here's the type".
+    const fuel =
+      fuelEnabled && fuelAmountStr
+        ? {
+            enabled: true,
+            amount: fuelAmountStr,
+            fuelType: (isPrivacyModeEnabled ? 'private' : fuelType) as 'public' | 'private',
+          }
+        : undefined
 
     const result = await bridge.bridgeL1ToL2({
       token: selectedToken?.symbol ?? 'USDC',
@@ -458,7 +414,6 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       l2Address: aztecAddress,
       isPrivate: isPrivacyModeEnabled ?? false,
       fuel,
-      fuelQuote,
       sendTransaction: async (tx) => {
         return (await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [tx])) as string
       },

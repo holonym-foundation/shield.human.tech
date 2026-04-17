@@ -40,6 +40,7 @@ import type {
   L2ClaimDeps,
   L2ClaimResult,
   BridgeEventCallback,
+  FuelQuote,
 } from '../types'
 
 // ─── Permit2 Constants ──────────────────────────────────────────────
@@ -658,26 +659,53 @@ export async function bridgeL1ToL2(
     // Fuel is carved OUT of `amount` (not additive): the SwapBridgeRouter pulls
     // `amount` from the user, sends `fuelAmount` through the swap, and forwards
     // `amount - fuelAmount` to the token portal. So `fuelAmount` must be < `amount`.
-    const isFuelEnabled = fuel?.enabled && fuelSecretHash && fuelQuote
-    const fuelAmountTokenUnits = isFuelEnabled ? parseUnits(fuel!.amount, tokenConfig.decimals) : 0n
-
-    if (fuel?.enabled && !fuelQuote) {
-      throw new Error('fuel.enabled is true but fuelQuote was not provided. Use getUniswapFuelQuote() to generate one.')
-    }
-    if (isFuelEnabled && fuelAmountTokenUnits >= amount) {
+    const fuelAmountTokenUnits = fuel?.enabled ? parseUnits(fuel.amount, tokenConfig.decimals) : 0n
+    if (fuel?.enabled && fuelAmountTokenUnits >= amount) {
       throw new Error(
-        `Fuel amount (${fuel!.amount}) must be strictly less than bridge amount — fuel is carved out, not additive.`,
+        `Fuel amount (${fuel.amount}) must be strictly less than bridge amount — fuel is carved out, not additive.`,
       )
     }
+
+    // Auto-build the V4 fuel quote when the caller didn't supply one. This is the
+    // default path — consumers only need to pass `fuel: { enabled, amount, fuelType? }`
+    // and the SDK handles routing + slippage + sufficiency internally.
+    let resolvedFuelQuote: FuelQuote | undefined = fuelQuote
+    if (fuel?.enabled && !resolvedFuelQuote) {
+      if (!config.feeJuiceAddress) {
+        throw new Error('fuel.enabled requires feeJuiceAddress in the active deployment config.')
+      }
+      if (!config.l1RpcUrl) {
+        throw new Error('fuel.enabled requires l1RpcUrl on the SDK config.')
+      }
+      const { buildSwapCandidates, getBestRoute } = await import('../fuelPricing')
+      const { getUniswapFuelQuote } = await import('../fuel')
+      const candidates = buildSwapCandidates(
+        tokenConfig.l1TokenContract as `0x${string}`,
+        config.feeJuiceAddress as `0x${string}`,
+      )
+      const best = await getBestRoute({
+        candidates,
+        inputAmount: fuelAmountTokenUnits,
+        l1RpcUrl: config.l1RpcUrl,
+      })
+      resolvedFuelQuote = getUniswapFuelQuote({
+        expectedOutput: best.expectedOutput,
+        slippageBps: fuel.slippageBps ?? 300,
+        poolKeys: best.route.poolKeys,
+        zeroForOnes: best.route.zeroForOnes,
+      })
+    }
+
+    const isFuelEnabled = fuel?.enabled && fuelSecretHash && resolvedFuelQuote
 
     // Pre-flight fuel sufficiency check. Fails fast BEFORE any L1 tx is sent,
     // so the user doesn't end up with an L1 deposit that produces too little FJ
     // to cover the L2 claim fee — which would leave funds stuck until they
     // top up FJ separately.
-    if (isFuelEnabled && fuelQuote!.expectedOutput != null) {
+    if (isFuelEnabled && resolvedFuelQuote!.expectedOutput != null) {
       const { checkFuelSufficiency } = await import('../fuelGasEstimate')
       const fuelTypeForCheck = fuel!.fuelType === 'private' ? 'private' : 'public'
-      const sufficiency = await checkFuelSufficiency(aztecNode, fuelQuote!.expectedOutput, fuelTypeForCheck)
+      const sufficiency = await checkFuelSufficiency(aztecNode, resolvedFuelQuote!.expectedOutput, fuelTypeForCheck)
       if (!sufficiency.sufficient) {
         throw new Error(
           `Insufficient fuel: swap produces ~${sufficiency.expectedFj} FJ but the L2 claim requires ~${sufficiency.feeLimitFj} FJ. ` +
@@ -770,9 +798,9 @@ export async function bridgeL1ToL2(
         fuelRecipient: fuelRecipientOnchain,
         tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
         fuelSecretHash: fuelSecretHash!.toString() as `0x${string}`,
-        minFuelOutput: fuelQuote!.minOutput,
-        poolKeys: (fuelQuote!.poolKeys ?? []) as any,
-        zeroForOnes: fuelQuote!.zeroForOnes ?? [],
+        minFuelOutput: resolvedFuelQuote!.minOutput,
+        poolKeys: (resolvedFuelQuote!.poolKeys ?? []) as any,
+        zeroForOnes: resolvedFuelQuote!.zeroForOnes ?? [],
         isPrivate,
       })
 
@@ -789,9 +817,9 @@ export async function bridgeL1ToL2(
             fuelRecipient: fuelRecipientOnchain,
             tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
             fuelSecretHash: fuelSecretHash!.toString() as `0x${string}`,
-            minFuelOutput: fuelQuote!.minOutput,
-            path: (fuelQuote!.poolKeys ?? []) as any,
-            zeroForOnes: fuelQuote!.zeroForOnes ?? [],
+            minFuelOutput: resolvedFuelQuote!.minOutput,
+            path: (resolvedFuelQuote!.poolKeys ?? []) as any,
+            zeroForOnes: resolvedFuelQuote!.zeroForOnes ?? [],
             isPrivate,
             cleanHands: cleanHandsData,
             passport: passportData,
