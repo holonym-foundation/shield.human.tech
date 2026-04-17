@@ -633,6 +633,22 @@ export async function bridgeL1ToL2(
       )
     }
 
+    // Pre-flight fuel sufficiency check. Fails fast BEFORE any L1 tx is sent,
+    // so the user doesn't end up with an L1 deposit that produces too little FJ
+    // to cover the L2 claim fee — which would leave funds stuck until they
+    // top up FJ separately.
+    if (isFuelEnabled && fuelQuote!.expectedOutput != null) {
+      const { checkFuelSufficiency } = await import('../fuelGasEstimate')
+      const fuelTypeForCheck = fuel!.fuelType === 'private' ? 'private' : 'public'
+      const sufficiency = await checkFuelSufficiency(aztecNode, fuelQuote!.expectedOutput, fuelTypeForCheck)
+      if (!sufficiency.sufficient) {
+        throw new Error(
+          `Insufficient fuel: swap produces ~${sufficiency.expectedFj} FJ but the L2 claim requires ~${sufficiency.feeLimitFj} FJ. ` +
+            `Increase the fuel amount or bridge without fuel and top up gas separately.`,
+        )
+      }
+    }
+
     // Check and approve allowance for Permit2 (one-time per token).
     // All deposits go through SwapBridgeRouter with Permit2 — approve the
     // canonical Permit2 contract with max uint256 (one-time).
@@ -1029,10 +1045,15 @@ export async function bridgeL1ToL2(
     onStep?.(3, 'active')
     patchOperationAsync(apiClient, operationId, { currentStep: 3 })
 
-    // Build fee payment method if fuel is enabled
-    let feeOption: { fee: { paymentMethod: any } } | undefined
+    // Build fee payment method if fuel is enabled.
+    // gasSettings carries a 2× fee-rate cap from current node base fees; gasLimits
+    // and teardownGasLimits are intentionally left unset so the wallet sizes them
+    // during its own preflight (different account contracts need very different
+    // limits — hardcoding one breaks the others).
+    let feeOption: { fee: { paymentMethod: any; gasSettings?: any } } | undefined
     if (isFuelEnabled && fuelSecret && fuelMessageLeafIndexStr && fuelAmountReceived) {
       const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+      const { buildClaimGasSettings } = await import('../fuelGasEstimate')
       const paymentMethod = new FeeJuicePaymentMethodWithClaim(
         AztecAddress.fromString(l2Address),
         {
@@ -1041,7 +1062,8 @@ export async function bridgeL1ToL2(
           messageLeafIndex: BigInt(fuelMessageLeafIndexStr),
         },
       )
-      feeOption = { fee: { paymentMethod } }
+      const gasSettings = await buildClaimGasSettings(aztecNode)
+      feeOption = { fee: { paymentMethod, gasSettings } }
     }
 
     // When fuel is enabled, SwapBridgeRouter splits totalAmount into amount (token) + fuel.

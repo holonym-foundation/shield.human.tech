@@ -331,6 +331,7 @@ async function resumeL1ToL2(
     // Throw on import failure instead of silently falling back — without the
     // FeeJuicePaymentMethodWithClaim, the L2 claim will fail if the wallet has no FeeJuice.
     const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+    const { buildClaimGasSettings } = await import('../fuelGasEstimate')
     const fuelClaimAmount = fuelAmount ? BigInt(fuelAmount) : 0n
     const paymentMethod = new FeeJuicePaymentMethodWithClaim(
       AztecAddress.fromString(l2Address),
@@ -340,7 +341,8 @@ async function resumeL1ToL2(
         messageLeafIndex: BigInt(fuelMessageLeafIndex),
       },
     )
-    fuelFeeOption = { fee: { paymentMethod } }
+    const gasSettings = await buildClaimGasSettings(aztecNode)
+    fuelFeeOption = { fee: { paymentMethod, gasSettings } }
     console.log('[SDK Resume L1→L2] Using FeeJuicePaymentMethodWithClaim for fuel-enabled resume')
   }
 
