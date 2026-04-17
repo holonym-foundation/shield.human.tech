@@ -473,15 +473,20 @@ async function resumeL1ToL2(
       },
     }
     console.log('[SDK Resume L1→L2] Using PrivateMintAndPayFeePaymentMethod (BridgedFPC) for private-fuel resume')
-  } else if (data.fuelSecret && fuelMessageLeafIndex) {
+  } else if (data.fuelSecret && fuelMessageLeafIndex && fuelAmount) {
     // Public-fuel resume: FeeJuicePaymentMethodWithClaim against the claimer's aztec address.
+    // All three inputs are required — a zero `fuelAmount` here would produce a
+    // FeeJuice note of zero value, which the claim uses as the payment method and
+    // then fails downstream with an opaque "insufficient fee" error. Main gates
+    // on the same three fields (useResumeL1BridgeToL2.ts:545); mirror that so a
+    // partially-recovered op falls through to a no-fuel claim instead of
+    // attempting (and failing) with a bogus FeeJuicePaymentMethodWithClaim.
     const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
     const { buildClaimGasSettings } = await import('../fuelGasEstimate')
-    const fuelClaimAmount = fuelAmount ? BigInt(fuelAmount) : 0n
     const paymentMethod = new FeeJuicePaymentMethodWithClaim(
       AztecAddress.fromString(l2Address),
       {
-        claimAmount: fuelClaimAmount,
+        claimAmount: BigInt(fuelAmount),
         claimSecret: Fr.fromString(data.fuelSecret),
         messageLeafIndex: BigInt(fuelMessageLeafIndex),
       },
