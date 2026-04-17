@@ -253,6 +253,19 @@ async function resumeL1ToL2(
   if (!l2Address) throw new Error('l2Address required to resume L1→L2')
   if (!data.claimSecret) throw new Error('claimSecret not found in decrypted data')
 
+  // Short-circuit if the operation is already completed (e.g. a previous claim
+  // succeeded but the PATCH to the UI/session failed). Avoids a wasted wallet
+  // popup and a confusing "already consumed" error surfaced after the fact.
+  if (op.status === 'completed') {
+    emit({ type: 'operation_completed', operationId: op.id, alreadyCompleted: true })
+    onStep?.(3, 'completed')
+    return {
+      operationId: op.id,
+      l1TxHash: op.l1TxHash ?? undefined,
+      l2TxHash: op.l2TxHash ?? undefined,
+    }
+  }
+
   const claimSecret = Fr.fromString(data.claimSecret)
   const claimSecretHash = data.claimSecretHash ?? ''
   const isPrivacyModeEnabled = op.isPrivacyModeEnabled ?? false
@@ -644,6 +657,17 @@ async function resumeL2ToL1(
   const { sendTransaction, onStep } = params
 
   if (!sendTransaction) throw new Error('sendTransaction required to resume L2→L1')
+
+  // Short-circuit if the operation is already completed.
+  if (op.status === 'completed') {
+    emit({ type: 'operation_completed', operationId: op.id, alreadyCompleted: true })
+    onStep?.(5, 'completed')
+    return {
+      operationId: op.id,
+      l1TxHash: op.l1TxHash ?? undefined,
+      l2TxHash: op.l2TxHash ?? undefined,
+    }
+  }
 
   if (!op.portalAddressL1) {
     throw new Error('portalAddressL1 not stored in operation. Cannot resume.')

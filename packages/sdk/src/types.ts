@@ -87,7 +87,7 @@ export type StepStatus = 'pending' | 'active' | 'completed' | 'error'
 export type BridgeEvent =
   // Lifecycle
   | { type: 'operation_created'; operationId: number | string; data: Record<string, unknown> }
-  | { type: 'operation_completed'; operationId: number | string; l1TxHash?: string; l2TxHash?: string }
+  | { type: 'operation_completed'; operationId: number | string; l1TxHash?: string; l2TxHash?: string; alreadyCompleted?: boolean }
   // L1→L2 deposit
   | { type: 'deposit_sent'; l1TxHash: string; l1TxUrl: string }
   | { type: 'deposit_confirmed'; l1TxHash: string; l1TxUrl: string; messageHash: string; messageLeafIndex: string; fuelMessageHash?: string; fuelMessageLeafIndex?: string; fuelAmount?: string }
