@@ -295,6 +295,11 @@ export interface TransactionRequest {
   to: string
   data: string
   value?: string
+  /**
+   * Optional gas limit as a hex-prefixed uint (e.g. '0xF42400' = 16M).
+   * Used for complex calls where wallet estimation is unreliable.
+   */
+  gas?: string
 }
 
 // ─── Bridge Results ─────────────────────────────────────────────────

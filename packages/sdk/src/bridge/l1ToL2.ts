@@ -730,6 +730,9 @@ export async function bridgeL1ToL2(
         from: l1Address,
         to: config.swapBridgeRouterAddress,
         data: bridgeData,
+        // 16M — bridgeWithFuel is complex (Permit2 + V4 swap + 2 portal deposits).
+        // Wallet estimation is unreliable for multi-hop swaps with state writes.
+        gas: '0xF42400',
       })
     } else {
       // ── Standard path: call SwapBridgeRouter.bridge via Permit2 ──
