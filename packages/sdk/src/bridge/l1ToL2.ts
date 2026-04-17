@@ -227,6 +227,7 @@ export async function executeL2Claim(
     maxAttempts?: number
     retryDelayMs?: number
     bruteForceMaxIndex?: number
+    walletTimeoutMs?: number
     onAttempt?: (attempt: number, maxAttempts: number) => void
     onRetry?: (attempt: number, maxAttempts: number, retryDelayMs: number) => void
     feeOption?: { fee: { paymentMethod: any } }
@@ -237,36 +238,70 @@ export async function executeL2Claim(
   const maxAttempts = options?.maxAttempts ?? 10
   const retryDelayMs = options?.retryDelayMs ?? 120_000
   const bruteForceMaxIndex = options?.bruteForceMaxIndex ?? 64
+  const walletTimeoutMs = options?.walletTimeoutMs ?? 5 * 60_000 // 5 min default
 
   const method = isPrivacyModeEnabled ? 'claim_private' : 'claim_public'
+
+  /** Race the wallet call against a timeout so we never hang forever. */
+  const callWithTimeout = <T>(p: Promise<T>): Promise<T> =>
+    Promise.race([
+      p,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                'Wallet did not respond in time. Check for a hidden wallet popup behind your browser window.',
+              ),
+            ),
+          walletTimeoutMs,
+        ),
+      ),
+    ])
 
   if (messageLeafIndex != null) {
     let result: { txHash: string } | undefined
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         options?.onAttempt?.(attempt, maxAttempts)
-        result = await walletAdapter.executeCall(
-          walletAdapter.bridgeAddress,
-          method,
-          [
-            AztecAddress.fromString(aztecAddress),
-            amount,
-            claimSecret,
-            messageLeafIndex,
-          ],
-          { contractType: 'bridge', ...options?.feeOption },
+        result = await callWithTimeout(
+          walletAdapter.executeCall(
+            walletAdapter.bridgeAddress,
+            method,
+            [
+              AztecAddress.fromString(aztecAddress),
+              amount,
+              claimSecret,
+              messageLeafIndex,
+            ],
+            { contractType: 'bridge', ...options?.feeOption },
+          ),
         )
         break
       } catch (err) {
         // Don't retry user rejections — they are intentional
         const errMsg = err instanceof Error ? err.message : String(err)
+        const errLower = errMsg.toLowerCase()
         const errCode = (err as any)?.code
         const isUserRejection =
           errCode === 4001 ||
-          errMsg.includes('user rejected') ||
-          errMsg.includes('User denied') ||
-          errMsg.includes('ACTION_REJECTED')
+          errLower.includes('user rejected') ||
+          errLower.includes('user denied') ||
+          errLower.includes('action_rejected') ||
+          errLower.includes('user cancelled')
         if (isUserRejection) throw err
+
+        // Non-transient errors that should surface immediately rather than retry
+        if (errLower.includes('message already consumed') || errLower.includes('already been consumed')) {
+          throw new Error('This deposit has already been claimed.')
+        }
+        if (
+          errLower.includes('capability scope') ||
+          errLower.includes('not in capability') ||
+          errLower.includes('permission denied')
+        ) {
+          throw new Error(`Wallet permission error: ${errMsg}`)
+        }
 
         // Retry on transient errors — the claim is idempotent
         // (reorgs, block header not found, message not synced, PXE lag, network errors, etc.)
@@ -283,16 +318,18 @@ export async function executeL2Claim(
     // Brute-force path — only catch index-miss errors, re-throw everything else
     for (let idx = 0; idx < bruteForceMaxIndex; idx++) {
       try {
-        const result = await walletAdapter.executeCall(
-          walletAdapter.bridgeAddress,
-          method,
-          [
-            AztecAddress.fromString(aztecAddress),
-            amount,
-            claimSecret,
-            BigInt(idx),
-          ],
-          { contractType: 'bridge', ...options?.feeOption },
+        const result = await callWithTimeout(
+          walletAdapter.executeCall(
+            walletAdapter.bridgeAddress,
+            method,
+            [
+              AztecAddress.fromString(aztecAddress),
+              amount,
+              claimSecret,
+              BigInt(idx),
+            ],
+            { contractType: 'bridge', ...options?.feeOption },
+          ),
         )
         return {
           l2TxHash: result.txHash,
