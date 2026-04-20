@@ -147,6 +147,38 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
 
+    // ── Defense-in-depth: reject plaintext secrets at the trust boundary ─
+    // The SDK MUST NEVER send plaintext claim/fuel secrets or withdrawal
+    // nonces — those live only in the encrypted blob and in the tx content
+    // hash. The rest of this handler uses an allow-list (only named fields
+    // reach Prisma), so accidental plaintext secrets are silently dropped
+    // today. This explicit reject matches the PATCH handler's immutable-
+    // field guard and surfaces misuse loudly during development instead of
+    // letting it slip through. The hash variants (claimSecretHash,
+    // fuelSecretHash, privateFuelSecretHash) remain legitimate.
+    const PLAINTEXT_SECRET_FIELDS = [
+      'claimSecret',
+      'fuelSecret',
+      'privateFuelSecret',
+      'privateFuelSalt',
+      'nonce',
+    ] as const
+    const leakedFields = PLAINTEXT_SECRET_FIELDS.filter((f) => body[f] !== undefined)
+    if (leakedFields.length > 0) {
+      console.error(
+        '[POST /api/bridge/operations] Rejected request carrying plaintext secret fields:',
+        leakedFields.join(', '),
+      )
+      return NextResponse.json(
+        {
+          error:
+            `Request body may not contain plaintext secret fields: ${leakedFields.join(', ')}. ` +
+            'Secrets must only be sent inside the encrypted blob (encryptedCiphertext).',
+        },
+        { status: 400 },
+      )
+    }
+
     // ── Sanitize all inputs ─────────────────────────────────────────────
     const encryptedCiphertext = sanitizeCiphertext(body.encryptedCiphertext)
     const encryptedIv = sanitizeString(body.encryptedIv, 128)
