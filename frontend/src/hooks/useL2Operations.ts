@@ -328,9 +328,23 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             break
           // Track operation ID for correlation
           case 'operation_created':
+            logInfo('Withdrawal operation created', {
+              direction: 'L2_TO_L1',
+              operationId: event.operationId,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'withdrawal_l2_to_l1_created',
+            })
             console.log('[L2→L1] Operation created:', event.operationId)
             break
           case 'burn_sent':
+            logInfo('L2 burn tx sent', {
+              direction: 'L2_TO_L1',
+              l2TxHash: event.l2TxHash,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'withdrawal_l2_to_l1_burn_sent',
+            })
             notify(
               'warn',
               {
@@ -342,6 +356,14 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             )
             break
           case 'burn_confirmed':
+            logInfo('L2 burn confirmed', {
+              direction: 'L2_TO_L1',
+              l2TxHash: event.l2TxHash,
+              l2BlockNumber: event.l2BlockNumber,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'withdrawal_l2_to_l1_burn_confirmed',
+            })
             setTransactionUrls(null, event.l2TxUrl)
             // Prompt user to backup their withdrawal data (matches old flow pattern)
             notify(
@@ -371,6 +393,14 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             break
           // Persist witness data on witness_computed (recovery-critical)
           case 'witness_computed':
+            logInfo('L2→L1 witness computed', {
+              direction: 'L2_TO_L1',
+              leafIndex: event.leafIndex,
+              epoch: event.epoch,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'withdrawal_l2_to_l1_witness_computed',
+            })
             console.log('[L2→L1] Witness computed: leafIndex=', event.leafIndex, 'epoch=', event.epoch)
             break
           case 'proven_poll':
@@ -387,6 +417,13 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             })
             break
           case 'l1_withdraw_sent':
+            logInfo('L1 withdraw tx sent', {
+              direction: 'L2_TO_L1',
+              l1TxHash: event.l1TxHash,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'withdrawal_l2_to_l1_l1_withdraw_sent',
+            })
             setTransactionUrls(event.l1TxUrl, currentL2TxUrl)
             break
           case 'operation_completed': {
@@ -396,10 +433,24 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             break
           }
           case 'attestation_fetch':
-            console.log(`[L2→L1] Fetching ${event.method} attestation...`)
+            logInfo('Attestation fetch', {
+              direction: 'L2_TO_L1',
+              method: event.method,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'withdrawal_attestation_fetch',
+            })
             break
           case 'attestation_fallback':
-            console.log(`[L2→L1] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
+            logInfo('Attestation cascade fallback', {
+              direction: 'L2_TO_L1',
+              from: event.from,
+              to: event.to,
+              reason: event.reason,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'withdrawal_attestation_fallback',
+            })
             break
           case 'patch_failed':
             // Observability: mirrors useL1Operations — PATCH failures here
@@ -602,9 +653,25 @@ export function useL2RecoverWithdrawal() {
             })
             break
           case 'l1_withdraw_sent':
+            logInfo('Resume L1 withdraw tx sent', {
+              direction: 'L2_TO_L1_RESUME',
+              l1TxHash: event.l1TxHash,
+              l1Address: resolvedL1Address,
+              l2Address: aztecAddress,
+              userAction: 'resume_l2_to_l1_l1_withdraw_sent',
+            })
             setTransactionUrls(event.l1TxUrl, currentL2TxUrl)
             break
           case 'operation_completed':
+            logInfo('Resume withdrawal completed', {
+              direction: 'L2_TO_L1_RESUME',
+              operationId: event.operationId,
+              l1TxHash: event.l1TxHash,
+              alreadyCompleted: event.alreadyCompleted,
+              l1Address: resolvedL1Address,
+              l2Address: aztecAddress,
+              userAction: 'resume_l2_to_l1_completed',
+            })
             if (event.l1TxHash) {
               const l1Url = `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${event.l1TxHash}`
               setTransactionUrls(l1Url, null)

@@ -8,6 +8,7 @@ import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent } from '@human.tech/aztec-bridge-sdk'
 import { getAztecscanUrl, L2_CHAIN_ID } from '@/config'
 import { verifyEncryptionDomain } from '@/utils'
+import { logInfo, logError } from '@/utils/datadog'
 
 export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
   const { setProgressStep, setTransactionUrls, clearRecovery } = useBridgeStore()
@@ -46,9 +47,21 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
           case 'recovery_from_receipt':
+            logInfo('L1→L2 resume from receipt', {
+              direction: 'L1_TO_L2_RESUME',
+              l1TxHash: (event as any).l1TxHash,
+              l1Address,
+              userAction: 'resume_l1_to_l2_from_receipt',
+            })
             notify('info', 'Recovering from L1 receipt...', { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
             break
           case 'recovery_from_block_scan':
+            logInfo('L1→L2 resume via block scan', {
+              direction: 'L1_TO_L2_RESUME',
+              l1BlockNumberBeforeTx: (event as any).l1BlockNumberBeforeTx,
+              l1Address,
+              userAction: 'resume_l1_to_l2_block_scan',
+            })
             notify('info', 'Scanning L1 blocks for deposit...', {
               toastId: 'resume-l1-to-l2-progress',
               autoClose: 15000,
@@ -77,18 +90,45 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
             )
             break
           case 'operation_completed':
+            logInfo('L1→L2 resume completed', {
+              direction: 'L1_TO_L2_RESUME',
+              operationId: event.operationId,
+              l2TxHash: event.l2TxHash,
+              alreadyCompleted: event.alreadyCompleted,
+              l1Address,
+              userAction: 'resume_l1_to_l2_completed',
+            })
             if ('l2TxHash' in event && event.l2TxHash) {
               const l2TxUrl = `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${event.l2TxHash}`
               setTransactionUrls(claimData.l1TxUrl ?? null, l2TxUrl)
             }
             break
           case 'attestation_fetch':
-            console.log(`[Resume L1→L2] Fetching ${event.method} attestation...`)
+            logInfo('Resume attestation fetch', {
+              direction: 'L1_TO_L2_RESUME',
+              method: event.method,
+              l1Address,
+              userAction: 'resume_attestation_fetch',
+            })
             break
           case 'attestation_fallback':
-            console.log(`[Resume L1→L2] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
+            logInfo('Resume attestation fallback', {
+              direction: 'L1_TO_L2_RESUME',
+              from: event.from,
+              to: event.to,
+              reason: event.reason,
+              l1Address,
+              userAction: 'resume_attestation_fallback',
+            })
             break
           case 'patch_failed':
+            logError(`Resume PATCH failed: ${event.label}`, {
+              direction: 'L1_TO_L2_RESUME',
+              operationId: event.operationId,
+              patchLabel: event.label,
+              l1Address,
+              userAction: 'resume_l1_to_l2_patch_failed',
+            })
             notify(
               'warn',
               {
@@ -99,6 +139,17 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
             )
             break
           case 'error':
+            logError(
+              event.error?.message ?? 'Resume error event',
+              {
+                direction: 'L1_TO_L2_RESUME',
+                fundsAtRisk: event.fundsAtRisk,
+                operationId: event.operationId,
+                l1Address,
+                userAction: 'resume_l1_to_l2_error',
+              },
+              event.error,
+            )
             if (event.fundsAtRisk) {
               notify(
                 'error',

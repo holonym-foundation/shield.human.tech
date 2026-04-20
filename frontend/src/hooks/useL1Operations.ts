@@ -461,9 +461,23 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             break
           // Track operation ID for correlation
           case 'operation_created':
+            logInfo('Bridge operation created', {
+              direction: 'L1_TO_L2',
+              operationId: event.operationId,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_l1_to_l2_created',
+            })
             console.log('[L1→L2] Operation created:', event.operationId)
             break
           case 'deposit_sent':
+            logInfo('L1 deposit tx sent', {
+              direction: 'L1_TO_L2',
+              l1TxHash: event.l1TxHash,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_l1_to_l2_deposit_sent',
+            })
             setTransactionUrls(event.l1TxUrl, null)
             notify(
               'warn',
@@ -476,6 +490,16 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             )
             break
           case 'deposit_confirmed':
+            logInfo('L1 deposit confirmed', {
+              direction: 'L1_TO_L2',
+              l1TxHash: event.l1TxHash,
+              messageHash: event.messageHash,
+              messageLeafIndex: event.messageLeafIndex,
+              hasFuel: !!event.fuelMessageHash,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_l1_to_l2_deposit_confirmed',
+            })
             setTransactionUrls(event.l1TxUrl, null)
             // Prompt user to backup their claim secret (matches old flow)
             notify(
@@ -530,10 +554,24 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             break
           }
           case 'attestation_fetch':
-            console.log(`[L1→L2] Fetching ${event.method} attestation...`)
+            logInfo('Attestation fetch', {
+              direction: 'L1_TO_L2',
+              method: event.method,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_attestation_fetch',
+            })
             break
           case 'attestation_fallback':
-            console.log(`[L1→L2] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
+            logInfo('Attestation cascade fallback', {
+              direction: 'L1_TO_L2',
+              from: event.from,
+              to: event.to,
+              reason: event.reason,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_attestation_fallback',
+            })
             break
           case 'patch_failed':
             // Observability: PATCH failures mean server-side state drift from
