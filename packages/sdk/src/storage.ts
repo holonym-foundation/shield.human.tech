@@ -159,9 +159,36 @@ export interface FailedPatch {
   timestamp: number
 }
 
+// Prevent unbounded queue growth: entries older than this are dropped, and
+// the queue never holds more than MAX_FAILED_PATCHES items (oldest evicted).
+// A user bridging repeatedly through a flaky network could otherwise amass
+// thousands of stale entries that slow every retry pass.
+const FAILED_PATCH_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+const MAX_FAILED_PATCHES = 100
+
 /** Queue a PATCH that failed all retry attempts for later retry. */
 export function pushFailedPatch(patch: FailedPatch): void {
-  pushItem(FAILED_PATCHES_KEY, patch as unknown as Record<string, unknown>)
+  if (!isLocalStorageAvailable()) return
+  try {
+    const arr = getArray(FAILED_PATCHES_KEY) as FailedPatch[]
+    const cutoff = Date.now() - FAILED_PATCH_TTL_MS
+    // Drop TTL-expired entries. An entry with no timestamp (legacy) gets the
+    // benefit of the doubt and stays — `timestamp ?? Date.now()`.
+    const fresh = arr.filter((p) => (p.timestamp ?? Date.now()) > cutoff)
+    fresh.push(patch)
+    // If we're over the cap, evict oldest to make room.
+    if (fresh.length > MAX_FAILED_PATCHES) {
+      const dropped = fresh.length - MAX_FAILED_PATCHES
+      fresh.splice(0, dropped)
+      console.warn(
+        `[Bridge SDK] Failed-PATCH queue reached ${MAX_FAILED_PATCHES} items — dropped ${dropped} oldest entries. ` +
+        'This usually indicates prolonged backend unavailability.',
+      )
+    }
+    setArray(FAILED_PATCHES_KEY, fresh as unknown as Record<string, unknown>[])
+  } catch (err) {
+    console.error('[Bridge SDK] pushFailedPatch failed:', err)
+  }
 }
 
 /** Get all queued failed PATCHes. */

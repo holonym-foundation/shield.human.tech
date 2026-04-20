@@ -26,7 +26,7 @@ import { CustomTokenPortalAbi } from '../contracts/abis/CustomTokenPortalAbi'
 import { decodeEventLog } from 'viem'
 
 import type { BridgeApiClient } from '../api'
-import { getOperation, patchOperationWithRetry, patchOperationAsync } from '../operations'
+import { getOperation, patchOperationWithRetry, patchOperationAsync, retryFailedPatches } from '../operations'
 import {
   decryptOperationPayload,
 } from '../encryption'
@@ -38,7 +38,7 @@ import type {
   BridgeActivityData,
   BridgeEventCallback,
 } from '../types'
-import { createL1PublicClient, wait } from './utils'
+import { createL1PublicClient, wait, isAlreadyConsumedError, assertBlockScanRange } from './utils'
 import { getAztecscanUrl as getAztecscanBaseUrl, getEtherscanUrl as getEtherscanBaseUrl } from '../config'
 import { pollL1ToL2MessageSync, waitForBlockProven, waitForNextL2Block } from './polling'
 import { executeL2Claim } from './l1ToL2'
@@ -62,6 +62,15 @@ export async function resume(
 ): Promise<BridgeResult> {
   const { signMessage, onStep, onEvent } = params
   const emit: BridgeEventCallback = onEvent ?? (() => {})
+
+  // 0. Drain any queued failed PATCHes first — otherwise recovery may see stale
+  // DB state (e.g. missing messageHash / l1TxHash) and fall back to expensive
+  // block scans for data that's already sitting in localStorage.
+  try {
+    await retryFailedPatches(apiClient)
+  } catch (err) {
+    console.warn('[SDK Resume] retryFailedPatches failed, continuing anyway:', err)
+  }
 
   // 1. Fetch operation
   const op = await getOperation(apiClient, operationId)
@@ -177,6 +186,11 @@ async function recoverFromBlockScan(
 }> {
   const fromBlock = BigInt(l1BlockNumberBeforeTx)
   const toBlock = await publicClient.getBlockNumber()
+
+  // Cap the total scan range so a misconfigured l1BlockNumberBeforeTx can't
+  // wedge the browser into scanning millions of blocks (browser hang + RPC
+  // rate-limit exhaustion). ~1M blocks is ~2 weeks on Ethereum mainnet.
+  assertBlockScanRange(fromBlock, toBlock, 1_000_000n, 'L1')
 
   console.log('[SDK Resume L1→L2] Scanning L1 blocks', fromBlock.toString(), '→', toBlock.toString(), '...')
 
@@ -977,6 +991,9 @@ async function resumeL2ToL1(
       // Block scan fallback
       const startBlock = Number(op.l2BlockNumberBeforeTx)
       const currentBlock = await aztecNode.getBlockNumber()
+      // L2 scan is O(N) with sync computeWitness() per block — uncapped it
+      // wedges the browser. 1000 blocks covers any realistic withdraw window.
+      assertBlockScanRange(startBlock, currentBlock, 1000, 'L2')
       console.log('[SDK Resume L2→L1] Scanning L2 blocks', startBlock, '→', currentBlock, '...')
 
       if (rollupVersion == null) {
@@ -1313,38 +1330,5 @@ async function resumeL2ToL1(
   }
 }
 
-// ─── Already-Consumed Detection ─────────────────────────────────────
-
-/**
- * Detects whether an error indicates the L1→L2 message or L2→L1 message
- * was already consumed (i.e., a previous resume attempt succeeded but the
- * completion PATCH didn't persist).
- *
- * Known patterns:
- * - Aztec L2 claim: "l1_to_l2_msg_exists" / "nonexistent L1-to-L2 message" (already consumed)
- * - Aztec L2 claim: "already nullified" / "note already consumed"
- * - L1 TokenPortal withdraw: "Nothing to consume" / "NothingToConsumeAtBlock"
- * - L1 Outbox: "already consumed" / "AlreadyConsumed"
- *
- * NOTE: Do NOT add generic patterns like /execution reverted/ — that would
- * silently swallow real L1 failures (wrong epoch, bad proof, contract paused)
- * and mark the operation as completed when funds never arrived.
- */
-function isAlreadyConsumedError(errMsg: string): boolean {
-  const patterns = [
-    /already\s*(nullified|consumed)/i,
-    /nothing\s*to\s*consume/i,
-    /NothingToConsumeAtBlock/i,
-    /AlreadyConsumed/i,
-    /message.*already.*consumed/i,
-    /note.*already.*consumed/i,
-    /nonexistent L1-to-L2 message/i,
-    /l1_to_l2_msg_exists/i,
-    // Known consumed-state custom error selectors (match even if the contract
-    // renames the error string in a future deploy).
-    // NothingToConsumeAtBlock(uint256,uint256) = keccak256 selector 0x945d8c59
-    /0x945d8c59/i,
-  ]
-  return patterns.some((p) => p.test(errMsg))
-}
+// isAlreadyConsumedError is now exported from './utils' (shared with happy-path flows).
 

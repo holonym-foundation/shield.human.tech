@@ -18,7 +18,9 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@aztec/aztec.js": "4.2.0-aztecnr-rc.2",
@@ -28,15 +30,17 @@
     "@aztec/stdlib": "4.2.0-aztecnr-rc.2",
     "@aztec/wallet-sdk": "4.2.0-aztecnr-rc.2",
     "@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
-    "@wonderland/aztec-fee-payment": "4.2.0-aztecnr-rc.2",
     "@noble/ciphers": "^2.1.1",
     "@noble/hashes": "^2.0.1",
+    "@wonderland/aztec-fee-payment": "4.2.0-aztecnr-rc.2",
     "axios": "^1.13.6",
     "siwe": "^3.0.0",
     "viem": "^2.22.8"
   },
   "devDependencies": {
+    "happy-dom": "^20.9.0",
     "tsup": "^8.0.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.4"
   }
 }

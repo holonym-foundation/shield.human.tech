@@ -1,6 +1,6 @@
 import { L1_TOKENS, L1_CHAIN_ID, L2_CHAIN_ID, getAztecscanUrl, getEtherscanUrl } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
-import { logInfo } from '@/utils/datadog'
+import { logInfo, logError } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -402,6 +402,16 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             console.log(`[L2→L1] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
             break
           case 'patch_failed':
+            // Observability: mirrors useL1Operations — PATCH failures here
+            // mean withdrawal proof state drifts from on-chain reality.
+            logError(`Withdrawal PATCH failed: ${event.label}`, {
+              direction: 'L2_TO_L1',
+              operationId: event.operationId,
+              patchLabel: event.label,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'withdrawal_patch_failed',
+            })
             notify(
               'warn',
               {
@@ -413,6 +423,20 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             )
             break
           case 'error':
+            logError(
+              event.error?.message ?? 'Withdrawal error event',
+              {
+                direction: 'L2_TO_L1',
+                fundsAtRisk: event.fundsAtRisk,
+                operationId: event.operationId,
+                l1Address,
+                l2Address: aztecAddress,
+                amount: amountDisplayL2,
+                isPrivacyModeEnabled,
+                userAction: 'withdrawal_l2_to_l1_error',
+              },
+              event.error,
+            )
             console.log('[L2→L1] Error event raw:', event.error)
             console.log('[L2→L1] Error message:', event.error?.message)
             if (event.fundsAtRisk) {
@@ -587,6 +611,14 @@ export function useL2RecoverWithdrawal() {
             }
             break
           case 'patch_failed':
+            logError(`Resume PATCH failed: ${event.label}`, {
+              direction: 'L2_TO_L1_RESUME',
+              operationId: event.operationId,
+              patchLabel: event.label,
+              l1Address: resolvedL1Address,
+              l2Address: aztecAddress,
+              userAction: 'resume_l2_to_l1_patch_failed',
+            })
             notify(
               'warn',
               {
@@ -597,6 +629,18 @@ export function useL2RecoverWithdrawal() {
             )
             break
           case 'error':
+            logError(
+              event.error?.message ?? 'Resume error event',
+              {
+                direction: 'L2_TO_L1_RESUME',
+                fundsAtRisk: event.fundsAtRisk,
+                operationId: event.operationId,
+                l1Address: resolvedL1Address,
+                l2Address: aztecAddress,
+                userAction: 'resume_l2_to_l1_error',
+              },
+              event.error,
+            )
             if (event.fundsAtRisk) {
               notify(
                 'error',

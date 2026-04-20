@@ -15,12 +15,51 @@ import {
 } from './storage'
 
 /**
+ * Required fields for resume to be possible. If any are missing at creation
+ * time, resume throws late ("X not stored in operation") and the user has to
+ * contact support. Validate up-front so a broken caller fails loudly before
+ * any on-chain tx, instead of silently writing an un-resumable row.
+ */
+const REQUIRED_CREATE_FIELDS_L1_TO_L2 = [
+  'portalAddressL1',
+  'bridgeAddressL2',
+  'encryptedCiphertext',
+  'keyDerivationDomain',
+  'isPrivacyModeEnabled',
+] as const
+const REQUIRED_CREATE_FIELDS_L2_TO_L1 = [
+  'portalAddressL1',
+  'bridgeAddressL2',
+  'encryptedCiphertext',
+  'keyDerivationDomain',
+  'isPrivacyModeEnabled',
+  'l2BlockNumberBeforeTx',
+  'rollupVersion',
+] as const
+
+function validateCreatePayload(data: Record<string, unknown>): void {
+  const dir = data.direction
+  if (dir !== 'L1_TO_L2' && dir !== 'L2_TO_L1') {
+    throw new Error(`createOperation: invalid direction "${String(dir)}". Must be L1_TO_L2 or L2_TO_L1.`)
+  }
+  const required = dir === 'L1_TO_L2' ? REQUIRED_CREATE_FIELDS_L1_TO_L2 : REQUIRED_CREATE_FIELDS_L2_TO_L1
+  const missing = required.filter((k) => data[k] === undefined || data[k] === null || data[k] === '')
+  if (missing.length > 0) {
+    throw new Error(
+      `createOperation: missing required ${dir} fields — ${missing.join(', ')}. ` +
+      `These are needed for resume to recover the operation.`,
+    )
+  }
+}
+
+/**
  * Create a new bridge operation on the backend.
  */
 export async function createOperation(
   apiClient: BridgeApiClient,
   data: Record<string, unknown>,
 ): Promise<{ operationId: number }> {
+  validateCreatePayload(data)
   const res = await apiClient.post<{ operationId: number }>(
     '/api/bridge/operations',
     data,

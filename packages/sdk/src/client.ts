@@ -80,7 +80,10 @@ export class HumanTechBridge {
     l2LoginMethod?: string
     l2WalletProvider?: string
   }): ReturnType<typeof authenticate> {
-    return authenticate(this.apiClient, params)
+    const result = await authenticate(this.apiClient, params)
+    // Drain queued failed PATCHes now that we have a fresh JWT.
+    this.drainFailedPatches()
+    return result
   }
 
   /**
@@ -244,9 +247,22 @@ export class HumanTechBridge {
 
   /**
    * Set the auth token on the API client (e.g. to restore a persisted JWT on page reload).
+   * Also drains any queued failed PATCHes left over from a prior session.
    */
   setAuthToken(token: string): void {
     this.apiClient.setAuthToken(token)
+    this.drainFailedPatches()
+  }
+
+  /**
+   * Fire-and-forget drain of the queued failed-PATCH queue. Called automatically
+   * after authenticate() / setAuthToken() so operations from a prior session
+   * (that lost their PATCH on a network blip) catch up as soon as auth returns.
+   */
+  private drainFailedPatches(): void {
+    retryFailedPatches(this.apiClient).catch((err) => {
+      console.warn('[Bridge SDK] drainFailedPatches failed:', err)
+    })
   }
 
   /**

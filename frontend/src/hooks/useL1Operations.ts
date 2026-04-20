@@ -536,6 +536,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             console.log(`[L1→L2] ${event.from} failed, falling back to ${event.to}: ${event.reason}`)
             break
           case 'patch_failed':
+            // Observability: PATCH failures mean server-side state drift from
+            // the actual on-chain state. If these spike we need to know fast,
+            // otherwise resume flows silently rely on localStorage/queue fallback.
+            logError(`Bridge PATCH failed: ${event.label}`, {
+              direction: 'L1_TO_L2',
+              operationId: event.operationId,
+              patchLabel: event.label,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_patch_failed',
+            })
             notify(
               'warn',
               {
@@ -547,6 +558,22 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             )
             break
           case 'error':
+            // Observability: forward SDK errors (with fundsAtRisk context) so
+            // Datadog alerts can distinguish recoverable vs. stuck-funds cases.
+            logError(
+              event.error?.message ?? 'Bridge error event',
+              {
+                direction: 'L1_TO_L2',
+                fundsAtRisk: event.fundsAtRisk,
+                operationId: event.operationId,
+                l1Address,
+                l2Address: aztecAddress,
+                amount: amountDisplayL1,
+                isPrivacyModeEnabled,
+                userAction: 'bridge_l1_to_l2_error',
+              },
+              event.error,
+            )
             if (event.fundsAtRisk) {
               notify(
                 'warn',

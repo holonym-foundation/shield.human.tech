@@ -203,11 +203,11 @@ async function signPermit2Transfer(params: {
   const signature = await signTypedData(params.l1Address, JSON.stringify(typedData)) as `0x${string}`
   return { nonce, deadline, signature }
 }
-import { createL1PublicClient, serializeNodeInfo, wait, extractErrorString } from './utils'
+import { createL1PublicClient, serializeNodeInfo, wait, extractErrorString, assertPassportDeadlineBuffer } from './utils'
 import { getEtherscanUrl as getEtherscanBaseUrl, getAztecscanUrl as getAztecscanBaseUrl } from '../config'
 import { pollL1ToL2MessageSync, waitForNextL2Block } from './polling'
 import { pushDeposit, updateDeposit } from '../storage'
-import { fetchAttestationsForDeposit } from '../attestation'
+import { fetchAttestationsForDeposit, assertNonEmptyDepositAttestation } from '../attestation'
 
 // ─── L2 Claim Execution ─────────────────────────────────────────────
 
@@ -749,8 +749,12 @@ export async function bridgeL1ToL2(
     let cleanHandsData = { nonce: 0n, signature: '0x' as `0x${string}` }
     let passportData = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
     if (isPrivate) {
-      const { cleanHands: attestCleanHands, passport: attestPassport } =
+      const attestResult =
         await fetchAttestationsForDeposit(apiClient, tokenConfig.l1PortalContract, amount, tokenConfig.decimals, emit)
+      // Defense-in-depth: refuse to submit the deposit if the cascade somehow
+      // returned both-empty structs (would revert on-chain otherwise).
+      assertNonEmptyDepositAttestation(attestResult)
+      const { cleanHands: attestCleanHands, passport: attestPassport } = attestResult
       cleanHandsData = {
         nonce: attestCleanHands.nonce,
         signature: attestCleanHands.signature as `0x${string}`,
@@ -761,6 +765,9 @@ export async function bridgeL1ToL2(
         deadline: attestPassport.deadline,
         signature: attestPassport.signature as `0x${string}`,
       }
+      // Passport deadline buffer. L1 portal rejects once block.timestamp >=
+      // deadline; reject too-short attestations before paying gas.
+      assertPassportDeadlineBuffer(passportData.deadline, 120n, 'the deposit tx')
     }
 
     if (isFuelEnabled) {
@@ -993,8 +1000,8 @@ export async function bridgeL1ToL2(
         // Fallback: extract from the portal event. Must branch on isPrivate —
         // depositToAztecPublic emits DepositToAztecPublic; depositToAztecPrivateFor
         // emits DepositToAztecPrivate.
+        const portalEventName = isPrivate ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
         try {
-          const portalEventName = isPrivate ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
           const portalLog = extractEvent(
             txReceipt.logs,
             tokenConfig.l1PortalContract as `0x${string}`,
@@ -1004,7 +1011,16 @@ export async function bridgeL1ToL2(
           )
           amountAfterFee = portalLog.args.amount as bigint
         } catch (e) {
-          console.warn('[SDK L1→L2] Could not extract amountAfterFee from portal event — using pre-fee amount for claim:', e)
+          // DO NOT silently fall back to pre-fee `amount` — the portal's L2 message
+          // hash binds amountAfterFee (= amount − portalFee). Claiming with the
+          // wrong amount produces a content-hash mismatch and the claim reverts.
+          // Funds are safe on L1 and recoverable via resume, so aborting here is
+          // the correct behavior instead of leaving the user stuck mid-claim.
+          throw new Error(
+            `Could not extract amountAfterFee from either BridgeWithFuel or ${portalEventName} event. ` +
+            `Funds are safe on L1 — resume this deposit from the Activity page once the portal event is readable. ` +
+            `(${e instanceof Error ? e.message : String(e)})`,
+          )
         }
       }
     } else {

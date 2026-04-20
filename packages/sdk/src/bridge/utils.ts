@@ -120,6 +120,128 @@ export async function getPostFeeClaimAmount(
 }
 
 /**
+ * Validate that a Passport attestation's deadline has enough buffer left to
+ * survive the tx-mining window. Passport is rejected on-chain once
+ * `block.timestamp >= deadline`, so issuing a tx with a tight deadline means
+ * the user pays gas for a guaranteed revert.
+ *
+ * @param deadline Attestation deadline in Unix seconds (bigint)
+ * @param minBufferSeconds Minimum seconds the deadline must exceed "now"
+ * @param context Human-readable label used in the thrown error
+ * @throws Error with actionable retry guidance if the buffer is insufficient.
+ *
+ * Treats `deadline === 0n` as "no passport attestation issued" (CleanHands
+ * path) and is a no-op — the caller shouldn't have to branch on which
+ * attestation method succeeded.
+ */
+export function assertPassportDeadlineBuffer(
+  deadline: bigint,
+  minBufferSeconds: bigint,
+  context: string,
+): void {
+  if (deadline <= 0n) return
+  const nowSec = BigInt(Math.floor(Date.now() / 1000))
+  if (deadline <= nowSec + minBufferSeconds) {
+    const remaining = deadline > nowSec ? (deadline - nowSec).toString() : '0'
+    throw new Error(
+      `Passport attestation expires in ${remaining}s — too short to safely submit ${context}. ` +
+      `Retry the operation so a fresh attestation is issued.`,
+    )
+  }
+}
+
+/**
+ * Validate that a block-scan range is not so large it would wedge the browser
+ * (synchronous work + RPC rate-limits). Thrown errors include the actionable
+ * recovery path (provide the tx hash for direct lookup instead of scanning).
+ *
+ * @param fromBlock Inclusive lower bound
+ * @param toBlock Inclusive upper bound (current head)
+ * @param maxRange Maximum allowed range in blocks
+ * @param chain "L1" | "L2" (for error messaging)
+ */
+export function assertBlockScanRange(
+  fromBlock: bigint | number,
+  toBlock: bigint | number,
+  maxRange: bigint | number,
+  chain: 'L1' | 'L2',
+): void {
+  const from = BigInt(fromBlock)
+  const to = BigInt(toBlock)
+  const max = BigInt(maxRange)
+  if (to < from) {
+    // Degenerate case — fromBlock after current head. Treat as OK (zero-range
+    // scan is a no-op, will just find nothing and error elsewhere).
+    return
+  }
+  const range = to - from
+  if (range > max) {
+    throw new Error(
+      `${chain} block scan range too large (${range.toString()} blocks). ` +
+      `Provide ${chain === 'L1' ? 'l1TxHash' : 'l2TxHash'} for direct receipt recovery, ` +
+      `or contact support with your operation ID. Max scan range: ${max.toString()} blocks.`,
+    )
+  }
+}
+
+/**
+ * Classify a `readContract` failure as fatal (the check can never succeed —
+ * wrong address, missing ABI, invalid selector) vs. transient (RPC timeout,
+ * rate-limit). Used by the L1 outbox idempotency pre-check so we don't
+ * blindly send a withdraw tx when the pre-check is structurally broken.
+ */
+export function isFatalContractReadError(errMsg: string): boolean {
+  return /contract.*does not exist|no contract|invalid address|unknown (function|method|selector)|function.*not found|returned no data|ContractFunctionZeroDataError/i.test(
+    errMsg,
+  )
+}
+
+/**
+ * Validate that an L2→L1 epoch is present and non-zero before using it in the
+ * L1 TokenPortal.withdraw proof. A zero/undefined epoch produces a proof that
+ * never matches a real L2→L1 message and the tx reverts with a cryptic error.
+ * Funds are safe (burn is on L2, witness is persisted) — resume from Activity
+ * will re-derive once the rollup contract can resolve the epoch.
+ */
+export function assertValidEpoch(epoch: bigint | null | undefined, l2BlockNumber: number | string): bigint {
+  if (epoch == null || epoch === 0n) {
+    throw new Error(
+      `Could not determine epoch for L1 withdraw (block ${l2BlockNumber}). ` +
+      `Your L2 burn succeeded and witness data is saved — resume this withdrawal ` +
+      `from the Activity page once the rollup contract can resolve the epoch.`,
+    )
+  }
+  return epoch
+}
+
+/**
+ * Detect errors that indicate a bridge message has already been consumed on
+ * the target chain — i.e. the operation is actually complete, we just didn't
+ * finalize the DB state. Used by both happy-path and resume flows so that a
+ * race (e.g. another device finalized, or a prior resume settled but its
+ * completion PATCH never landed) resolves as 'completed' instead of 'failed'.
+ *
+ * NOTE: Do NOT add generic patterns like /execution reverted/ — that would
+ * silently swallow real L1 failures (wrong epoch, bad proof, contract paused)
+ * and mark the operation as completed when funds never arrived.
+ */
+export function isAlreadyConsumedError(errMsg: string): boolean {
+  const patterns = [
+    /already\s*(nullified|consumed)/i,
+    /nothing\s*to\s*consume/i,
+    /NothingToConsumeAtBlock/i,
+    /AlreadyConsumed/i,
+    /message.*already.*consumed/i,
+    /note.*already.*consumed/i,
+    /nonexistent L1-to-L2 message/i,
+    /l1_to_l2_msg_exists/i,
+    // NothingToConsumeAtBlock(uint256,uint256) = keccak256 selector 0x945d8c59
+    /0x945d8c59/i,
+  ]
+  return patterns.some((p) => p.test(errMsg))
+}
+
+/**
  * Extract a human-readable error string from an unknown thrown value.
  * Prevents `String({...})` from producing "[object Object]" in error messages.
  */

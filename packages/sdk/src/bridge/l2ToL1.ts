@@ -35,12 +35,21 @@ import type {
   L1WithdrawResult,
   BridgeEventCallback,
 } from '../types'
-import { createL1PublicClient, serializeNodeInfo, wait, extractErrorString } from './utils'
+import {
+  createL1PublicClient,
+  serializeNodeInfo,
+  wait,
+  extractErrorString,
+  isAlreadyConsumedError,
+  isFatalContractReadError,
+  assertPassportDeadlineBuffer,
+  assertValidEpoch,
+} from './utils'
 import { getEtherscanUrl as getEtherscanBaseUrl, getAztecscanUrl as getAztecscanBaseUrl } from '../config'
 import { waitForBlockProven } from './polling'
 import { computeL2ToL1MessageLeaf, computeWitness } from './witness'
 import { pushWithdrawal, updateWithdrawal } from '../storage'
-import { fetchAttestationsForWithdrawal } from '../attestation'
+import { fetchAttestationsForWithdrawal, assertNonEmptyWithdrawalAttestation } from '../attestation'
 import type { L2CleanHandsStruct, L2PassportStruct } from '../types'
 
 // ─── L1 Withdraw Execution ──────────────────────────────────────────
@@ -89,8 +98,19 @@ export async function executeL1Withdraw(params: {
         return { l1TxHash: 'already-consumed', l1TxUrl }
       }
     } catch (e) {
-      // If check fails, proceed to withdraw (the tx will revert if already consumed)
-      console.warn('[SDK L2→L1] Could not check outbox consumption, proceeding:', e)
+      // Distinguish fatal (contract missing/ABI wrong/address invalid) from
+      // transient (RPC timeout, rate-limit). Fatal means the check can NEVER
+      // succeed, so proceeding sends a tx we can't reason about — abort with
+      // a clear error instead. Transient errors fall through to the L1 tx
+      // (which has its own already-consumed catch in withdrawL2ToL1).
+      const errMsg = e instanceof Error ? e.message : String(e)
+      if (isFatalContractReadError(errMsg)) {
+        throw new Error(
+          `Outbox consumption pre-check failed fatally at ${outboxAddress}: ${errMsg}. ` +
+          `This suggests a misconfigured outbox address or ABI mismatch — aborting before the L1 tx.`,
+        )
+      }
+      console.warn('[SDK L2→L1] Outbox consumption check failed (transient), proceeding:', errMsg)
     }
   }
 
@@ -363,8 +383,18 @@ export async function withdrawL2ToL1(
       const attestResult = await fetchAttestationsForWithdrawal(
         apiClient, tokenConfig.l1PortalContract, l2BridgeAddress, amount, tokenConfig.decimals, emit
       )
+      // Defense-in-depth: refuse to burn if the cascade somehow produced
+      // both-empty structs (L2 bridge would revert otherwise — after burn is
+      // already irreversible).
+      assertNonEmptyWithdrawalAttestation(attestResult)
       l2CleanHands = attestResult.cleanHands
       l2Passport = attestResult.passport
+      // Passport deadline buffer — L2 bridge rejects once `block.timestamp >=
+      // deadline`. 10-min buffer covers burn mining before the L2 phase that
+      // consumes the nonce. Fail fast before the L2 burn becomes irreversible.
+      if (l2Passport) {
+        assertPassportDeadlineBuffer(l2Passport.deadline, 600n, 'the withdrawal')
+      }
     }
 
     // Execute burn+exit on L2 (DANGER ZONE)
@@ -642,19 +672,45 @@ export async function withdrawL2ToL1(
     onStep?.(4, 'active')
     patchOperationAsync(apiClient, operationId, { currentStep: 4 })
 
-    const withdrawResult = await executeL1Withdraw({
-      publicClient,
-      sendTransaction,
-      l1Address,
-      amount,
-      epoch: resolvedEpoch ?? witnessResult.epoch,
-      leafIndex: witnessResult.leafIndex,
-      siblingPath: witnessResult.siblingPath,
-      portalAddress: tokenConfig.l1PortalContract,
-      chainId: config.l1ChainId,
-      l2BlockNumber,
-      outboxAddress: outboxAddress ?? config.l1ContractAddresses.outboxAddress,
-    })
+    // L1 TokenPortal.withdraw encodes `epoch` into the outbox proof; zero/null
+    // produces a proof that never matches a real message. Fail fast so the
+    // user knows to resume (witness data is already persisted).
+    const finalEpoch = assertValidEpoch(resolvedEpoch ?? witnessResult.epoch, l2BlockNumber)
+
+    // If the outbox pre-check missed (RPC blip, race with another device) and
+    // the L1 tx reverts with an "already consumed" error, that means the
+    // withdrawal actually settled — the burn side always succeeds once a
+    // consumption exists. Treat the revert as success instead of surfacing
+    // a 'failed'-ish error that leaves the operation stuck in 'ready'.
+    // Resume already has this handling (resume.ts); mirror it here so the
+    // happy-path doesn't depend on a follow-up resume to converge.
+    let withdrawResult: L1WithdrawResult
+    try {
+      withdrawResult = await executeL1Withdraw({
+        publicClient,
+        sendTransaction,
+        l1Address,
+        amount,
+        epoch: finalEpoch,
+        leafIndex: witnessResult.leafIndex,
+        siblingPath: witnessResult.siblingPath,
+        portalAddress: tokenConfig.l1PortalContract,
+        chainId: config.l1ChainId,
+        l2BlockNumber,
+        outboxAddress: outboxAddress ?? config.l1ContractAddresses.outboxAddress,
+      })
+    } catch (withdrawErr) {
+      const errMsg = withdrawErr instanceof Error ? withdrawErr.message : String(withdrawErr)
+      if (isAlreadyConsumedError(errMsg)) {
+        console.log('[SDK L2→L1] L1 withdraw already consumed — treating as previously completed.')
+        withdrawResult = {
+          l1TxHash: 'already-consumed',
+          l1TxUrl: `${getEtherscanBaseUrl(config.l1ChainId)}/tx/already-consumed`,
+        }
+      } else {
+        throw withdrawErr
+      }
+    }
 
     if (withdrawResult.l1TxHash !== 'already-consumed') {
       emit({ type: 'l1_withdraw_sent', l1TxHash: withdrawResult.l1TxHash, l1TxUrl: withdrawResult.l1TxUrl })
