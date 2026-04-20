@@ -308,4 +308,73 @@ export class HumanTechBridge {
   async retryFailedPatches(): Promise<{ succeeded: number; failed: number; total: number }> {
     return retryFailedPatches(this.apiClient)
   }
+
+  /**
+   * Verify the connected Aztec L2 node is compatible with the SDK's bundled
+   * deployment metadata. Returns a structured result — does NOT throw.
+   *
+   * Recommended usage: call once at app startup, log/surface warnings.
+   * A mismatch doesn't necessarily break things (e.g. nightly node can be
+   * ahead of the SDK build), but the contract/ABI assumptions the SDK
+   * makes are tied to `rollupVersion` — a mismatch there is a red flag
+   * for the resume / witness paths.
+   */
+  async verifyNodeCompatibility(): Promise<{
+    compatible: boolean
+    expectedRollupVersion: number
+    actualRollupVersion: number | null
+    expectedAztecVersion: string
+    actualNodeVersion: string | null
+    warnings: string[]
+  }> {
+    const expectedRollupVersion = this.config.rollupVersion
+    const expectedAztecVersion = this.config.aztecVersion
+    const warnings: string[] = []
+
+    let nodeInfo: any
+    try {
+      nodeInfo = await this.aztecNode.getNodeInfo()
+    } catch (err) {
+      warnings.push(
+        `Could not fetch nodeInfo from L2 node: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      return {
+        compatible: false,
+        expectedRollupVersion,
+        actualRollupVersion: null,
+        expectedAztecVersion,
+        actualNodeVersion: null,
+        warnings,
+      }
+    }
+
+    const actualRollupVersion = nodeInfo?.rollupVersion != null ? Number(nodeInfo.rollupVersion) : null
+    const actualNodeVersion = nodeInfo?.nodeVersion != null ? String(nodeInfo.nodeVersion) : null
+
+    if (actualRollupVersion == null) {
+      warnings.push('Node did not report a rollupVersion — cannot verify compatibility.')
+    } else if (actualRollupVersion !== expectedRollupVersion) {
+      warnings.push(
+        `Rollup version mismatch: SDK expects ${expectedRollupVersion}, node reports ${actualRollupVersion}. ` +
+        `Contract ABIs and L1→L2 content hashes may differ — recovery paths are at risk.`,
+      )
+    }
+
+    if (actualNodeVersion && actualNodeVersion !== expectedAztecVersion) {
+      warnings.push(
+        `Aztec version mismatch: SDK built against ${expectedAztecVersion}, node reports ${actualNodeVersion}. ` +
+        `Usually benign across patch versions; review if behavior is unexpected.`,
+      )
+    }
+
+    const compatible = actualRollupVersion === expectedRollupVersion
+    return {
+      compatible,
+      expectedRollupVersion,
+      actualRollupVersion,
+      expectedAztecVersion,
+      actualNodeVersion,
+      warnings,
+    }
+  }
 }
