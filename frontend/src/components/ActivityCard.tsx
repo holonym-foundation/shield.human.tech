@@ -4,6 +4,7 @@ import React from 'react'
 import type { BridgeOperation } from '@human.tech/aztec-bridge-sdk'
 import { formatUnits } from 'viem'
 import { L1_TOKEN_METADATA } from '@/config'
+import { isResumable, hasPossibleLockedFunds } from '@/utils/resumability'
 
 const STATUS_STYLES: Record<string, { label: string; className: string }> = {
   pending: { label: 'Pending', className: 'bg-yellow-100 text-yellow-800' },
@@ -22,26 +23,6 @@ function StatusBadge({ status }: { status: string }) {
     className: 'bg-gray-100 text-gray-800',
   }
   return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.className}`}>{style.label}</span>
-}
-
-/** True for statuses where the user's funds are locked and can be resumed */
-function isResumable(op: BridgeOperation): boolean {
-  if (op.direction === 'L1_TO_L2') {
-    // L1→L2: resumable if deposited/claimed AND we have at least one recovery path:
-    // - Best: messageHash + messageLeafIndex already stored
-    // - Fallback: l1TxHash → scan receipt for portal events
-    // - Last resort: l1BlockNumberBeforeTx → scan L1 blocks for portal events
-    // Also allow 'pending' if l1TxHash exists (L1 tx mined but status PATCH failed)
-    const resumableStatus =
-      op.status === 'deposited' || op.status === 'claimed' || (op.status === 'pending' && !!op.l1TxHash)
-    return resumableStatus && (!!op.messageHash || !!op.l1TxHash || !!op.l1BlockNumberBeforeTx)
-  }
-  if (op.direction === 'L2_TO_L1') {
-    // L2→L1: resumable when tokens are burned on L2 but L1 withdraw isn't complete.
-    // leafIndex/siblingPath can be recomputed from l2BlockNumber if missing.
-    return op.status === 'submitted' || op.status === 'ready' || op.status === 'pending_finalize'
-  }
-  return false
 }
 
 interface ActivityCardProps {
@@ -64,12 +45,26 @@ export default function ActivityCard({ operation, onResume, resuming }: Activity
   })
   const directionLabel = operation.direction === 'L1_TO_L2' ? 'L1 → L2' : 'L2 → L1'
 
+  // Resume button shown for both standard resumable states AND the edge case
+  // where status='pending' but a tx hash exists (session died after tx send
+  // but before the status-update PATCH landed — funds may be locked on-chain).
+  // Both branches use the same decrypt + resume pipeline; the badge below
+  // tells the user which case they're in.
+  const resumable = isResumable(operation)
+  const lockedFunds = hasPossibleLockedFunds(operation)
+  const showResume = resumable || lockedFunds
+
   return (
     <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-gray-600">{directionLabel}</span>
           <StatusBadge status={operation.status} />
+          {lockedFunds && (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-800">
+              Funds may be locked
+            </span>
+          )}
         </div>
         <span className="text-xs text-gray-400">{date}</span>
       </div>
@@ -102,7 +97,7 @@ export default function ActivityCard({ operation, onResume, resuming }: Activity
           </a>
         )}
 
-        {isResumable(operation) && (
+        {showResume && (
           <button
             onClick={() => onResume(operation)}
             disabled={resuming}
