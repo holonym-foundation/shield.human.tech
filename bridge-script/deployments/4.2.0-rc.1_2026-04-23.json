@@ -1,13 +1,13 @@
 {
-  "id": "4.2.0-nightly.20260408-1_2026-04-09",
-  "deployedAt": "2026-04-09T08:55:26.248Z",
+  "id": "4.2.0-rc.1_2026-04-23",
+  "deployedAt": "2026-04-23T08:39:50.986Z",
   "network": {
     "name": "testnet",
     "nodeUrl": "https://rpc.testnet.aztec-labs.com",
     "l1RpcUrl": "",
     "l1ChainId": 11155111,
     "l2ChainId": -156673111,
-    "aztecVersion": "4.2.0-nightly.20260408-1",
+    "aztecVersion": "4.2.0-rc.1",
     "rollupVersion": 4127419662
   },
   "l1ContractAddresses": {
@@ -17,8 +17,8 @@
     "outboxAddress": "0x5fe63c32b7ca20445e813bdb1019f1ffc5f52376"
   },
   "nodeInfo": {
-    "enr": "enr:-OC4QNmHt1MVIGVZ6y6ACUPTUgWMTvZXZsDlVX7sRDtlKwAxWva4Dk_uozAuONjoNfL1FlcMg3LnBeM3o_3lzSMf7AYHhWF6dGVjsTAwLTExMTU1MTExLWY2ZDBkNDJhLTQxMjc0MTk2NjItMjY3MjM0MGQtMWRkMjY0NGGCaWSCdjSCaXCEiHYQrYlzZWNwMjU2azGhAkj0cNg4q_1-73tJ5SHnVcgHmddUg59kMyRa2qsu46P3g3RjcIKd34N1ZHCCnd-DdmVymDQuMi4wLW5pZ2h0bHkuMjAyNjA0MDgtMQ",
-    "nodeVersion": "4.2.0-nightly.20260408-1",
+    "enr": "enr:-NK4QOchk9AjK0spjnjGC1dXuXd4MyGKMUQPUAh1NLU-QfA_U4BBVo30ow0mL0ua4xERJnY4o4P-5hzckRjpxLE3IkcHhWF6dGVjsTAwLTExMTU1MTExLWY2ZDBkNDJhLTQxMjc0MTk2NjItMjY3MjM0MGQtMWRkMjY0NGGCaWSCdjSCaXCEiHYQrYlzZWNwMjU2azGhAkj0cNg4q_1-73tJ5SHnVcgHmddUg59kMyRa2qsu46P3g3RjcIKd34N1ZHCCnd-DdmVyijQuMi4wLXJjLjE",
+    "nodeVersion": "4.2.0-rc.1",
     "l1ChainId": 11155111,
     "rollupVersion": 4127419662,
     "l1ContractAddresses": {
@@ -50,18 +50,18 @@
       "symbol": "USDC",
       "decimals": 6,
       "logo": "/assets/tokens/usdc-xl.svg",
-      "l1TokenContract": "0x94994a77af37eddd72d4bc9d40ef510fb63c53a1",
-      "l1PortalContract": "0x9b131722e639ef91a484c38998a09079c6be3508",
-      "l2TokenContract": "0x2629c5fd7225cffc290f91cd952504b2ee1fdbff6b1ffc367ee1a8199861e887",
-      "l2BridgeContract": "0x1344ec3305feb6e8c89308179af156361c4cf6deec43d0192049d3fd823ee2b0",
-      "l2ProxyContract": "0x2e2a1c28d65f9d1181a8a693e629f622e182ba32d6ae56f4435008db2687ea14",
-      "feeAssetHandler": "0xcdf9adeef13b0c3f6f471d64bf627659fb64f4bf",
+      "l1TokenContract": "0xf45edc80c39c82257a5b3e0da1604181dab33b46",
+      "l1PortalContract": "0x6afdd8205288a1db9beb22a1636c504b10d06403",
+      "l2TokenContract": "0x1a141605b67aff715eab617d33dd90e4244f96355202f86b34171fe7bcaddd50",
+      "l2BridgeContract": "0x197e15c5f63c4c0263f780b9141441746e0b2d8709029006a9448d3536a00e5f",
+      "l2ProxyContract": "0x00ec7806bdef81f65f101bccaa8e8b0a2d8269bd22339ac6b3a0083400b73a9c",
+      "feeAssetHandler": "0x8a99ba36d00d9c90924085ec8f5d492b5f897702",
       "sponsoredFee": "0x2ae02a54fd254586fd628ff46b71071bd8db32b63dc5d083f844f2c208a3923c",
       "humanIdAttester": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
       "passportSigner": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
     }
   ],
-  "uniswapFuelSwapAddress": "0x020dae34858705f87a85c9f2c8b75e161febd079",
-  "swapBridgeRouterAddress": "0x5165d9c40ba8f0dae258bd2969f3246cbedbc817",
+  "uniswapFuelSwapAddress": "0x4e63b90419acefeb5ec46b06ababcc7c80176d87",
+  "swapBridgeRouterAddress": "0xa6b0c5b3c859a5b3aaae006387ddeb7e4195ef34",
   "bridgedFpcAddress": "0x1d6d7973a39ebbac62ba7db6dd432ae138a1f210392c5202dbcd11c7a037bc14"
 }

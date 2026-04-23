@@ -1,5 +1,5 @@
 {
-  "activeDeploymentId": "4.2.0-nightly.20260408-1_2026-04-09",
+  "activeDeploymentId": "4.2.0-rc.1_2026-04-23",
   "deployments": [
     {
       "id": "4.2.0-nightly.20260406_2026-04-08",
@@ -10,11 +10,11 @@
       "active": false
     },
     {
-      "id": "4.2.0-nightly.20260408-1_2026-04-09",
-      "file": "4.2.0-nightly.20260408-1_2026-04-09.json",
-      "deployedAt": "2026-04-09T08:55:26.248Z",
+      "id": "4.2.0-rc.1_2026-04-23",
+      "file": "4.2.0-rc.1_2026-04-23.json",
+      "deployedAt": "2026-04-23T08:39:50.986Z",
       "network": "testnet",
-      "aztecVersion": "4.2.0-nightly.20260408-1",
+      "aztecVersion": "4.2.0-rc.1",
       "active": true
     }
   ]

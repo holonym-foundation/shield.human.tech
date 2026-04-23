@@ -23,7 +23,14 @@ contract ForkFeeJuicePortal {
 contract ForkTokenPortal {
     IERC20 public immutable token;
     constructor(address underlying) { token = IERC20(underlying); }
-    function depositToAztecPublic(bytes32, uint256 amount, bytes32) external returns (bytes32, uint256, uint256) {
+    function depositToAztecPublicFor(
+        address,
+        bytes32,
+        uint256 amount,
+        bytes32,
+        CleanHandsData calldata,
+        PassportData calldata
+    ) external returns (bytes32, uint256, uint256) {
         token.transferFrom(msg.sender, address(this), amount);
         return (bytes32(uint256(2)), 2, amount);
     }

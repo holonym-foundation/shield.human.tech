@@ -129,6 +129,9 @@ is_paused: {
   /** Type-safe wrappers for the public methods exposed by the contract. */
   public declare methods: {
     
+    /** authorize_exit_to_l1_public(recipient: struct, amount: integer, caller_on_l1: struct, authwit_nonce: field, clean_hands: struct, passport: struct) */
+    authorize_exit_to_l1_public: ((recipient: EthAddressLike, amount: (bigint | number), caller_on_l1: EthAddressLike, authwit_nonce: FieldLike, clean_hands: { nonce: FieldLike, signature: (bigint | number)[] }, passport: { max_amount: (bigint | number), nonce: FieldLike, deadline: (bigint | number), signature: (bigint | number)[] }) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
     /** cancel_ownership_transfer() */
     cancel_ownership_transfer: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
@@ -146,9 +149,6 @@ is_paused: {
 
     /** exit_to_l1_private(recipient: struct, amount: integer, caller_on_l1: struct, authwit_nonce: field, clean_hands: struct, passport: struct) */
     exit_to_l1_private: ((recipient: EthAddressLike, amount: (bigint | number), caller_on_l1: EthAddressLike, authwit_nonce: FieldLike, clean_hands: { nonce: FieldLike, signature: (bigint | number)[] }, passport: { max_amount: (bigint | number), nonce: FieldLike, deadline: (bigint | number), signature: (bigint | number)[] }) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** exit_to_l1_public(recipient: struct, amount: integer, caller_on_l1: struct, authwit_nonce: field) */
-    exit_to_l1_public: ((recipient: EthAddressLike, amount: (bigint | number), caller_on_l1: EthAddressLike, authwit_nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** get_config() */
     get_config: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
