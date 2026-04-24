@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 import { checkCleanHands, getDefaultActionId } from '@/lib/attestation'
 import { enforceAddressBinding } from '@/lib/address-binding'
+import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctions'
 
 /**
  * GET /api/attestation/poch/check
@@ -27,6 +28,23 @@ export async function GET(request: NextRequest) {
     const bindingError = await enforceAddressBinding(l1Address, l2Address)
     if (bindingError) {
       return NextResponse.json({ eligible: false, reason: bindingError })
+    }
+
+    // Sanctions screening — fail closed on vendor outage.
+    try {
+      const screening = await screenAddress(l1Address)
+      if (!screening.clear) {
+        return NextResponse.json({ eligible: false, reason: screening.reason })
+      }
+    } catch (err) {
+      if (err instanceof SanctionsScreeningUnavailableError) {
+        console.error('[attestation/poch/check] sanctions screening unavailable:', err.message)
+        return NextResponse.json(
+          { error: 'Compliance screening temporarily unavailable. Please try again shortly.' },
+          { status: 503 },
+        )
+      }
+      throw err
     }
 
     // Check clean hands via Holonym
