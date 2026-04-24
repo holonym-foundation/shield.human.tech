@@ -67,8 +67,10 @@ export async function screenAddress(address: string): Promise<ScreeningResult> {
   const url = new URL(SANCTIONS_IO_API_URL)
   url.searchParams.set('identifier', address)
   url.searchParams.set('min_score', SANCTIONS_IO_MIN_SCORE)
-  // Wildcards: SANCTIONS-LISTS (US OFAC/SDN, EU/CFSP, UK, UN, …) + CRIME (Interpol/FBI, …).
-  url.searchParams.set('data_source', 'SANCTIONS-LISTS,CRIME')
+  url.searchParams.set(
+    'data_source',
+    'CAP,CCMC,CMIC,DPL,DTC,EL,FATF,FBI,FINCEN,FSE,INTERPOL,ISN,MEU,NONSDN,NS-MBS LIST,OFAC-COMPREHENSIVE,OFAC-MILITARY,OFAC-OTHERS,PEP,PLC,SDN,SSI,US-DOS-CRS',
+  )
 
   let resp: Response
   try {
