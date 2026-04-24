@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useWalletStore } from '@/stores/walletStore'
-import { useBridgeStore } from '@/stores/bridgeStore'
 import { useAuthStore } from '@/stores/useAuthStore'
 
 interface AttestationCheckResult {
@@ -16,14 +15,12 @@ interface AttestationCheckResult {
 /**
  * Cascading attestation check: POCH first, then Passport fallback.
  *
- * Replaces usePochCheck — returns a unified result that the UI consumes
- * to decide button labels, amount limits, and error messages.
- *
- * Only enabled when both wallets are connected and privacy mode is on.
+ * Required for both public and private flows — the on-chain TokenPortal and
+ * TokenBridge contracts now gate every deposit and exit on a POCH or Passport
+ * attestation, regardless of privacy mode.
  */
 export function useAttestationCheck() {
   const { isWaapConnected, isAztecConnected, waapAddress } = useWalletStore()
-  const { isPrivacyModeEnabled } = useBridgeStore()
   const token = useAuthStore((s) => s.token)
 
   return useQuery<AttestationCheckResult>({
@@ -82,7 +79,7 @@ export function useAttestationCheck() {
         }
       }
     },
-    enabled: isWaapConnected && isAztecConnected && !!waapAddress && isPrivacyModeEnabled && !!token,
+    enabled: isWaapConnected && isAztecConnected && !!waapAddress && !!token,
     staleTime: 5 * 60 * 1000, // cache for 5 minutes
     retry: false,
   })

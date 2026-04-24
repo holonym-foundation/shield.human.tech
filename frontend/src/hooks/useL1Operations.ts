@@ -689,31 +689,31 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       // ─── Step 3: Check allowance and approve (+ Permit2 sign) ────────
       await checkAndApproveAllowance(l1Address, amount, selectedToken)
 
-      // ─── Step 3b: Fetch attestation for private deposits (POCH → Passport fallback) ──
+      // ─── Step 3b: Fetch compliance attestation (POCH → Passport fallback) ──
+      // Required for both public and private deposits — the L1 TokenPortal now gates
+      // every deposit on a POCH or Passport ECDSA attestation.
       let attestation: PochAttestationData | undefined
       let passportAttestation: PassportAttestationData | undefined
-      if (isPrivacyModeEnabled) {
-        const portalAddress = selectedToken?.l1PortalContract ?? ''
-        try {
-          console.log('[L1→L2] Fetching POCH attestation for private deposit...')
-          attestation = await fetchPochAttestation(portalAddress)
-          console.log('[L1→L2] POCH attestation received, nonce:', attestation.nonce)
-        } catch (pochErr) {
-          console.warn('[L1→L2] POCH attestation failed, trying Passport fallback...', pochErr)
-          passportAttestation = await fetchPassportAttestation(portalAddress)
-          console.log(
-            '[L1→L2] Passport attestation received, nonce:',
-            passportAttestation.nonce,
-            'maxAmount:',
-            passportAttestation.maxAmount,
+      const portalAddress = selectedToken?.l1PortalContract ?? ''
+      try {
+        console.log('[L1→L2] Fetching POCH attestation for deposit...')
+        attestation = await fetchPochAttestation(portalAddress)
+        console.log('[L1→L2] POCH attestation received, nonce:', attestation.nonce)
+      } catch (pochErr) {
+        console.warn('[L1→L2] POCH attestation failed, trying Passport fallback...', pochErr)
+        passportAttestation = await fetchPassportAttestation(portalAddress)
+        console.log(
+          '[L1→L2] Passport attestation received, nonce:',
+          passportAttestation.nonce,
+          'maxAmount:',
+          passportAttestation.maxAmount,
+        )
+        // Enforce amount limit for Passport path
+        if (amount > BigInt(passportAttestation.maxAmount)) {
+          const maxFormatted = (Number(passportAttestation.maxAmount) / 1e6).toFixed(2)
+          throw new Error(
+            `Passport allows up to ${maxFormatted} USDC per transaction. Mint a POCH SBT to remove this limit.`,
           )
-          // Enforce amount limit for Passport path
-          if (amount > BigInt(passportAttestation.maxAmount)) {
-            const maxFormatted = (Number(passportAttestation.maxAmount) / 1e6).toFixed(2)
-            throw new Error(
-              `Passport allows up to ${maxFormatted} USDC per transaction. Mint a POCH SBT to remove this limit.`,
-            )
-          }
         }
       }
 

@@ -6,12 +6,11 @@ import {SafeERC20} from "@oz/token/ERC20/utils/SafeERC20.sol";
 import {Ownable2Step, Ownable} from "@oz/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@oz/utils/ReentrancyGuard.sol";
 import {IFeeJuicePortal} from "@aztec/core/interfaces/IFeeJuicePortal.sol";
-import {ITokenPortal} from "./interfaces/ITokenPortal.sol";
 import {ISignatureTransfer} from "./interfaces/ISignatureTransfer.sol";
 
-// ─── TokenPortal Private Deposit Interface ───────────────────────────
+// ─── TokenPortal Attestation Structs ─────────────────────────────────
 
-/// @notice Attestation structs matching TokenPortal's private deposit requirements.
+/// @notice Attestation structs matching TokenPortal's compliance-gated deposit requirements.
 struct CleanHandsData {
     uint256 nonce;
     bytes signature;
@@ -36,6 +35,17 @@ interface ITokenPortalPrivate {
         address _depositor,
         uint256 _amount,
         bytes32 _secretHashForL2MessageConsumption,
+        CleanHandsData calldata _cleanHands,
+        PassportData calldata _passport
+    ) external returns (bytes32, uint256, uint256);
+}
+
+interface ITokenPortalPublicFor {
+    function depositToAztecPublicFor(
+        address _depositor,
+        bytes32 _to,
+        uint256 _amount,
+        bytes32 _secretHash,
         CleanHandsData calldata _cleanHands,
         PassportData calldata _passport
     ) external returns (bytes32, uint256, uint256);
@@ -288,10 +298,13 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
                 p.passport
             );
         } else {
-            (tokenKey, tokenIndex, tokenAmountAfterFee) = ITokenPortal(p.tokenPortal).depositToAztecPublic(
+            (tokenKey, tokenIndex, tokenAmountAfterFee) = ITokenPortalPublicFor(p.tokenPortal).depositToAztecPublicFor(
+                msg.sender,
                 p.aztecRecipient,
                 bridgeAmount,
-                p.tokenSecretHash
+                p.tokenSecretHash,
+                p.cleanHands,
+                p.passport
             );
         }
         token.forceApprove(p.tokenPortal, 0);
@@ -362,10 +375,13 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
                 p.passport
             );
         } else {
-            (key, index, amountAfterFee) = ITokenPortal(p.tokenPortal).depositToAztecPublic(
+            (key, index, amountAfterFee) = ITokenPortalPublicFor(p.tokenPortal).depositToAztecPublicFor(
+                msg.sender,
                 p.aztecRecipient,
                 p.amount,
-                p.secretHash
+                p.secretHash,
+                p.cleanHands,
+                p.passport
             );
         }
 

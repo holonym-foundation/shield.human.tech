@@ -15,6 +15,7 @@ pub contract TokenBridge {
     use aztec::{
         macros::{functions::{external, initializer, internal, only_self, view}, storage::storage},
         protocol::{
+            abis::function_selector::FunctionSelector,
             address::{AztecAddress, EthAddress},
             traits::{Deserialize, Packable, Serialize, ToField},
         },
@@ -22,7 +23,12 @@ pub contract TokenBridge {
             DelayedPublicMutable, Map, PublicMutable,
             PublicImmutable,
         },
-        authwit::auth::compute_inner_authwit_hash,
+        authwit::auth::{
+            assert_current_call_valid_authwit_public,
+            compute_authwit_message_hash_from_call,
+            compute_inner_authwit_hash,
+            set_authorized,
+        },
     };
 
     use token_portal_content_hash_lib::{
@@ -189,29 +195,146 @@ pub contract TokenBridge {
         self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_public(to, amount));
     }
 
-    // Burns the appropriate amount of tokens and creates a L2 to L1 withdraw message publicly
-    // Requires `msg.sender` to give approval to the bridge to burn tokens on their behalf using witness signatures
-    #[external("public")]
-    fn exit_to_l1_public(
+    // Verifies the compliance attestation in private (Schnorr uses Blake2s, unavailable in the
+    // AVM), writes a one-shot approval into the canonical AuthRegistry, and enqueues the public
+    // `exit_to_l1_public` which consumes that approval atomically. The Schnorr preimage is the
+    // same as the private-exit path: cross-mode replay is not a concern because the
+    // clean_hands/passport nonce map is shared, so any sig can only be consumed once across
+    // both modes, and the public-exit params (recipient/amount/...) are bound through the
+    // AuthRegistry inner_hash, not the Schnorr preimage.
+    //
+    // Requires `msg.sender` to give approval to the proxy to burn public tokens on their behalf
+    // via an authwit signature (same as the current public-burn flow).
+    #[external("private")]
+    fn authorize_exit_to_l1_public(
         recipient: EthAddress, // ethereum address to withdraw to
         amount: u128,
         caller_on_l1: EthAddress, // ethereum address that can call this function on the L1 portal (0x0 if anyone can call)
         authwit_nonce: Field, // nonce used in the approval message by `msg.sender` to let bridge burn their tokens on L2
+        clean_hands: CleanHandsData,
+        passport: PassportData,
+    ) {
+        assert(amount > 0, "Amount must be greater than zero");
+        let sender = self.msg_sender();
+
+        let mut is_clean_hands = false;
+
+        let has_clean_hands_sig =
+            (clean_hands.signature[0] != 0u8) | (clean_hands.signature[1] != 0u8);
+
+        if has_clean_hands_sig {
+            let attester_pubkey = self.storage.human_id_attester_pubkey.get_current_value();
+            let circuit_id = self.storage.clean_hands_circuit_id.get_current_value();
+            let action_id = self.storage.clean_hands_action_id.get_current_value();
+
+            is_clean_hands = verify_clean_hands_signature(
+                attester_pubkey,
+                circuit_id,
+                action_id,
+                clean_hands.nonce,
+                sender,
+                clean_hands.signature,
+            );
+
+            self.enqueue_self._consume_clean_hands_nonce_public(sender, clean_hands.nonce);
+        }
+
+        if !is_clean_hands {
+            let has_passport_sig = (passport.signature[0] != 0u8) | (passport.signature[1] != 0u8);
+            assert(has_passport_sig, "No Valid passport verification provided");
+
+            let passport_pubkey = self.storage.passport_signer_pubkey.get_current_value();
+
+            // Deadline is enforced in public (msg.sender-independent, cheap, avoids trusting the
+            // private timestamp).
+            self.enqueue_self._verify_deadline(passport.deadline);
+
+            let is_passport_valid = verify_passport_signature(
+                self.address,
+                passport_pubkey,
+                sender,
+                passport.max_amount,
+                passport.nonce,
+                passport.deadline,
+                passport.signature,
+            );
+            assert(is_passport_valid, "Passport signature invalid");
+            assert(amount <= passport.max_amount, "Amount exceeds Passport limit");
+            self.enqueue_self._consume_passport_nonce_public(sender, passport.nonce);
+        }
+
+        // Bind the approval to the upcoming public `exit_to_l1_public(user, recipient, amount,
+        // caller_on_l1, authwit_nonce)` call. caller==consumer==self.address because the public
+        // fn is called via enqueue_self (msg.sender at both set_authorized and consume is the
+        // bridge) and is defined on this contract.
+        let message_hash = compute_authwit_message_hash_from_call(
+            self.address,
+            self.address,
+            self.context.chain_id(),
+            self.context.version(),
+            comptime {
+                FunctionSelector::from_signature(
+                    "exit_to_l1_public((Field),(Field),u128,(Field),Field)",
+                )
+            },
+            [
+                sender.to_field(),
+                recipient.to_field(),
+                amount as Field,
+                caller_on_l1.to_field(),
+                authwit_nonce,
+            ],
+        );
+
+        // Register the approval from a public self-call (so msg.sender at the registry is the
+        // bridge; `assert_current_call_valid_authwit_public` below re-derives the same inner
+        // hash from the public-phase call and consumes the approval).
+        self.enqueue_self._register_public_exit_approval(message_hash);
+
+        // Hand off to the public exit path, which atomically consumes the approval above,
+        // sends the L2->L1 message, and burns the user's public balance via the proxy.
+        self.enqueue_self.exit_to_l1_public(sender, recipient, amount, caller_on_l1, authwit_nonce);
+    }
+
+    // Public execution of the L1 withdraw + burn. Gated by an approval in the canonical
+    // AuthRegistry written by `authorize_exit_to_l1_public` in the same transaction.
+    // `#[only_self]` means the only reachable caller is the bridge itself, enforced at the AVM
+    // msg.sender level.
+    #[external("public")]
+    #[only_self]
+    fn exit_to_l1_public(
+        user: AztecAddress,
+        recipient: EthAddress,
+        amount: u128,
+        caller_on_l1: EthAddress,
+        authwit_nonce: Field,
     ) {
         assert(self.storage.is_paused.read() == false, "Bridge is paused");
         assert(amount > 0, "Amount must be greater than zero");
         let config = self.storage.config.read();
 
-        // Send an L2 to L1 message
+        // Atomically verifies approved_actions[self.address][message_hash]==true and clears it.
+        // The registry derives inner_hash from [msg.sender, selector, args_hash] of this call,
+        // matching what `compute_authwit_message_hash_from_call` produced on the private side.
+        // Reverts if missing, so a second call with the same params cannot re-exit.
+        assert_current_call_valid_authwit_public(self.context, self.address);
+
         let content = get_withdraw_content_hash(recipient, amount, caller_on_l1);
         self.context.message_portal(config.portal, content);
 
-        // Burn tokens
-        self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_public(
-            self.msg_sender(),
-            amount,
-            authwit_nonce,
-        ));
+        self.call(
+            TokenMinterProxy::at(config.token_minter_proxy).burn_public(user, amount, authwit_nonce),
+        );
+    }
+
+    // Public wrapper around the canonical AuthRegistry `set_authorized(message_hash, true)` call.
+    // Needed because the registry key is keyed by `msg.sender` at the registry call: we want the
+    // bridge itself as the approver, so we enqueue this #[only_self] wrapper from the private
+    // authorize path rather than calling the registry directly from the user's context.
+    #[external("public")]
+    #[only_self]
+    fn _register_public_exit_approval(message_hash: Field) {
+        set_authorized(self.context, message_hash, true);
     }
 
     /// Claims the bridged tokens and makes them accessible in private. Note that recipient's address is not revealed

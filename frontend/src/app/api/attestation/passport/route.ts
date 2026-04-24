@@ -9,6 +9,7 @@ import {
   getPassportMaxAmount,
   getPassportScoreThreshold,
 } from '@/lib/attestation'
+import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctions'
 
 /**
  * POST /api/attestation/passport
@@ -47,6 +48,26 @@ export async function POST(request: NextRequest) {
     const bindingError = await enforceAddressBinding(l1Address, l2Address)
     if (bindingError) {
       return NextResponse.json({ error: bindingError }, { status: 403 })
+    }
+
+    // 2b. Sanctions screening — fail closed on vendor outage.
+    try {
+      const screening = await screenAddress(l1Address)
+      if (!screening.clear) {
+        return NextResponse.json(
+          { error: screening.reason, reason: 'sanctions_match' },
+          { status: 403 },
+        )
+      }
+    } catch (err) {
+      if (err instanceof SanctionsScreeningUnavailableError) {
+        console.error('[attestation/passport] sanctions screening unavailable:', err.message)
+        return NextResponse.json(
+          { error: 'Compliance screening temporarily unavailable. Please try again shortly.' },
+          { status: 503 },
+        )
+      }
+      throw err
     }
 
     // 3. Fetch passport score

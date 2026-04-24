@@ -6,6 +6,7 @@ import {
   getPassportMaxAmount,
 } from '@/lib/attestation'
 import { enforceAddressBinding } from '@/lib/address-binding'
+import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctions'
 
 /**
  * GET /api/attestation/passport/check
@@ -37,6 +38,29 @@ export async function GET(request: NextRequest) {
         maxAmount: getPassportMaxAmount().toString(),
         reason: bindingError,
       })
+    }
+
+    // Sanctions screening — fail closed on vendor outage.
+    try {
+      const screening = await screenAddress(l1Address)
+      if (!screening.clear) {
+        return NextResponse.json({
+          eligible: false,
+          score: 0,
+          threshold: getPassportScoreThreshold(),
+          maxAmount: getPassportMaxAmount().toString(),
+          reason: screening.reason,
+        })
+      }
+    } catch (err) {
+      if (err instanceof SanctionsScreeningUnavailableError) {
+        console.error('[attestation/passport/check] sanctions screening unavailable:', err.message)
+        return NextResponse.json(
+          { error: 'Compliance screening temporarily unavailable. Please try again shortly.' },
+          { status: 503 },
+        )
+      }
+      throw err
     }
 
     // Fetch Gitcoin Passport score

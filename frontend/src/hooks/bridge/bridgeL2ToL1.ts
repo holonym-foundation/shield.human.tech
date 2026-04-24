@@ -67,16 +67,16 @@ export interface L1WithdrawResult {
   l1TxUrl: string;
 }
 
-// ─── Attestation for Private Withdrawals ─────────────────────────────
+// ─── Attestation for L2 Exits (private and public) ───────────────────
 
-/** Attestation data for L2 private exit (Schnorr signature). */
+/** Attestation data for L2 exit (Schnorr signature). */
 export interface L2PochAttestation {
   l2Signature: number[];
   nonce: number;
   actionId: string;
 }
 
-/** Passport attestation data for L2 private exit (Schnorr signature). */
+/** Passport attestation data for L2 exit (Schnorr signature). */
 export interface L2PassportAttestation {
   l2Signature: number[];
   nonce: number;
@@ -85,8 +85,9 @@ export interface L2PassportAttestation {
 }
 
 /**
- * Fetch a POCH attestation from the backend for use in exit_to_l1_private.
- * The API returns both L1 (ECDSA) and L2 (Schnorr) signatures — we only need the L2 one here.
+ * Fetch a POCH attestation from the backend for use in exit_to_l1_private
+ * or authorize_exit_to_l1_public. The API returns both L1 (ECDSA) and L2
+ * (Schnorr) signatures — only the L2 Schnorr sig is consumed on L2.
  */
 export async function fetchL2PochAttestation(
   portalAddress: string,
@@ -765,7 +766,11 @@ export async function encryptAndBackupWithdrawalNonce(params: {
 
 /**
  * Send burn+exit transaction on L2 (private or public).
- * After this succeeds, tokens are burned — the operation must NOT be marked 'failed'.
+ *
+ * Both modes are now compliance-gated: the TokenBridge verifies either a POCH
+ * (clean hands) or Passport Schnorr attestation before the tokens are burned.
+ * After this call succeeds, tokens are burned — the operation must NOT be
+ * marked 'failed'.
  */
 export async function executeBurnAndExit(params: {
   walletAdapter: any;
@@ -774,9 +779,9 @@ export async function executeBurnAndExit(params: {
   amount: bigint;
   nonce: Fr;
   isPrivacyModeEnabled: boolean;
-  /** POCH attestation for private withdrawals (l2Signature + nonce/actionId) */
+  /** POCH attestation (l2Signature + nonce) — either this or passportAttestation is required. */
   attestation?: { l2Signature: number[]; nonce: number; actionId: string };
-  /** Passport attestation for private withdrawals (fallback when POCH unavailable) */
+  /** Passport attestation — fallback when POCH unavailable. */
   passportAttestation?: L2PassportAttestation;
 }): Promise<BurnExitResult> {
   const {
@@ -798,34 +803,41 @@ export async function executeBurnAndExit(params: {
     amount.toString(),
     "recipient:",
     l1Address,
+    "hasPoch:",
+    !!attestation,
     "hasPassport:",
     !!passportAttestation,
   );
 
+  if (!attestation && !passportAttestation) {
+    throw new Error(
+      "Compliance attestation required. Mint a POCH SBT or link your Passport before exiting.",
+    );
+  }
+
+  // CleanHandsData: (nonce: Field, signature: [u8; 64]) — no action_id on-chain.
+  const cleanHandsData = attestation
+    ? {
+        nonce: BigInt(attestation.nonce),
+        signature: attestation.l2Signature,
+      }
+    : { nonce: 0n, signature: new Array(64).fill(0) };
+  const passportData = passportAttestation
+    ? {
+        max_amount: BigInt(passportAttestation.maxAmount),
+        nonce: BigInt(passportAttestation.nonce),
+        deadline: BigInt(passportAttestation.deadline),
+        signature: passportAttestation.l2Signature,
+      }
+    : {
+        max_amount: 0n,
+        nonce: 0n,
+        deadline: 0n,
+        signature: new Array(64).fill(0),
+      };
+
   let result: { txHash: string; blockNumber?: number };
   if (isPrivacyModeEnabled) {
-    // Build CleanHandsData from POCH attestation (or empty if none)
-    const cleanHandsData = attestation
-      ? {
-          nonce: BigInt(attestation.nonce),
-          action_id: BigInt(attestation.actionId),
-          signature: attestation.l2Signature,
-        }
-      : { nonce: 0n, action_id: 0n, signature: new Array(64).fill(0) };
-    // Build PassportData from Passport attestation (or empty if none)
-    const passportData = passportAttestation
-      ? {
-          max_amount: BigInt(passportAttestation.maxAmount),
-          nonce: BigInt(passportAttestation.nonce),
-          deadline: BigInt(passportAttestation.deadline),
-          signature: passportAttestation.l2Signature,
-        }
-      : {
-          max_amount: 0n,
-          nonce: 0n,
-          deadline: 0n,
-          signature: new Array(64).fill(0),
-        };
     result = await walletAdapter.executeWithdrawToL1Private(
       l1Address,
       amount,
@@ -839,6 +851,8 @@ export async function executeBurnAndExit(params: {
       l1Address,
       amount,
       nonce,
+      cleanHandsData,
+      passportData,
       userAddress,
     );
   }

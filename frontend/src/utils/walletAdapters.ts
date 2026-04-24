@@ -257,17 +257,21 @@ class WalletAdapter {
   }
 
   /**
-   * Public withdrawal to L1 — batched into a single transaction:
-   * 1. Set public authwit in AuthRegistry (set_authorized)
-   * 2. Bridge exit_to_l1_public (which calls token.burn_public)
+   * Public withdrawal to L1 — compliance-gated, batched into a single transaction:
+   * 1. Set public authwit in AuthRegistry (set_authorized) so the proxy can burn_public on user's behalf
+   * 2. Bridge.authorize_exit_to_l1_public (private entry) — verifies the POCH/Passport attestation
+   *    in private, writes the bridge's self-approval into AuthRegistry, then enqueues
+   *    exit_to_l1_public (public) which consumes that approval and calls proxy.burn_public.
    *
-   * Both are public calls batched via BatchCall, so they execute in enqueue
-   * order within one tx — the authwit is visible when burn_public checks it.
+   * The two interactions are batched so they land in one tx: the public authwit
+   * set_authorized runs before exit_to_l1_public reads it, making burn_public valid.
    */
   async executeWithdrawToL1Public(
     l1Address: string,
     amount: bigint,
     nonce: Fr,
+    cleanHandsData: { nonce: bigint; signature: number[] },
+    passportData: { max_amount: bigint; nonce: bigint; deadline: bigint; signature: number[] },
     userAddress?: AztecAddress | string,
   ): Promise<ExecuteCallResult> {
     const user = userAddress
@@ -301,10 +305,15 @@ class WalletAdapter {
       true,
     )
 
-    // Batch authwit + exit into a single tx — public calls execute in enqueue order,
-    // so set_authorized runs before burn_public, making the auth visible.
-    const exitCall = bridge.methods.exit_to_l1_public(EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce)
-    const batch = new BatchCall(this.wallet, [authwit, exitCall])
+    const authorizeExitCall = bridge.methods.authorize_exit_to_l1_public(
+      EthAddress.fromString(l1Address),
+      amount,
+      EthAddress.ZERO,
+      nonce,
+      cleanHandsData,
+      passportData,
+    )
+    const batch = new BatchCall(this.wallet, [authwit, authorizeExitCall])
     const { receipt } = await batch.send({ from: this.account })
     assertReceiptSuccess(receipt)
 
@@ -316,20 +325,15 @@ class WalletAdapter {
 
   /**
    * Private withdrawal to L1:
-   * 1. Create private authwit for bridge to call token.burn_private
-   * 2. Send bridge.exit_to_l1_private
+   * 1. Create private authwit for the proxy to call token.burn_private
+   * 2. Send bridge.exit_to_l1_private with POCH/Passport attestation data
    */
   async executeWithdrawToL1Private(
     l1Address: string,
     amount: bigint,
     nonce: Fr,
-    cleanHandsData?: { nonce: bigint; action_id: bigint; signature: number[] },
-    passportData?: {
-      max_amount: bigint
-      nonce: bigint
-      deadline: bigint
-      signature: number[]
-    },
+    cleanHandsData: { nonce: bigint; signature: number[] },
+    passportData: { max_amount: bigint; nonce: bigint; deadline: bigint; signature: number[] },
     userAddress?: AztecAddress | string,
   ): Promise<ExecuteCallResult> {
     const user = userAddress
@@ -360,17 +364,19 @@ class WalletAdapter {
       call: burnCall, // consumer = call.to = tokenAddr
     })
 
-    // Send exit transaction — bridge contract params: (recipient, amount, caller_on_l1, nonce, ...)
-    // No tokenAddr prefix — the bridge already knows its token from its config.
-    const exitArgs =
-      cleanHandsData && passportData
-        ? [EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce, cleanHandsData, passportData]
-        : [EthAddress.fromString(l1Address), amount, EthAddress.ZERO, nonce]
-    const exitMethod = cleanHandsData && passportData ? 'exit_to_l1_private' : 'exit_to_l1_public'
-    const { receipt } = await bridge.methods[exitMethod](...exitArgs).send({
-      from: this.account,
-      authWitnesses: [authWit],
-    })
+    const { receipt } = await bridge.methods
+      .exit_to_l1_private(
+        EthAddress.fromString(l1Address),
+        amount,
+        EthAddress.ZERO,
+        nonce,
+        cleanHandsData,
+        passportData,
+      )
+      .send({
+        from: this.account,
+        authWitnesses: [authWit],
+      })
     assertReceiptSuccess(receipt)
 
     return {
