@@ -31,7 +31,7 @@ import {
 } from '@aztec/l1-artifacts'
 import { TokenContract, TokenContractArtifact } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js'
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee'
-import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
+import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction, lookupValidity } from '@aztec/aztec.js/authorization'
 import { EmbeddedWallet } from '@aztec/wallets/embedded'
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
 import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
@@ -2631,6 +2631,16 @@ async function testPublicExitFlow(
   //
   // Caller must be the direct msg.sender of Token.burn_public — that's TokenMinterProxy
   // (Bridge → Proxy → Token), not the Bridge itself.
+  // Sanity-check the user's public balance — Token.burn_public does a u128.sub, which
+  // panics with an empty "Assertion failed:" on underflow (masks as authwit failure).
+  const { result: publicBalanceBefore } = await l2TokenContract.methods
+    .balance_of_public(ownerAztecAddress)
+    .simulate({ from: ownerAztecAddress })
+  logger.info(`[L2] Public balance before exit: ${publicBalanceBefore} (need ${withdrawAmount})`)
+  if (BigInt(publicBalanceBefore) < withdrawAmount) {
+    throw new Error(`Insufficient public balance for exit test: have ${publicBalanceBefore}, need ${withdrawAmount}`)
+  }
+
   logger.info(`[L2] Registering public authwit for proxy to burn ${withdrawAmount} public tokens`)
   const proxyAddress = AztecAddress.fromString(deployed.l2ProxyContract)
   const burnAction = l2TokenContract.methods.burn_public(ownerAztecAddress, withdrawAmount, authwitNonce)
@@ -2642,6 +2652,13 @@ async function testPublicExitFlow(
   )
   await burnAuthwit.send({ fee: { paymentMethod: sponsoredPaymentMethod }, wait: { timeout: getTimeouts().txTimeout } })
   logger.info(`[L2] Public AuthWit written to AuthRegistry`)
+
+  // Verify the authwit is actually consumable now (catches hash-mismatch between TS and Noir).
+  const validity = await lookupValidity(wallet, ownerAztecAddress, { caller: proxyAddress, action: burnAction }, undefined as any)
+  logger.info(`[L2] AuthWit validity: isValidInPublic=${validity.isValidInPublic}, isValidInPrivate=${validity.isValidInPrivate}`)
+  if (!validity.isValidInPublic) {
+    throw new Error('Public authwit is not consumable — message_hash mismatch between TS registration and Noir expectation')
+  }
 
   // Build L2 public-exit attestation. Preimage is the same as the private-exit path: the
   // AuthRegistry inner_hash in authorize_exit_to_l1_public binds this sig to the specific
@@ -4217,73 +4234,71 @@ async function main() {
       wallet
     )
 
-    // await testPublicFuelFlow(
-    //   deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    //   l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
-    // )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 1: L1 Public Deposit (POCH) → L2 Public Claim
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPublicBridgeFlow(
+      'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion, logger
+    )
 
-    // // ════════════════════════════════════════════════════════════════════════════
-    // // Test 1: L1 Public Deposit (POCH) → L2 Public Claim
-    // // ════════════════════════════════════════════════════════════════════════════
-    // await testPublicBridgeFlow(
-    //   'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    //   l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion, logger
-    // )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 1a: L1 Public Deposit (Passport) → L2 Public Claim
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPublicBridgeFlow(
+      'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion, logger
+    )
 
-    // // ════════════════════════════════════════════════════════════════════════════
-    // // Test 1a: L1 Public Deposit (Passport) → L2 Public Claim
-    // // ════════════════════════════════════════════════════════════════════════════
-    // await testPublicBridgeFlow(
-    //   'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    //   l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion, logger
-    // )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 1b: Public Fuel — SwapBridgeRouter + FeeJuicePaymentMethodWithClaim
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPublicFuelFlow(
+      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
+    )
 
-    // // ════════════════════════════════════════════════════════════════════════════
-    // // Test 1b: Public Fuel — SwapBridgeRouter + FeeJuicePaymentMethodWithClaim
-    // // ════════════════════════════════════════════════════════════════════════════
-    
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 1c: Private Fuel — SwapBridgeRouter + PrivateMintAndPayFeePaymentMethod
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPrivateFuelFlow(
+      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
+    )
 
-    // // ════════════════════════════════════════════════════════════════════════════
-    // // Test 1c: Private Fuel — SwapBridgeRouter + PrivateMintAndPayFeePaymentMethod
-    // // ════════════════════════════════════════════════════════════════════════════
-    // await testPrivateFuelFlow(
-    //   deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    //   l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
-    // )
-
-    // // ════════════════════════════════════════════════════════════════════════════
-    // // Test 1d: Private Deposit Fuel + POCH Attestation (isPrivate=true)
-    // // ════════════════════════════════════════════════════════════════════════════
-    // await testPrivateDepositFuelWithAttestation(
-    //   'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    //   l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
-    // )
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 1d: Private Deposit Fuel + POCH Attestation (isPrivate=true)
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPrivateDepositFuelWithAttestation(
+      'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
+    )
 
     // ════════════════════════════════════════════════════════════════════════════
     // Test 1e: Private Deposit Fuel + Passport Attestation (isPrivate=true)
     // ════════════════════════════════════════════════════════════════════════════
-    // await testPrivateDepositFuelWithAttestation(
-    //   'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    //   l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
-    // )
+    await testPrivateDepositFuelWithAttestation(
+      'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
+    )
 
     // ════════════════════════════════════════════════════════════════════════════
     // Test 2: L1 Private Deposit (POCH) → L2 Private Claim
     // ════════════════════════════════════════════════════════════════════════════
-    // const pochResult = await testPrivateDepositAndClaimFlow(
-    //   'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    //   l1ContractAddresses, sponsoredPaymentMethod, node, logger
-    // )
-    // logger.info(`POCH deposit+claim result: amountAfterFee=${pochResult.amountAfterFee}`)
+    const pochResult = await testPrivateDepositAndClaimFlow(
+      'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, logger
+    )
+    logger.info(`POCH deposit+claim result: amountAfterFee=${pochResult.amountAfterFee}`)
 
     // ════════════════════════════════════════════════════════════════════════════
     // Test 3: L1 Private Deposit (Passport) → L2 Private Claim
     // ════════════════════════════════════════════════════════════════════════════
-    // const passportResult = await testPrivateDepositAndClaimFlow(
-    //   'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-    //   l1ContractAddresses, sponsoredPaymentMethod, node, logger
-    // )
-    // logger.info(`Passport deposit+claim result: amountAfterFee=${passportResult.amountAfterFee}`)
+    const passportResult = await testPrivateDepositAndClaimFlow(
+      'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, logger
+    )
+    logger.info(`Passport deposit+claim result: amountAfterFee=${passportResult.amountAfterFee}`)
 
     // ════════════════════════════════════════════════════════════════════════════
     // Test 4: L2 Public Exit (POCH) → L1 Withdraw
