@@ -67,6 +67,8 @@ export async function screenAddress(address: string): Promise<ScreeningResult> {
   const url = new URL(SANCTIONS_IO_API_URL)
   url.searchParams.set('identifier', address)
   url.searchParams.set('min_score', SANCTIONS_IO_MIN_SCORE)
+  // Wildcards: SANCTIONS-LISTS (US OFAC/SDN, EU/CFSP, UK, UN, …) + CRIME (Interpol/FBI, …).
+  url.searchParams.set('data_source', 'SANCTIONS-LISTS,CRIME')
 
   let resp: Response
   try {
@@ -84,12 +86,15 @@ export async function screenAddress(address: string): Promise<ScreeningResult> {
   }
 
   if (!resp.ok) {
+    const body = await resp.text().catch(() => '')
     throw new SanctionsScreeningUnavailableError(
-      `sanctions.io returned ${resp.status} ${resp.statusText}`,
+      `sanctions.io returned ${resp.status} ${resp.statusText}${body ? `: ${body.slice(0, 500)}` : ''}`,
     )
   }
 
   const data = (await resp.json()) as SanctionsIoResponse
+  // TEMP debug — remove once behaviour is verified end-to-end.
+  console.log('[sanctions] response for', address, JSON.stringify(data))
   const hits = Array.isArray(data.results) ? data.results : []
   const hasMatch = hits.length > 0
 

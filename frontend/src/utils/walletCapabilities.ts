@@ -22,7 +22,12 @@ const TOKEN_TRANSACTION_SIMULATION_METHODS = ['balance_of_public'] as const
 
 const TOKEN_TRANSACTION_METHODS = ['transfer', 'transfer_to_private', 'burn_public', 'burn_private'] as const
 
-const BRIDGE_TRANSACTION_METHODS = ['claim_public', 'claim_private', 'exit_to_l1_public', 'exit_to_l1_private'] as const
+const BRIDGE_TRANSACTION_METHODS = [
+  'claim_public',
+  'claim_private',
+  'authorize_exit_to_l1_public',
+  'exit_to_l1_private',
+] as const
 
 const FEE_JUICE_SIMULATION_METHODS = ['balance_of_public'] as const
 
