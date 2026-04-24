@@ -59,7 +59,7 @@ export const PASSPORT_SCORER_ID = process.env.PASSPORT_SCORER_ID ?? ''
 
 export const SANCTIONS_IO_API_KEY = process.env.SANCTIONS_IO_API_KEY ?? ''
 export const SANCTIONS_IO_API_URL = process.env.SANCTIONS_IO_API_URL ?? 'https://api.sanctions.io/search/'
-export const SANCTIONS_IO_API_VERSION = process.env.SANCTIONS_IO_API_VERSION ?? 'v2.3'
+export const SANCTIONS_IO_API_VERSION = process.env.SANCTIONS_IO_API_VERSION ?? '2.3'
 export const SANCTIONS_IO_MIN_SCORE = process.env.SANCTIONS_IO_MIN_SCORE ?? '0.88'
 // Ops kill switch — flip to 'false' to bypass screening during a vendor outage.
 export const SANCTIONS_SCREENING_ENABLED = (process.env.SANCTIONS_SCREENING_ENABLED ?? 'true') !== 'false'
