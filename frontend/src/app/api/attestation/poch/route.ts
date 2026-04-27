@@ -9,6 +9,7 @@ import {
   getCircuitId,
   getDefaultActionId,
 } from '@/lib/attestation'
+import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctions'
 
 /**
  * POST /api/attestation/poch
@@ -51,6 +52,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: bindingError }, { status: 403 })
     }
 
+    // 2b. Sanctions screening — fail closed on vendor outage.
+    try {
+      const screening = await screenAddress(l1Address)
+      if (!screening.clear) {
+        return NextResponse.json({ error: screening.reason, reason: 'sanctions_match' }, { status: 403 })
+      }
+    } catch (err) {
+      if (err instanceof SanctionsScreeningUnavailableError) {
+        console.error('[attestation/poch] sanctions screening unavailable:', err.message)
+        return NextResponse.json(
+          { error: 'Compliance screening temporarily unavailable. Please try again shortly.' },
+          { status: 503 },
+        )
+      }
+      throw err
+    }
+
     // 3. Check clean hands via Holonym
     const actionId = getDefaultActionId()
     const holonymResult = await checkCleanHands(l1Address, actionId)
@@ -58,7 +76,7 @@ export async function POST(request: NextRequest) {
     if (!holonymResult.isUnique) {
       return NextResponse.json(
         { error: 'Clean hands check failed: address does not have a valid attestation', isUnique: false },
-        { status: 403 }
+        { status: 403 },
       )
     }
 
@@ -89,9 +107,6 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('[attestation/poch]', error)
-    return NextResponse.json(
-      { error: 'Failed to issue POCH attestation' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to issue POCH attestation' }, { status: 500 })
   }
 }

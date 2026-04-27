@@ -6,7 +6,9 @@ import type { ContractFunctionPattern } from '@aztec/aztec.js/wallet'
 const FEE_JUICE_ADDRESS = AztecAddress.fromString('0x0000000000000000000000000000000000000000000000000000000000000005')
 
 /** Auth Registry protocol contract on L2 (canonical address = 1) */
-const AUTH_REGISTRY_ADDRESS = AztecAddress.fromString('0x0000000000000000000000000000000000000000000000000000000000000001')
+const AUTH_REGISTRY_ADDRESS = AztecAddress.fromString(
+  '0x0000000000000000000000000000000000000000000000000000000000000001',
+)
 
 function pattern(contract: AztecAddress, fn: string): ContractFunctionPattern {
   return { contract, function: fn }
@@ -22,7 +24,12 @@ const TOKEN_TRANSACTION_SIMULATION_METHODS = ['balance_of_public'] as const
 
 const TOKEN_TRANSACTION_METHODS = ['transfer', 'transfer_to_private', 'burn_public', 'burn_private'] as const
 
-const BRIDGE_TRANSACTION_METHODS = ['claim_public', 'claim_private', 'exit_to_l1_public', 'exit_to_l1_private'] as const
+const BRIDGE_TRANSACTION_METHODS = [
+  'claim_public',
+  'claim_private',
+  'authorize_exit_to_l1_public',
+  'exit_to_l1_private',
+] as const
 
 const FEE_JUICE_SIMULATION_METHODS = ['balance_of_public'] as const
 

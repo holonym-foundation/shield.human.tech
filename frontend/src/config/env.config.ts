@@ -55,6 +55,15 @@ export const HOLONYM_API_URL = process.env.HOLONYM_API_URL ?? 'https://api.holon
 export const PASSPORT_API_KEY = process.env.PASSPORT_API_KEY ?? ''
 export const PASSPORT_SCORER_ID = process.env.PASSPORT_SCORER_ID ?? ''
 
+// ─── Sanctions screening (server) ───────────────────────────────────
+
+export const SANCTIONS_IO_API_KEY = process.env.SANCTIONS_IO_API_KEY ?? ''
+export const SANCTIONS_IO_API_URL = process.env.SANCTIONS_IO_API_URL ?? 'https://api.sanctions.io/search/'
+export const SANCTIONS_IO_API_VERSION = process.env.SANCTIONS_IO_API_VERSION ?? '2.3'
+export const SANCTIONS_IO_MIN_SCORE = process.env.SANCTIONS_IO_MIN_SCORE ?? '0.88'
+// Ops kill switch — flip to 'false' to bypass screening during a vendor outage.
+export const SANCTIONS_SCREENING_ENABLED = (process.env.SANCTIONS_SCREENING_ENABLED ?? 'true') !== 'false'
+
 // ─── Datadog (client) ───────────────────────────────────────────────
 
 export const DATADOG_APPLICATION_ID = process.env.NEXT_PUBLIC_DATADOG_APPLICATION_ID ?? ''
