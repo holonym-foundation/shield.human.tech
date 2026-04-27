@@ -455,7 +455,9 @@ export interface WalletAdapterInterface {
     l1Address: string,
     amount: bigint,
     nonce: unknown,
-    userAddress: unknown,
+    cleanHands: L2CleanHandsStruct,
+    passport: L2PassportStruct,
+    l2Address: string,
   ): Promise<{ txHash: string; l2BlockNumber?: number }>
   registerToken?(tokenAddress: string): Promise<void>
 }

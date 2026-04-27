@@ -376,25 +376,24 @@ export async function withdrawL2ToL1(
       siblingPath: null as string[] | null,
     })
 
-    // Fetch attestation for private withdrawal (before irreversible burn step)
-    let l2CleanHands: L2CleanHandsStruct | undefined
-    let l2Passport: L2PassportStruct | undefined
-    if (isPrivate) {
-      const attestResult = await fetchAttestationsForWithdrawal(
-        apiClient, tokenConfig.l1PortalContract, l2BridgeAddress, amount, tokenConfig.decimals, emit
-      )
-      // Defense-in-depth: refuse to burn if the cascade somehow produced
-      // both-empty structs (L2 bridge would revert otherwise — after burn is
-      // already irreversible).
-      assertNonEmptyWithdrawalAttestation(attestResult)
-      l2CleanHands = attestResult.cleanHands
-      l2Passport = attestResult.passport
-      // Passport deadline buffer — L2 bridge rejects once `block.timestamp >=
-      // deadline`. 10-min buffer covers burn mining before the L2 phase that
-      // consumes the nonce. Fail fast before the L2 burn becomes irreversible.
-      if (l2Passport) {
-        assertPassportDeadlineBuffer(l2Passport.deadline, 600n, 'the withdrawal')
-      }
+    // Fetch attestation for both public and private withdrawals — the deployed
+    // L2 bridge gates `authorize_exit_to_l1_public` on POCH/Passport, same as
+    // exit_to_l1_private. Without an attestation, the L2 call reverts before
+    // the burn even fires.
+    const attestResult = await fetchAttestationsForWithdrawal(
+      apiClient, tokenConfig.l1PortalContract, l2BridgeAddress, amount, tokenConfig.decimals, emit
+    )
+    // Defense-in-depth: refuse to burn if the cascade somehow produced
+    // both-empty structs (L2 bridge would revert otherwise — after burn is
+    // already irreversible).
+    assertNonEmptyWithdrawalAttestation(attestResult)
+    const l2CleanHands: L2CleanHandsStruct = attestResult.cleanHands
+    const l2Passport: L2PassportStruct = attestResult.passport
+    // Passport deadline buffer — L2 bridge rejects once `block.timestamp >=
+    // deadline`. 10-min buffer covers burn mining before the L2 phase that
+    // consumes the nonce. Fail fast before the L2 burn becomes irreversible.
+    if (l2Passport) {
+      assertPassportDeadlineBuffer(l2Passport.deadline, 600n, 'the withdrawal')
     }
 
     // Execute burn+exit on L2 (DANGER ZONE)
@@ -405,8 +404,8 @@ export async function withdrawL2ToL1(
     let burnResult: { txHash: string; blockNumber?: number }
     try {
       burnResult = isPrivate
-        ? await walletAdapter.executeWithdrawToL1Private(l1Address, amount, nonce, l2CleanHands!, l2Passport!, userAddress.toString())
-        : await walletAdapter.executeWithdrawToL1Public(l1Address, amount, nonce, userAddress)
+        ? await walletAdapter.executeWithdrawToL1Private(l1Address, amount, nonce, l2CleanHands, l2Passport, userAddress.toString())
+        : await walletAdapter.executeWithdrawToL1Public(l1Address, amount, nonce, l2CleanHands, l2Passport, userAddress.toString())
       // 🔒 Only set burnConfirmed after the wallet call returns successfully
       burnConfirmed = true
     } catch (burnErr) {
