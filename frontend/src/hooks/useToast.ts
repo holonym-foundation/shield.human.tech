@@ -69,7 +69,10 @@ type ToastMessages = {
 
 const DEFAULT_TOAST_OPTIONS: ToastOptions = {
   position: 'top-right',
-  autoClose: 5000,
+  // F8: 15s default — long enough for users to read multi-line warning toasts
+  // (e.g. claim-attempt updates during a 15-min bridge wait). Persistent
+  // banners override this with autoClose: false at the call site.
+  autoClose: 15000,
   pauseOnHover: true,
   pauseOnFocusLoss: true,
   closeButton: false,
