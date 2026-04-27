@@ -135,9 +135,12 @@ export async function executeL1Withdraw(params: {
     data: withdrawCallData,
   })
 
+  // S7: no timeout. Mainnet/testnet mempool spikes routinely push inclusion
+  // past 5 minutes; surfacing a viem timeout here as a "failure" to the user
+  // is misleading because the L2 burn already happened and the L1 tx WILL
+  // eventually mine. Wait indefinitely (matches main).
   const receipt = await publicClient.waitForTransactionReceipt({
     hash: l1WithdrawTxHash as `0x${string}`,
-    timeout: 300_000, // 5 minutes — matches the L1 deposit receipt timeout
   })
 
   if (receipt.status !== 'success') {
@@ -620,6 +623,10 @@ export async function withdrawL2ToL1(
         ...w,
         l2ToL1MessageIndex: witnessResult.leafIndex,
         siblingPath: witnessResult.siblingPath,
+        // S5: persist epoch alongside the witness so a later resume that has to
+        // fall back to localStorage doesn't have to re-derive it from the
+        // rollup contract via getEpochForCheckpoint.
+        epoch: resolvedEpoch != null ? Number(resolvedEpoch) : undefined,
         status: 'ready',
       }),
     )
@@ -766,7 +773,27 @@ export async function withdrawL2ToL1(
     const err = error instanceof Error ? error : new Error(extractErrorString(error))
     const errorMessage = err.message
 
-    emit({ type: 'error', error: err, fundsAtRisk: burnConfirmed, operationId })
+    // S8: rewrite class-of-error messages so the consumer can show actionable copy.
+    // BlockNotProven family means "wait longer" — main puts a friendly message here.
+    const isBlockNotProven =
+      /BlockNotProven|NothingToConsumeAtBlock|block.*required|required.*block/i.test(errorMessage)
+    const isArtifactNotFound =
+      /Contract artifact not found|artifact.*not found/i.test(errorMessage)
+
+    let surfaced: Error = err
+    if (isBlockNotProven) {
+      surfaced = new Error(
+        'L1 withdraw blocked: the L2 block containing your burn is not yet proven on L1. ' +
+          'Wait the full ~40 minutes after the L2 exit and resume from Activity to try again.',
+      )
+    } else if (isArtifactNotFound) {
+      surfaced = new Error(
+        'The contract artifact is not available in the public registry. ' +
+          'Upload it to https://testnet.aztec-registry.xyz/ to make it available for the wallet.',
+      )
+    }
+
+    emit({ type: 'error', error: surfaced, fundsAtRisk: burnConfirmed, operationId })
 
     if (operationId) {
       const patchData: Record<string, unknown> = {
@@ -779,7 +806,7 @@ export async function withdrawL2ToL1(
       await patchOperationWithRetry(apiClient, operationId, patchData, { label: 'error status' })
     }
 
-    throw error
+    throw surfaced
   }
 }
 
