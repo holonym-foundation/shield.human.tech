@@ -397,7 +397,14 @@ async function resumeL1ToL2(
     const { getPostFeeClaimAmount } = await import('./utils')
     amount = await getPostFeeClaimAmount(config, op.portalAddressL1, BigInt(op.amountL1))
   } else {
-    amount = BigInt(op.amountL2 ?? data.amount ?? op.amountL1 ?? '0')
+    // No third tier: amountL2 / data.amount / amountL1 are pre-fee values; using
+    // them as the L2 claim amount would fail the L1→L2 content-hash check and
+    // burn an L2 claim attempt for nothing. Refuse to proceed instead.
+    throw new Error(
+      'Cannot resume: post-fee claim amount is unknown. Operation has neither a stored ' +
+        'claimAmount nor portalAddressL1+amountL1 to derive it from the portal fee. ' +
+        'Refusing to attempt L2 claim with a pre-fee fallback.',
+    )
   }
   if (amount === 0n) {
     throw new Error('Cannot resume: operation amount is zero. The operation data may be corrupted.')
@@ -414,6 +421,17 @@ async function resumeL1ToL2(
   // (data.fuelSecret) and private fuel (data.privateFuelSecret) — main's BridgeWithFuel
   // event carries fuelKey/fuelIndex/fuelAmount regardless of fuel type.
   const hasAnyFuelSecret = !!(data.fuelSecret || data.privateFuelSecret)
+  // If fuel was used but the SDK config has no router address, fuel-message
+  // recovery has no source — we can't reach BridgeWithFuel. Fail loudly
+  // instead of silently dropping fuel data and proceeding to a no-fuel claim
+  // that will mis-pay for L2 gas.
+  if (hasAnyFuelSecret && (!fuelMessageLeafIndex || !fuelAmount) && !config.swapBridgeRouterAddress) {
+    throw new Error(
+      'Cannot resume fuel-enabled deposit: SDK config is missing swapBridgeRouterAddress, ' +
+        'so the BridgeWithFuel event cannot be re-extracted. Set config.swapBridgeRouterAddress ' +
+        'to the deployed router and retry.',
+    )
+  }
   if (hasAnyFuelSecret && (!fuelMessageLeafIndex || !fuelAmount) && op.l1TxHash && config.swapBridgeRouterAddress) {
     try {
       const { SwapBridgeRouterAbi } = await import('../contracts/abis/SwapBridgeRouterAbi')
@@ -825,6 +843,17 @@ async function resumeL1ToL2(
       completedAt: Date.now(),
     }),
   )
+
+  // Register the L2 token in the wallet so the resumed deposit shows up in
+  // the user's balance UI without requiring a manual rescan. Mirrors the
+  // happy-path behavior in bridge/l1ToL2.ts.
+  if (walletAdapter?.registerToken && op.tokenAddressL2) {
+    try {
+      await walletAdapter.registerToken(op.tokenAddressL2)
+    } catch {
+      // Non-critical — token will appear once the wallet syncs notes.
+    }
+  }
 
   await wait(3000)
   onStep?.(4, 'completed')
