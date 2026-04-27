@@ -1045,20 +1045,43 @@ export async function bridgeL1ToL2(
 
       const eventFilter = isPrivate ? privateEventFilter : publicEventFilter
 
-      const log = extractEvent(
-        txReceipt.logs,
-        tokenConfig.l1PortalContract as `0x${string}`,
-        CustomTokenPortalAbi,
-        eventName,
-        eventFilter,
-      )
-
-      messageHashStr = log.args.key.toString()
-      messageLeafIndexStr = log.args.index.toString()
-
-      // The custom portal deducts fees before creating the L2 message.
-      // The `amount` in the event is the POST-FEE amount — use it for the L2 claim.
-      amountAfterFee = log.args.amount as bigint
+      try {
+        const log = extractEvent(
+          txReceipt.logs,
+          tokenConfig.l1PortalContract as `0x${string}`,
+          CustomTokenPortalAbi,
+          eventName,
+          eventFilter,
+        )
+        messageHashStr = log.args.key.toString()
+        messageLeafIndexStr = log.args.index.toString()
+        // The custom portal deducts fees before creating the L2 message.
+        // The `amount` in the event is the POST-FEE amount — use it for the L2 claim.
+        amountAfterFee = log.args.amount as bigint
+      } catch (portalErr) {
+        // S12: portal-event extract failed (e.g., a future portal upgrade
+        // changed the event signature). The non-fuel deposit went through
+        // SwapBridgeRouter.bridge() which also emits Bridge(aztecRecipient,
+        // key, index, amount, secretHash) carrying the same data. Fall back
+        // to that event before giving up — funds are still on L1 either way,
+        // but a successful fallback lets the happy path complete.
+        const { SwapBridgeRouterAbi } = await import('../contracts/abis/SwapBridgeRouterAbi')
+        const routerLog = extractEvent(
+          txReceipt.logs,
+          config.swapBridgeRouterAddress as `0x${string}`,
+          SwapBridgeRouterAbi,
+          'Bridge',
+          (log: any) => log.args.secretHash?.toString() === claimSecretHash.toString(),
+        )
+        if (!routerLog) {
+          throw portalErr
+        }
+        messageHashStr = routerLog.args.key.toString()
+        messageLeafIndexStr = routerLog.args.index.toString()
+        // Router's Bridge.amount is the post-fee value forwarded from the
+        // portal (SwapBridgeRouter.sol returns amountAfterFee).
+        amountAfterFee = routerLog.args.amount as bigint
+      }
     }
 
     emit({
