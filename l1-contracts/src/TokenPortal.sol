@@ -162,14 +162,17 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     // EXTERNAL FUNCTIONS: USER ACTIONS
     // =============================================================
 
-    function depositToAztecPublic(bytes32 _to, uint256 _amount, bytes32 _secretHash)
-        external
-        whenNotPaused
-        nonReentrant
-        returns (bytes32, uint256, uint256)
-    {
+    function depositToAztecPublic(
+        bytes32 _to,
+        uint256 _amount,
+        bytes32 _secretHash,
+        CleanHandsData calldata _cleanHands,
+        PassportData calldata _passport
+    ) external whenNotPaused nonReentrant returns (bytes32, uint256, uint256) {
         if (!depositsActive) revert DepositsPaused();
         require(_amount > 0, "Amount must be greater than zero");
+        _validateAttestations(_msgSender(), _amount, _cleanHands, _passport);
+
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
 
@@ -186,6 +189,35 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         return (key, index, amountAfterFee);
     }
 
+    function depositToAztecPublicFor(
+        address _depositor,
+        bytes32 _to,
+        uint256 _amount,
+        bytes32 _secretHash,
+        CleanHandsData calldata _cleanHands,
+        PassportData calldata _passport
+    ) external whenNotPaused nonReentrant returns (bytes32, uint256, uint256) {
+        if (!depositsActive) revert DepositsPaused();
+        if (!trustedForwarders[msg.sender]) revert NotTrustedForwarder();
+        require(_amount > 0, "Amount must be greater than zero");
+        _validateAttestations(_depositor, _amount, _cleanHands, _passport);
+
+        uint256 fee = calculateFee(_amount);
+        uint256 amountAfterFee = _amount - fee;
+
+        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+        bytes32 contentHash =
+            Hash.sha256ToField(abi.encodeWithSignature("mint_to_public(bytes32,uint256)", _to, amountAfterFee));
+
+        underlying.safeTransferFrom(msg.sender, address(this), _amount);
+        collectedFees += fee;
+
+        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHash);
+
+        emit DepositToAztecPublic(_to, amountAfterFee, fee, _secretHash, key, index);
+        return (key, index, amountAfterFee);
+    }
+
     function depositToAztecPrivate(
         uint256 _amount,
         bytes32 _secretHashForL2MessageConsumption,
@@ -194,7 +226,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     ) external whenNotPaused nonReentrant returns (bytes32, uint256, uint256) {
         if (!depositsActive) revert DepositsPaused();
         require(_amount > 0, "Amount must be greater than zero");
-        _validatePrivateAttestations(_msgSender(), _amount, _cleanHands, _passport);
+        _validateAttestations(_msgSender(), _amount, _cleanHands, _passport);
 
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
@@ -221,7 +253,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
         if (!depositsActive) revert DepositsPaused();
         if (!trustedForwarders[msg.sender]) revert NotTrustedForwarder();
         require(_amount > 0, "Amount must be greater than zero");
-        _validatePrivateAttestations(_depositor, _amount, _cleanHands, _passport);
+        _validateAttestations(_depositor, _amount, _cleanHands, _passport);
 
         uint256 fee = calculateFee(_amount);
         uint256 amountAfterFee = _amount - fee;
@@ -338,7 +370,7 @@ contract TokenPortal is Pausable, ReentrancyGuard, Ownable2Step {
     // INTERNAL HELPERS
     // =============================================================
 
-    function _validatePrivateAttestations(
+    function _validateAttestations(
         address _depositor,
         uint256 _amount,
         CleanHandsData calldata _cleanHands,

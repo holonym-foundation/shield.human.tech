@@ -70,10 +70,26 @@ contract MockTokenPortal {
         token = IERC20(_token);
     }
 
-    function depositToAztecPublic(bytes32, uint256 amount, bytes32)
-        external
-        returns (bytes32, uint256, uint256)
-    {
+    function depositToAztecPublic(
+        bytes32,
+        uint256 amount,
+        bytes32,
+        CleanHandsData calldata,
+        PassportData calldata
+    ) external returns (bytes32, uint256, uint256) {
+        token.transferFrom(msg.sender, address(this), amount);
+        _callCount++;
+        return (bytes32(_callCount), _callCount, amount);
+    }
+
+    function depositToAztecPublicFor(
+        address,
+        bytes32,
+        uint256 amount,
+        bytes32,
+        CleanHandsData calldata,
+        PassportData calldata
+    ) external returns (bytes32, uint256, uint256) {
         token.transferFrom(msg.sender, address(this), amount);
         _callCount++;
         return (bytes32(_callCount), _callCount, amount);

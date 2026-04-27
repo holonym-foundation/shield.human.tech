@@ -4,27 +4,38 @@
     "inputs": [
       {
         "name": "_initialOwner",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "_feeRecipient",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "_feeBasisPoints",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "_humanIdAttester",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "_cleanHandsCircuitId",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "_cleanHandsActionId",
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "_passportSigner",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -36,7 +47,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -54,13 +66,15 @@
     "inputs": [
       {
         "name": "_amount",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -74,12 +88,26 @@
   },
   {
     "type": "function",
+    "name": "cleanHandsActionId",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "cleanHandsCircuitId",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -90,17 +118,20 @@
     "inputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
       {
         "name": "",
-        "type": "bool"
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -112,7 +143,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -123,49 +155,55 @@
     "inputs": [
       {
         "name": "_amount",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "_secretHashForL2MessageConsumption",
-        "type": "bytes32"
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
         "name": "_cleanHands",
         "type": "tuple",
+        "internalType": "struct TokenPortal.CleanHandsData",
         "components": [
           {
             "name": "nonce",
-            "type": "uint256"
-          },
-          {
-            "name": "actionId",
-            "type": "uint256"
+            "type": "uint256",
+            "internalType": "uint256"
           },
           {
             "name": "signature",
-            "type": "bytes"
+            "type": "bytes",
+            "internalType": "bytes"
           }
         ]
       },
       {
         "name": "_passport",
         "type": "tuple",
+        "internalType": "struct TokenPortal.PassportData",
         "components": [
           {
             "name": "maxAmount",
-            "type": "uint256"
+            "type": "uint256",
+            "internalType": "uint256"
           },
           {
             "name": "nonce",
-            "type": "uint256"
+            "type": "uint256",
+            "internalType": "uint256"
           },
           {
             "name": "deadline",
-            "type": "uint256"
+            "type": "uint256",
+            "internalType": "uint256"
           },
           {
             "name": "signature",
-            "type": "bytes"
+            "type": "bytes",
+            "internalType": "bytes"
           }
         ]
       }
@@ -173,11 +211,101 @@
     "outputs": [
       {
         "name": "",
-        "type": "bytes32"
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "depositToAztecPrivateFor",
+    "inputs": [
+      {
+        "name": "_depositor",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "_secretHashForL2MessageConsumption",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "_cleanHands",
+        "type": "tuple",
+        "internalType": "struct TokenPortal.CleanHandsData",
+        "components": [
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "_passport",
+        "type": "tuple",
+        "internalType": "struct TokenPortal.PassportData",
+        "components": [
+          {
+            "name": "maxAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "nonpayable"
@@ -188,28 +316,183 @@
     "inputs": [
       {
         "name": "_to",
-        "type": "bytes32"
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
         "name": "_amount",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "_secretHash",
-        "type": "bytes32"
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "_cleanHands",
+        "type": "tuple",
+        "internalType": "struct TokenPortal.CleanHandsData",
+        "components": [
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "_passport",
+        "type": "tuple",
+        "internalType": "struct TokenPortal.PassportData",
+        "components": [
+          {
+            "name": "maxAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
       }
     ],
     "outputs": [
       {
         "name": "",
-        "type": "bytes32"
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "depositToAztecPublicFor",
+    "inputs": [
+      {
+        "name": "_depositor",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_to",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "_amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "_secretHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "_cleanHands",
+        "type": "tuple",
+        "internalType": "struct TokenPortal.CleanHandsData",
+        "components": [
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "_passport",
+        "type": "tuple",
+        "internalType": "struct TokenPortal.PassportData",
+        "components": [
+          {
+            "name": "maxAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "depositsActive",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -218,7 +501,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -230,7 +514,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -242,7 +527,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -254,7 +540,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -266,7 +553,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -278,7 +566,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "contract IInbox"
       }
     ],
     "stateMutability": "view"
@@ -289,15 +578,18 @@
     "inputs": [
       {
         "name": "_registry",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "_underlying",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "_l2Bridge",
-        "type": "bytes32"
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "outputs": [],
@@ -310,7 +602,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "bytes32"
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "stateMutability": "view"
@@ -322,7 +615,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "contract IOutbox"
       }
     ],
     "stateMutability": "view"
@@ -334,7 +628,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -345,17 +640,20 @@
     "inputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
       {
         "name": "",
-        "type": "bool"
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -367,7 +665,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -381,12 +680,20 @@
   },
   {
     "type": "function",
+    "name": "pauseDeposits",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "paused",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "bool"
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -398,7 +705,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -409,7 +717,8 @@
     "inputs": [
       {
         "name": "newOwner",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -422,7 +731,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "contract IRegistry"
       }
     ],
     "stateMutability": "view"
@@ -440,11 +750,13 @@
     "inputs": [
       {
         "name": "_token",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "_amount",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -457,7 +769,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "contract IRollup"
       }
     ],
     "stateMutability": "view"
@@ -469,10 +782,29 @@
     "outputs": [
       {
         "name": "",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setTrustedForwarder",
+    "inputs": [
+      {
+        "name": "_forwarder",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_trusted",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -480,11 +812,31 @@
     "inputs": [
       {
         "name": "newOwner",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "trustedForwarders",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -493,7 +845,8 @@
     "outputs": [
       {
         "name": "",
-        "type": "address"
+        "type": "address",
+        "internalType": "contract IERC20"
       }
     ],
     "stateMutability": "view"
@@ -507,19 +860,34 @@
   },
   {
     "type": "function",
+    "name": "unpauseDeposits",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "updateAttestationConfig",
     "inputs": [
       {
         "name": "_attester",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "_circuitId",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "_actionId",
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "_signer",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -531,7 +899,8 @@
     "inputs": [
       {
         "name": "_newFeeBasisPoints",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -543,7 +912,8 @@
     "inputs": [
       {
         "name": "_newFeeRecipient",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -555,29 +925,20 @@
     "inputs": [
       {
         "name": "nonce",
-        "type": "uint256"
-      },
-      {
-        "name": "circuitId",
-        "type": "uint256"
-      },
-      {
-        "name": "actionId",
-        "type": "uint256"
-      },
-      {
-        "name": "userAddress",
-        "type": "address"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "signature",
-        "type": "bytes"
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [
       {
         "name": "",
-        "type": "bool"
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -588,25 +949,30 @@
     "inputs": [
       {
         "name": "maxAmount",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "nonce",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "deadline",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "signature",
-        "type": "bytes"
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [
       {
         "name": "",
-        "type": "bool"
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -617,27 +983,33 @@
     "inputs": [
       {
         "name": "_recipient",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "_amount",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "_withCaller",
-        "type": "bool"
+        "type": "bool",
+        "internalType": "bool"
       },
       {
         "name": "_l2BlockNumber",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "_leafIndex",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "_path",
-        "type": "bytes32[]"
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
       }
     ],
     "outputs": [],
@@ -657,17 +1029,26 @@
       {
         "name": "attester",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "circuitId",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "actionId",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       },
       {
         "name": "signer",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -679,27 +1060,32 @@
       {
         "name": "amount",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
       },
       {
         "name": "fee",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
       },
       {
         "name": "secretHash",
         "type": "bytes32",
-        "indexed": false
+        "indexed": false,
+        "internalType": "bytes32"
       },
       {
         "name": "key",
         "type": "bytes32",
-        "indexed": false
+        "indexed": false,
+        "internalType": "bytes32"
       },
       {
         "name": "index",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -711,34 +1097,52 @@
       {
         "name": "to",
         "type": "bytes32",
-        "indexed": true
+        "indexed": true,
+        "internalType": "bytes32"
       },
       {
         "name": "amount",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
       },
       {
         "name": "fee",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
       },
       {
         "name": "secretHash",
         "type": "bytes32",
-        "indexed": false
+        "indexed": false,
+        "internalType": "bytes32"
       },
       {
         "name": "key",
         "type": "bytes32",
-        "indexed": false
+        "indexed": false,
+        "internalType": "bytes32"
       },
       {
         "name": "index",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DepositsBlocked",
+    "inputs": [],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DepositsUnblocked",
+    "inputs": [],
     "anonymous": false
   },
   {
@@ -748,7 +1152,8 @@
       {
         "name": "newFeeRecipient",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -760,7 +1165,8 @@
       {
         "name": "newFeeBasisPoints",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -772,12 +1178,14 @@
       {
         "name": "recipient",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "amount",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -789,17 +1197,20 @@
       {
         "name": "registry",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "underlying",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "l2Bridge",
         "type": "bytes32",
-        "indexed": false
+        "indexed": false,
+        "internalType": "bytes32"
       }
     ],
     "anonymous": false
@@ -811,7 +1222,8 @@
       {
         "name": "currentOwner",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -823,12 +1235,14 @@
       {
         "name": "previousOwner",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "newOwner",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -840,12 +1254,14 @@
       {
         "name": "previousOwner",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "newOwner",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -857,12 +1273,14 @@
       {
         "name": "previousOwner",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "newOwner",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -874,7 +1292,8 @@
       {
         "name": "account",
         "type": "address",
-        "indexed": false
+        "indexed": false,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -886,17 +1305,39 @@
       {
         "name": "token",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "to",
         "type": "address",
-        "indexed": true
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "amount",
         "type": "uint256",
-        "indexed": false
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TrustedForwarderUpdated",
+    "inputs": [
+      {
+        "name": "forwarder",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "trusted",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
       }
     ],
     "anonymous": false
@@ -908,7 +1349,8 @@
       {
         "name": "account",
         "type": "address",
-        "indexed": false
+        "indexed": false,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -930,6 +1372,11 @@
   },
   {
     "type": "error",
+    "name": "DepositsPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ECDSAInvalidSignature",
     "inputs": []
   },
@@ -939,7 +1386,8 @@
     "inputs": [
       {
         "name": "length",
-        "type": "uint256"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -949,7 +1397,8 @@
     "inputs": [
       {
         "name": "s",
-        "type": "bytes32"
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ]
   },
@@ -995,11 +1444,17 @@
   },
   {
     "type": "error",
+    "name": "NotTrustedForwarder",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OwnableInvalidOwner",
     "inputs": [
       {
         "name": "owner",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ]
   },
@@ -1009,7 +1464,8 @@
     "inputs": [
       {
         "name": "account",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ]
   },
@@ -1029,7 +1485,8 @@
     "inputs": [
       {
         "name": "token",
-        "type": "address"
+        "type": "address",
+        "internalType": "address"
       }
     ]
   },

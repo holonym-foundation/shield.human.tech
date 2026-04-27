@@ -479,10 +479,27 @@ contract UniswapFuelSwapTest is Test {
     }
 
     function test_revertOnPartialFillNativeEth() public {
+        // The fee=3000 ETH/AZTEC pool is already initialized on Sepolia with deep
+        // real-world liquidity, so 50 ether fills completely. Use a fresh (fee,
+        // tickSpacing) combo to guarantee only our seeded liquidity exists.
+        PoolKey memory freshKey = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(AZTEC),
+            fee: 500,
+            tickSpacing: 10,
+            hooks: IHooks(address(0))
+        });
+        try IPoolManager(POOL_MANAGER).initialize(freshKey, INIT_SQRT_PRICE) {} catch {}
+
+        uint256 seed = 100 ether;
+        vm.deal(address(seeder), seed);
+        deal(AZTEC, address(seeder), seed);
+        seeder.seedLiquidity(freshKey, -600, 600, 10e18);
+
         uint256 hugeAmount = 50 ether;
         deal(WETH, user, hugeAmount);
 
-        (PoolKey[] memory path, bool[] memory dirs) = _singlePath(ethFeeKey, ethFeeZeroForOne);
+        (PoolKey[] memory path, bool[] memory dirs) = _singlePath(freshKey, true);
 
         vm.startPrank(user);
         IERC20(WETH).approve(address(swapper), hugeAmount);
