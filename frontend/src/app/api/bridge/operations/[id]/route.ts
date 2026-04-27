@@ -162,6 +162,33 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const body = await request.json()
 
+    // ── Defense-in-depth: reject plaintext secrets at the trust boundary ─
+    // Mirrors the POST handler's reject list. The PATCH allow-list below
+    // would silently drop these fields, but a loud 400 surfaces client-side
+    // regressions during development instead of letting them slip past.
+    const PLAINTEXT_SECRET_FIELDS = [
+      'claimSecret',
+      'fuelSecret',
+      'privateFuelSecret',
+      'privateFuelSalt',
+      'nonce',
+    ] as const
+    const leakedFields = PLAINTEXT_SECRET_FIELDS.filter((f) => body[f] !== undefined)
+    if (leakedFields.length > 0) {
+      console.error(
+        '[PATCH /api/bridge/operations/[id]] Rejected request carrying plaintext secret fields:',
+        leakedFields.join(', '),
+      )
+      return NextResponse.json(
+        {
+          error:
+            `Request body may not contain plaintext secret fields: ${leakedFields.join(', ')}. ` +
+            'Secrets must only be sent inside the encrypted blob (encryptedCiphertext).',
+        },
+        { status: 400 },
+      )
+    }
+
     // ── Sanitize all inputs ─────────────────────────────────────────────
     const status = sanitizeString(body.status, 20)
     const l1TxHash = sanitizeTxHash(body.l1TxHash)
