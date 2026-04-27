@@ -1,4 +1,4 @@
-import { L1_TOKENS, L1_CHAIN_ID, L2_CHAIN_ID, getAztecscanUrl, getEtherscanUrl } from '@/config'
+import { L1_TOKENS, L1_CHAIN_ID, L2_CHAIN_ID, BRIDGED_FPC_ADDRESS, getAztecscanUrl, getEtherscanUrl } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { logInfo, logError } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
@@ -120,7 +120,10 @@ export const useL2FeeJuiceBalance = () => {
       ])
 
       const publicBalance = BigInt(publicBalanceResult.result.toString())
-      return formatUnits(publicBalance, FEE_JUICE_DECIMALS)
+      // Truncate to 2 decimals so the UI doesn't render 18-digit FJ values.
+      const raw = formatUnits(publicBalance, FEE_JUICE_DECIMALS)
+      const dot = raw.indexOf('.')
+      return dot === -1 ? `${raw}.00` : raw.slice(0, dot + 3).padEnd(dot + 3, '0')
     } catch (error) {
       handleL2Error<string>(error, 'BALANCE')
       throw error
@@ -151,18 +154,28 @@ export const useL2PrivateFeeJuiceBalance = () => {
         throw new Error('Aztec wallet not connected or contracts not initialized')
       }
 
+      if (!BRIDGED_FPC_ADDRESS) {
+        throw new Error('Bridged FPC address not configured for this deployment')
+      }
+
       const userAddress = AztecAddress.fromString(aztecAddress)
 
+      // F3: read the user's BridgedFPC balance (what they can spend on private
+      // fuel via the FPC) — NOT FEE_JUICE.balance_of_private (the user's own
+      // private FeeJuice notes), which is a different number.
       const [privateBalanceResult] = await walletAdapter.simulateViews([
         {
-          contract: FEE_JUICE_ADDRESS,
-          method: 'balance_of_private',
+          contract: BRIDGED_FPC_ADDRESS,
+          method: 'balance_of',
           args: [userAddress],
         },
       ])
 
       const privateBalance = BigInt(privateBalanceResult.result.toString())
-      return formatUnits(privateBalance, FEE_JUICE_DECIMALS)
+      // Truncate to 2 decimals for display parity with the public balance row.
+      const raw = formatUnits(privateBalance, FEE_JUICE_DECIMALS)
+      const dot = raw.indexOf('.')
+      return dot === -1 ? `${raw}.00` : raw.slice(0, dot + 3).padEnd(dot + 3, '0')
     } catch (error) {
       handleL2Error<string>(error, 'BALANCE')
       throw error
@@ -172,7 +185,7 @@ export const useL2PrivateFeeJuiceBalance = () => {
   return useQuery<string, Error>({
     queryKey,
     queryFn,
-    enabled: !!aztecAddress && !!walletAdapter,
+    enabled: !!aztecAddress && !!walletAdapter && !!BRIDGED_FPC_ADDRESS,
     refetchInterval: 30_000,
   })
 }
