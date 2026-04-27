@@ -136,6 +136,20 @@ export default function ProgressPage() {
     }
   }, [isBridgeTokensToL2Error, withdrawTokensToL1Error, steps, setProgressStep])
 
+  // F5: warn the user before unloading the page while a step is active.
+  // The encrypted secrets payload is in localStorage so a survivable reload
+  // is possible, but recovery is meaningfully easier if the tab stays open
+  // through the irreversible L1/L2 tx.
+  useEffect(() => {
+    const isInProgress = steps.some((step) => step.status === 'active')
+    if (!isInProgress) return
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [steps])
+
   const hasError = isBridgeTokensToL2Error || withdrawTokensToL1Error
 
   // Amount display with optional fuel breakdown. Preserved from the pre-split
