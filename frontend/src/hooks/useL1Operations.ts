@@ -673,11 +673,48 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               { autoClose: false },
             )
             break
-          case 'error':
-            // Observability: forward SDK errors (with fundsAtRisk context) so
-            // Datadog alerts can distinguish recoverable vs. stuck-funds cases.
+          case 'error': {
+            // F15: classify the error so Datadog dashboards/alerts can segment
+            // congestion vs. contract revert vs. claim failure vs. sync timeout
+            // vs. funds-at-risk vs. generic. Without these tags, all bridge
+            // failures collapse into a single user_action and alerting can't
+            // distinguish "the network is broken" from "this user's claim failed".
+            const errorMsgForLog = event.error?.message ?? 'Bridge error event'
+            const isCongestion =
+              errorMsgForLog.includes('"path":["revertReason","functionErrorStack",0,"functionSelector"]') ||
+              (errorMsgForLog.includes('invalid_type') && errorMsgForLog.includes('functionSelector'))
+            const isReloadable = errorMsgForLog.includes('0xfb8f41b2')
+            const isArtifact =
+              errorMsgForLog.includes('Contract artifact not found') ||
+              errorMsgForLog.includes('artifact not found') ||
+              (errorMsgForLog.includes('artifact') && errorMsgForLog.includes('not found'))
+            // F16: SDK now throws "L1-to-L2 message sync timeout after ..." —
+            // detect it so the dedicated user_action persists.
+            const isSyncTimeout =
+              errorMsgForLog.includes('message sync timeout') || errorMsgForLog.includes('sync timeout after')
+            let errorTag: string
+            let errorUserAction: string
+            if (event.fundsAtRisk) {
+              errorTag = 'claim_failed'
+              errorUserAction = 'bridge_l1_to_l2_claim_failed'
+            } else if (isCongestion) {
+              errorTag = 'congestion'
+              errorUserAction = 'bridge_l1_to_l2_congestion_error'
+            } else if (isReloadable) {
+              errorTag = 'contract_revert'
+              errorUserAction = 'bridge_l1_to_l2_contract_error'
+            } else if (isArtifact) {
+              errorTag = 'artifact_not_found'
+              errorUserAction = 'bridge_l1_to_l2_artifact_error'
+            } else if (isSyncTimeout) {
+              errorTag = 'sync_timeout'
+              errorUserAction = 'bridge_l1_to_l2_sync_timeout'
+            } else {
+              errorTag = 'unknown'
+              errorUserAction = 'bridge_l1_to_l2_error'
+            }
             logError(
-              event.error?.message ?? 'Bridge error event',
+              errorMsgForLog,
               {
                 direction: 'L1_TO_L2',
                 fundsAtRisk: event.fundsAtRisk,
@@ -686,7 +723,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
                 l2Address: aztecAddress,
                 amount: amountDisplayL1,
                 isPrivacyModeEnabled,
-                userAction: 'bridge_l1_to_l2_error',
+                errorType: errorTag,
+                ...(isReloadable ? { errorSignature: '0xfb8f41b2' } : {}),
+                userAction: errorUserAction,
               },
               event.error,
             )
@@ -738,6 +777,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               }
             }
             break
+          }
         }
       },
     })
