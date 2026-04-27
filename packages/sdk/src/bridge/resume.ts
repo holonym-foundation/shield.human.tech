@@ -769,6 +769,39 @@ async function resumeL1ToL2(
   onStep?.(3, 'active')
   patchOperationAsync(apiClient, op.id, { currentStep: 3 })
 
+  // F17: re-fetch the operation right before the claim. If a parallel tab
+  // (or a previous successful resume that crashed before completion PATCH)
+  // already completed this op during our sync poll / sequencer wait, we
+  // can short-circuit instead of paying a wallet popup + a guaranteed-to-
+  // fail claim that the catch below would otherwise treat as
+  // already-consumed.
+  try {
+    const fresh = await getOperation(apiClient, op.id)
+    if (fresh.status === 'completed') {
+      console.log('[SDK Resume L1→L2] Op completed by another tab during resume — short-circuiting.')
+      onStep?.(3, 'completed')
+      onStep?.(4, 'completed')
+      emit({
+        type: 'operation_completed',
+        operationId: op.id,
+        l1TxHash: fresh.l1TxHash ?? op.l1TxHash ?? undefined,
+        l2TxHash: fresh.l2TxHash ?? undefined,
+        alreadyCompleted: true,
+      })
+      return {
+        operationId: op.id,
+        l1TxHash: fresh.l1TxHash ?? op.l1TxHash ?? undefined,
+        l2TxHash: fresh.l2TxHash ?? undefined,
+        l1TxUrl: op.l1TxUrl ?? undefined,
+        l2TxUrl: fresh.l2TxUrl ?? undefined,
+      }
+    }
+  } catch (refetchErr) {
+    // Non-fatal — fall through to the claim attempt and let the
+    // already-consumed catch handle the race if it materializes.
+    console.warn('[SDK Resume L1→L2] Pre-claim re-fetch failed (non-fatal):', refetchErr)
+  }
+
   let l2TxHash: string | undefined
   let alreadyClaimed = false
 

@@ -31,6 +31,14 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       console.warn('[Resume L1→L2] Connected wallet differs from deposit wallet:', waapAddress, 'vs', l1Address)
     }
 
+    // F18: surface the L1 tx URL upfront so the user can verify their deposit
+    // confirmed on Etherscan during the long sync poll. The SDK's resume path
+    // never emits 'deposit_confirmed' so the existing case in this hook only
+    // ran at the very end — main set this URL right when resume began.
+    if (claimData.l1TxUrl) {
+      setTransactionUrls(claimData.l1TxUrl, null)
+    }
+
     const result = await bridge.resume(claimData.operationId, {
       walletAdapter: walletAdapter as any,
       l1Address,
