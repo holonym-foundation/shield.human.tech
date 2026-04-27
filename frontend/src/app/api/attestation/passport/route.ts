@@ -99,7 +99,8 @@ export async function POST(request: NextRequest) {
       maxAmount,
       nonce: BigInt(nonce),
       deadline: deadlineSeconds,
-      portalAddress: data.portalAddress ?? '',
+      // F7: Zod schema now requires portalAddress; no `?? ''` wildcard fallback.
+      portalAddress: data.portalAddress,
     })
 
     // L2 Schnorr signature (only if bridgeAddress provided)

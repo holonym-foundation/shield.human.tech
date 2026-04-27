@@ -16,10 +16,11 @@ import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctio
  *
  * 1. Authenticate user (JWT)
  * 2. Enforce 1:1 address binding (l1Address <-> l2Address)
- * 3. Verify clean hands via Holonym sandbox API
- * 4. Issue signed attestation from our POCH attester (L1 ECDSA + L2 Schnorr)
+ * 3. Sanctions screening (fail closed on vendor outage)
+ * 4. Verify clean hands via Holonym sandbox API
+ * 5. Issue signed attestation from our POCH attester (L1 ECDSA + L2 Schnorr)
  *
- * Body: { portalAddress: string }
+ * Body: { l2Address: string, isPrivate?: boolean }
  * Returns: { l1Signature, l2Signature, nonce, circuitId, actionId }
  */
 export async function POST(request: NextRequest) {

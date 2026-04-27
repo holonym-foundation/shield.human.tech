@@ -8,25 +8,47 @@
 
 import { z } from 'zod'
 
+// ─── Regex patterns (declared first so Zod schemas below can reference them) ─
+
+/** Ethereum address: 0x followed by 40 hex chars. */
+export const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/
+
+/** Ethereum tx hash: 0x followed by 64 hex chars. */
+export const TX_HASH_REGEX = /^0x[a-fA-F0-9]{64}$/
+
+/** Hex string (with 0x prefix, variable length). Used for Aztec addresses and message hashes. */
+export const HEX_STRING_REGEX = /^0x[a-fA-F0-9]+$/
+
+/** Numeric string (non-negative integer). Used for amounts, block numbers, and leaf indices. */
+export const NUMERIC_STRING_REGEX = /^\d+$/
+
 // ─── Zod Schemas ──────────────────────────────────────────────────────
 
-/** Schema for POST /api/auth/authenticate */
+/** Schema for POST /api/auth/authenticate.
+ *  F20: bound message/signature length so an attacker can't post megabytes
+ *  of payload and force the SIWE parser/verifier to do meaningful work. */
 export const AuthenticateSchema = z.object({
-  message: z.string().min(1),
-  signature: z.string().min(1),
-  l1LoginMethod: z.string().optional(),
-  l1WalletProvider: z.string().optional(),
-  l2LoginMethod: z.string().optional(),
-  l2WalletProvider: z.string().optional(),
+  // SIWE messages are typically ~500-800 chars; 2048 is generous.
+  message: z.string().min(1).max(2048),
+  // ECDSA hex signatures are 132 chars; 256 is generous.
+  signature: z.string().min(1).max(256),
+  l1LoginMethod: z.string().max(64).optional(),
+  l1WalletProvider: z.string().max(64).optional(),
+  l2LoginMethod: z.string().max(64).optional(),
+  l2WalletProvider: z.string().max(64).optional(),
 })
 
-/** Schema for POST /api/attestation/passport */
+/** Schema for POST /api/attestation/passport.
+ *  F7: portalAddress is REQUIRED — the L1 ECDSA passport attestation is bound
+ *  to a specific TokenPortal so the signature can't be replayed against any
+ *  other portal. Allowing it to be optional + signing `?? ''` produced
+ *  wildcard-binding attestations. */
 export const PassportAttestationSchema = z.object({
   l2Address: z.string().min(1),
   isPrivate: z.boolean().optional().default(false),
-  bridgeAddress: z.string().optional(),
-  portalAddress: z.string().optional(),
-  deadline: z.number().optional(),
+  bridgeAddress: z.string().regex(ETH_ADDRESS_REGEX, 'bridgeAddress must be 0x + 40 hex chars').optional(),
+  portalAddress: z.string().regex(ETH_ADDRESS_REGEX, 'portalAddress must be 0x + 40 hex chars'),
+  deadline: z.number().int().nonnegative().optional(),
 })
 
 /** Schema for POST /api/attestation/poch */
@@ -54,20 +76,6 @@ export const MAX_SIBLING_PATH_ENTRY_LENGTH = 200
 
 /** Max number of sibling path entries. */
 export const MAX_SIBLING_PATH_ENTRIES = 128
-
-// ─── Regex patterns ─────────────────────────────────────────────────────
-
-/** Ethereum address: 0x followed by 40 hex chars. */
-export const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/
-
-/** Ethereum tx hash: 0x followed by 64 hex chars. */
-export const TX_HASH_REGEX = /^0x[a-fA-F0-9]{64}$/
-
-/** Hex string (with 0x prefix, variable length). Used for Aztec addresses and message hashes. */
-export const HEX_STRING_REGEX = /^0x[a-fA-F0-9]+$/
-
-/** Numeric string (non-negative integer). Used for amounts, block numbers, and leaf indices. */
-export const NUMERIC_STRING_REGEX = /^\d+$/
 
 // ─── Sanitization helpers ───────────────────────────────────────────────
 
