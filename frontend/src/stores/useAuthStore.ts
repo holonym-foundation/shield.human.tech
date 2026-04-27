@@ -4,7 +4,10 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 export interface AuthUser {
-  id: number
+  // F10: server returns the User CUID directly (string) — see
+  // /api/auth/authenticate/route.ts and prisma/schema.prisma
+  // (User.id String @id @default(cuid(2))). Type was wrongly `number`.
+  id: string
   l1Address: string
   l2Address: string
   l1LoginMethod: string | null
@@ -39,6 +42,6 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'aztec-bridge-auth',
       partialize: (state) => ({ token: state.token, user: state.user }),
-    }
-  )
+    },
+  ),
 )

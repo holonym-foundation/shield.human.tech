@@ -718,7 +718,8 @@ export type SessionStatus =
   | {
       valid: true
       user: {
-        id: number
+        // F10: User CUID (prisma/schema.prisma User.id String @id @default(cuid(2))).
+        id: string
         l1Address: string
         l2Address: string
         l1LoginMethod: string | null
