@@ -31,7 +31,7 @@ import {
 } from '@aztec/l1-artifacts'
 import { TokenContract, TokenContractArtifact } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js'
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee'
-import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
+import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction, lookupValidity } from '@aztec/aztec.js/authorization'
 import { EmbeddedWallet } from '@aztec/wallets/embedded'
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
 import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
@@ -256,15 +256,95 @@ async function sendWithoutPublicSimulation(
 
   const tx = await provenTx.toTx()
   const txHash = tx.getTxHash()
+
+  // Pre-submit public simulation — cheap on the node, surfaces revert reasons BEFORE
+  // submission so we don't fight post-tx nullifier pollution in the fallback path.
+  // Unlike EmbeddedWallet's simulate (which hits the lagging PXE L1→L2 tree), this
+  // calls the sequencer-side node directly.
+  try {
+    const preSim = await wallet.aztecNode.simulatePublicCalls(tx, true)
+    if (preSim?.revertReason) {
+      const rr: any = preSim.revertReason
+      const origMsg = rr.originalMessage ?? rr.message ?? ''
+      const callStack = typeof rr.getCallStack === 'function' ? rr.getCallStack() : rr.functionErrorStack ?? []
+      const noirStack = typeof rr.getNoirCallStack === 'function' ? rr.getNoirCallStack() : rr.noirErrorStack ?? []
+      const fullStack = typeof rr.getStack === 'function' ? rr.getStack() : ''
+      logger.error(`[DirectSend] Pre-submit simulation shows revert:`)
+      logger.error(`  Original message: ${origMsg || '(empty)'}`)
+      if (fullStack) logger.error(`  Stack:\n${fullStack}`)
+      if (callStack.length > 0) logger.error(`  Function call stack: ${JSON.stringify(callStack.map((f: any) => ({ contract: f.contractAddress?.toString?.(), name: f.functionName, selector: f.functionSelector?.toString?.() })), null, 2)}`)
+      if (noirStack.length > 0) logger.error(`  Noir stack: ${JSON.stringify(noirStack, null, 2)}`)
+      if (rr.revertData && rr.revertData.length > 0) logger.error(`  Revert data: ${JSON.stringify(rr.revertData)}`)
+      throw new Error(`Public phase would revert (pre-submit sim): ${origMsg || fullStack || 'see logs above'}`)
+    }
+  } catch (preSimErr: any) {
+    if (preSimErr?.message?.includes('Public phase would revert')) throw preSimErr
+    logger.warn(`[DirectSend] Pre-submit sim failed (continuing anyway): ${preSimErr?.message?.slice(0, 200) ?? preSimErr}`)
+  }
+
   logger.info(`[DirectSend] Submitting tx ${txHash} to sequencer...`)
   await wallet.aztecNode.sendTx(tx)
   logger.info(`[DirectSend] Tx ${txHash} submitted, waiting for receipt...`)
 
   // Import waitForTx to wait for mining
   const { waitForTx } = await import('@aztec/aztec.js/node')
-  const receipt = await waitForTx(wallet.aztecNode, txHash, sendOpts.wait)
-  logger.info(`[DirectSend] Tx mined in block ${receipt.blockNumber}`)
-  return receipt
+  try {
+    const receipt = await waitForTx(wallet.aztecNode, txHash, sendOpts.wait)
+    logger.info(`[DirectSend] Tx mined in block ${receipt.blockNumber}`)
+    return receipt
+  } catch (err: any) {
+    // SDK/node schema drift: node may return executionResult values the aztec.js Zod
+    // schema rejects (e.g. 'reverted' instead of 'app_logic_reverted'). Surface the real
+    // revert reason via a raw JSON-RPC getTxReceipt so debugging isn't blocked.
+    const looksLikeSchemaError =
+      err?.name === 'ZodError' ||
+      err?.issues ||
+      (typeof err?.message === 'string' && err.message.includes('executionResult'))
+    if (!looksLikeSchemaError) throw err
+    logger.warn(`[DirectSend] waitForTx schema parse failed — querying raw receipt via JSON-RPC`)
+    let raw: any
+    try {
+      raw = await fetchRawTxReceipt(getAztecNodeUrl(), txHash.toString())
+      logger.error(`[DirectSend] Raw receipt: ${JSON.stringify(raw, null, 2)}`)
+    } catch (rpcErr: any) {
+      logger.error(`[DirectSend] Raw RPC fallback failed: ${rpcErr?.message ?? rpcErr}`)
+      throw err
+    }
+    // Raw receipt for 'reverted' txs doesn't include an error message on this node
+    // version. Re-simulate the public phase to extract the on-chain revert reason.
+    try {
+      logger.info(`[DirectSend] Re-simulating public calls to extract revert reason...`)
+      const sim = await wallet.aztecNode.simulatePublicCalls(tx, true)
+      if (sim?.revertReason) {
+        const reasonStr = typeof sim.revertReason?.toString === 'function'
+          ? sim.revertReason.toString()
+          : JSON.stringify(sim.revertReason)
+        logger.error(`[DirectSend] Public-phase revert reason: ${reasonStr}`)
+        throw new Error(`Tx ${txHash} reverted: ${reasonStr}`)
+      }
+      logger.warn(`[DirectSend] simulatePublicCalls returned no revertReason (sim output may not match on-chain state)`)
+    } catch (simErr: any) {
+      if (simErr?.message?.startsWith(`Tx ${txHash} reverted:`)) throw simErr
+      logger.error(`[DirectSend] simulatePublicCalls fallback failed: ${simErr?.message ?? simErr}`)
+    }
+    throw new Error(`Tx ${txHash} reverted (raw executionResult=${raw?.executionResult ?? '?'}): no reason extracted`)
+  }
+}
+
+async function fetchRawTxReceipt(nodeUrl: string, txHashHex: string): Promise<any> {
+  const res = await fetch(nodeUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'node_getTxReceipt',
+      params: [txHashHex],
+      id: 1,
+    }),
+  })
+  const body = await res.json() as any
+  if (body?.error) throw new Error(`JSON-RPC error: ${JSON.stringify(body.error)}`)
+  return body?.result
 }
 
 async function sendPrivateWithRetry<T>(
@@ -1695,6 +1775,17 @@ async function testPublicFuelFlow(
     })
     logger.info('Permit2 witness signed')
 
+    // Sign a POCH attestation for the public deposit (SwapBridgeRouter acts as the trusted
+    // forwarder via depositToAztecPublicFor; attestation is signed for the depositor = user).
+    const pfPochNonce = BigInt(Date.now())
+    logger.info(`[L1] Signing POCH attestation for public fuel deposit (nonce=${pfPochNonce})`)
+    const pfPochSig = await signCleanHandsAttestation({
+      nonce: pfPochNonce,
+      circuitId: CLEAN_HANDS_CIRCUIT_ID,
+      actionId: CLEAN_HANDS_ACTION_ID,
+      userAddress: ownerEthAddress,
+    })
+
     // Simulate first to get detailed error
     logger.info('Simulating bridgeWithFuel via eth_call...')
     const bridgeWithFuelArgs = [
@@ -1711,7 +1802,7 @@ async function testPublicFuelFlow(
         path: poolKeys,
         zeroForOnes,
         isPrivate: false,
-        cleanHands: { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` },
+        cleanHands: { nonce: pfPochNonce, signature: pfPochSig },
         passport: { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` },
       },
       { nonce: pfPermit.nonce, deadline: pfPermit.deadline, signature: pfPermit.signature },
@@ -1971,6 +2062,17 @@ async function testPrivateFuelFlow(
     })
     logger.info('Permit2 witness signed (private fuel)')
 
+    // Sign POCH attestation for the token deposit leg (TokenPortal.depositToAztecPublicFor
+    // validates attestation for the depositor = user; router forwards via msg.sender).
+    const pvPochNonce = BigInt(Date.now())
+    logger.info(`[L1] Signing POCH attestation for private fuel deposit (nonce=${pvPochNonce})`)
+    const pvPochSig = await signCleanHandsAttestation({
+      nonce: pvPochNonce,
+      circuitId: CLEAN_HANDS_CIRCUIT_ID,
+      actionId: CLEAN_HANDS_ACTION_ID,
+      userAddress: ownerEthAddress,
+    })
+
     // Call SwapBridgeRouter.bridgeWithFuel
     const router = getContract({ address: swapRouterAddress, abi: SwapBridgeRouterAbiLocal, client: l1Client as any }) as any
     const bridgeTx = await router.write.bridgeWithFuel([
@@ -1987,7 +2089,7 @@ async function testPrivateFuelFlow(
         path: poolKeys,
         zeroForOnes,
         isPrivate: false,
-        cleanHands: { nonce: 0n, actionId: 0n, signature: '0x' as `0x${string}` },
+        cleanHands: { nonce: pvPochNonce, signature: pvPochSig },
         passport: { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` },
       },
       { nonce: pvPermit.nonce, deadline: pvPermit.deadline, signature: pvPermit.signature },
@@ -2342,6 +2444,7 @@ async function testPrivateDepositFuelWithAttestation(
 }
 
 async function testPublicBridgeFlow(
+  attestationType: 'poch' | 'passport',
   deployed: DeployedCompliantToken,
   wallet: EmbeddedWallet,
   ownerAztecAddress: AztecAddress,
@@ -2353,7 +2456,8 @@ async function testPublicBridgeFlow(
   rollupVersion: number,
   logger: Logger
 ) {
-  logger.info(`\n=== Testing PUBLIC bridge flow (depositToAztecPublic — no attestation needed) ===`)
+  const label = attestationType === 'poch' ? 'POCH (Clean Hands)' : 'Passport'
+  logger.info(`\n=== Testing PUBLIC bridge flow with ${label} attestation (depositToAztecPublic + claim_public) ===`)
 
   const l1TokenContract = EthAddress.fromString(deployed.l1TokenContract)
   const feeAssetHandler = EthAddress.fromString(deployed.feeAssetHandler)
@@ -2377,7 +2481,40 @@ async function testPublicBridgeFlow(
   const approveTx = await l1Token.write.approve([l1PortalAddr, depositAmount])
   await l1Client.waitForTransactionReceipt({ hash: approveTx, timeout: getTimeouts().txTimeout })
 
-  // Deposit to Aztec public (no attestation needed for public deposits)
+  // Build attestation data — public deposit now carries the same compliance gate as private
+  let cleanHandsData: { nonce: bigint; signature: Hex }
+  let passportData: { maxAmount: bigint; nonce: bigint; deadline: bigint; signature: Hex }
+
+  if (attestationType === 'poch') {
+    const pochNonce = BigInt(Date.now())
+    logger.info(`[L1] Signing POCH attestation (nonce=${pochNonce})`)
+    const pochSig = await signCleanHandsAttestation({
+      nonce: pochNonce,
+      circuitId: CLEAN_HANDS_CIRCUIT_ID,
+      actionId: CLEAN_HANDS_ACTION_ID,
+      userAddress: ownerEthAddress,
+    })
+    cleanHandsData = { nonce: pochNonce, signature: pochSig }
+    passportData = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as Hex }
+  } else {
+    const l1Public = createPublicClient({ transport: http(L1_URL) })
+    const block = await l1Public.getBlock()
+    const deadline = block.timestamp + 3600n
+    const passportNonce = BigInt(Date.now())
+    const maxAmount = depositAmount * 10n
+    logger.info(`[L1] Signing Passport attestation (maxAmount=${maxAmount}, deadline=${deadline})`)
+    const passportSig = await signPassportAttestation({
+      userAddress: ownerEthAddress,
+      maxAmount,
+      nonce: passportNonce,
+      deadline,
+      portalAddress: l1PortalAddr,
+    })
+    cleanHandsData = { nonce: 0n, signature: '0x' as Hex }
+    passportData = { maxAmount, nonce: passportNonce, deadline, signature: passportSig }
+  }
+
+  // Deposit to Aztec public (with attestation)
   const secret = Fr.random()
   const secretHash = await computeSecretHash(secret)
   logger.info(`[L1] depositToAztecPublic (amount=${depositAmount}, to=${ownerAztecAddress})`)
@@ -2386,6 +2523,8 @@ async function testPublicBridgeFlow(
     ownerAztecAddress.toString() as Hex,
     depositAmount,
     secretHash.toString() as Hex,
+    cleanHandsData,
+    passportData,
   ])
   const receipt = await l1Client.waitForTransactionReceipt({ hash: depositTx, timeout: getTimeouts().txTimeout })
   logger.info(`[L1] Deposit tx confirmed: ${depositTx}`)
@@ -2457,11 +2596,15 @@ async function testPublicBridgeFlow(
 }
 
 /**
- * Test 4: L2 Public → L1
- * Burns from public balance via exit_to_l1_public (no attestation needed),
- * then waits for proof and calls TokenPortal.withdraw on L1.
+ * Test 4: L2 Public → L1 (compliance-gated).
+ * Burns from public balance via authorize_exit_to_l1_public. The private entry verifies a
+ * clean-hands or passport attestation in the private circuit, writes a one-shot approval into
+ * the canonical AuthRegistry, and enqueues nonce consumption + the #[only_self] public
+ * `exit_to_l1_public` call (which consumes the approval, sends the L2->L1 message, and burns
+ * the user's public balance via the proxy). Waits for proof and calls withdraw on L1.
  */
 async function testPublicExitFlow(
+  attestationType: 'poch' | 'passport',
   deployed: DeployedCompliantToken,
   wallet: EmbeddedWallet,
   ownerAztecAddress: AztecAddress,
@@ -2475,29 +2618,86 @@ async function testPublicExitFlow(
   l2TokenContract: any,
   logger: Logger
 ) {
-  logger.info(`\n=== Testing Public Exit Flow (exit_to_l1_public → L1 withdraw) ===`)
+  const label = attestationType === 'poch' ? 'POCH (Clean Hands)' : 'Passport'
+  logger.info(`\n=== Testing Public Exit Flow with ${label} (authorize_exit_to_l1_public → L1 withdraw) ===`)
 
   const withdrawAmount = 5n
-  const nonce = Fr.random()
+  const authwitNonce = Fr.random()
 
-  // AuthWit: authorize the PROXY (not bridge) to burn public tokens
-  logger.info(`[L2] Setting public authwit for proxy to burn ${withdrawAmount} tokens`)
-  const authwit = await SetPublicAuthwitContractInteraction.create(
+  // Token.burn_public validates via #[authorize_once("from", "authwit_nonce")], which expands
+  // to assert_current_call_valid_authwit_public(ctx, from). That reader hits the canonical
+  // AuthRegistry. Private authwits created via createAuthWit are NOT visible there, so we
+  // must pre-register a PUBLIC approval via setPublicAuthWit (sent as a separate tx).
+  //
+  // Caller must be the direct msg.sender of Token.burn_public — that's TokenMinterProxy
+  // (Bridge → Proxy → Token), not the Bridge itself.
+  // Sanity-check the user's public balance — Token.burn_public does a u128.sub, which
+  // panics with an empty "Assertion failed:" on underflow (masks as authwit failure).
+  const { result: publicBalanceBefore } = await l2TokenContract.methods
+    .balance_of_public(ownerAztecAddress)
+    .simulate({ from: ownerAztecAddress })
+  logger.info(`[L2] Public balance before exit: ${publicBalanceBefore} (need ${withdrawAmount})`)
+  if (BigInt(publicBalanceBefore) < withdrawAmount) {
+    throw new Error(`Insufficient public balance for exit test: have ${publicBalanceBefore}, need ${withdrawAmount}`)
+  }
+
+  logger.info(`[L2] Registering public authwit for proxy to burn ${withdrawAmount} public tokens`)
+  const proxyAddress = AztecAddress.fromString(deployed.l2ProxyContract)
+  const burnAction = l2TokenContract.methods.burn_public(ownerAztecAddress, withdrawAmount, authwitNonce)
+  const burnAuthwit = await SetPublicAuthwitContractInteraction.create(
     wallet,
     ownerAztecAddress,
-    {
-      caller: AztecAddress.fromString(deployed.l2ProxyContract),
-      action: l2TokenContract.methods.burn_public(ownerAztecAddress, withdrawAmount, nonce),
-    },
-    true
+    { caller: proxyAddress, action: burnAction },
+    true,
   )
-  await authwit.send({
-    fee: { paymentMethod: sponsoredPaymentMethod as any },
-    wait: { timeout: getTimeouts().txTimeout },
-  })
-  logger.info(`[L2] AuthWit set`)
+  await burnAuthwit.send({ fee: { paymentMethod: sponsoredPaymentMethod }, wait: { timeout: getTimeouts().txTimeout } })
+  logger.info(`[L2] Public AuthWit written to AuthRegistry`)
 
-  logger.info(`[L2] Calling exit_to_l1_public (no attestation needed)`)
+  // Verify the authwit is actually consumable now (catches hash-mismatch between TS and Noir).
+  const validity = await lookupValidity(wallet, ownerAztecAddress, { caller: proxyAddress, action: burnAction }, undefined as any)
+  logger.info(`[L2] AuthWit validity: isValidInPublic=${validity.isValidInPublic}, isValidInPrivate=${validity.isValidInPrivate}`)
+  if (!validity.isValidInPublic) {
+    throw new Error('Public authwit is not consumable — message_hash mismatch between TS registration and Noir expectation')
+  }
+
+  // Build L2 public-exit attestation. Preimage is the same as the private-exit path: the
+  // AuthRegistry inner_hash in authorize_exit_to_l1_public binds this sig to the specific
+  // public-exit params, and the shared nonce map prevents double-spending across modes.
+  let cleanHandsData: { nonce: bigint, signature: number[] }
+  let passportData: { max_amount: bigint, nonce: bigint, deadline: bigint, signature: number[] }
+
+  const l2BridgeAddress = AztecAddress.fromString(deployed.l2BridgeContract)
+
+  if (attestationType === 'poch') {
+    const pochNonce = BigInt(Date.now())
+    logger.info(`[L2] Signing L2 public-exit POCH attestation (nonce=${pochNonce})`)
+    const sig = await signL2CleanHandsAttestation({
+      circuitId: CLEAN_HANDS_CIRCUIT_ID,
+      actionId: CLEAN_HANDS_ACTION_ID,
+      nonce: pochNonce,
+      userAztecAddress: ownerAztecAddress,
+    })
+    cleanHandsData = { nonce: pochNonce, signature: sig }
+    passportData = { max_amount: 0n, nonce: 0n, deadline: 0n, signature: new Array(64).fill(0) }
+  } else {
+    const l1Public = createPublicClient({ transport: http(L1_URL) })
+    const block = await l1Public.getBlock()
+    const deadline = block.timestamp + 7200n
+    const passportNonce = BigInt(Date.now())
+    const maxAmount = BigInt(10000)
+    logger.info(`[L2] Signing L2 public-exit Passport attestation (maxAmount=${maxAmount}, nonce=${passportNonce}, deadline=${deadline})`)
+    const sig = await signL2PassportAttestation({
+      userAztecAddress: ownerAztecAddress,
+      maxAmount,
+      nonce: passportNonce,
+      deadline,
+      bridgeAddress: l2BridgeAddress,
+    })
+    cleanHandsData = { nonce: 0n, signature: new Array(64).fill(0) }
+    passportData = { max_amount: maxAmount, nonce: passportNonce, deadline, signature: sig }
+  }
+
+  logger.info(`[L2] Calling authorize_exit_to_l1_public with ${label} attestation`)
 
   const selectorBuf = Buffer.from(
     toFunctionSelector('withdraw(address,uint256,address)').slice(2),
@@ -2506,31 +2706,39 @@ async function testPublicExitFlow(
   const recipient = EthAddress.fromString(ownerEthAddress)
   const callerOnL1 = EthAddress.ZERO
 
-  // Profile exit_to_l1_public before sending
+  // Profile authorize_exit_to_l1_public before sending
   await profileIfEnabled(
-    'exit_to_l1_public',
-    l2BridgeContract.methods.exit_to_l1_public(
+    `authorize_exit_to_l1_public (${label})`,
+    l2BridgeContract.methods.authorize_exit_to_l1_public(
       EthAddress.fromString(ownerEthAddress),
       withdrawAmount,
       EthAddress.ZERO,
-      nonce
+      authwitNonce,
+      cleanHandsData,
+      passportData,
     ),
     { from: ownerAztecAddress, fee: { paymentMethod: sponsoredPaymentMethod } },
     logger,
   )
 
-  const l2TxReceipt = await l2BridgeContract.methods
-    .exit_to_l1_public(
+  const l2TxReceipt = await sendPrivateWithRetry(
+    () => l2BridgeContract.methods.authorize_exit_to_l1_public(
       EthAddress.fromString(ownerEthAddress),
       withdrawAmount,
       EthAddress.ZERO,
-      nonce
-    )
-    .send({
+      authwitNonce,
+      cleanHandsData,
+      passportData,
+    ),
+    {
       from: ownerAztecAddress,
       fee: { paymentMethod: sponsoredPaymentMethod },
       wait: { timeout: getTimeouts().txTimeout, returnReceipt: true },
-    })
+    },
+    logger,
+    10,
+    wallet,
+  )
 
   const { result: newL2Balance } = await l2TokenContract.methods
     .balance_of_public(ownerAztecAddress)
@@ -2544,7 +2752,7 @@ async function testPublicExitFlow(
     withdrawAmount, callerOnL1, recipient, selectorBuf, logger
   )
 
-  logger.info(`Public exit flow successful!`)
+  logger.info(`Public exit flow with ${label} successful!`)
 }
 
 /**
@@ -2889,12 +3097,21 @@ async function testNegativeCrossClaim(
   let amountAfterFee: bigint
 
   if (testCase === 'public_deposit_private_claim') {
-    // Do public deposit
+    // Do public deposit (use POCH for simplicity)
+    const pochNonce = BigInt(Date.now())
+    const pochSig = await signCleanHandsAttestation({
+      nonce: pochNonce,
+      circuitId: CLEAN_HANDS_CIRCUIT_ID,
+      actionId: CLEAN_HANDS_ACTION_ID,
+      userAddress: ownerEthAddress,
+    })
     logger.info(`[L1] depositToAztecPublic (amount=${depositAmount})`)
     const depositTx = await l1Portal.write.depositToAztecPublic([
       ownerAztecAddress.toString() as Hex,
       depositAmount,
       secretHash.toString() as Hex,
+      { nonce: pochNonce, signature: pochSig },
+      { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as Hex },
     ])
     const receipt = await l1Client.waitForTransactionReceipt({ hash: depositTx, timeout: getTimeouts().txTimeout })
     const { parseEventLogs } = await import('viem')
@@ -3020,14 +3237,23 @@ async function testWrongRecipientCantClaimPublic(
   const approveTx = await l1Token.write.approve([l1PortalAddr, depositAmount])
   await l1Client.waitForTransactionReceipt({ hash: approveTx, timeout: getTimeouts().txTimeout })
 
-  // Deposit to ownerAztecAddress
+  // Deposit to ownerAztecAddress — public deposit now requires an attestation
   const secret = Fr.random()
   const secretHash = await computeSecretHash(secret)
+  const wrongRecipientNonce = BigInt(Date.now())
+  const wrongRecipientPochSig = await signCleanHandsAttestation({
+    nonce: wrongRecipientNonce,
+    circuitId: CLEAN_HANDS_CIRCUIT_ID,
+    actionId: CLEAN_HANDS_ACTION_ID,
+    userAddress: ownerEthAddress,
+  })
   logger.info(`[L1] depositToAztecPublic for ${ownerAztecAddress}`)
   const depositTx = await l1Portal.write.depositToAztecPublic([
     ownerAztecAddress.toString() as Hex,
     depositAmount,
     secretHash.toString() as Hex,
+    { nonce: wrongRecipientNonce, signature: wrongRecipientPochSig },
+    { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as Hex },
   ])
   const receipt = await l1Client.waitForTransactionReceipt({ hash: depositTx, timeout: getTimeouts().txTimeout })
 
@@ -3220,19 +3446,32 @@ async function testNonHolderCantExit(
   logger.info(`\n=== Negative Test: Non-token-holder can't exit_to_l1_public ===`)
 
   const fakeRecipient = '0x' + 'de'.repeat(20)
-  const nonce = Fr.random()
+  const authwitNonce = Fr.random()
 
-  // Simulate exit_to_l1_public from the owner but for more tokens than they have
-  // (or without an authwit). This tests that the burn fails.
+  // Build a VALID attestation so the revert comes from the burn step (insufficient balance /
+  // missing authwit), not from attestation verification. This isolates the access-control check.
+  const pochNonce = BigInt(Date.now())
+  const pochSig = await signL2CleanHandsAttestation({
+    circuitId: CLEAN_HANDS_CIRCUIT_ID,
+    actionId: CLEAN_HANDS_ACTION_ID,
+    nonce: pochNonce,
+    userAztecAddress: ownerAztecAddress,
+  })
+  const cleanHandsData = { nonce: pochNonce, signature: pochSig }
+  const passportData = { max_amount: 0n, nonce: 0n, deadline: 0n, signature: new Array(64).fill(0) }
+
+  // Simulate exit_to_l1_public for more tokens than the owner holds (or without an authwit).
   const hugeAmount = BigInt(999999999999)
   logger.info(`[L2] Attempting exit_to_l1_public for ${hugeAmount} tokens (more than balance, should FAIL)`)
   try {
     await l2BridgeContract.methods
-      .exit_to_l1_public(
+      .authorize_exit_to_l1_public(
         EthAddress.fromString(fakeRecipient),
         hugeAmount,
         EthAddress.ZERO,
-        nonce
+        authwitNonce,
+        cleanHandsData,
+        passportData,
       )
       .simulate({ from: ownerAztecAddress })
     throw new Error('NEGATIVE TEST FAILED: exit_to_l1_public succeeded without sufficient balance/authwit')
@@ -3242,6 +3481,332 @@ async function testNonHolderCantExit(
     logger.info(`[L2] Expected revert: ${e.message?.slice(0, 120)}...`)
     logger.info(`NEGATIVE TEST PASSED: Can't exit more tokens than held`)
   }
+}
+
+/**
+ * Tests 12–17: Public-mode compliance negative tests.
+ * Sanity-check that the new attestation gates on depositToAztecPublic and exit_to_l1_public
+ * revert for the expected failure modes. Most are simulation-only — a bad deposit doesn't need
+ * to be landed to prove the portal rejects it.
+ */
+async function testPublicComplianceNegatives(
+  deployed: DeployedCompliantToken,
+  wallet: EmbeddedWallet,
+  ownerAztecAddress: AztecAddress,
+  l1Client: ExtendedViemWalletClient,
+  ownerEthAddress: string,
+  sponsoredPaymentMethod: any,
+  l2BridgeContract: any,
+  l2TokenContract: any,
+  swapRouterAddress: `0x${string}` | undefined,
+  l1ChainId: number,
+  logger: Logger,
+) {
+  const l1PortalAddr = deployed.l1PortalContract as `0x${string}`
+  const l1Portal = getContract({
+    address: l1PortalAddr,
+    abi: CustomTokenPortalAbi,
+    client: l1Client as any,
+  }) as any
+  const l1Token = getContract({
+    address: deployed.l1TokenContract as `0x${string}`,
+    abi: TestERC20Abi,
+    client: l1Client as any,
+  }) as any
+  const l2BridgeAddress = AztecAddress.fromString(deployed.l2BridgeContract)
+
+  // Shared setup: mint & approve tokens for the user so simulation reaches the portal checks.
+  const depositAmount = 100n
+  await (async () => {
+    const mintTx = await l1Token.write.mint([ownerEthAddress, depositAmount * 10n])
+    await l1Client.waitForTransactionReceipt({ hash: mintTx, timeout: getTimeouts().txTimeout })
+    const approveTx = await l1Token.write.approve([l1PortalAddr, depositAmount * 10n])
+    await l1Client.waitForTransactionReceipt({ hash: approveTx, timeout: getTimeouts().txTimeout })
+  })()
+
+  const secret = Fr.random()
+  const secretHash = await computeSecretHash(secret)
+  const emptyCh = { nonce: 0n, signature: '0x' as Hex }
+  const emptyPp = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as Hex }
+
+  // ── Test 12: depositToAztecPublic with missing attestations ─────────────
+  logger.info(`\n=== Negative Test 12: depositToAztecPublic with missing attestations ===`)
+  try {
+    await l1Portal.simulate.depositToAztecPublic([
+      ownerAztecAddress.toString() as Hex, depositAmount, secretHash.toString() as Hex,
+      emptyCh, emptyPp,
+    ], { account: l1Client.account as any })
+    throw new Error('NEGATIVE TEST 12 FAILED: deposit succeeded with no attestation')
+  } catch (e: any) {
+    if (e.message?.includes('NEGATIVE TEST 12 FAILED')) throw e
+    logger.info(`  Expected revert: ${e.message?.slice(0, 200)?.replace(/\s+/g, ' ')}...`)
+    logger.info(`NEGATIVE TEST 12 PASSED: no-attestation deposit rejected`)
+  }
+
+  // ── Test 13: depositToAztecPublic with reused clean-hands nonce ─────────
+  logger.info(`\n=== Negative Test 13: depositToAztecPublic reused clean-hands nonce ===`)
+  {
+    const nonce = BigInt(Date.now()) + 1_000n
+    const sig = await signCleanHandsAttestation({
+      nonce,
+      circuitId: CLEAN_HANDS_CIRCUIT_ID,
+      actionId: CLEAN_HANDS_ACTION_ID,
+      userAddress: ownerEthAddress,
+    })
+    const ch = { nonce, signature: sig }
+    // First call lands the nonce
+    const firstTx = await l1Portal.write.depositToAztecPublic([
+      ownerAztecAddress.toString() as Hex, depositAmount, secretHash.toString() as Hex, ch, emptyPp,
+    ])
+    await l1Client.waitForTransactionReceipt({ hash: firstTx, timeout: getTimeouts().txTimeout })
+    // Second call with same nonce must revert
+    try {
+      await l1Portal.simulate.depositToAztecPublic([
+        ownerAztecAddress.toString() as Hex, depositAmount, secretHash.toString() as Hex, ch, emptyPp,
+      ], { account: l1Client.account as any })
+      throw new Error('NEGATIVE TEST 13 FAILED: reused nonce accepted')
+    } catch (e: any) {
+      if (e.message?.includes('NEGATIVE TEST 13 FAILED')) throw e
+      logger.info(`  Expected revert: ${e.message?.slice(0, 200)?.replace(/\s+/g, ' ')}...`)
+      logger.info(`NEGATIVE TEST 13 PASSED: reused clean-hands nonce rejected`)
+    }
+  }
+
+  // ── Test 14: depositToAztecPublic with expired passport ──────────────────
+  logger.info(`\n=== Negative Test 14: depositToAztecPublic with expired passport ===`)
+  {
+    const l1Public = createPublicClient({ transport: http(L1_URL) })
+    const block = await l1Public.getBlock()
+    const deadline = block.timestamp - 100n // already expired
+    const passportNonce = BigInt(Date.now()) + 2_000n
+    const maxAmount = depositAmount * 10n
+    const sig = await signPassportAttestation({
+      userAddress: ownerEthAddress, maxAmount, nonce: passportNonce, deadline,
+      portalAddress: l1PortalAddr,
+    })
+    const pp = { maxAmount, nonce: passportNonce, deadline, signature: sig }
+    try {
+      await l1Portal.simulate.depositToAztecPublic([
+        ownerAztecAddress.toString() as Hex, depositAmount, secretHash.toString() as Hex, emptyCh, pp,
+      ], { account: l1Client.account as any })
+      throw new Error('NEGATIVE TEST 14 FAILED: expired passport accepted')
+    } catch (e: any) {
+      if (e.message?.includes('NEGATIVE TEST 14 FAILED')) throw e
+      logger.info(`  Expected revert: ${e.message?.slice(0, 200)?.replace(/\s+/g, ' ')}...`)
+      logger.info(`NEGATIVE TEST 14 PASSED: expired passport rejected`)
+    }
+  }
+
+  // ── Test 15: exit_to_l1_public with missing attestations ────────────────
+  logger.info(`\n=== Negative Test 15: exit_to_l1_public missing attestations ===`)
+  {
+    const emptyL2Ch = { nonce: 0n, signature: new Array(64).fill(0) }
+    const emptyL2Pp = { max_amount: 0n, nonce: 0n, deadline: 0n, signature: new Array(64).fill(0) }
+    try {
+      await l2BridgeContract.methods
+        .authorize_exit_to_l1_public(
+          EthAddress.fromString(ownerEthAddress),
+          1n,
+          EthAddress.ZERO,
+          Fr.random(),
+          emptyL2Ch,
+          emptyL2Pp,
+        )
+        .simulate({ from: ownerAztecAddress })
+      throw new Error('NEGATIVE TEST 15 FAILED: exit succeeded without attestation')
+    } catch (e: any) {
+      if (e.message?.includes('NEGATIVE TEST 15 FAILED')) throw e
+      if (e.message?.includes('Include-by timestamp')) throw e
+      logger.info(`  Expected revert: ${e.message?.slice(0, 200)?.replace(/\s+/g, ' ')}...`)
+      logger.info(`NEGATIVE TEST 15 PASSED: exit without attestation rejected`)
+    }
+  }
+
+  // ── Test 16: exit_to_l1_public with amount > passport maxAmount ─────────
+  logger.info(`\n=== Negative Test 16: exit_to_l1_public amount > passport maxAmount ===`)
+  {
+    const l1Public = createPublicClient({ transport: http(L1_URL) })
+    const block = await l1Public.getBlock()
+    const deadline = block.timestamp + 3600n
+    const passportNonce = BigInt(Date.now()) + 3_000n
+    const maxAmount = 5n
+    const overAmount = 100n
+    const sig = await signL2PassportAttestation({
+      userAztecAddress: ownerAztecAddress,
+      maxAmount, nonce: passportNonce, deadline, bridgeAddress: l2BridgeAddress,
+    })
+    const ch = { nonce: 0n, signature: new Array(64).fill(0) }
+    const pp = { max_amount: maxAmount, nonce: passportNonce, deadline, signature: sig }
+    try {
+      await l2BridgeContract.methods
+        .authorize_exit_to_l1_public(
+          EthAddress.fromString(ownerEthAddress),
+          overAmount,
+          EthAddress.ZERO,
+          Fr.random(),
+          ch,
+          pp,
+        )
+        .simulate({ from: ownerAztecAddress })
+      throw new Error('NEGATIVE TEST 16 FAILED: over-limit exit accepted')
+    } catch (e: any) {
+      if (e.message?.includes('NEGATIVE TEST 16 FAILED')) throw e
+      if (e.message?.includes('Include-by timestamp')) throw e
+      logger.info(`  Expected revert: ${e.message?.slice(0, 200)?.replace(/\s+/g, ' ')}...`)
+      logger.info(`NEGATIVE TEST 16 PASSED: amount > passport.maxAmount rejected`)
+    }
+  }
+
+  // ── Test 17: depositToAztecPublic with reused Passport nonce ────────────
+  logger.info(`\n=== Negative Test 17: depositToAztecPublic reused Passport nonce ===`)
+  {
+    const l1Public = createPublicClient({ transport: http(L1_URL) })
+    const block = await l1Public.getBlock()
+    const deadline = block.timestamp + 3600n
+    const passportNonce = BigInt(Date.now()) + 4_000n
+    const maxAmount = depositAmount * 10n
+    const sig = await signPassportAttestation({
+      userAddress: ownerEthAddress, maxAmount, nonce: passportNonce, deadline,
+      portalAddress: l1PortalAddr,
+    })
+    const pp = { maxAmount, nonce: passportNonce, deadline, signature: sig }
+    // First call lands the nonce
+    const firstTx = await l1Portal.write.depositToAztecPublic([
+      ownerAztecAddress.toString() as Hex, depositAmount, secretHash.toString() as Hex, emptyCh, pp,
+    ])
+    await l1Client.waitForTransactionReceipt({ hash: firstTx, timeout: getTimeouts().txTimeout })
+    // Second call with same nonce must revert
+    try {
+      await l1Portal.simulate.depositToAztecPublic([
+        ownerAztecAddress.toString() as Hex, depositAmount, secretHash.toString() as Hex, emptyCh, pp,
+      ], { account: l1Client.account as any })
+      throw new Error('NEGATIVE TEST 17 FAILED: reused passport nonce accepted')
+    } catch (e: any) {
+      if (e.message?.includes('NEGATIVE TEST 17 FAILED')) throw e
+      logger.info(`  Expected revert: ${e.message?.slice(0, 200)?.replace(/\s+/g, ' ')}...`)
+      logger.info(`NEGATIVE TEST 17 PASSED: reused passport nonce rejected`)
+    }
+  }
+
+  // ── Test 18: depositToAztecPublic with amount > Passport maxAmount ──────
+  logger.info(`\n=== Negative Test 18: depositToAztecPublic amount > Passport maxAmount ===`)
+  {
+    const l1Public = createPublicClient({ transport: http(L1_URL) })
+    const block = await l1Public.getBlock()
+    const deadline = block.timestamp + 3600n
+    const passportNonce = BigInt(Date.now()) + 5_000n
+    const maxAmount = 5n
+    const overAmount = depositAmount // 100n > 5n
+    const sig = await signPassportAttestation({
+      userAddress: ownerEthAddress, maxAmount, nonce: passportNonce, deadline,
+      portalAddress: l1PortalAddr,
+    })
+    const pp = { maxAmount, nonce: passportNonce, deadline, signature: sig }
+    try {
+      await l1Portal.simulate.depositToAztecPublic([
+        ownerAztecAddress.toString() as Hex, overAmount, secretHash.toString() as Hex, emptyCh, pp,
+      ], { account: l1Client.account as any })
+      throw new Error('NEGATIVE TEST 18 FAILED: over-limit deposit accepted')
+    } catch (e: any) {
+      if (e.message?.includes('NEGATIVE TEST 18 FAILED')) throw e
+      logger.info(`  Expected revert: ${e.message?.slice(0, 200)?.replace(/\s+/g, ' ')}...`)
+      logger.info(`NEGATIVE TEST 18 PASSED: amount > passport.maxAmount rejected`)
+    }
+  }
+
+  // ── Test 19: SwapBridgeRouter.bridge forwards missing attestations ──────
+  // Confirms the router passes the user-supplied structs straight through to
+  // the portal rather than substituting or swallowing them. bridgeWithFuel
+  // shares the same forwarding path via depositToAztec(Public|Private)For.
+  logger.info(`\n=== Negative Test 19: SwapBridgeRouter.bridge with missing attestations ===`)
+  if (!swapRouterAddress) {
+    logger.warn(`  Skipped — no SwapBridgeRouter configured for this deployment`)
+  } else {
+    // Approve token for Permit2 (idempotent, large approval)
+    const erc20 = getContract({
+      address: deployed.l1TokenContract as `0x${string}`,
+      abi: [...ERC20_ABI, ...APPROVE_ABI],
+      client: l1Client as any,
+    }) as any
+    const currentAllowance = await erc20.read.allowance([l1Client.account.address, PERMIT2_CANONICAL]) as bigint
+    if (currentAllowance < BigInt(1e30)) {
+      const approveTx = await erc20.write.approve([PERMIT2_CANONICAL, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')])
+      await l1Client.waitForTransactionReceipt({ hash: approveTx, timeout: getTimeouts().txTimeout })
+    }
+    // Sign a valid Permit2 witness (no fuel swap → empty poolKeys / fuelAmount=0)
+    const permit = await signPermit2Witness(l1Client, {
+      tokenPortal: l1PortalAddr,
+      bridgeToken: deployed.l1TokenContract as `0x${string}`,
+      totalAmount: depositAmount,
+      fuelAmount: 0n,
+      aztecRecipient: ownerAztecAddress.toString() as `0x${string}`,
+      fuelRecipient: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+      tokenSecretHash: secretHash.toString() as `0x${string}`,
+      fuelSecretHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+      minFuelOutput: 0n,
+      poolKeys: [],
+      zeroForOnes: [],
+      isPrivate: false,
+      swapBridgeRouter: swapRouterAddress,
+      l1ChainId,
+    })
+    const router = getContract({ address: swapRouterAddress, abi: SwapBridgeRouterAbiLocal, client: l1Client as any }) as any
+    try {
+      await router.simulate.bridge([
+        {
+          tokenPortal: l1PortalAddr,
+          bridgeToken: deployed.l1TokenContract as `0x${string}`,
+          amount: depositAmount,
+          aztecRecipient: ownerAztecAddress.toString() as `0x${string}`,
+          secretHash: secretHash.toString() as `0x${string}`,
+          isPrivate: false,
+          cleanHands: emptyCh,
+          passport: emptyPp,
+        },
+        { nonce: permit.nonce, deadline: permit.deadline, signature: permit.signature },
+      ], { account: l1Client.account as any })
+      throw new Error('NEGATIVE TEST 19 FAILED: router forwarded empty attestations')
+    } catch (e: any) {
+      if (e.message?.includes('NEGATIVE TEST 19 FAILED')) throw e
+      logger.info(`  Expected revert: ${e.message?.slice(0, 200)?.replace(/\s+/g, ' ')}...`)
+      logger.info(`NEGATIVE TEST 19 PASSED: router rejected empty attestations (portal enforced)`)
+    }
+  }
+
+  // ── Test 20: exit_to_l1_public with expired Passport ────────────────────
+  logger.info(`\n=== Negative Test 20: exit_to_l1_public with expired Passport ===`)
+  {
+    const l1Public = createPublicClient({ transport: http(L1_URL) })
+    const block = await l1Public.getBlock()
+    const deadline = block.timestamp - 100n // already expired
+    const passportNonce = BigInt(Date.now()) + 6_000n
+    const maxAmount = 1_000n
+    const sig = await signL2PassportAttestation({
+      userAztecAddress: ownerAztecAddress,
+      maxAmount, nonce: passportNonce, deadline, bridgeAddress: l2BridgeAddress,
+    })
+    const ch = { nonce: 0n, signature: new Array(64).fill(0) }
+    const pp = { max_amount: maxAmount, nonce: passportNonce, deadline, signature: sig }
+    try {
+      await l2BridgeContract.methods
+        .authorize_exit_to_l1_public(
+          EthAddress.fromString(ownerEthAddress),
+          1n,
+          EthAddress.ZERO,
+          Fr.random(),
+          ch,
+          pp,
+        )
+        .simulate({ from: ownerAztecAddress })
+      throw new Error('NEGATIVE TEST 20 FAILED: expired passport accepted')
+    } catch (e: any) {
+      if (e.message?.includes('NEGATIVE TEST 20 FAILED')) throw e
+      if (e.message?.includes('Include-by timestamp')) throw e
+      logger.info(`  Expected revert: ${e.message?.slice(0, 200)?.replace(/\s+/g, ' ')}...`)
+      logger.info(`NEGATIVE TEST 20 PASSED: expired passport rejected on exit`)
+    }
+  }
+
 }
 
 // ─── L2→L1 Withdraw Helper ──────────────────────────────────────────────────
@@ -3669,23 +4234,29 @@ async function main() {
       wallet
     )
 
-    await testPublicFuelFlow(
-      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
-      l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 1: L1 Public Deposit (POCH) → L2 Public Claim
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPublicBridgeFlow(
+      'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion, logger
     )
 
     // ════════════════════════════════════════════════════════════════════════════
-    // Test 1: L1 Public Deposit → L2 Public Claim (no attestation)
+    // Test 1a: L1 Public Deposit (Passport) → L2 Public Claim
     // ════════════════════════════════════════════════════════════════════════════
     await testPublicBridgeFlow(
-      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
       l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion, logger
     )
 
     // ════════════════════════════════════════════════════════════════════════════
     // Test 1b: Public Fuel — SwapBridgeRouter + FeeJuicePaymentMethodWithClaim
     // ════════════════════════════════════════════════════════════════════════════
-    
+    await testPublicFuelFlow(
+      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, l2BridgeContract, l2TokenContract, logger
+    )
 
     // ════════════════════════════════════════════════════════════════════════════
     // Test 1c: Private Fuel — SwapBridgeRouter + PrivateMintAndPayFeePaymentMethod
@@ -3730,10 +4301,19 @@ async function main() {
     logger.info(`Passport deposit+claim result: amountAfterFee=${passportResult.amountAfterFee}`)
 
     // ════════════════════════════════════════════════════════════════════════════
-    // Test 4: L2 Public Exit → L1 Withdraw (no attestation)
+    // Test 4: L2 Public Exit (POCH) → L1 Withdraw
     // ════════════════════════════════════════════════════════════════════════════
     await testPublicExitFlow(
-      deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      'poch', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+      l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion,
+      l2BridgeContract, l2TokenContract, logger
+    )
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // Test 4a: L2 Public Exit (Passport) → L1 Withdraw
+    // ════════════════════════════════════════════════════════════════════════════
+    await testPublicExitFlow(
+      'passport', deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
       l1ContractAddresses, sponsoredPaymentMethod, node, rollupVersion,
       l2BridgeContract, l2TokenContract, logger
     )
@@ -3796,7 +4376,22 @@ async function main() {
       sponsoredPaymentMethod, logger
     )
 
-    logger.info('\n=== ALL 16 COMPLIANT BRIDGE + FUEL TESTS COMPLETE ===')
+    // ════════════════════════════════════════════════════════════════════════════
+    // Tests 12–20: Public-mode compliance negatives
+    // (missing attestations, reused cleanHands/passport nonce, expired passport,
+    //  over-limit passport, router-forwarded attestations, exit revert paths)
+    // ════════════════════════════════════════════════════════════════════════════
+    {
+      const negDeployment = loadActiveDeployment()
+      const negSwapRouter = negDeployment?.swapBridgeRouterAddress as `0x${string}` | undefined
+      await testPublicComplianceNegatives(
+        deployed, wallet, ownerAztecAddress, l1Client, ownerEthAddress,
+        sponsoredPaymentMethod, l2BridgeContract, l2TokenContract,
+        negSwapRouter, nodeInfo.l1ChainId, logger
+      )
+    }
+
+    logger.info('\n=== ALL COMPLIANT BRIDGE + FUEL TESTS COMPLETE (Tests 1–20 + fuel variants) ===')
     logger.info(`Tested against: ${deployed.symbol}`)
     logger.info(`  L1 Portal:       ${deployed.l1PortalContract}`)
     logger.info(`  L2 Bridge:       ${deployed.l2BridgeContract}`)
