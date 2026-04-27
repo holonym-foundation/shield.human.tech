@@ -68,6 +68,13 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
             })
             break
           case 'sync_poll':
+            logInfo('L1→L2 resume sync poll', {
+              direction: 'L1_TO_L2_RESUME',
+              elapsedMinutes: event.elapsedMinutes,
+              synced: event.synced,
+              l1Address,
+              userAction: 'resume_l1_to_l2_sync_poll',
+            })
             notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, {
               toastId: 'resume-l1-to-l2-progress',
               autoClose: 15000,
@@ -77,12 +84,27 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
             if ('l1TxUrl' in event) setTransactionUrls(event.l1TxUrl, null)
             break
           case 'claim_attempt':
+            logInfo('L1→L2 resume claim attempt', {
+              direction: 'L1_TO_L2_RESUME',
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              l1Address,
+              userAction: 'resume_l1_to_l2_claim_attempt',
+            })
             notify('info', `Claiming tokens on L2 (attempt ${event.attempt}/${event.maxAttempts})...`, {
               toastId: 'resume-l1-to-l2-progress',
               autoClose: 15000,
             })
             break
           case 'claim_retry':
+            logInfo('L1→L2 resume claim retry', {
+              direction: 'L1_TO_L2_RESUME',
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              delayMs: event.delayMs,
+              l1Address,
+              userAction: 'resume_l1_to_l2_claim_retry',
+            })
             notify(
               'info',
               `L2 node hasn't synced this message yet. Retrying in ${Math.round(event.delayMs / 60_000)} min (${event.attempt}/${event.maxAttempts})...`,

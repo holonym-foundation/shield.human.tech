@@ -55,6 +55,14 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
             })
             break
           case 'proven_poll':
+            logInfo('L2→L1 resume proven poll', {
+              direction: 'L2_TO_L1_RESUME',
+              provenBlock: event.provenBlock,
+              neededBlock: event.neededBlock,
+              elapsedMs: event.elapsedMs,
+              l1Address: withdrawRecipient,
+              userAction: 'resume_l2_to_l1_proven_poll',
+            })
             notify(
               'info',
               `Waiting for L2 block to be proven on L1 (proven: ${event.provenBlock}, need: ${event.neededBlock}, ${Math.round(event.elapsedMs / 60_000)} min elapsed)...`,
@@ -62,6 +70,12 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
             )
             break
           case 'proven_fallback':
+            logInfo('L2→L1 resume proven fallback', {
+              direction: 'L2_TO_L1_RESUME',
+              fixedWaitMs: event.fixedWaitMs,
+              l1Address: withdrawRecipient,
+              userAction: 'resume_l2_to_l1_proven_fallback',
+            })
             notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, {
               toastId: 'resume-l2-to-l1-progress',
               autoClose: 15000,

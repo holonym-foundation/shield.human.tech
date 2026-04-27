@@ -542,18 +542,43 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             break
           // Show sync progress to prevent users from force-closing
           case 'sync_poll':
+            logInfo('L1→L2 sync poll', {
+              direction: 'L1_TO_L2',
+              elapsedMinutes: event.elapsedMinutes,
+              synced: event.synced,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_l1_to_l2_sync_poll',
+            })
             notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, {
               toastId: 'l1-to-l2-progress',
               autoClose: 15000,
             })
             break
           case 'claim_attempt':
+            logInfo('L2 claim attempt', {
+              direction: 'L1_TO_L2',
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_l1_to_l2_claim_attempt',
+            })
             notify('info', `Claiming tokens on L2 (attempt ${event.attempt}/${event.maxAttempts})...`, {
               toastId: 'l1-to-l2-progress',
               autoClose: 15000,
             })
             break
           case 'claim_retry':
+            logInfo('L2 claim retry', {
+              direction: 'L1_TO_L2',
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              delayMs: event.delayMs,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_l1_to_l2_claim_retry',
+            })
             notify(
               'info',
               `L2 node hasn't synced this message yet. Retrying in ${Math.round(event.delayMs / 60_000)} min (${event.attempt}/${event.maxAttempts})...`,
