@@ -390,6 +390,8 @@ export interface EncryptedData {
   ciphertext: string
   iv: string
   tag: string
+  /** Encryption format version — increment when KDF, cipher, or payload structure changes. */
+  version?: number
 }
 
 export interface BridgeActivityData {

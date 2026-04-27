@@ -67,21 +67,22 @@ export async function deriveEncryptionKey(
 
 // ─── Encryption ─────────────────────────────────────────────────────
 
+/** Current encryption envelope format version. Increment on KDF, cipher, or payload changes. */
+export const ENCRYPTION_VERSION = 1
+
 /**
  * Encrypts data using AES-256-GCM.
  *
  * @param plaintext - Data to encrypt (string)
  * @param key - 32-byte encryption key
- * @returns Encrypted data with IV and authentication tag (hex-encoded)
+ * @returns Encrypted data with IV, authentication tag, and format version (hex-encoded)
  */
 export async function encryptData(
   plaintext: string,
   key: Uint8Array,
-  aad?: string,
 ): Promise<EncryptedData> {
   const iv = crypto.getRandomValues(new Uint8Array(12))
-  const aadBytes = aad ? new TextEncoder().encode(aad) : undefined
-  const cipher = gcm(key, iv, aadBytes)
+  const cipher = gcm(key, iv)
   const plaintextBytes = new TextEncoder().encode(plaintext)
   const encrypted = cipher.encrypt(plaintextBytes)
 
@@ -93,6 +94,7 @@ export async function encryptData(
     ciphertext: toHex(ciphertext),
     iv: toHex(iv),
     tag: toHex(tag),
+    version: ENCRYPTION_VERSION,
   }
 }
 
@@ -112,14 +114,12 @@ export async function decryptData(
   iv: string,
   tag: string,
   key: Uint8Array,
-  aad?: string,
 ): Promise<string> {
   const ivBytes = fromHex(iv)
   const tagBytes = fromHex(tag)
   const ciphertextBytes = fromHex(ciphertext)
 
-  const aadBytes = aad ? new TextEncoder().encode(aad) : undefined
-  const cipher = gcm(key, ivBytes, aadBytes)
+  const cipher = gcm(key, ivBytes)
 
   // GCM expects ciphertext + tag concatenated
   const encrypted = new Uint8Array(ciphertextBytes.length + tagBytes.length)

@@ -57,6 +57,7 @@ export {
   deriveEncryptionKey,
   decryptData,
   decryptOperationPayload,
+  ENCRYPTION_VERSION,
 } from './encryption'
 
 // Auth
