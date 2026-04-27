@@ -1,16 +1,6 @@
-import {
-  Slide,
-  toast,
-  ToastOptions,
-} from 'react-toastify'
+import { Slide, toast, ToastOptions } from 'react-toastify'
 import React from 'react'
-import {
-  UseQueryOptions,
-  UseMutationOptions,
-  useQuery,
-  useMutation,
-  QueryFunction,
-} from '@tanstack/react-query'
+import { UseQueryOptions, UseMutationOptions, useQuery, useMutation, QueryFunction } from '@tanstack/react-query'
 import PrivacyModeToast from '@/components/toast/PrivacyModeToast'
 import DefaultToast from '@/components/toast/DFToast'
 import InfoToast from '@/components/toast/InfoToast'
@@ -21,28 +11,28 @@ import ErrorToast from '@/components/toast/ErrorToast'
 
 /**
  * Toast System with Loading Spinner Support and Duplicate Error Prevention
- * 
+ *
  * Features:
  * - Prevents duplicate error messages from being shown simultaneously
  * - Automatic cleanup of error message tracking when toasts are dismissed
  * - Loading spinner support for async operations
- * 
+ *
  * @example Basic Usage
  * const notify = useToast()
  * notify('success', 'Operation completed!')
  * notify('error', { message: 'Failed!', heading: 'Error' })
- * 
+ *
  * @example Promise Toasts
  * notify.promise(somePromise, {
  *   pending: 'Loading...',
  *   success: 'Done!',
  *   error: 'Failed!'
  * }, { animatePromise: true })
- * 
+ *
  * @example React Query
  * useToastQuery({ queryFn, toastMessages: { pending: '...', success: '...', error: '...' } })
  * useToastMutation({ mutationFn, toastMessages: { pending: '...', success: '...', error: '...' } })
- * 
+ *
  * @example Clear Error Messages
  * notify.clearErrorMessages() // Clears the duplicate error tracking
  */
@@ -53,14 +43,16 @@ import ErrorToast from '@/components/toast/ErrorToast'
 
 type ToastType = 'default' | 'success' | 'info' | 'warn' | 'error' | 'privacy-mode'
 
-type ToastMessageInput = string | { message: string; heading?: string }
+// F22: widen back to ReactNode so callers can pass JSX (clickable links,
+// styled spans). String messages still work; the toast renderers accept both.
+type ToastMessageInput = string | { message: string | React.ReactNode; heading?: string }
 
 type CustomToastOptions = ToastOptions & {
   animatePromise?: boolean
 }
 
 type ToastMessageObject = {
-  message: string
+  message: string | React.ReactNode
   heading?: string
   options?: ToastOptions
 }
@@ -115,8 +107,7 @@ const TOAST_COMPONENTS = {
 /**
  * Normalizes message input to object format
  */
-const normalizeMessage = (input: string | { message: string; heading?: string }) =>
-  typeof input === 'string' ? { message: input } : input
+const normalizeMessage = (input: ToastMessageInput) => (typeof input === 'string' ? { message: input } : input)
 
 /**
  * Extracts options from toast message object
@@ -158,22 +149,25 @@ const createMergedOptions = (baseOptions: ToastOptions, customOptions: ToastOpti
  */
 const createToast = (
   type: ToastType,
-  message: string,
+  message: string | React.ReactNode,
   heading?: string,
-  options: ToastOptions = {}
+  options: ToastOptions = {},
 ) => {
   // For error toasts, check if this exact message is already active
+  // Use only the heading for de-dupe when message is non-string (JSX),
+  // since JSX nodes can't be reliably stringified for keying.
   if (type === 'error') {
-    const messageKey = `${message}${heading ? `|${heading}` : ''}`
-    
+    const messageKey =
+      typeof message === 'string' ? `${message}${heading ? `|${heading}` : ''}` : `__jsx__${heading ?? ''}`
+
     if (activeErrorMessages.has(messageKey)) {
       // Message already exists, don't show duplicate
       return null
     }
-    
+
     // Add to active messages
     activeErrorMessages.add(messageKey)
-    
+
     // Set up cleanup when toast is dismissed
     const originalOnClose = options.onClose
     options.onClose = () => {
@@ -195,14 +189,19 @@ const createToast = (
   // so the message refreshes without creating a new toast or being silently ignored.
   if (finalOptions.toastId && toast.isActive(finalOptions.toastId)) {
     toast.update(finalOptions.toastId, {
-      render: React.createElement(Component, { heading, message }),
+      // `message` widened to ReactNode for ErrorToast (F11/F22); the other toast
+      render:
+        // components type it as string but React renders ReactNode fine at runtime.
+        React.createElement(Component as any, { heading, message }),
       ...finalOptions,
     })
     return finalOptions.toastId
   }
 
   return toast(
-    React.createElement(Component, { heading, message }),
+    // `message` widened to ReactNode for ErrorToast (F11/F22); the other toast
+    // components type it as string but React renders ReactNode fine at runtime.
+    React.createElement(Component as any, { heading, message }),
     finalOptions,
   )
 }
@@ -210,17 +209,14 @@ const createToast = (
 /**
  * Creates a loading toast
  */
-const createLoadingToast = (message: string, heading?: string, options: ToastOptions = {}) => {
+const createLoadingToast = (message: string | React.ReactNode, heading?: string, options: ToastOptions = {}) => {
   const mergedOptions = createMergedOptions({}, options)
-  
-  return toast(
-    React.createElement(LoadingToast, { heading, message }),
-    {
-      ...mergedOptions,
-      className: 'loading-toast',
-      ...LOADING_TOAST_OPTIONS,
-    }
-  )
+
+  return toast(React.createElement(LoadingToast as any, { heading, message }), {
+    ...mergedOptions,
+    className: 'loading-toast',
+    ...LOADING_TOAST_OPTIONS,
+  })
 }
 
 /**
@@ -229,23 +225,25 @@ const createLoadingToast = (message: string, heading?: string, options: ToastOpt
 const updateToastState = (
   toastId: string | number,
   type: 'success' | 'error',
-  message: string,
+  message: string | React.ReactNode,
   heading?: string,
-  options: ToastOptions = {}
+  options: ToastOptions = {},
 ) => {
-  // For error toasts, check if this exact message is already active
+  // For error toasts, check if this exact message is already active.
+  // Match createToast's keying so JSX messages don't trigger string interpolation.
   if (type === 'error') {
-    const messageKey = `${message}${heading ? `|${heading}` : ''}`
-    
+    const messageKey =
+      typeof message === 'string' ? `${message}${heading ? `|${heading}` : ''}` : `__jsx__${heading ?? ''}`
+
     if (activeErrorMessages.has(messageKey)) {
       // Message already exists, dismiss the loading toast instead of updating to error
       toast.dismiss(toastId)
       return
     }
-    
+
     // Add to active messages
     activeErrorMessages.add(messageKey)
-    
+
     // Set up cleanup when toast is dismissed
     const originalOnClose = options.onClose
     options.onClose = () => {
@@ -259,7 +257,10 @@ const updateToastState = (
   const mergedOptions = createMergedOptions({}, { ...errorOverrides, ...options })
 
   toast.update(toastId, {
-    render: React.createElement(Component, { heading, message }),
+    // `message` widened to ReactNode for ErrorToast (F11/F22); the other toast
+    render:
+      // components type it as string but React renders ReactNode fine at runtime.
+      React.createElement(Component as any, { heading, message }),
     className: `${type}-toast from-loading`,
     type,
     isLoading: false,
@@ -277,10 +278,10 @@ const handlePromiseToast = <T>(
     success: string | { message: string; heading?: string }
     error: string | { message: string; heading?: string }
   },
-  options: CustomToastOptions = {}
+  options: CustomToastOptions = {},
 ): Promise<T> => {
   const { animatePromise, ...toastOptions } = options
-  
+
   // Create loading toast
   const pendingMsg = normalizeMessage(messages.pending)
   const pendingOptions = extractOptions(messages.pending)
@@ -290,7 +291,7 @@ const handlePromiseToast = <T>(
     .then((data) => {
       const successMsg = normalizeMessage(messages.success)
       const successOptions = extractOptions(messages.success)
-      
+
       if (animatePromise) {
         toast.dismiss(toastId)
         createToast('success', successMsg.message, successMsg.heading, {
@@ -309,7 +310,7 @@ const handlePromiseToast = <T>(
     .catch((error) => {
       const errorMsg = normalizeMessage(messages.error)
       const errorOptions = extractOptions(messages.error)
-      
+
       if (animatePromise) {
         toast.dismiss(toastId)
         createToast('error', errorMsg.message, errorMsg.heading, {
@@ -332,11 +333,7 @@ const handlePromiseToast = <T>(
 // ============================================================================
 
 export const useToast = () => {
-  const showToast = (
-    type: ToastType,
-    input: ToastMessageInput,
-    options?: CustomToastOptions
-  ) => {
+  const showToast = (type: ToastType, input: ToastMessageInput, options?: CustomToastOptions) => {
     const { message, heading } = normalizeMessage(input)
     createToast(type, message, heading, options)
   }
@@ -359,13 +356,13 @@ export function useToastQuery<
   TQueryFnData = unknown,
   TError = unknown,
   TData = TQueryFnData,
-  TQueryKey extends Array<unknown> = unknown[]
+  TQueryKey extends Array<unknown> = unknown[],
 >(
   options: Omit<UseQueryOptions<TQueryFnData, TError, TData, TQueryKey>, 'queryFn'> & {
     queryFn: QueryFunction<TQueryFnData, TQueryKey>
     toastMessages?: ToastMessages
     silentRefresh?: boolean
-  }
+  },
 ) {
   const notify = useToast()
   const { toastMessages, queryFn, silentRefresh = true, ...queryOptions } = options
@@ -417,16 +414,11 @@ export function useToastQuery<
   })
 }
 
-export function useToastMutation<
-  TData = unknown,
-  TError = unknown,
-  TVariables = void,
-  TContext = unknown
->(
+export function useToastMutation<TData = unknown, TError = unknown, TVariables = void, TContext = unknown>(
   options: Omit<UseMutationOptions<TData, TError, TVariables, TContext>, 'mutationFn'> & {
     mutationFn: (variables: TVariables) => Promise<TData>
     toastMessages?: ToastMessages
-  }
+  },
 ) {
   const notify = useToast()
   const { toastMessages, mutationFn, ...mutationOptions } = options
@@ -450,9 +442,7 @@ export function useToastMutation<
           const errorMsg = normalizeMessage(toastMessages.error)
           const errorOptions = extractOptions(toastMessages.error)
           const backendMessage = extractErrorMessage(error)
-          const displayMessage = backendMessage
-            ? `${errorMsg.message}: ${backendMessage}`
-            : errorMsg.message
+          const displayMessage = backendMessage ? `${errorMsg.message}: ${backendMessage}` : errorMsg.message
           updateToastState(toastIdRef.current, 'error', displayMessage, errorMsg.heading, errorOptions)
           toastIdRef.current = undefined
         }
@@ -481,9 +471,7 @@ export function useToastMutation<
         const errorMsg = normalizeMessage(toastMessages.error)
         const errorOptions = extractOptions(toastMessages.error)
         const backendMessage = extractErrorMessage(error)
-        const displayMessage = backendMessage
-          ? `${errorMsg.message}: ${backendMessage}`
-          : errorMsg.message
+        const displayMessage = backendMessage ? `${errorMsg.message}: ${backendMessage}` : errorMsg.message
         notify('error', { ...errorMsg, message: displayMessage }, errorOptions)
       }
 
@@ -496,11 +484,7 @@ export function useToastMutation<
 // STANDALONE FUNCTIONS
 // ============================================================================
 
-export const showToast = (
-  type: ToastType,
-  input: ToastMessageInput,
-  options?: ToastOptions
-) => {
+export const showToast = (type: ToastType, input: ToastMessageInput, options?: ToastOptions) => {
   const { message, heading } = normalizeMessage(input)
   createToast(type, message, heading, options)
 }
