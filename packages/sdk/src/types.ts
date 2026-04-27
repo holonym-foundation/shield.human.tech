@@ -88,6 +88,10 @@ export type BridgeEvent =
   // Lifecycle
   | { type: 'operation_created'; operationId: number | string; data: Record<string, unknown> }
   | { type: 'operation_completed'; operationId: number | string; l1TxHash?: string; l2TxHash?: string; alreadyCompleted?: boolean }
+  // Danger-zone — fired immediately before an irreversible on-chain tx
+  // (L1 deposit, L2 burn). Consumers should show a persistent "do not
+  // reload" banner until the matching deposit_sent / burn_sent event.
+  | { type: 'do_not_reload'; phase: 'l1_deposit' | 'l2_burn' }
   // L1→L2 deposit
   | { type: 'deposit_sent'; l1TxHash: string; l1TxUrl: string }
   | { type: 'deposit_confirmed'; l1TxHash: string; l1TxUrl: string; messageHash: string; messageLeafIndex: string; fuelMessageHash?: string; fuelMessageLeafIndex?: string; fuelAmount?: string }

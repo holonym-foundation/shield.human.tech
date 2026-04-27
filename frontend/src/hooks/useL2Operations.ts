@@ -302,6 +302,19 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       },
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
+          case 'do_not_reload':
+            // Persistent banner — stays up until burn_sent / burn_confirmed.
+            // Tab close at this point loses the encrypted nonce needed to resume.
+            notify(
+              'warn',
+              {
+                heading: 'Do Not Reload',
+                message:
+                  'Your withdrawal transaction is being prepared. Closing or reloading this page now may make recovery harder.',
+              },
+              { autoClose: false, toastId: 'l2-to-l1-do-not-reload' },
+            )
+            break
           // Persist encrypted nonce payload (recovery-critical)
           case 'nonce_generated':
             console.log('[L2→L1] Nonce generated, encrypted payload persisted to localStorage via SDK')

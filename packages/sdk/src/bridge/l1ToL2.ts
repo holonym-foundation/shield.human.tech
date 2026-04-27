@@ -770,6 +770,10 @@ export async function bridgeL1ToL2(
       assertPassportDeadlineBuffer(passportData.deadline, 120n, 'the deposit tx')
     }
 
+    // Danger zone: from here on, the L1 tx may go through irreversibly.
+    // Consumers map this to a persistent "do not reload" banner.
+    emit({ type: 'do_not_reload', phase: 'l1_deposit' })
+
     if (isFuelEnabled) {
       // ── Fuel path: call SwapBridgeRouter.bridgeWithFuel via Permit2 ──
       // `totalAmount` is what gets pulled from the user; `fuelAmount` is carved

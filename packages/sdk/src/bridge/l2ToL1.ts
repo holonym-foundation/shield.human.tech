@@ -403,6 +403,9 @@ export async function withdrawL2ToL1(
     // Set burnConfirmed=true AFTER the wallet call succeeds, not before.
     // If the call throws with a txHash available (network error reading receipt),
     // we check for the txHash before re-throwing.
+    // Danger zone: from here on, the L2 burn is irreversible. Consumers map
+    // this event to a persistent "do not reload" banner.
+    emit({ type: 'do_not_reload', phase: 'l2_burn' })
     const userAddress = AztecAddress.fromString(l2Address)
     let burnResult: { txHash: string; blockNumber?: number }
     try {

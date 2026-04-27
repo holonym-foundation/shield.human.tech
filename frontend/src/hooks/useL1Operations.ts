@@ -432,6 +432,19 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       },
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
+          case 'do_not_reload':
+            // Persistent banner — stays up until deposit_sent / deposit_confirmed
+            // arrives. Tab close at this point loses recovery state.
+            notify(
+              'warn',
+              {
+                heading: 'Do Not Reload',
+                message:
+                  'Your deposit transaction is being prepared. Closing or reloading this page now may make recovery harder.',
+              },
+              { autoClose: false, toastId: 'l1-to-l2-do-not-reload' },
+            )
+            break
           // Persist encrypted payload on secrets_generated (recovery-critical)
           case 'secrets_generated':
             console.log('[L1→L2] Secrets generated, encrypted payload persisted to localStorage via SDK')
