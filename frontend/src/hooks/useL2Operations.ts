@@ -532,27 +532,41 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             )
             console.log('[L2→L1] Error event raw:', event.error)
             console.log('[L2→L1] Error message:', event.error?.message)
+            // F13: when the SDK rewrote the error to a "wait ~40 minutes" hint
+            // (BlockNotProven family — see packages/sdk/src/bridge/l2ToL1.ts S8),
+            // surface the rewritten message instead of the static "funds burned"
+            // copy. The rewritten message contains the actionable retry hint.
+            const errorMsgRaw = event.error?.message ?? 'Unknown error'
+            const isBlockNotProvenHint = /not yet proven on L1|wait the full ~40 minutes|wait .{0,5}40 minutes/i.test(
+              errorMsgRaw,
+            )
             if (event.fundsAtRisk) {
               notify(
                 'warn',
-                {
-                  heading: 'L1 Withdraw Failed — Funds Burned on L2',
-                  message:
-                    'Your tokens were burned on L2 but the L1 withdrawal did not complete. Go to Activity to resume.',
-                },
+                isBlockNotProvenHint
+                  ? {
+                      heading: 'L1 Withdraw Blocked — Try Again Later',
+                      message: errorMsgRaw,
+                    }
+                  : {
+                      heading: 'L1 Withdraw Failed — Funds Burned on L2',
+                      message:
+                        'Your tokens were burned on L2 but the L1 withdrawal did not complete. Go to Activity to resume.',
+                    },
                 { autoClose: false },
               )
             } else {
               // Skip generic toast for backup failures — onError handler shows a more specific one
-              const errorMsg = event.error?.message ?? 'Unknown error'
+              const errorMsg = errorMsgRaw
               console.log('[L2→L1] errorMsg for toast:', JSON.stringify(errorMsg))
               if (errorMsg.includes('Failed to backup')) break
 
               if (errorMsg.includes('Contract artifact not found') || errorMsg.includes('artifact not found')) {
+                // F14: registry URL must be testnet, not devnet (project runs on testnet).
                 notify('error', {
                   heading: 'Contract Artifact Not Found',
                   message:
-                    'The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.',
+                    'The contract artifact is not available in the public registry. Please upload it to https://testnet.aztec-registry.xyz/ to make it available for the wallet.',
                 })
               } else {
                 notify('error', {
