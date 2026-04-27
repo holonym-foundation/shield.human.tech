@@ -64,6 +64,17 @@ export const SANCTIONS_IO_MIN_SCORE = process.env.SANCTIONS_IO_MIN_SCORE ?? '0.8
 // Ops kill switch — flip to 'false' to bypass screening during a vendor outage.
 export const SANCTIONS_SCREENING_ENABLED = (process.env.SANCTIONS_SCREENING_ENABLED ?? 'true') !== 'false'
 
+// ─── Auth (server) ──────────────────────────────────────────────────
+
+/**
+ * Expected SIWE domain for /api/auth/authenticate. The signed message has its
+ * own .domain field; this is what the server verifies against. Pinning to env
+ * prevents a Host-header injection where a misconfigured proxy lets an
+ * attacker present a SIWE message signed for evil.com and have the server
+ * accept it. localhost connections still pass (dev exception).
+ */
+export const AUTH_EXPECTED_DOMAIN = process.env.AUTH_EXPECTED_DOMAIN ?? 'bridge.human.tech'
+
 // ─── Datadog (client) ───────────────────────────────────────────────
 
 export const DATADOG_APPLICATION_ID = process.env.NEXT_PUBLIC_DATADOG_APPLICATION_ID ?? ''

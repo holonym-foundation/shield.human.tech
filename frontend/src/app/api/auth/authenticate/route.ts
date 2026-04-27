@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { signJWT } from '@/lib/jwt'
 import { consumeNonce } from '@/lib/siweNonceStore'
 import { AuthenticateSchema } from '@/lib/validation'
+import { AUTH_EXPECTED_DOMAIN } from '@/config/env.config'
 import { L2_RESOURCE_PREFIX } from '@human.tech/aztec-bridge-sdk'
 
 /** Aztec address: 0x followed by 64 hex chars */
@@ -51,46 +52,41 @@ export async function POST(request: NextRequest) {
     try {
       siweMessage = new SiweMessage(data.message)
     } catch {
-      return NextResponse.json(
-        { error: 'Invalid SIWE message format' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Invalid SIWE message format' }, { status: 400 })
     }
 
     // ── Validate nonce exists (check without consuming) ────────────────
     const messageNonce = siweMessage.nonce
     if (!messageNonce) {
-      return NextResponse.json(
-        { error: 'Missing nonce in SIWE message.' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Missing nonce in SIWE message.' }, { status: 400 })
     }
 
     // ── Verify SIWE signature BEFORE consuming the nonce ──────────────
     // This prevents a DoS where an attacker submits a valid nonce with an
     // invalid signature, burning the nonce before the legitimate user.
-    const requestDomain = request.headers.get('host') ?? ''
+    //
+    // F9: pin the expected domain to env (AUTH_EXPECTED_DOMAIN) instead of
+    // trusting the request Host header. A misconfigured proxy that lets an
+    // attacker send Host: evil.com would otherwise verify a SIWE message
+    // signed for evil.com. localhost is still allowed for dev convenience.
+    const requestHost = request.headers.get('host') ?? ''
+    const isLocalhost = requestHost.startsWith('localhost') || requestHost.startsWith('127.0.0.1')
+    const expectedDomain = isLocalhost ? requestHost : AUTH_EXPECTED_DOMAIN
     try {
       await siweMessage.verify({
         signature: data.signature as string,
         nonce: messageNonce,
-        domain: requestDomain,
+        domain: expectedDomain,
       })
     } catch (err) {
-      return NextResponse.json(
-        { error: 'Invalid signature' },
-        { status: 401 },
-      )
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
 
     // ── Consume nonce AFTER signature is verified ─────────────────────
     // Atomic: lookup + delete in one DB call. If the nonce was already
     // consumed (replay) or expired, reject.
     if (!(await consumeNonce(messageNonce))) {
-      return NextResponse.json(
-        { error: 'Invalid or expired nonce. Please try again.' },
-        { status: 401 },
-      )
+      return NextResponse.json({ error: 'Invalid or expired nonce. Please try again.' }, { status: 401 })
     }
 
     // ── Extract addresses from verified message ───────────────────────
@@ -108,9 +104,7 @@ export async function POST(request: NextRequest) {
 
     // ── Upsert user ──────────────────────────────────────────────────
     const clientIp =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-      request.headers.get('x-real-ip') ??
-      null
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip') ?? null
 
     const user = await prisma.user.upsert({
       where: {
@@ -169,9 +163,6 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('[auth/authenticate]', error)
-    return NextResponse.json(
-      { error: 'Authentication failed' },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: 'Authentication failed' }, { status: 500 })
   }
 }
