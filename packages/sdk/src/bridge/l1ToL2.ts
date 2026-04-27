@@ -1165,7 +1165,12 @@ export async function bridgeL1ToL2(
     // Wait for the sequencer to include the L1→L2 message in a new L2 block.
     // The archiver checkpoint appears quickly, but the message is only consumable
     // after the sequencer includes it in an L2 block (can take up to ~1 epoch on testnet).
-    await waitForNextL2Block(aztecNode)
+    // F6: emit l2_block_wait per poll so the frontend can show progress during
+    // this multi-minute wait. Without it the UI is silent for ~19 min.
+    await waitForNextL2Block(aztecNode, {
+      onPoll: (elapsedSec, currentBlock, targetBlock) =>
+        emit({ type: 'l2_block_wait', elapsedSec, currentBlock, targetBlock }),
+    })
 
     onStep?.(2, 'completed')
 
@@ -1310,10 +1315,18 @@ export async function bridgeL1ToL2(
     )
 
     // Token registration after successful bridge
+    // F21: emit observability events so the frontend can log success/failure
+    // to Datadog ("token doesn't show up" complaints used to be invisible).
     if (walletAdapter?.registerToken) {
       try {
         await walletAdapter.registerToken(tokenConfig.l2TokenContract)
-      } catch {
+        emit({ type: 'token_registered', tokenAddressL2: tokenConfig.l2TokenContract })
+      } catch (regErr) {
+        emit({
+          type: 'token_registration_failed',
+          tokenAddressL2: tokenConfig.l2TokenContract,
+          error: regErr instanceof Error ? regErr : new Error(String(regErr)),
+        })
         // Non-critical — token will still appear after refresh
       }
     }

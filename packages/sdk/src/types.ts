@@ -104,8 +104,12 @@ export type BridgeEvent =
   | { type: 'l1_withdraw_sent'; l1TxHash: string; l1TxUrl: string }
   // Polling progress
   | { type: 'sync_poll'; elapsedMinutes: number; synced: boolean }
+  | { type: 'l2_block_wait'; elapsedSec: number; currentBlock: number; targetBlock: number }
   | { type: 'proven_poll'; provenBlock: number; neededBlock: number; elapsedMs: number }
   | { type: 'proven_fallback'; fixedWaitMs: number }
+  // Token registration in the wallet (post-claim) — observability for "token doesn't show up" reports
+  | { type: 'token_registered'; tokenAddressL2: string }
+  | { type: 'token_registration_failed'; tokenAddressL2: string; error: Error }
   // Recovery / resume
   | { type: 'recovery_from_receipt'; l1TxHash: string }
   | { type: 'recovery_from_block_scan'; l1BlockNumberBeforeTx: string }

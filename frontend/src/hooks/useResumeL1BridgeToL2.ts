@@ -67,6 +67,41 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
               autoClose: 15000,
             })
             break
+          case 'l2_block_wait':
+            logInfo('L1→L2 resume sequencer block wait', {
+              direction: 'L1_TO_L2_RESUME',
+              elapsedSec: event.elapsedSec,
+              currentBlock: event.currentBlock,
+              targetBlock: event.targetBlock,
+              l1Address,
+              userAction: 'resume_l1_to_l2_sequencer_wait',
+            })
+            notify(
+              'info',
+              `Waiting for L2 sequencer to include message (${Math.round(event.elapsedSec / 60)}m elapsed)...`,
+              { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 },
+            )
+            break
+          case 'token_registered':
+            logInfo('Token added to wallet after resume', {
+              direction: 'L1_TO_L2_RESUME',
+              tokenAddressL2: event.tokenAddressL2,
+              l1Address,
+              userAction: 'resume_token_added_to_wallet',
+            })
+            break
+          case 'token_registration_failed':
+            logError(
+              'Failed to add token to wallet after resume',
+              {
+                direction: 'L1_TO_L2_RESUME',
+                tokenAddressL2: event.tokenAddressL2,
+                l1Address,
+                userAction: 'resume_token_add_to_wallet_failed',
+              },
+              event.error,
+            )
+            break
           case 'sync_poll':
             logInfo('L1→L2 resume sync poll', {
               direction: 'L1_TO_L2_RESUME',

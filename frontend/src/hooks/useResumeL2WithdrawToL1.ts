@@ -45,6 +45,15 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
       onStep: (step, status) => setProgressStep(step, status),
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
+          case 'recovery_l2_block':
+            logInfo('L2→L1 resume recovered l2BlockNumber from receipt', {
+              direction: 'L2_TO_L1_RESUME',
+              l2TxHash: event.l2TxHash,
+              l2BlockNumber: event.l2BlockNumber,
+              l1Address: withdrawRecipient,
+              userAction: 'resume_l2_to_l1_recovered_l2_block',
+            })
+            break
           case 'witness_computed':
             logInfo('Resume witness computed', {
               direction: 'L2_TO_L1_RESUME',

@@ -540,6 +540,46 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               },
             )
             break
+          // F6: sequencer wait between sync and claim — used to be silent for ~19 min.
+          case 'l2_block_wait':
+            logInfo('L1→L2 sequencer block wait', {
+              direction: 'L1_TO_L2',
+              elapsedSec: event.elapsedSec,
+              currentBlock: event.currentBlock,
+              targetBlock: event.targetBlock,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'bridge_l1_to_l2_sequencer_wait',
+            })
+            notify(
+              'info',
+              `Waiting for L2 sequencer to include message (${Math.round(event.elapsedSec / 60)}m elapsed)...`,
+              { toastId: 'l1-to-l2-progress', autoClose: 15000 },
+            )
+            break
+          // F21: token registration observability.
+          case 'token_registered':
+            logInfo('Token added to wallet after bridge', {
+              direction: 'L1_TO_L2',
+              tokenAddressL2: event.tokenAddressL2,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'token_added_to_wallet',
+            })
+            break
+          case 'token_registration_failed':
+            logError(
+              'Failed to add token to wallet after bridge',
+              {
+                direction: 'L1_TO_L2',
+                tokenAddressL2: event.tokenAddressL2,
+                l1Address,
+                l2Address: aztecAddress,
+                userAction: 'token_add_to_wallet_failed',
+              },
+              event.error,
+            )
+            break
           // Show sync progress to prevent users from force-closing
           case 'sync_poll':
             logInfo('L1→L2 sync poll', {
