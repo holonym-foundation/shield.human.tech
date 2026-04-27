@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { useWalletStore } from '@/stores/walletStore'
-import { useBridgeStore } from '@/stores/bridgeStore'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { useBridge } from '@/hooks/useBridge'
 
@@ -19,11 +18,12 @@ interface AttestationCheckResult {
  * Returns a unified result that the UI consumes to decide button labels,
  * amount limits, and error messages.
  *
- * Only enabled when both wallets are connected and privacy mode is on.
+ * Required for both public and private flows — the L1 TokenPortal and L2
+ * TokenBridge contracts gate every deposit and exit on a POCH or Passport
+ * attestation regardless of privacy mode.
  */
 export function useAttestationCheck() {
   const { isWaapConnected, isAztecConnected, waapAddress } = useWalletStore()
-  const { isPrivacyModeEnabled } = useBridgeStore()
   const token = useAuthStore((s) => s.token)
   const bridge = useBridge()
 
@@ -62,9 +62,7 @@ export function useAttestationCheck() {
           passportMaxAmount: BigInt(passportData.maxAmount),
         }
       } catch (err: any) {
-        const reason = err?.body
-          || err?.message
-          || 'Failed to check attestation eligibility'
+        const reason = err?.body || err?.message || 'Failed to check attestation eligibility'
         return {
           eligible: false,
           method: null,
@@ -72,7 +70,7 @@ export function useAttestationCheck() {
         }
       }
     },
-    enabled: isWaapConnected && isAztecConnected && !!waapAddress && isPrivacyModeEnabled && !!token,
+    enabled: isWaapConnected && isAztecConnected && !!waapAddress && !!token,
     staleTime: 5 * 60 * 1000,
     retry: false,
   })

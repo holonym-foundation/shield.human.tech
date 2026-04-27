@@ -264,52 +264,54 @@ function BridgeActionButton({
       return
     }
 
-    // Step 5: Attestation check (privacy mode, both directions)
-    if (isPrivacyModeEnabled) {
-      if (pochLoading) {
-        notify('info', 'Checking eligibility...')
-        return
-      }
-      if (!pochEligible) {
-        notify('error', {
-          heading: 'Attestation Required',
-          message: React.createElement(
+    // Step 5: Attestation check — required for BOTH public and private flows.
+    // The L1 TokenPortal and L2 TokenBridge gate every deposit/exit on POCH or
+    // Passport regardless of privacy mode.
+    if (pochLoading) {
+      notify('info', 'Checking eligibility...')
+      return
+    }
+    if (!pochEligible) {
+      notify('error', {
+        heading: 'Attestation Required',
+        message: React.createElement(
+          'span',
+          null,
+          React.createElement(
             'span',
             null,
-            React.createElement('span', null, pochReason ? `${pochReason}. ` : 'Cannot use private mode. '),
-            React.createElement('br'),
-            React.createElement(
-              'a',
-              {
-                href: 'https://id.human.tech/sandbox/clean-hands',
-                target: '_blank',
-                rel: 'noopener noreferrer',
-                style: { color: '#2563eb', textDecoration: 'underline' },
-              },
-              'Mint your POCH SBT here',
-            ),
-            React.createElement('br'),
-            React.createElement(
-              'a',
-              {
-                href: 'https://app.passport.xyz/',
-                target: '_blank',
-                rel: 'noopener noreferrer',
-                style: { color: '#2563eb', textDecoration: 'underline' },
-              },
-              `Build your Passport score${passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''}`,
-            ),
-            React.createElement('br'),
-            'Or switch to public mode.',
-          ) as unknown as string,
-        })
-        return
-      }
+            pochReason ? `${pochReason}. ` : 'Cannot bridge without a valid attestation. ',
+          ),
+          React.createElement('br'),
+          React.createElement(
+            'a',
+            {
+              href: 'https://id.human.tech/sandbox/clean-hands',
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              style: { color: '#2563eb', textDecoration: 'underline' },
+            },
+            'Mint your POCH SBT here',
+          ),
+          React.createElement('br'),
+          React.createElement(
+            'a',
+            {
+              href: 'https://app.passport.xyz/',
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              style: { color: '#2563eb', textDecoration: 'underline' },
+            },
+            `Build your Passport score${passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''}`,
+          ),
+        ) as unknown as string,
+      })
+      return
     }
 
     // Step 6: Validate amount
-    // Step 6a: Passport amount limit check
-    if (isPrivacyModeEnabled && attestationMethod === 'passport' && passportMaxAmount != null) {
+    // Step 6a: Passport amount limit check (applies to both public and private)
+    if (attestationMethod === 'passport' && passportMaxAmount != null) {
       try {
         const decimals = 6 // USDC decimals
         const inputBigInt = BigInt(Math.floor(parseFloat(inputAmount || '0') * 10 ** decimals))
@@ -382,14 +384,15 @@ function BridgeActionButton({
     l2NodeIsReadyLoading ||
     balancesLoading ||
     isOperationInFlight ||
-    (isPrivacyModeEnabled && pochLoading && bothWalletsConnected)
+    // Attestation eligibility check is required for both modes (F1).
+    (pochLoading && bothWalletsConnected)
 
   const getLoadingText = () => {
     if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...'
     if (balancesLoading) return 'Loading balances...'
     if (isConnecting) return 'Connecting...'
     if (requestFaucetPending) return 'Getting Eth & Testnet USDC...'
-    if (pochLoading && isPrivacyModeEnabled) return 'Checking eligibility...'
+    if (pochLoading) return 'Checking eligibility...'
     if (withdrawTokensToL1Pending) return 'Withdrawing Tokens...'
     if (bridgeTokensToL2Pending) return 'Bridging Tokens...'
     return 'Loading...'
@@ -419,11 +422,9 @@ function BridgeActionButton({
       if (hasL1SBT !== true) return `Get SBT on ${requiredChain}`
     }
 
-    // Attestation requirement (privacy mode, both directions)
-    if (isPrivacyModeEnabled) {
-      if (pochLoading) return 'Checking eligibility...'
-      if (!pochEligible) return 'Attestation Required'
-    }
+    // Attestation requirement applies to both public and private modes.
+    if (pochLoading) return 'Checking eligibility...'
+    if (!pochEligible) return 'Attestation Required'
 
     return getOperationLabel(direction)
   }
