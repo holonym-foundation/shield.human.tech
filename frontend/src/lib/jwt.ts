@@ -27,7 +27,7 @@ export function signJWT(payload: Omit<JWTPayload, 'iat' | 'exp'>): string {
 export function verifyJWT(token: string): JWTPayload | null {
   try {
     const decoded = jwt.verify(token, getSecret(), { algorithms: ['HS256'] }) as unknown as JWTPayload
-    // F26: User.id is a string CUID (prisma/schema.prisma:43 — String @default(cuid(2))).
+    // User.id is a string CUID (prisma/schema.prisma:43 — String @default(cuid(2))).
     // Reject malformed JWTs whose userId isn't a string so consumers can rely on the type.
     if (typeof decoded.userId !== 'string') {
       console.warn('[auth] Rejecting JWT with non-string userId — user must re-authenticate')

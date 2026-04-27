@@ -43,7 +43,7 @@ import ErrorToast from '@/components/toast/ErrorToast'
 
 type ToastType = 'default' | 'success' | 'info' | 'warn' | 'error' | 'privacy-mode'
 
-// F22: widen back to ReactNode so callers can pass JSX (clickable links,
+// widen back to ReactNode so callers can pass JSX (clickable links,
 // styled spans). String messages still work; the toast renderers accept both.
 type ToastMessageInput = string | { message: string | React.ReactNode; heading?: string }
 
@@ -69,7 +69,7 @@ type ToastMessages = {
 
 const DEFAULT_TOAST_OPTIONS: ToastOptions = {
   position: 'top-right',
-  // F8: 15s default — long enough for users to read multi-line warning toasts
+  // 15s default — long enough for users to read multi-line warning toasts
   // (e.g. claim-attempt updates during a 15-min bridge wait). Persistent
   // banners override this with autoClose: false at the call site.
   autoClose: 15000,
@@ -192,7 +192,7 @@ const createToast = (
   // so the message refreshes without creating a new toast or being silently ignored.
   if (finalOptions.toastId && toast.isActive(finalOptions.toastId)) {
     toast.update(finalOptions.toastId, {
-      // `message` widened to ReactNode for ErrorToast (F11/F22); the other toast
+      // `message` widened to ReactNode for ErrorToast; the other toast
       render:
         // components type it as string but React renders ReactNode fine at runtime.
         React.createElement(Component as any, { heading, message }),
@@ -202,7 +202,7 @@ const createToast = (
   }
 
   return toast(
-    // `message` widened to ReactNode for ErrorToast (F11/F22); the other toast
+    // `message` widened to ReactNode for ErrorToast; the other toast
     // components type it as string but React renders ReactNode fine at runtime.
     React.createElement(Component as any, { heading, message }),
     finalOptions,
@@ -260,7 +260,7 @@ const updateToastState = (
   const mergedOptions = createMergedOptions({}, { ...errorOverrides, ...options })
 
   toast.update(toastId, {
-    // `message` widened to ReactNode for ErrorToast (F11/F22); the other toast
+    // `message` widened to ReactNode for ErrorToast; the other toast
     render:
       // components type it as string but React renders ReactNode fine at runtime.
       React.createElement(Component as any, { heading, message }),

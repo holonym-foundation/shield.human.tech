@@ -1059,7 +1059,7 @@ export async function bridgeL1ToL2(
         // The `amount` in the event is the POST-FEE amount — use it for the L2 claim.
         amountAfterFee = log.args.amount as bigint
       } catch (portalErr) {
-        // S12: portal-event extract failed (e.g., a future portal upgrade
+        // portal-event extract failed (e.g., a future portal upgrade
         // changed the event signature). The non-fuel deposit went through
         // SwapBridgeRouter.bridge() which also emits Bridge(aztecRecipient,
         // key, index, amount, secretHash) carrying the same data. Fall back
@@ -1165,7 +1165,7 @@ export async function bridgeL1ToL2(
     // Wait for the sequencer to include the L1→L2 message in a new L2 block.
     // The archiver checkpoint appears quickly, but the message is only consumable
     // after the sequencer includes it in an L2 block (can take up to ~1 epoch on testnet).
-    // F6: emit l2_block_wait per poll so the frontend can show progress during
+    // emit l2_block_wait per poll so the frontend can show progress during
     // this multi-minute wait. Without it the UI is silent for ~19 min.
     await waitForNextL2Block(aztecNode, {
       onPoll: (elapsedSec, currentBlock, targetBlock) =>
@@ -1315,7 +1315,7 @@ export async function bridgeL1ToL2(
     )
 
     // Token registration after successful bridge
-    // F21: emit observability events so the frontend can log success/failure
+    // emit observability events so the frontend can log success/failure
     // to Datadog ("token doesn't show up" complaints used to be invisible).
     if (walletAdapter?.registerToken) {
       try {

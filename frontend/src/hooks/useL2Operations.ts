@@ -160,7 +160,7 @@ export const useL2PrivateFeeJuiceBalance = () => {
 
       const userAddress = AztecAddress.fromString(aztecAddress)
 
-      // F3: read the user's BridgedFPC balance (what they can spend on private
+      // read the user's BridgedFPC balance (what they can spend on private
       // fuel via the FPC) — NOT FEE_JUICE.balance_of_private (the user's own
       // private FeeJuice notes), which is a different number.
       const [privateBalanceResult] = await walletAdapter.simulateViews([
@@ -532,7 +532,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             )
             console.log('[L2→L1] Error event raw:', event.error)
             console.log('[L2→L1] Error message:', event.error?.message)
-            // F13: when the SDK rewrote the error to a "wait ~40 minutes" hint
+            // when the SDK rewrote the error to a "wait ~40 minutes" hint
             // (BlockNotProven family — see packages/sdk/src/bridge/l2ToL1.ts S8),
             // surface the rewritten message instead of the static "funds burned"
             // copy. The rewritten message contains the actionable retry hint.
@@ -562,7 +562,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               if (errorMsg.includes('Failed to backup')) break
 
               if (errorMsg.includes('Contract artifact not found') || errorMsg.includes('artifact not found')) {
-                // F14: registry URL must be testnet, not devnet (project runs on testnet).
+                // registry URL must be testnet, not devnet (project runs on testnet).
                 notify('error', {
                   heading: 'Contract Artifact Not Found',
                   message:

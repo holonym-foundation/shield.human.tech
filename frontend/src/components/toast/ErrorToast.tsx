@@ -4,7 +4,7 @@ import { ToastContentProps } from 'react-toastify'
 
 interface ErrorToastProps extends Partial<ToastContentProps> {
   heading?: string
-  // F11: widen back to ReactNode so callers (e.g. BridgeActionButton's
+  // widen back to ReactNode so callers (e.g. BridgeActionButton's
   // Attestation-Required toast) can pass JSX with clickable links and the
   // type system actually checks them, instead of casting via `as unknown as string`.
   message?: React.ReactNode

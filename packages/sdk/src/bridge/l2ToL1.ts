@@ -135,7 +135,7 @@ export async function executeL1Withdraw(params: {
     data: withdrawCallData,
   })
 
-  // S7: no timeout. Mainnet/testnet mempool spikes routinely push inclusion
+  // no timeout. Mainnet/testnet mempool spikes routinely push inclusion
   // past 5 minutes; surfacing a viem timeout here as a "failure" to the user
   // is misleading because the L2 burn already happened and the L1 tx WILL
   // eventually mine. Wait indefinitely (matches main).
@@ -626,7 +626,7 @@ export async function withdrawL2ToL1(
         ...w,
         l2ToL1MessageIndex: witnessResult.leafIndex,
         siblingPath: witnessResult.siblingPath,
-        // S5: persist epoch alongside the witness so a later resume that has to
+        // persist epoch alongside the witness so a later resume that has to
         // fall back to localStorage doesn't have to re-derive it from the
         // rollup contract via getEpochForCheckpoint.
         epoch: resolvedEpoch != null ? Number(resolvedEpoch) : undefined,
@@ -776,7 +776,7 @@ export async function withdrawL2ToL1(
     const err = error instanceof Error ? error : new Error(extractErrorString(error))
     const errorMessage = err.message
 
-    // S8: rewrite class-of-error messages so the consumer can show actionable copy.
+    // rewrite class-of-error messages so the consumer can show actionable copy.
     // BlockNotProven family means "wait longer" — main puts a friendly message here.
     const isBlockNotProven =
       /BlockNotProven|NothingToConsumeAtBlock|block.*required|required.*block/i.test(errorMessage)

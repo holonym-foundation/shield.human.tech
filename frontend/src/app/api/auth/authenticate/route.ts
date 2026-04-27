@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     // This prevents a DoS where an attacker submits a valid nonce with an
     // invalid signature, burning the nonce before the legitimate user.
     //
-    // F9: pin the expected domain to env (AUTH_EXPECTED_DOMAIN) instead of
+    // pin the expected domain to env (AUTH_EXPECTED_DOMAIN) instead of
     // trusting the request Host header. A misconfigured proxy that lets an
     // attacker send Host: evil.com would otherwise verify a SIWE message
     // signed for evil.com. localhost is still allowed for dev convenience.

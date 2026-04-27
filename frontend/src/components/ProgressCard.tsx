@@ -201,7 +201,7 @@ export default function ProgressCard({
         <p className="text-32 text-black font-medium text-center">{amountDisplay}</p>
         {fuelBreakdown && (
           <p className="text-center text-12 font-medium text-latest-grey-500 mt-1">
-            {/* F4: bridgeAmount/fuelAmount strings already include their own
+            {/* bridgeAmount/fuelAmount strings already include their own
                 token symbol and "to top up …" suffix from the producer at
                 app/progress/page.tsx — do NOT double-suffix here. */}
             {fuelBreakdown.bridgeAmount} to bridge + {fuelBreakdown.fuelAmount}

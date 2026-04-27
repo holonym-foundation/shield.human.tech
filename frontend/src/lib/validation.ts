@@ -25,7 +25,7 @@ export const NUMERIC_STRING_REGEX = /^\d+$/
 // ─── Zod Schemas ──────────────────────────────────────────────────────
 
 /** Schema for POST /api/auth/authenticate.
- *  F20: bound message/signature length so an attacker can't post megabytes
+ *  Bound message/signature length so an attacker can't post megabytes
  *  of payload and force the SIWE parser/verifier to do meaningful work. */
 export const AuthenticateSchema = z.object({
   // SIWE messages are typically ~500-800 chars; 2048 is generous.
@@ -39,7 +39,7 @@ export const AuthenticateSchema = z.object({
 })
 
 /** Schema for POST /api/attestation/passport.
- *  F7: portalAddress is REQUIRED — the L1 ECDSA passport attestation is bound
+ *  portalAddress is REQUIRED — the L1 ECDSA passport attestation is bound
  *  to a specific TokenPortal so the signature can't be replayed against any
  *  other portal. Allowing it to be optional + signing `?? ''` produced
  *  wildcard-binding attestations. */

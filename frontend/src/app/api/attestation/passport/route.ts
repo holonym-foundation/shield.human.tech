@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
       maxAmount,
       nonce: BigInt(nonce),
       deadline: deadlineSeconds,
-      // F7: Zod schema now requires portalAddress; no `?? ''` wildcard fallback.
+      // Zod schema now requires portalAddress; no `?? ''` wildcard fallback.
       portalAddress: data.portalAddress,
     })
 

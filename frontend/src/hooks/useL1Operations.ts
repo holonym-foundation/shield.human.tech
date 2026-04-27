@@ -293,7 +293,7 @@ export function useL1Faucet() {
         faucetProvider: 'Internal API',
         faucetType: 'internal',
         userAction: 'faucet_request_failed',
-        // F23: extractErrorMessage peels apart axios/wallet errors so faucet
+        // extractErrorMessage peels apart axios/wallet errors so faucet
         // failures stay actionable in Datadog. Plain `error.message` returned
         // "Unknown error" for any non-Error object (most axios shapes).
         error: extractErrorMessage(error),
@@ -544,7 +544,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               },
             )
             break
-          // F6: sequencer wait between sync and claim — used to be silent for ~19 min.
+          // sequencer wait between sync and claim — used to be silent for ~19 min.
           case 'l2_block_wait':
             logInfo('L1→L2 sequencer block wait', {
               direction: 'L1_TO_L2',
@@ -561,7 +561,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               { toastId: 'l1-to-l2-progress', autoClose: 15000 },
             )
             break
-          // F21: token registration observability.
+          // token registration observability.
           case 'token_registered':
             logInfo('Token added to wallet after bridge', {
               direction: 'L1_TO_L2',
@@ -678,7 +678,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             )
             break
           case 'error': {
-            // F15: classify the error so Datadog dashboards/alerts can segment
+            // classify the error so Datadog dashboards/alerts can segment
             // congestion vs. contract revert vs. claim failure vs. sync timeout
             // vs. funds-at-risk vs. generic. Without these tags, all bridge
             // failures collapse into a single user_action and alerting can't
@@ -692,7 +692,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               errorMsgForLog.includes('Contract artifact not found') ||
               errorMsgForLog.includes('artifact not found') ||
               (errorMsgForLog.includes('artifact') && errorMsgForLog.includes('not found'))
-            // F16: SDK now throws "L1-to-L2 message sync timeout after ..." —
+            // SDK now throws "L1-to-L2 message sync timeout after ..." —
             // detect it so the dedicated user_action persists.
             const isSyncTimeout =
               errorMsgForLog.includes('message sync timeout') || errorMsgForLog.includes('sync timeout after')
@@ -747,7 +747,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               const errorMsg = event.error?.message ?? 'Unknown error'
               if (errorMsg.includes('Failed to backup')) break
 
-              // S13: classify the error so the user gets actionable copy
+              // classify the error so the user gets actionable copy
               // instead of a raw on-chain revert string.
               const isCongestion =
                 errorMsg.includes('"path":["revertReason","functionErrorStack",0,"functionSelector"]') ||

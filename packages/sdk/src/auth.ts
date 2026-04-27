@@ -43,7 +43,7 @@ export async function authenticate(
   },
 ): Promise<{
   token: string
-  // F10: User CUID is a string (prisma/schema.prisma User.id @default(cuid(2))).
+  // User CUID is a string (prisma/schema.prisma User.id @default(cuid(2))).
   userId: string
   user: {
     id: string
@@ -84,7 +84,7 @@ export async function authenticate(
     success: boolean
     token: string
     user: {
-      // F10: server returns string CUID; matches outer Promise<...> shape above.
+      // server returns string CUID; matches outer Promise<...> shape above.
       id: string
       l1Address: string
       l2Address: string

@@ -4,7 +4,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 export interface AuthUser {
-  // F10: server returns the User CUID directly (string) — see
+  // server returns the User CUID directly (string) — see
   // /api/auth/authenticate/route.ts and prisma/schema.prisma
   // (User.id String @id @default(cuid(2))). Type was wrongly `number`.
   id: string

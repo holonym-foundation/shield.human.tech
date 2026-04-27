@@ -384,7 +384,7 @@ function BridgeActionButton({
     l2NodeIsReadyLoading ||
     balancesLoading ||
     isOperationInFlight ||
-    // Attestation eligibility check is required for both modes (F1).
+    // Attestation eligibility check is required for both modes.
     (pochLoading && bothWalletsConnected)
 
   const getLoadingText = () => {

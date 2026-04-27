@@ -136,7 +136,7 @@ export default function ProgressPage() {
     }
   }, [isBridgeTokensToL2Error, withdrawTokensToL1Error, steps, setProgressStep])
 
-  // F5: warn the user before unloading the page while a step is active.
+  // warn the user before unloading the page while a step is active.
   // The encrypted secrets payload is in localStorage so a survivable reload
   // is possible, but recovery is meaningfully easier if the tab stays open
   // through the irreversible L1/L2 tx.

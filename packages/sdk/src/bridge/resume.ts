@@ -754,7 +754,7 @@ async function resumeL1ToL2(
   // The archiver checkpoint appears quickly, but the message is only consumable
   // after the sequencer includes it in an L2 block (can take up to ~1 epoch on testnet).
   console.log('[SDK Resume L1→L2] Waiting for sequencer to include message in L2 block...')
-  // F6: emit l2_block_wait per poll so the resume UI can show progress
+  // emit l2_block_wait per poll so the resume UI can show progress
   // during the multi-minute sequencer wait.
   await waitForNextL2Block(aztecNode, {
     onPoll: (elapsedSec, currentBlock, targetBlock) =>
@@ -769,7 +769,7 @@ async function resumeL1ToL2(
   onStep?.(3, 'active')
   patchOperationAsync(apiClient, op.id, { currentStep: 3 })
 
-  // F17: re-fetch the operation right before the claim. If a parallel tab
+  // re-fetch the operation right before the claim. If a parallel tab
   // (or a previous successful resume that crashed before completion PATCH)
   // already completed this op during our sync poll / sequencer wait, we
   // can short-circuit instead of paying a wallet popup + a guaranteed-to-
@@ -885,7 +885,7 @@ async function resumeL1ToL2(
   // Register the L2 token in the wallet so the resumed deposit shows up in
   // the user's balance UI without requiring a manual rescan. Mirrors the
   // happy-path behavior in bridge/l1ToL2.ts.
-  // F21: emit observability events so the frontend can log success/failure.
+  // emit observability events so the frontend can log success/failure.
   if (walletAdapter?.registerToken && op.tokenAddressL2) {
     try {
       await walletAdapter.registerToken(op.tokenAddressL2)
