@@ -664,11 +664,30 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               const errorMsg = event.error?.message ?? 'Unknown error'
               if (errorMsg.includes('Failed to backup')) break
 
-              if (errorMsg.includes('Contract artifact not found') || errorMsg.includes('artifact not found')) {
+              // S13: classify the error so the user gets actionable copy
+              // instead of a raw on-chain revert string.
+              const isCongestion =
+                errorMsg.includes('"path":["revertReason","functionErrorStack",0,"functionSelector"]') ||
+                (errorMsg.includes('invalid_type') && errorMsg.includes('functionSelector'))
+              const isReloadable = errorMsg.includes('0xfb8f41b2')
+              const isArtifact =
+                errorMsg.includes('Contract artifact not found') ||
+                errorMsg.includes('artifact not found') ||
+                (errorMsg.includes('artifact') && errorMsg.includes('not found'))
+
+              if (isCongestion) {
+                notify(
+                  'error',
+                  'The Aztec Testnet is congested right now. Unfortunately your transaction was dropped.',
+                  { autoClose: false },
+                )
+              } else if (isReloadable) {
+                notify('error', 'Bridge transaction failed (error: 0xfb8f41b2). Please reload the page.')
+              } else if (isArtifact) {
                 notify('error', {
                   heading: 'Contract Artifact Not Found',
                   message:
-                    'The contract artifact is not available in the public registry. Please upload it to https://devnet.aztec-registry.xyz/ to make it available for the wallet.',
+                    'The contract artifact is not available in the public registry. Please upload it to https://testnet.aztec-registry.xyz/ to make it available for the wallet.',
                 })
               } else {
                 notify('error', {
