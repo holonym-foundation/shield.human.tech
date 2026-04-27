@@ -5,6 +5,7 @@ import {
   copyToClipboard,
   decryptStorageEntry,
   verifyEncryptionDomain,
+  extractErrorMessage,
 } from '@/utils'
 import { logError, logInfo } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
@@ -292,7 +293,10 @@ export function useL1Faucet() {
         faucetProvider: 'Internal API',
         faucetType: 'internal',
         userAction: 'faucet_request_failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        // F23: extractErrorMessage peels apart axios/wallet errors so faucet
+        // failures stay actionable in Datadog. Plain `error.message` returned
+        // "Unknown error" for any non-Error object (most axios shapes).
+        error: extractErrorMessage(error),
       })
 
       throw error
