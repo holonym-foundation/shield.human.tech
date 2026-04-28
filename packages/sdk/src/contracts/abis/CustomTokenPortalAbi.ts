@@ -10,6 +10,6 @@
  * Source: l1-contracts/out/TokenPortal.sol/TokenPortal.json
  * To update: run the deploy script, which copies Forge output into packages/sdk/src/contracts/abis/TokenPortal.json
  */
-import TokenPortalAbi from './TokenPortal.json'
+import TokenPortalJson from './TokenPortal.json'
 
-export const CustomTokenPortalAbi = TokenPortalAbi
+export const CustomTokenPortalAbi = TokenPortalJson.abi
