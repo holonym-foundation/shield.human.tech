@@ -522,6 +522,34 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             )
             break
           case 'error':
+            // Classify so Datadog can segment L2→L1 failures the same way it
+            // does L1→L2 (mirrors useL1Operations.ts:680). Without these tags,
+            // every withdrawal failure collapses into a single user_action and
+            // alerting can't distinguish "L1 withdraw failed after burn" from
+            // "block not yet proven" from "artifact not found".
+            const errorMsgRaw = event.error?.message ?? 'Unknown error'
+            const isBlockNotProvenHint = /not yet proven on L1|wait the full ~40 minutes|wait .{0,5}40 minutes/i.test(
+              errorMsgRaw,
+            )
+            const isArtifact =
+              errorMsgRaw.includes('Contract artifact not found') ||
+              errorMsgRaw.includes('artifact not found') ||
+              (errorMsgRaw.includes('artifact') && errorMsgRaw.includes('not found'))
+            let errorTag: string
+            let errorUserAction: string
+            if (event.fundsAtRisk) {
+              errorTag = 'l1_withdraw_failed'
+              errorUserAction = 'withdrawal_l2_to_l1_l1_withdraw_failed'
+            } else if (isBlockNotProvenHint) {
+              errorTag = 'block_not_proven'
+              errorUserAction = 'withdrawal_l2_to_l1_block_not_proven'
+            } else if (isArtifact) {
+              errorTag = 'artifact_not_found'
+              errorUserAction = 'withdrawal_l2_to_l1_artifact_error'
+            } else {
+              errorTag = 'unknown'
+              errorUserAction = 'withdrawal_l2_to_l1_error'
+            }
             logError(
               event.error?.message ?? 'Withdrawal error event',
               {
@@ -532,19 +560,10 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
                 l2Address: aztecAddress,
                 amount: amountDisplayL2,
                 isPrivacyModeEnabled,
-                userAction: 'withdrawal_l2_to_l1_error',
+                errorType: errorTag,
+                userAction: errorUserAction,
               },
               event.error,
-            )
-            console.log('[L2→L1] Error event raw:', event.error)
-            console.log('[L2→L1] Error message:', event.error?.message)
-            // when the SDK rewrote the error to a "wait ~40 minutes" hint
-            // (BlockNotProven family — see packages/sdk/src/bridge/l2ToL1.ts S8),
-            // surface the rewritten message instead of the static "funds burned"
-            // copy. The rewritten message contains the actionable retry hint.
-            const errorMsgRaw = event.error?.message ?? 'Unknown error'
-            const isBlockNotProvenHint = /not yet proven on L1|wait the full ~40 minutes|wait .{0,5}40 minutes/i.test(
-              errorMsgRaw,
             )
             if (event.fundsAtRisk) {
               notify(
