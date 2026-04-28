@@ -413,9 +413,15 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               },
             )
             break
-          // Handle recovery_l2_block event
           case 'recovery_l2_block':
-            console.log('[L2→L1] Recovered L2 block number:', event.l2BlockNumber)
+            logInfo('L2→L1 recovered l2BlockNumber from receipt', {
+              direction: 'L2_TO_L1',
+              l2TxHash: event.l2TxHash,
+              l2BlockNumber: event.l2BlockNumber,
+              l1Address,
+              l2Address: aztecAddress,
+              userAction: 'withdrawal_l2_to_l1_recovered_l2_block',
+            })
             break
           // Persist witness data on witness_computed (recovery-critical)
           case 'witness_computed':
