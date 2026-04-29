@@ -20,7 +20,6 @@
     "db:reset": "prisma migrate reset --force --skip-seed && prisma db push"
   },
   "dependencies": {
-    "@wonderland/aztec-fee-payment": "4.2.0-aztecnr-rc.2",
     "@aztec/accounts": "4.2.0-aztecnr-rc.2",
     "@aztec/aztec.js": "4.2.0-aztecnr-rc.2",
     "@aztec/ethereum": "4.2.0-aztecnr-rc.2",
@@ -31,7 +30,6 @@
     "@aztec/stdlib": "4.2.0-aztecnr-rc.2",
     "@aztec/wallet-sdk": "4.2.0-aztecnr-rc.2",
     "@datadog/browser-logs": "^4.45.0",
-    "@datadog/browser-rum": "^4.45.0",
     "@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
     "@human.tech/waap-sdk": "^1.0.3",
     "@iconify/react": "^6.0.0",
@@ -42,6 +40,7 @@
     "@tanstack/react-query": "^5.75.0",
     "@tanstack/react-query-devtools": "^5.75.0",
     "@tanstack/react-query-persist-client": "^5.75.2",
+    "@wonderland/aztec-fee-payment": "4.2.0-aztecnr-rc.2",
     "axios": "^1.9.0",
     "clsx": "^2.1.1",
     "copy-to-clipboard": "^3.3.3",
