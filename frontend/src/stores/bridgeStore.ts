@@ -109,9 +109,15 @@ interface BridgeStoreState
   fuelEnabled: boolean
   fuelAmount: string
   fuelType: 'public' | 'private'
+  /**
+   * Optional public-fuel recipient override. When non-empty, the bridged FeeJuice will mint
+   * to this L2 address instead of the user's own. Ignored for private fuel (always FPC).
+   */
+  fuelRecipientOverride: string
   setFuelEnabled: (enabled: boolean) => void
   setFuelAmount: (amount: string) => void
   setFuelType: (type: 'public' | 'private') => void
+  setFuelRecipientOverride: (address: string) => void
 
   // Step actions
   setHeaderStep: (
@@ -237,6 +243,7 @@ const initialState = {
   fuelEnabled: false,
   fuelAmount: '',
   fuelType: 'public' as const,
+  fuelRecipientOverride: '',
 } as const
 
 const bridgeStore = create<BridgeStoreState>((set, get) => ({
@@ -260,9 +267,14 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   fuelEnabled: false,
   fuelAmount: '',
   fuelType: 'public' as const,
-  setFuelEnabled: (enabled: boolean) => set({ fuelEnabled: enabled, fuelAmount: '' }),
+  fuelRecipientOverride: '',
+  setFuelEnabled: (enabled: boolean) =>
+    set({ fuelEnabled: enabled, fuelAmount: '', fuelRecipientOverride: '' }),
   setFuelAmount: (amount: string) => set({ fuelAmount: amount }),
-  setFuelType: (type: 'public' | 'private') => set({ fuelType: type }),
+  setFuelType: (type: 'public' | 'private') =>
+    // Clear any third-party recipient when switching to private fuel — private always routes to FPC.
+    set((s) => ({ fuelType: type, fuelRecipientOverride: type === 'private' ? '' : s.fuelRecipientOverride })),
+  setFuelRecipientOverride: (address: string) => set({ fuelRecipientOverride: address }),
 
   // Step actions
   setHeaderStep: (
@@ -401,6 +413,7 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
     fuelEnabled: false,
     fuelAmount: '',
     fuelType: 'public' as const,
+    fuelRecipientOverride: '',
   })),
 }))
 
@@ -451,9 +464,11 @@ export const useBridgeStore = () =>
       fuelEnabled: state.fuelEnabled,
       fuelAmount: state.fuelAmount,
       fuelType: state.fuelType,
+      fuelRecipientOverride: state.fuelRecipientOverride,
       setFuelEnabled: state.setFuelEnabled,
       setFuelAmount: state.setFuelAmount,
       setFuelType: state.setFuelType,
+      setFuelRecipientOverride: state.setFuelRecipientOverride,
 
       // Recovery
       recoveryOperationId: state.recoveryOperationId,

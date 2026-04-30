@@ -198,7 +198,7 @@ class WalletAdapter {
     contract: AztecAddress | string,
     method: string,
     args: any[],
-    options?: { contractType?: ContractType; fee?: { paymentMethod: any } },
+    options?: { contractType?: ContractType; fee?: { paymentMethod: any; gasSettings?: any } },
   ): Promise<ExecuteCallResult> {
     const addr = typeof contract === 'string' ? AztecAddress.fromString(contract) : contract
     const type = options?.contractType ?? resolveArtifactType(addr.toString(), this.bridgeAddress)
@@ -228,7 +228,7 @@ class WalletAdapter {
       args: any[]
       contractType?: ContractType
     }[],
-    options?: { fee?: { paymentMethod: any } },
+    options?: { fee?: { paymentMethod: any; gasSettings?: any } },
   ): Promise<ExecuteCallResult> {
     const interactions = await Promise.all(
       calls.map(async (call) => {

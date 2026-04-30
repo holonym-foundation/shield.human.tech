@@ -545,6 +545,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     fuelEnabled,
     fuelAmount: fuelAmountStr,
     fuelType,
+    fuelRecipientOverride,
   } = useBridgeStore()
   const notify = useToast()
 
@@ -619,10 +620,29 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             )
           }
 
-          fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote }
+          // Validate the optional third-party fuel recipient. If invalid, refuse to proceed —
+          // we don't want to silently fall back to the user's own L2 when they intended to send
+          // the fee juice elsewhere.
+          let fuelRecipient: string | undefined
+          if (fuelRecipientOverride && fuelRecipientOverride.trim().length > 0) {
+            try {
+              const parsed = AztecAddress.fromString(fuelRecipientOverride.trim())
+              fuelRecipient = parsed.toString()
+            } catch {
+              throw new Error(
+                'Invalid fuel-recipient L2 address. Clear the override or paste a valid Aztec address.',
+              )
+            }
+            if (aztecAddress && fuelRecipient.toLowerCase() === aztecAddress.toLowerCase()) {
+              // Same as self — drop the override so logs/state don't lie about a "third-party" send.
+              fuelRecipient = undefined
+            }
+          }
+          fuel = { fuelAmount: fuelAmountTokenUnits, fuelQuote, fuelRecipient }
           console.log('[L1→L2] Public fuel enabled:', {
             fuelAmount: fuelAmountTokenUnits.toString(),
             expectedOutput: fuelQuote.expectedOutput.toString(),
+            fuelRecipient: fuelRecipient ?? '(self)',
           })
         }
       }
@@ -784,6 +804,26 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       depositConfirmed = true
       receiptData = receipt
       setTransactionUrls(receipt.l1TxUrl, null)
+
+      // ─── Step 5b: Persist fuel secret to localStorage for the share-claim-link flow ──
+      // When the user routed fuel to a third party, the bridger needs the plaintext fuel secret
+      // to build a claim link for the recipient. The secret normally lives only in the encrypted
+      // backup blob, but for this flow we mirror it into the bridger's local entry so the link
+      // survives a reload. Security: anyone who reads this localStorage entry can submit the L2
+      // claim, but the FJ always mints to the recipient address baked into the L1 message — they
+      // can only spend their own gas to deliver the claim, not redirect the funds.
+      if (fuel && !privateFuel && backup.fuelSecret) {
+        try {
+          const { LS_KEY_BRIDGE_DEPOSITS, updateLocalStorageItem } = await import('./bridge/bridgeUtils')
+          updateLocalStorageItem(
+            LS_KEY_BRIDGE_DEPOSITS,
+            (c: any) => c.id === operationId,
+            (c: any) => (c?.fuelClaimByOther ? { ...c, fuelSecret: backup.fuelSecret!.toString() } : c),
+          )
+        } catch (err) {
+          console.warn('[L1→L2] Failed to mirror fuel secret to localStorage (claim link may not be available after reload):', err)
+        }
+      }
 
       // ─── Step 6: Persist receipt to backend ─────────────────────────
       const receiptPatchSucceeded = await persistReceiptToBackend(operationId, receipt)
@@ -978,33 +1018,51 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           receipt.fuelMessageLeafIndex != null &&
           receipt.fuelAmount
         ) {
-          try {
-            const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
-            const { buildClaimGasSettings } = await import('@/utils/fuelGasEstimate')
+          // FeeJuicePaymentMethodWithClaim calls FeeJuice.claim_and_end_setup(<sender>, ...) during the
+          // setup phase. The L1→L2 fuel message has the *configured fuel recipient* baked in as the
+          // claimable `to`, so when the override is set to a third party, the bridger's wallet would
+          // call claim_and_end_setup with the wrong `to` and the claim would revert. In that case the
+          // bridger has to pay token-claim gas from their existing FJ balance (no claim fee method),
+          // and the recipient claims their FJ separately via the share-claim-link flow.
+          const fuelRecipientForClaim = (fuel.fuelRecipient && fuel.fuelRecipient.length > 0
+            ? fuel.fuelRecipient
+            : aztecAddress
+          ).toLowerCase()
+          const fuelGoesToBridger = fuelRecipientForClaim === aztecAddress.toLowerCase()
+          if (!fuelGoesToBridger) {
+            console.log(
+              '[L1→L2] Fuel recipient is third-party — skipping FeeJuicePaymentMethodWithClaim for token claim. ' +
+                'Bridger must have existing FJ balance (or a sponsored fee method) to pay token-claim gas.',
+            )
+          } else {
+            try {
+              const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+              const { buildClaimGasSettings } = await import('@/utils/fuelGasEstimate')
 
-            const claimGasSettings = await buildClaimGasSettings()
-            console.log('[L1→L2] Public fuel claim params:', {
-              sender: aztecAddress,
-              claimAmount: receipt.fuelAmount.toString(),
-              claimSecretStr: backup.fuelSecret.toString().slice(0, 18) + '...',
-              messageLeafIndex: receipt.fuelMessageLeafIndexStr,
-              fuelMessageHash: receipt.fuelMessageHashStr,
-              maxFeesPerGas: {
-                feePerL2Gas: claimGasSettings.maxFeesPerGas.feePerL2Gas.toString(),
-                feePerDaGas: claimGasSettings.maxFeesPerGas.feePerDaGas.toString(),
-              },
-              gasLimitsOmitted: 'wallet estimates from preflight',
-            })
+              const claimGasSettings = await buildClaimGasSettings()
+              console.log('[L1→L2] Public fuel claim params:', {
+                sender: aztecAddress,
+                claimAmount: receipt.fuelAmount.toString(),
+                claimSecretStr: backup.fuelSecret.toString().slice(0, 18) + '...',
+                messageLeafIndex: receipt.fuelMessageLeafIndexStr,
+                fuelMessageHash: receipt.fuelMessageHashStr,
+                maxFeesPerGas: {
+                  feePerL2Gas: claimGasSettings.maxFeesPerGas.feePerL2Gas.toString(),
+                  feePerDaGas: claimGasSettings.maxFeesPerGas.feePerDaGas.toString(),
+                },
+                gasLimitsOmitted: 'wallet estimates from preflight',
+              })
 
-            const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
-              claimAmount: receipt.fuelAmount,
-              claimSecret: backup.fuelSecret,
-              messageLeafIndex: BigInt(receipt.fuelMessageLeafIndexStr!),
-            })
-            feeOption = { fee: { paymentMethod, gasSettings: claimGasSettings } }
-            console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim (public fuel)')
-          } catch (err) {
-            console.warn('[L1→L2] Failed to create FeeJuicePaymentMethodWithClaim, falling back to default:', err)
+              const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
+                claimAmount: receipt.fuelAmount,
+                claimSecret: backup.fuelSecret,
+                messageLeafIndex: BigInt(receipt.fuelMessageLeafIndexStr!),
+              })
+              feeOption = { fee: { paymentMethod, gasSettings: claimGasSettings } }
+              console.log('[L1→L2] Using FeeJuicePaymentMethodWithClaim for L2 claim (public fuel)')
+            } catch (err) {
+              console.warn('[L1→L2] Failed to create FeeJuicePaymentMethodWithClaim, falling back to default:', err)
+            }
           }
         }
 

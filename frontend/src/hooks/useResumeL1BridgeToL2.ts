@@ -543,21 +543,44 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
         throw new Error(`[Resume L1→L2] Failed to create PrivateMintAndPayFeePaymentMethod: ${err}`)
       }
     } else if (fuelSecret && fuelMessageLeafIndex && fuelAmount) {
-      // Public fuel path: FeeJuicePaymentMethodWithClaim
+      // Public fuel path: FeeJuicePaymentMethodWithClaim — but only when the bridged FJ is for
+      // the bridger themselves. If the deposit used a third-party fuel recipient (override flow),
+      // the L1→L2 fuel message has someone else's address as `to`, and the bridger's wallet would
+      // call FeeJuice.claim_and_end_setup with a `to` that doesn't match the message → revert.
+      // We detect this by reading the localStorage entry's `fuelClaimByOther` flag (set in
+      // bridgeL1ToL2.ts when the receipt is parsed). Legacy entries without the flag default to
+      // false (self), preserving prior behavior.
+      let fuelGoesToBridger = true
       try {
-        const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
-        const { buildClaimGasSettings } = await import('@/utils/fuelGasEstimate')
+        const stored = localStorage.getItem(LS_KEY_BRIDGE_DEPOSITS)
+        const claims = stored ? JSON.parse(stored) : []
+        const entry = claims.find((c: any) => c.id === operationId)
+        if (entry?.fuelClaimByOther) fuelGoesToBridger = false
+      } catch {
+        // localStorage unavailable or malformed — assume self for compatibility.
+      }
 
-        const claimGasSettings = await buildClaimGasSettings()
-        console.log('[Resume L1→L2] Building FeeJuicePaymentMethodWithClaim (public fuel)')
-        const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
-          claimAmount: BigInt(fuelAmount),
-          claimSecret: Fr.fromString(fuelSecret),
-          messageLeafIndex: BigInt(fuelMessageLeafIndex),
-        })
-        feeOption = { fee: { paymentMethod, gasSettings: claimGasSettings } }
-      } catch (err) {
-        throw new Error(`[Resume L1→L2] Failed to create FeeJuicePaymentMethodWithClaim: ${err}`)
+      if (!fuelGoesToBridger) {
+        console.log(
+          '[Resume L1→L2] Fuel recipient is third-party — skipping FeeJuicePaymentMethodWithClaim. ' +
+            'Bridger must have existing FJ balance to pay token-claim gas.',
+        )
+      } else {
+        try {
+          const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+          const { buildClaimGasSettings } = await import('@/utils/fuelGasEstimate')
+
+          const claimGasSettings = await buildClaimGasSettings()
+          console.log('[Resume L1→L2] Building FeeJuicePaymentMethodWithClaim (public fuel)')
+          const paymentMethod = new FeeJuicePaymentMethodWithClaim(AztecAddress.fromString(aztecAddress), {
+            claimAmount: BigInt(fuelAmount),
+            claimSecret: Fr.fromString(fuelSecret),
+            messageLeafIndex: BigInt(fuelMessageLeafIndex),
+          })
+          feeOption = { fee: { paymentMethod, gasSettings: claimGasSettings } }
+        } catch (err) {
+          throw new Error(`[Resume L1→L2] Failed to create FeeJuicePaymentMethodWithClaim: ${err}`)
+        }
       }
     }
 
