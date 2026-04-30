@@ -26,6 +26,7 @@ import { useCountdown } from 'usehooks-ts'
 import TextButton from '@/components/TextButton'
 import { useTokenPrices } from '@/utils/coinGeckoPrice'
 import { getTokenPriceUsd } from '@/utils/fuelPricing'
+import FuelClaimLinkPanel from '@/components/FuelClaimLinkPanel'
 
 export default function ProgressPage() {
   const router = useRouter()
@@ -457,6 +458,8 @@ export default function ProgressPage() {
           )}
         </div>
       </div>
+
+      <FuelClaimLinkPanel />
 
       <div className='flex flex-row items-center justify-center px-5 mt-2 gap-4'>
         {l1TxUrl && (

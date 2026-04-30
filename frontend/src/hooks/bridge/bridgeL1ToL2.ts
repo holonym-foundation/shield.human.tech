@@ -72,6 +72,12 @@ export interface L2ClaimResult {
 export interface FuelParams {
   fuelAmount: bigint
   fuelQuote: FuelQuote
+  /**
+   * Optional override for the L2 address that will receive the bridged FeeJuice.
+   * Only honored for public fuel — private fuel always routes to the FPC.
+   * Defaults to the bridger's own L2 address when omitted.
+   */
+  fuelRecipient?: string
 }
 
 /** Attestation data fetched from /api/attestation/poch for private deposits. */
@@ -742,6 +748,11 @@ export async function generateAndBackupClaimSecret(params: {
   if (privateFuelSalt) payloadToEncrypt.privateFuelSalt = privateFuelSalt.toString()
   if (privateFuelSecret) payloadToEncrypt.privateFuelSecret = privateFuelSecret.toString()
   if (privateFuelSecretHash) payloadToEncrypt.privateFuelSecretHash = privateFuelSecretHash.toString()
+  // Override fuel recipient: persisted inside the blob (not the DB) so any of the bridger's
+  // devices can re-decrypt and rebuild the claim link without trusting the server with secrets.
+  if (params.fuel?.fuelRecipient && params.fuel.fuelRecipient !== aztecAddress) {
+    payloadToEncrypt.fuelRecipient = params.fuel.fuelRecipient
+  }
   console.log('[L1→L2] Payload to encrypt:', {
     amount: payloadToEncrypt.amount,
     l1Address: payloadToEncrypt.l1Address,
@@ -1076,6 +1087,11 @@ export async function sendL1DepositTransaction(params: {
   const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as const
   const fuelSecretHashHex = ((privateFuel ? privateFuel.secretHash : fuel?.fuelSecretHash)?.toString() ??
     zeroBytes32) as `0x${string}`
+  // Public fuel can be sent to a third-party L2 address (FJ is non-transferable, so this is the
+  // only way to fund someone else's account during bridging). Private fuel always routes to the FPC.
+  const resolvedPublicFuelRecipient = (fuel?.fuelRecipient && fuel.fuelRecipient.length > 0
+    ? fuel.fuelRecipient
+    : aztecAddress) as `0x${string}`
   const permit2 = await signPermit2Transfer({
     l1Address,
     tokenPortal: l1PortalAddress as `0x${string}`,
@@ -1083,7 +1099,7 @@ export async function sendL1DepositTransaction(params: {
     totalAmount: amount,
     fuelAmount: fuel?.fuelAmount ?? 0n,
     aztecRecipient: aztecAddress as `0x${string}`,
-    fuelRecipient: (privateFuel ? privateFuel.fpcAddress : fuel ? aztecAddress : zeroBytes32) as `0x${string}`,
+    fuelRecipient: (privateFuel ? privateFuel.fpcAddress : fuel ? resolvedPublicFuelRecipient : zeroBytes32) as `0x${string}`,
     tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
     fuelSecretHash: fuelSecretHashHex,
     minFuelOutput: fuel?.fuelQuote.minOutput ?? 0n,
@@ -1132,7 +1148,7 @@ export async function sendL1DepositTransaction(params: {
           totalAmount: amount,
           fuelAmount: fuel.fuelAmount,
           aztecRecipient: aztecAddress as `0x${string}`,
-          fuelRecipient: (privateFuel ? privateFuel.fpcAddress : aztecAddress) as `0x${string}`,
+          fuelRecipient: (privateFuel ? privateFuel.fpcAddress : resolvedPublicFuelRecipient) as `0x${string}`,
           tokenSecretHash: claimSecretHash.toString() as `0x${string}`,
           fuelSecretHash: fuelSecretHashHex,
           minFuelOutput: fuel.fuelQuote.minOutput,
@@ -1152,7 +1168,9 @@ export async function sendL1DepositTransaction(params: {
       'fuelAmount:',
       fuel.fuelAmount.toString(),
       'fuelRecipient:',
-      privateFuel ? privateFuel.fpcAddress : aztecAddress,
+      privateFuel ? privateFuel.fpcAddress : resolvedPublicFuelRecipient,
+      'fuelRecipientIsThirdParty:',
+      !privateFuel && resolvedPublicFuelRecipient.toLowerCase() !== (aztecAddress as string).toLowerCase(),
     )
     txHash = await requestWaapWallet(WAAP_METHOD.eth_sendTransaction, [
       {
@@ -1345,6 +1363,14 @@ export async function waitForReceiptAndExtractEvent(params: {
       claimAmount: claimAmount.toString(),
     })
 
+    // Persist where the fuel actually went so downstream UI can show "fuel sent to <address>"
+    // and skip auto-claim for the bridger when the recipient is someone else. The bridger still
+    // owns the claim secret and can hand it off; we just don't want to auto-prompt them to claim
+    // a balance they can't use.
+    const resolvedFuelRecipientForStorage =
+      fuel.fuelRecipient && fuel.fuelRecipient.length > 0 ? fuel.fuelRecipient : aztecAddress
+    const fuelIsForSelf = resolvedFuelRecipientForStorage.toLowerCase() === aztecAddress.toLowerCase()
+
     updateLocalStorageItem(
       LS_KEY_BRIDGE_DEPOSITS,
       (c: any) => c.claimSecretHash === claimSecretHash.toString() && c.status === BridgeOperationStatus.pending,
@@ -1355,6 +1381,8 @@ export async function waitForReceiptAndExtractEvent(params: {
         fuelMessageHash: fuelMessageHashStr,
         fuelMessageLeafIndex: fuelMessageLeafIndexStr,
         fuelAmount: fuelAmountReceived.toString(),
+        fuelRecipient: resolvedFuelRecipientForStorage,
+        fuelClaimByOther: !fuelIsForSelf,
       }),
     )
 

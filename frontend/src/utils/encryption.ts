@@ -228,6 +228,12 @@ export interface BridgeActivityData {
   privateFuelSalt?: string
   privateFuelSecret?: string
   privateFuelSecretHash?: string
+  /**
+   * L2 address of the fuel recipient when the bridger overrode the default (own L2). Persisted
+   * inside the encrypted blob so the bridger can rebuild the recipient claim link from any device
+   * after re-decryption — the DB never sees this field, only the encrypted ciphertext.
+   */
+  fuelRecipient?: string
 
   // L1→L2: snapshot stored in blob for offline recovery
   l1BlockNumberBeforeTx?: string

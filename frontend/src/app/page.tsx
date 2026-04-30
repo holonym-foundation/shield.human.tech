@@ -1,7 +1,6 @@
 'use client'
 import TextButton from '@/components/TextButton'
 import { ChangeEvent, useCallback, useEffect, useState, useRef } from 'react'
-import { Oval } from 'react-loader-spinner'
 import RootStyle from '@/components/RootStyle'
 import SBT from '@/components/model/SBT'
 import StyledImage from '@/components/StyledImage'
@@ -52,9 +51,7 @@ import BalanceCard from '@/components/BalanceCard'
 import { logInfo, logError } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { AztecLoginMethod } from '@/types/wallet'
-import EmojiVerificationModal from '@/components/model/EmojiVerificationModal'
-import AccountSelectorModal from '@/components/model/AccountSelectorModal'
-import WalletDiscoveryModal from '@/components/model/WalletDiscoveryModal'
+import AztecWalletConnectionModals from '@/components/AztecWalletConnectionModals'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useRouter } from 'next/navigation'
@@ -86,6 +83,7 @@ export default function Home() {
   const [currentSBTChain, setCurrentSBTChain] = useState<'Ethereum' | 'Aztec'>('Ethereum')
   const [bridgeCompleted, setBridgeCompleted] = useState(false)
   const [fuelSufficient, setFuelSufficient] = useState(true)
+  const [fuelRecipientValid, setFuelRecipientValid] = useState(true)
 
   // Notification system
   const notify = useToast()
@@ -104,12 +102,16 @@ export default function Home() {
     fuelEnabled,
     fuelAmount,
     fuelType,
+    fuelRecipientOverride,
     setFuelEnabled,
     setFuelAmount,
     setFuelType,
+    setFuelRecipientOverride,
   } = useBridgeStore()
 
-  // Get wallet state from useWalletStore
+  // Get wallet state from useWalletStore. Modal-driving fields (walletConnectionPhase,
+  // discoveredWallets, verificationEmojis, etc.) are consumed inside <AztecWalletConnectionModals />
+  // and don't need to be pulled in here.
   const {
     isWaapConnected,
     isAztecConnected,
@@ -121,27 +123,10 @@ export default function Home() {
     waapWalletIcon: walletIcon,
     waapWalletProvider: walletProvider,
     getWaapWalletProvider: getWalletProvider,
-    // Wallet SDK connection flow
-    walletConnectionPhase,
-    verificationEmojis,
-    discoveredWallets,
-    selectWallet,
-    confirmWalletConnection,
-    cancelWalletConnection,
-    // Account selection
-    availableAccounts,
-    selectAccount,
-  } = useWalletStore()
-
-  // Get UI state from walletStore
-  const {
     showWalletModal,
-    showWalletInstallPrompt,
     setShowWalletModal,
-    setShowWalletInstallPrompt,
     aztecAddress,
     waapAddress,
-    isAztecConnecting,
   } = useWalletStore()
 
   // Success callbacks
@@ -433,48 +418,7 @@ export default function Home() {
       <RootStyle>
         {/* Maintenance Overlay - blocks all interactions when enabled */}
         {MAINTENANCE_MODE && <MaintenanceOverlay title={MAINTENANCE_TITLE} message={MAINTENANCE_MESSAGE} />}
-        {showWalletInstallPrompt && (
-          <WalletDiscoveryModal
-            isOpen={true}
-            wallets={[]}
-            isDiscovering={false}
-            onSelectWallet={() => {}}
-            onClose={() => setShowWalletInstallPrompt(false)}
-          />
-        )}
-        {(walletConnectionPhase === 'discovering' || walletConnectionPhase === 'selecting') && (
-          <WalletDiscoveryModal
-            isOpen={true}
-            wallets={discoveredWallets}
-            isDiscovering={walletConnectionPhase === 'discovering'}
-            onSelectWallet={selectWallet}
-            onClose={cancelWalletConnection}
-          />
-        )}
-        {walletConnectionPhase === 'verifying' && verificationEmojis && (
-          <EmojiVerificationModal
-            isOpen={true}
-            emojis={verificationEmojis}
-            isConfirming={isAztecConnecting}
-            onConfirm={confirmWalletConnection}
-            onCancel={cancelWalletConnection}
-          />
-        )}
-        {walletConnectionPhase === 'requesting' && (
-          <div className="absolute inset-0 bg-latest-grey-1000 z-20 rounded-lg flex flex-col items-center justify-center gap-4">
-            <Oval height={40} width={40} color="#3b82f6" secondaryColor="#93c5fd" strokeWidth={4} />
-            <p className="text-latest-grey-600 text-14 font-medium">Requesting permissions...</p>
-          </div>
-        )}
-        {walletConnectionPhase === 'account-select' && (
-          <AccountSelectorModal
-            isOpen={true}
-            accounts={availableAccounts}
-            onSelect={selectAccount}
-            onCancel={cancelWalletConnection}
-            title="Select Account"
-          />
-        )}
+        <AztecWalletConnectionModals />
         {selectNetwork && (
           <NetworkModal
             setNetworkData={handleSelectNetwork}
@@ -570,7 +514,11 @@ export default function Home() {
                         fuelType={fuelType}
                         onFuelTypeChange={setFuelType}
                         onSufficiencyChange={setFuelSufficient}
+                        onRecipientValidityChange={setFuelRecipientValid}
                         isPrivacyModeEnabled={isPrivacyModeEnabled}
+                        selfAztecAddress={aztecAddress ?? ''}
+                        fuelRecipientOverride={fuelRecipientOverride}
+                        onFuelRecipientOverrideChange={setFuelRecipientOverride}
                       />
                     )}
                   <TransactionBreakdown isOpen={false} onToggle={() => setShowBreakdown(true)} />
@@ -593,7 +541,7 @@ export default function Home() {
           <div className="self-end">
             <div className="rounded-[16px] border border-[#D4D4D4] bg-white shadow-[0px_0px_16px_0px_rgba(0,0,0,0.16)] flex flex-col items-center gap-[16px] pt-[16px] pr-[10px] pb-0 pl-[10px] w-full">
               <BridgeActionButton
-                isDisabled={!fuelSufficient}
+                isDisabled={!fuelSufficient || !fuelRecipientValid}
                 // Connection states
                 isWaapConnected={isWaapConnected}
                 connectWaapWallet={connectWaapWallet}

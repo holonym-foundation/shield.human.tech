@@ -6,6 +6,7 @@ import RootStyle from '@/components/RootStyle'
 import BridgeHeader from '@/components/BridgeHeader'
 import ActivityCard from '@/components/ActivityCard'
 import TextButton from '@/components/TextButton'
+import FuelClaimLinkModal from '@/components/FuelClaimLinkModal'
 import {
   useBridgeOperations,
   decryptOperationPayload,
@@ -19,11 +20,14 @@ import {
 import { useWalletStore } from '@/stores/walletStore'
 import { useToast } from '@/hooks/useToast'
 import { BridgeDirection } from '@/types/bridge'
+import { buildFuelClaimUrl } from '@/utils/fuelClaimLink'
 
 export default function ActivityPage() {
   const router = useRouter()
   const notify = useToast()
   const [resumingId, setResumingId] = useState<string | null>(null)
+  const [sharingId, setSharingId] = useState<string | null>(null)
+  const [shareLink, setShareLink] = useState<{ link: string; recipient: string } | null>(null)
 
   const { waapAddress: l1Address, signWaapMessage } = useWalletStore()
   const { setRecovery, setWithdrawalRecovery, setDirection } = useBridgeStore()
@@ -147,6 +151,61 @@ export default function ActivityPage() {
     [l1Address, signWaapMessage, setRecovery, setWithdrawalRecovery, setDirection, router, notify],
   )
 
+  const handleShareFuelClaim = useCallback(
+    async (operation: BridgeOperation) => {
+      if (!l1Address) {
+        notify('error', 'Please connect your Ethereum wallet first')
+        return
+      }
+      if (
+        !operation.fuelMessageHash ||
+        !operation.fuelMessageLeafIndex ||
+        !operation.fuelAmount ||
+        !operation.l1TxHash
+      ) {
+        notify('error', 'Missing fuel data for this bridge — cannot rebuild the claim link.')
+        return
+      }
+      setSharingId(operation.id)
+      try {
+        const decrypted = await decryptOperationPayload(operation, l1Address, signWaapMessage)
+        if (!decrypted) {
+          throw new Error(
+            'Could not decrypt operation data. Make sure you are using the same wallet that created this bridge.',
+          )
+        }
+        if (!decrypted.fuelSecret) {
+          throw new Error('No fuel secret in this bridge — was it a public-fuel deposit?')
+        }
+        // The override field is only set in the blob when the bridger sent fuel to a third party.
+        // Self-fuel bridges never write it, so a missing field here means there's nothing to share.
+        const recipient = decrypted.fuelRecipient
+        if (!recipient || recipient === decrypted.l2Address) {
+          notify(
+            'info',
+            'This bridge sent fuel to your own L2 account — no claim link is needed; the fuel is yours.',
+          )
+          return
+        }
+        const link = buildFuelClaimUrl(window.location.origin, {
+          recipient,
+          claimAmount: operation.fuelAmount,
+          claimSecret: decrypted.fuelSecret,
+          messageLeafIndex: operation.fuelMessageLeafIndex,
+          fuelMessageHash: operation.fuelMessageHash,
+          l1TxHash: operation.l1TxHash,
+        })
+        setShareLink({ link, recipient })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to build claim link'
+        notify('error', msg)
+      } finally {
+        setSharingId(null)
+      }
+    },
+    [l1Address, signWaapMessage, notify],
+  )
+
   return (
     <RootStyle className='overflow-y-auto'>
       <div className='px-5 pt-5 pb-5 flex flex-col h-full'>
@@ -181,6 +240,8 @@ export default function ActivityPage() {
               operation={op}
               onResume={handleResume}
               resuming={resumingId === op.id}
+              onShareFuelClaim={handleShareFuelClaim}
+              sharingFuelClaim={sharingId === op.id}
             />
           ))}
         </div>
@@ -191,6 +252,12 @@ export default function ActivityPage() {
           </TextButton>
         </div>
       </div>
+      <FuelClaimLinkModal
+        isOpen={!!shareLink}
+        link={shareLink?.link ?? ''}
+        recipient={shareLink?.recipient ?? ''}
+        onClose={() => setShareLink(null)}
+      />
     </RootStyle>
   )
 }
