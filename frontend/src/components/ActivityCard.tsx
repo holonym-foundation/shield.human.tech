@@ -25,13 +25,32 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.className}`}>{style.label}</span>
 }
 
+/**
+ * True when the operation has the fuel-leg fields populated. Whether the fuel was sent to a
+ * third party (as opposed to the bridger's own L2) is in the encrypted blob, so we can't tell
+ * here — we just expose the share button whenever fuel data exists, and let the click handler
+ * decrypt and decide.
+ */
+function hasFuelClaimData(op: BridgeOperation): boolean {
+  if (op.direction !== 'L1_TO_L2') return false
+  return !!op.fuelMessageHash && !!op.fuelMessageLeafIndex && !!op.fuelAmount && !!op.l1TxHash
+}
+
 interface ActivityCardProps {
   operation: BridgeOperation
   onResume: (operation: BridgeOperation) => void
   resuming: boolean
+  onShareFuelClaim?: (operation: BridgeOperation) => void
+  sharingFuelClaim?: boolean
 }
 
-export default function ActivityCard({ operation, onResume, resuming }: ActivityCardProps) {
+export default function ActivityCard({
+  operation,
+  onResume,
+  resuming,
+  onShareFuelClaim,
+  sharingFuelClaim,
+}: ActivityCardProps) {
   const decimals = operation.tokenDecimalsL1 ?? L1_TOKEN_METADATA.decimals
   const tokenSymbol = operation.tokenSymbol ?? operation.tokenSymbolL1 ?? L1_TOKEN_METADATA.symbol
   const amount =
@@ -97,15 +116,26 @@ export default function ActivityCard({ operation, onResume, resuming }: Activity
           </a>
         )}
 
-        {showResume && (
-          <button
-            onClick={() => onResume(operation)}
-            disabled={resuming}
-            className="ml-auto text-xs font-semibold text-white bg-black hover:bg-gray-800 disabled:bg-gray-400 px-3 py-1 rounded-lg"
-          >
-            {resuming ? 'Decrypting...' : 'Resume'}
-          </button>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {onShareFuelClaim && hasFuelClaimData(operation) && (
+            <button
+              onClick={() => onShareFuelClaim(operation)}
+              disabled={!!sharingFuelClaim}
+              className="text-xs font-semibold text-black bg-amber-100 hover:bg-amber-200 disabled:opacity-50 px-3 py-1 rounded-lg"
+            >
+              {sharingFuelClaim ? 'Decrypting…' : 'Share fuel claim'}
+            </button>
+          )}
+          {showResume && (
+            <button
+              onClick={() => onResume(operation)}
+              disabled={resuming}
+              className="text-xs font-semibold text-white bg-black hover:bg-gray-800 disabled:bg-gray-400 px-3 py-1 rounded-lg"
+            >
+              {resuming ? 'Decrypting...' : 'Resume'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -255,7 +255,19 @@ export interface BridgeL1ToL2Params {
    * When `fuel.enabled` is true and no `fuelQuote` is supplied alongside, the SDK
    * auto-builds the V4 quote internally via buildSwapCandidates + getBestRoute.
    */
-  fuel?: { enabled: boolean; amount: string; fuelType?: 'public' | 'private'; slippageBps?: number }
+  fuel?: {
+    enabled: boolean
+    amount: string
+    fuelType?: 'public' | 'private'
+    slippageBps?: number
+    /**
+     * Optional override for the L2 address that will receive the bridged FeeJuice (public fuel only).
+     * Useful when the bridger wants to fund someone else's L2 account during bridging — FJ is
+     * non-transferable, so this is the only way. Ignored for private fuel (always FPC).
+     * Defaults to the bridger's own L2 address when omitted.
+     */
+    recipient?: string
+  }
   /** Pre-computed fuel quote (required when fuel.enabled is true) */
   fuelQuote?: FuelQuote
   /** Callback to send an L1 transaction (e.g. via wallet provider) */
@@ -417,6 +429,12 @@ export interface BridgeActivityData {
   privateFuelSalt?: string
   privateFuelSecret?: string
   privateFuelSecretHash?: string
+  /**
+   * L2 address of the fuel recipient when the bridger overrode the default (own L2). Persisted
+   * inside the encrypted blob so the bridger can rebuild the recipient claim link from any device
+   * after re-decryption — the DB never sees this field, only the encrypted ciphertext.
+   */
+  fuelRecipient?: string
   // Portal address snapshot (for resume/recovery)
   portalAddressL1?: string
   // For L2→L1
@@ -601,6 +619,12 @@ export interface FuelQuote {
 export interface FuelParams {
   fuelAmount: bigint
   fuelQuote: FuelQuote
+  /**
+   * Optional override for the L2 address that will receive the bridged FeeJuice.
+   * Only honored for public fuel — private fuel always routes to the FPC.
+   * Defaults to the bridger's own L2 address when omitted.
+   */
+  fuelRecipient?: string
 }
 
 // ─── Attestation Eligibility Check Types ─────────────────────────────

@@ -1,7 +1,8 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { formatFjAmount, getFeeJuicePriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
 import { buildSwapCandidates, getBestRoute } from '@/utils/fuelPricing'
 import { BRIDGED_FPC_ADDRESS, L1_RPC_URL } from '@/config'
@@ -23,7 +24,16 @@ interface FuelToggleProps {
   fuelType: 'public' | 'private'
   onFuelTypeChange: (type: 'public' | 'private') => void
   onSufficiencyChange?: (sufficient: boolean) => void
+  /**
+   * Whether the third-party fuel-recipient form is in a valid state. The parent uses this to
+   * gate the bridge button so we don't accept an unparseable address.
+   */
+  onRecipientValidityChange?: (valid: boolean) => void
   isPrivacyModeEnabled?: boolean
+  /** L2 address of the bridger — used as the default fuel recipient and for "self" comparisons. */
+  selfAztecAddress?: string
+  fuelRecipientOverride: string
+  onFuelRecipientOverrideChange: (address: string) => void
 }
 
 const USD_PRESETS = [1, 5, 10]
@@ -145,6 +155,12 @@ function QuoteSkeleton() {
   )
 }
 
+function shortenAztecAddress(addr: string): string {
+  if (!addr) return ''
+  if (addr.length <= 14) return addr
+  return `${addr.slice(0, 8)}…${addr.slice(-6)}`
+}
+
 const FuelToggle: React.FC<FuelToggleProps> = ({
   fuelEnabled,
   fuelAmount,
@@ -161,7 +177,11 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   fuelType,
   onFuelTypeChange,
   onSufficiencyChange,
+  onRecipientValidityChange,
   isPrivacyModeEnabled = false,
+  selfAztecAddress = '',
+  fuelRecipientOverride,
+  onFuelRecipientOverrideChange,
 }) => {
   const bridgeNum = Number(bridgeAmount) || 0
   const fuelNum = Number(fuelAmount) || 0
@@ -175,6 +195,67 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
       onFuelTypeChange('private')
     }
   }, [isPrivacyModeEnabled, fuelType, onFuelTypeChange])
+
+  // Recipient-override UI is only shown for public fuel; private fuel always routes to the FPC.
+  const recipientOverrideAvailable = fuelType === 'public'
+  const [recipientOverrideOpen, setRecipientOverrideOpen] = useState(false)
+  // Auto-open the override section if the store already has an address (e.g. on page reload).
+  useEffect(() => {
+    if (recipientOverrideAvailable && fuelRecipientOverride.trim().length > 0) {
+      setRecipientOverrideOpen(true)
+    }
+  }, [recipientOverrideAvailable, fuelRecipientOverride])
+  // Close + clear when fuel mode flips to private (FJ goes to FPC, not a user L2).
+  useEffect(() => {
+    if (!recipientOverrideAvailable) {
+      setRecipientOverrideOpen(false)
+      if (fuelRecipientOverride.length > 0) onFuelRecipientOverrideChange('')
+    }
+  }, [recipientOverrideAvailable, fuelRecipientOverride, onFuelRecipientOverrideChange])
+
+  const recipientStatus = useMemo<{
+    valid: boolean
+    isThirdParty: boolean
+    error: string | null
+    parsed: string | null
+  }>(() => {
+    const raw = fuelRecipientOverride.trim()
+    if (raw.length === 0) {
+      return { valid: true, isThirdParty: false, error: null, parsed: null }
+    }
+    try {
+      const parsed = AztecAddress.fromString(raw).toString()
+      const isSelf = !!selfAztecAddress && parsed.toLowerCase() === selfAztecAddress.toLowerCase()
+      return { valid: true, isThirdParty: !isSelf, error: null, parsed }
+    } catch {
+      return { valid: false, isThirdParty: false, error: 'Not a valid Aztec address', parsed: null }
+    }
+  }, [fuelRecipientOverride, selfAztecAddress])
+
+  // Inline confirmation that the user understands FJ is non-transferable. Only required when
+  // the recipient resolves to a third-party L2 (different from self).
+  const [confirmedThirdParty, setConfirmedThirdParty] = useState(false)
+  useEffect(() => {
+    // Reset the checkbox when the override clears or flips to self — guards against stale consent.
+    if (!recipientStatus.isThirdParty) setConfirmedThirdParty(false)
+  }, [recipientStatus.isThirdParty])
+
+  // Bubble validity up so the parent can disable the bridge button if the override is broken
+  // or the third-party warning hasn't been acknowledged.
+  useEffect(() => {
+    const ok =
+      !recipientOverrideAvailable ||
+      fuelRecipientOverride.trim().length === 0 ||
+      (recipientStatus.valid && (!recipientStatus.isThirdParty || confirmedThirdParty))
+    onRecipientValidityChange?.(ok)
+  }, [
+    recipientOverrideAvailable,
+    fuelRecipientOverride,
+    recipientStatus.valid,
+    recipientStatus.isThirdParty,
+    confirmedThirdParty,
+    onRecipientValidityChange,
+  ])
 
   const { prices, isLoading: pricesLoading, error: pricesError } = useTokenPrices()
 
@@ -317,6 +398,84 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
                       Not enough gas: ~{formatFjAmount(fjOutput)} FJ from swap but ~{feeLimitFj} FJ needed for L2 claim.
                       Increase the fuel amount.
                     </p>
+                  )}
+                </div>
+              )}
+
+              {recipientOverrideAvailable && (
+                <div className="border-t border-gray-200 pt-2 mt-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-latest-grey-700 font-medium">Send fee juice to</span>
+                      <span className="text-latest-grey-500">
+                        {recipientStatus.parsed && recipientStatus.isThirdParty
+                          ? shortenAztecAddress(recipientStatus.parsed)
+                          : selfAztecAddress
+                            ? `${shortenAztecAddress(selfAztecAddress)} (this wallet)`
+                            : 'this wallet'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !recipientOverrideOpen
+                        setRecipientOverrideOpen(next)
+                        if (!next) {
+                          // Closing the panel cancels any pending override.
+                          if (fuelRecipientOverride.length > 0) onFuelRecipientOverrideChange('')
+                          setConfirmedThirdParty(false)
+                        }
+                      }}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {recipientOverrideOpen ? 'Cancel' : 'Edit'}
+                    </button>
+                  </div>
+
+                  {recipientOverrideOpen && (
+                    <div className="mt-2 space-y-2">
+                      <input
+                        type="text"
+                        spellCheck={false}
+                        autoComplete="off"
+                        placeholder="Aztec L2 address (0x…)"
+                        value={fuelRecipientOverride}
+                        onChange={(e) => onFuelRecipientOverrideChange(e.target.value.trim())}
+                        className={`w-full px-3 py-1.5 text-xs border rounded-md focus:outline-none focus:ring-1 ${
+                          recipientStatus.error
+                            ? 'border-red-400 focus:ring-red-400'
+                            : 'border-gray-300 focus:ring-blue-500'
+                        }`}
+                      />
+                      {recipientStatus.error && (
+                        <p className="text-red-500">{recipientStatus.error}</p>
+                      )}
+                      {recipientStatus.valid && recipientStatus.isThirdParty && (
+                        <div className="rounded-md bg-amber-50 border border-amber-200 p-2 space-y-1.5">
+                          <p className="text-amber-800">
+                            <span className="font-semibold">Heads up:</span> fee juice is non-transferable on Aztec.
+                            Once it lands at this address it cannot be moved. The recipient will need a claim
+                            link from you to actually receive it.
+                          </p>
+                          <p className="text-amber-800">
+                            Your token claim will pay L2 gas from your <span className="font-semibold">existing</span>{' '}
+                            Fee Juice balance{feeJuiceBalance ? ` (currently ${feeJuiceBalance})` : ''} — make sure
+                            you have enough or your token claim will fail.
+                          </p>
+                          <label className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={confirmedThirdParty}
+                              onChange={(e) => setConfirmedThirdParty(e.target.checked)}
+                              className="mt-0.5 shrink-0"
+                            />
+                            <span className="text-amber-800">
+                              I&apos;ve double-checked the address and understand this is irreversible.
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               )}

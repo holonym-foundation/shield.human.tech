@@ -542,6 +542,11 @@ export async function bridgeL1ToL2(
       payloadToEncrypt.fuelAmount = fuel.amount ?? '0'
       if (tokenConfig.decimals != null) payloadToEncrypt.fuelDecimals = tokenConfig.decimals
     }
+    // Override fuel recipient: persisted inside the blob (not the DB) so any of the bridger's
+    // devices can re-decrypt and rebuild the claim link without trusting the server with secrets.
+    if (fuel?.recipient && fuel.recipient !== l2Address) {
+      payloadToEncrypt.fuelRecipient = fuel.recipient
+    }
 
     const encrypted = await encryptData(JSON.stringify(payloadToEncrypt), encryptionKey)
 
@@ -789,8 +794,14 @@ export async function bridgeL1ToL2(
           'Private fuel requires bridgedFpcAddress in the active deployment config.',
         )
       }
+      // Public fuel can be sent to a third-party L2 address (FJ is non-transferable, so this is
+      // the only way to fund someone else's account during bridging). Private fuel always routes
+      // to the FPC.
+      const resolvedPublicFuelRecipient = (fuel?.recipient && fuel.recipient.length > 0
+        ? fuel.recipient
+        : l2Address) as `0x${string}`
       const fuelRecipientOnchain = (
-        isPrivateFuel ? config.bridgedFpcAddress : l2Address
+        isPrivateFuel ? config.bridgedFpcAddress : resolvedPublicFuelRecipient
       ) as `0x${string}`
 
       // Sign Permit2 witness-bound transfer
@@ -1095,7 +1106,22 @@ export async function bridgeL1ToL2(
       fuelAmount: fuelAmountReceived?.toString(),
     })
 
-    // Persist deposit receipt data to localStorage with status: 'deposited'
+    // Persist where the fuel actually went so downstream UI can show "fuel sent to <address>"
+    // and skip auto-claim for the bridger when the recipient is someone else. The bridger still
+    // owns the claim secret and can hand it off; we just don't want to auto-prompt them to claim
+    // a balance they can't use.
+    const resolvedFuelRecipientForStorage =
+      fuel?.recipient && fuel.recipient.length > 0 ? fuel.recipient : l2Address
+    const fuelIsForSelf = resolvedFuelRecipientForStorage.toLowerCase() === l2Address.toLowerCase()
+
+    // Persist deposit receipt data to localStorage with status: 'deposited'.
+    //
+    // When the bridger routed fuel to a third party, mirror the plaintext fuelSecret into the
+    // bridger's local entry so the share-claim-link UI survives a page reload (the secret
+    // normally lives only in the encrypted backup blob). Security: anyone who reads this
+    // localStorage entry can submit the L2 claim, but the FJ always mints to the recipient
+    // address baked into the L1 message — they can only spend their own gas to deliver the
+    // claim, not redirect the funds.
     updateDeposit(
       (c: any) => c.id === operationId,
       (c: any) => ({
@@ -1109,6 +1135,10 @@ export async function bridgeL1ToL2(
         ...(fuelMessageLeafIndexStr ? { fuelMessageLeafIndex: fuelMessageLeafIndexStr } : {}),
         ...(fuelAmountReceived != null ? { fuelAmount: fuelAmountReceived.toString() } : {}),
         ...(amountAfterFee != null ? { claimAmount: amountAfterFee.toString() } : {}),
+        ...(fuel?.enabled
+          ? { fuelRecipient: resolvedFuelRecipientForStorage, fuelClaimByOther: !fuelIsForSelf }
+          : {}),
+        ...(!fuelIsForSelf && fuelSecret ? { fuelSecret: fuelSecret.toString() } : {}),
       }),
     )
 
@@ -1215,19 +1245,34 @@ export async function bridgeL1ToL2(
         },
       }
     } else if (isFuelEnabled && fuelSecret && fuelMessageLeafIndexStr && fuelAmountReceived) {
-      // Public fuel: FeeJuicePortal deposited FJ directly to claimer's aztecAddress.
-      const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
-      const { buildClaimGasSettings } = await import('../fuelGasEstimate')
-      const paymentMethod = new FeeJuicePaymentMethodWithClaim(
-        AztecAddress.fromString(l2Address),
-        {
-          claimAmount: fuelAmountReceived,
-          claimSecret: fuelSecret,
-          messageLeafIndex: BigInt(fuelMessageLeafIndexStr),
-        },
-      )
-      const gasSettings = await buildClaimGasSettings(aztecNode)
-      feeOption = { fee: { paymentMethod, gasSettings } }
+      // Public fuel: FeeJuicePortal deposited FJ to the configured fuel recipient.
+      // FeeJuicePaymentMethodWithClaim calls FeeJuice.claim_and_end_setup(<sender>, ...) during
+      // the setup phase. The L1→L2 fuel message has the *configured fuel recipient* baked in as
+      // the claimable `to`, so when the override sends fuel to a third party, the bridger's
+      // wallet would call claim_and_end_setup with a `to` that doesn't match the message and the
+      // claim would revert. In that case the bridger has to pay token-claim gas from their
+      // existing FJ balance (no claim fee method); the recipient claims FJ separately via the
+      // share-claim-link flow.
+      const fuelRecipientForClaim = (
+        fuel?.recipient && fuel.recipient.length > 0 ? fuel.recipient : l2Address
+      ).toLowerCase()
+      const fuelGoesToBridger = fuelRecipientForClaim === l2Address.toLowerCase()
+      if (fuelGoesToBridger) {
+        const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+        const { buildClaimGasSettings } = await import('../fuelGasEstimate')
+        const paymentMethod = new FeeJuicePaymentMethodWithClaim(
+          AztecAddress.fromString(l2Address),
+          {
+            claimAmount: fuelAmountReceived,
+            claimSecret: fuelSecret,
+            messageLeafIndex: BigInt(fuelMessageLeafIndexStr),
+          },
+        )
+        const gasSettings = await buildClaimGasSettings(aztecNode)
+        feeOption = { fee: { paymentMethod, gasSettings } }
+      }
+      // else: third-party fuel — leave feeOption undefined; the bridger pays token-claim gas
+      // from their own balance, and the recipient redeems via the share-claim-link UI.
     }
 
     // When fuel is enabled, SwapBridgeRouter splits totalAmount into amount (token) + fuel.

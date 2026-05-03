@@ -12,6 +12,7 @@ import { WalletType } from '@/types/wallet'
 import { useWalletAdapter } from './useWalletAdapter'
 import { ADDRESS, getAztecscanUrl, getEtherscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
+import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, encodeFunctionData } from 'viem'
 import PortalSBTJson from '../constants/PortalSBT.json'
@@ -380,6 +381,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     fuelEnabled,
     fuelAmount: fuelAmountStr,
     fuelType,
+    fuelRecipientOverride,
   } = useBridgeStore()
   const notify = useToast()
 
@@ -399,6 +401,23 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     if (!aztecAddress) throw new Error('Aztec wallet not connected')
     if (!walletAdapter) throw new Error('Aztec wallet adapter not ready')
 
+    // Validate the optional third-party fuel recipient. If invalid, refuse to proceed —
+    // we don't want to silently fall back to the user's own L2 when they intended to send
+    // the fee juice elsewhere.
+    let resolvedFuelRecipient: string | undefined
+    if (fuelRecipientOverride && fuelRecipientOverride.trim().length > 0) {
+      try {
+        const parsed = AztecAddress.fromString(fuelRecipientOverride.trim())
+        resolvedFuelRecipient = parsed.toString()
+      } catch {
+        throw new Error('Invalid fuel-recipient L2 address. Clear the override or paste a valid Aztec address.')
+      }
+      if (aztecAddress && resolvedFuelRecipient.toLowerCase() === aztecAddress.toLowerCase()) {
+        // Same as self — drop the override so logs/state don't lie about a "third-party" send.
+        resolvedFuelRecipient = undefined
+      }
+    }
+
     // Forward the user's fuel selection to the SDK. The SDK handles V4 routing,
     // slippage, and sufficiency internally — the frontend only needs to say
     // "yes, use fuel, here's how much, here's the type".
@@ -408,6 +427,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             enabled: true,
             amount: fuelAmountStr,
             fuelType: (isPrivacyModeEnabled ? 'private' : fuelType) as 'public' | 'private',
+            ...(resolvedFuelRecipient ? { recipient: resolvedFuelRecipient } : {}),
           }
         : undefined
 

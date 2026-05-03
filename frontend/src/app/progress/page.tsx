@@ -5,6 +5,7 @@ import RootStyle from '@/components/RootStyle'
 import { useRouter } from 'next/navigation'
 import BridgeHeader from '@/components/BridgeHeader'
 import ProgressCard from '@/components/ProgressCard'
+import FuelClaimLinkPanel from '@/components/FuelClaimLinkPanel'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { parseUnits } from 'viem'
 import {
@@ -189,6 +190,8 @@ export default function ProgressPage() {
           toNetwork={toNetwork}
           direction={direction === BridgeDirection.L1_TO_L2 ? 'L1_TO_L2' : 'L2_TO_L1'}
         />
+
+        <FuelClaimLinkPanel />
       </div>
     </RootStyle>
   )

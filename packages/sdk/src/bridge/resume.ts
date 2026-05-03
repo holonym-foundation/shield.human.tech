@@ -508,26 +508,51 @@ async function resumeL1ToL2(
     }
     console.log('[SDK Resume L1→L2] Using PrivateMintAndPayFeePaymentMethod (BridgedFPC) for private-fuel resume')
   } else if (data.fuelSecret && fuelMessageLeafIndex && fuelAmount) {
-    // Public-fuel resume: FeeJuicePaymentMethodWithClaim against the claimer's aztec address.
-    // All three inputs are required — a zero `fuelAmount` here would produce a
-    // FeeJuice note of zero value, which the claim uses as the payment method and
-    // then fails downstream with an opaque "insufficient fee" error. Main gates
-    // on the same three fields (useResumeL1BridgeToL2.ts:545); mirror that so a
-    // partially-recovered op falls through to a no-fuel claim instead of
-    // attempting (and failing) with a bogus FeeJuicePaymentMethodWithClaim.
-    const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
-    const { buildClaimGasSettings } = await import('../fuelGasEstimate')
-    const paymentMethod = new FeeJuicePaymentMethodWithClaim(
-      AztecAddress.fromString(l2Address),
-      {
-        claimAmount: BigInt(fuelAmount),
-        claimSecret: Fr.fromString(data.fuelSecret),
-        messageLeafIndex: BigInt(fuelMessageLeafIndex),
-      },
-    )
-    const gasSettings = await buildClaimGasSettings(aztecNode)
-    fuelFeeOption = { fee: { paymentMethod, gasSettings } }
-    console.log('[SDK Resume L1→L2] Using FeeJuicePaymentMethodWithClaim for public-fuel resume')
+    // Public-fuel resume: FeeJuicePaymentMethodWithClaim — but only when the bridged FJ is for
+    // the bridger themselves. If the deposit used a third-party fuel recipient (override flow),
+    // the L1→L2 fuel message has someone else's address as `to`, and the bridger's wallet would
+    // call FeeJuice.claim_and_end_setup with a `to` that doesn't match → revert.
+    //
+    // Detection: localStorage's `fuelClaimByOther` flag (set in l1ToL2.ts when the receipt is
+    // parsed). Fall back to the encrypted blob's `fuelRecipient` if the LS entry is gone (e.g.
+    // resuming from a fresh device after re-decrypting backup). Legacy entries lacking both
+    // signals default to self, preserving prior behavior.
+    let fuelGoesToBridger = true
+    try {
+      const { getDepositById } = await import('../storage')
+      const lsEntry = getDepositById(op.id)
+      if (lsEntry?.fuelClaimByOther) {
+        fuelGoesToBridger = false
+      } else if (data.fuelRecipient && data.fuelRecipient.length > 0) {
+        fuelGoesToBridger = data.fuelRecipient.toLowerCase() === l2Address.toLowerCase()
+      }
+    } catch {
+      // localStorage / SDK helper unavailable — assume self for compatibility.
+    }
+
+    if (fuelGoesToBridger) {
+      // All three inputs are required — a zero `fuelAmount` here would produce a
+      // FeeJuice note of zero value, which the claim uses as the payment method and
+      // then fails downstream with an opaque "insufficient fee" error.
+      const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+      const { buildClaimGasSettings } = await import('../fuelGasEstimate')
+      const paymentMethod = new FeeJuicePaymentMethodWithClaim(
+        AztecAddress.fromString(l2Address),
+        {
+          claimAmount: BigInt(fuelAmount),
+          claimSecret: Fr.fromString(data.fuelSecret),
+          messageLeafIndex: BigInt(fuelMessageLeafIndex),
+        },
+      )
+      const gasSettings = await buildClaimGasSettings(aztecNode)
+      fuelFeeOption = { fee: { paymentMethod, gasSettings } }
+      console.log('[SDK Resume L1→L2] Using FeeJuicePaymentMethodWithClaim for public-fuel resume')
+    } else {
+      console.log(
+        '[SDK Resume L1→L2] Fuel recipient is third-party — skipping FeeJuicePaymentMethodWithClaim. ' +
+          'Bridger must have existing FJ balance to pay token-claim gas.',
+      )
+    }
   }
 
   if (!op.portalAddressL1) {
