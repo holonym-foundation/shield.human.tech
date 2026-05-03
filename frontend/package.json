@@ -31,7 +31,6 @@
     "@aztec/stdlib": "4.2.0-aztecnr-rc.2",
     "@aztec/wallet-sdk": "4.2.0-aztecnr-rc.2",
     "@datadog/browser-logs": "^4.45.0",
-    "@datadog/browser-rum": "^4.45.0",
     "@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
     "@human.tech/aztec-bridge-sdk": "workspace:*",
     "@human.tech/waap-sdk": "^1.0.3",

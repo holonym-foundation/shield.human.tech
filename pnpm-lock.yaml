@@ -44,9 +44,6 @@ importers:
       '@datadog/browser-logs':
         specifier: ^4.45.0
         version: 4.50.1(@datadog/browser-rum@4.50.1)
-      '@datadog/browser-rum':
-        specifier: ^4.45.0
-        version: 4.50.1(@datadog/browser-logs@4.50.1)
       '@defi-wonderland/aztec-standards':
         specifier: 4.2.0-aztecnr-rc.2
         version: 4.2.0-aztecnr-rc.2
@@ -275,7 +272,7 @@ importers:
         version: 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
       '@aztec/wallet-sdk':
         specifier: 4.2.0-aztecnr-rc.2
-        version: 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+        version: 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
       '@defi-wonderland/aztec-standards':
         specifier: 4.2.0-aztecnr-rc.2
         version: 4.2.0-aztecnr-rc.2
@@ -296,7 +293,7 @@ importers:
         version: 3.0.0(ethers@6.16.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
       viem:
         specifier: ^2.22.8
-        version: 2.47.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+        version: 2.47.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
     devDependencies:
       happy-dom:
         specifier: ^20.9.0
@@ -8068,34 +8065,6 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@aztec/bb-prover@4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)':
-    dependencies:
-      '@aztec/bb.js': 4.2.0-aztecnr-rc.2
-      '@aztec/constants': 4.2.0-aztecnr-rc.2
-      '@aztec/foundation': 4.2.0-aztecnr-rc.2
-      '@aztec/noir-noirc_abi': 4.2.0-aztecnr-rc.2
-      '@aztec/noir-protocol-circuits-types': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/noir-types': 4.2.0-aztecnr-rc.2
-      '@aztec/simulator': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
-      '@aztec/stdlib': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/telemetry-client': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
-      '@aztec/world-state': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      commander: 12.1.0
-      pako: 2.1.0
-      source-map-support: 0.5.21
-      tslib: 2.8.1
-    transitivePeerDependencies:
-      - '@types/pg'
-      - aws-crt
-      - bufferutil
-      - debug
-      - encoding
-      - pg-native
-      - supports-color
-      - typescript
-      - utf-8-validate
-      - zod
-
   '@aztec/bb-prover@4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)':
     dependencies:
       '@aztec/bb.js': 4.2.0-aztecnr-rc.2
@@ -8373,39 +8342,6 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@aztec/pxe@4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)':
-    dependencies:
-      '@aztec/bb-prover': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
-      '@aztec/bb.js': 4.2.0-aztecnr-rc.2
-      '@aztec/builder': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/constants': 4.2.0-aztecnr-rc.2
-      '@aztec/ethereum': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/foundation': 4.2.0-aztecnr-rc.2
-      '@aztec/key-store': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/kv-store': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/noir-protocol-circuits-types': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/noir-types': 4.2.0-aztecnr-rc.2
-      '@aztec/protocol-contracts': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/simulator': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
-      '@aztec/stdlib': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      koa: 2.16.4
-      koa-router: 13.1.1
-      lodash.omit: 4.5.0
-      sha3: 2.1.4
-      tslib: 2.8.1
-      viem: '@aztec/viem@2.38.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)'
-    transitivePeerDependencies:
-      - '@types/pg'
-      - aws-crt
-      - bufferutil
-      - debug
-      - encoding
-      - pg-native
-      - supports-color
-      - typescript
-      - utf-8-validate
-      - zod
-
   '@aztec/pxe@4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)':
     dependencies:
       '@aztec/bb-prover': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
@@ -8427,34 +8363,6 @@ snapshots:
       sha3: 2.1.4
       tslib: 2.8.1
       viem: '@aztec/viem@2.38.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)'
-    transitivePeerDependencies:
-      - '@types/pg'
-      - aws-crt
-      - bufferutil
-      - debug
-      - encoding
-      - pg-native
-      - supports-color
-      - typescript
-      - utf-8-validate
-      - zod
-
-  '@aztec/simulator@4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)':
-    dependencies:
-      '@aztec/constants': 4.2.0-aztecnr-rc.2
-      '@aztec/foundation': 4.2.0-aztecnr-rc.2
-      '@aztec/native': 4.2.0-aztecnr-rc.2
-      '@aztec/noir-acvm_js': 4.2.0-aztecnr-rc.2
-      '@aztec/noir-noirc_abi': 4.2.0-aztecnr-rc.2
-      '@aztec/noir-protocol-circuits-types': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/noir-types': 4.2.0-aztecnr-rc.2
-      '@aztec/protocol-contracts': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/stdlib': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/telemetry-client': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
-      '@aztec/world-state': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      lodash.clonedeep: 4.5.0
-      lodash.merge: 4.6.2
-      tslib: 2.8.1
     transitivePeerDependencies:
       - '@types/pg'
       - aws-crt
@@ -8641,26 +8549,6 @@ snapshots:
       typescript: 5.9.3
     transitivePeerDependencies:
       - bufferutil
-      - utf-8-validate
-      - zod
-
-  '@aztec/wallet-sdk@4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)':
-    dependencies:
-      '@aztec/aztec.js': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/constants': 4.2.0-aztecnr-rc.2
-      '@aztec/entrypoints': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@aztec/foundation': 4.2.0-aztecnr-rc.2
-      '@aztec/pxe': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
-      '@aztec/stdlib': 4.2.0-aztecnr-rc.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-    transitivePeerDependencies:
-      - '@types/pg'
-      - aws-crt
-      - bufferutil
-      - debug
-      - encoding
-      - pg-native
-      - supports-color
-      - typescript
       - utf-8-validate
       - zod
 
@@ -8952,6 +8840,7 @@ snapshots:
   '@datadog/browser-rum-core@4.50.1':
     dependencies:
       '@datadog/browser-core': 4.50.1
+    optional: true
 
   '@datadog/browser-rum@4.50.1(@datadog/browser-logs@4.50.1)':
     dependencies:
@@ -8959,6 +8848,7 @@ snapshots:
       '@datadog/browser-rum-core': 4.50.1
     optionalDependencies:
       '@datadog/browser-logs': 4.50.1(@datadog/browser-rum@4.50.1)
+    optional: true
 
   '@defi-wonderland/aztec-standards@4.2.0-aztecnr-rc.2': {}
 

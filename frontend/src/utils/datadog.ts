@@ -1,13 +1,5 @@
 import { datadogLogs } from '@datadog/browser-logs'
-import { datadogRum } from '@datadog/browser-rum'
-import {
-  DATADOG_APPLICATION_ID,
-  DATADOG_CLIENT_TOKEN,
-  DATADOG_SITE,
-  DATADOG_SERVICE,
-  DATADOG_ENV,
-  DATADOG_LOGS_CLIENT_TOKEN,
-} from '@/config/env.config'
+import { DATADOG_SITE, DATADOG_SERVICE, DATADOG_ENV, DATADOG_LOGS_CLIENT_TOKEN } from '@/config/env.config'
 
 export function init() {
   // Only initialize on client-side
@@ -19,18 +11,6 @@ export function init() {
     return
   }
 
-  datadogRum.init({
-    applicationId: DATADOG_APPLICATION_ID,
-    clientToken: DATADOG_CLIENT_TOKEN,
-    site: DATADOG_SITE,
-    service: DATADOG_SERVICE,
-    env: DATADOG_ENV,
-    sessionSampleRate: 100,
-    premiumSampleRate: 100,
-    trackUserInteractions: true,
-    defaultPrivacyLevel: 'mask-user-input',
-  })
-
   datadogLogs.init({
     clientToken: DATADOG_LOGS_CLIENT_TOKEN,
     site: DATADOG_SITE,
@@ -40,8 +20,6 @@ export function init() {
     forwardConsoleLogs: ['error'],
     sessionSampleRate: 100,
   })
-
-  datadogRum.startSessionReplayRecording()
 }
 
 export function logInfo(message: string, messageContext?: object | undefined, error?: Error | undefined) {
