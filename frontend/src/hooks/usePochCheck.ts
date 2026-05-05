@@ -22,9 +22,9 @@ export function usePochCheck() {
       try {
         return await bridge.checkPochEligibility()
       } catch (err: any) {
-        const reason = err?.body
-          || err?.message
-          || 'Failed to check POCH eligibility'
+        const parsed = err?.parsedBody as { reason?: string; error?: string } | null | undefined
+        const reason =
+          parsed?.reason ?? parsed?.error ?? err?.body ?? err?.message ?? 'Failed to check POCH eligibility'
         return { eligible: false, reason } as { eligible: boolean; reason?: string }
       }
     },

@@ -62,7 +62,9 @@ export function useAttestationCheck() {
           passportMaxAmount: BigInt(passportData.maxAmount),
         }
       } catch (err: any) {
-        const reason = err?.body || err?.message || 'Failed to check attestation eligibility'
+        const parsed = err?.parsedBody as { reason?: string; error?: string } | null | undefined
+        const reason =
+          parsed?.reason ?? parsed?.error ?? err?.body ?? err?.message ?? 'Failed to check attestation eligibility'
         return {
           eligible: false,
           method: null,
