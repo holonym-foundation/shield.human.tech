@@ -296,6 +296,20 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
     if (!aztecAddress) throw new Error('Aztec wallet not connected')
     if (!walletAdapter) throw new Error('Aztec wallet adapter not ready')
 
+    logInfo('Withdrawal from L2 to L1 initiated', {
+      direction: 'L2_TO_L1',
+      fromNetwork: 'Aztec',
+      toNetwork: 'Ethereum',
+      fromToken: selectedToken?.symbol ?? 'cUSDC',
+      toToken: selectedToken?.pairedSymbol ?? 'USDC',
+      l1Address,
+      l2Address: aztecAddress,
+      amountL1: params.amountL1,
+      amountL2: params.amountL2,
+      isPrivate: isPrivacyModeEnabled ?? false,
+      userAction: 'withdrawal_l2_to_l1_initiated',
+    })
+
     const result = await bridge.withdrawL2ToL1({
       token: selectedToken?.symbol ?? 'cUSDC',
       amount: amountDisplayL2,
