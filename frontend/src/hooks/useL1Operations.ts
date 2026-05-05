@@ -431,6 +431,21 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
           }
         : undefined
 
+    logInfo('Bridge from L1 to L2 initiated', {
+      direction: 'L1_TO_L2',
+      fromNetwork: 'Ethereum',
+      toNetwork: 'Aztec',
+      fromToken: selectedToken?.symbol ?? 'USDC',
+      toToken: selectedToken?.pairedSymbol ?? 'cUSDC',
+      l1Address,
+      l2Address: aztecAddress,
+      amountL1: params.amountL1,
+      amountL2: params.amountL2,
+      isPrivate: isPrivacyModeEnabled ?? false,
+      fuelEnabled: !!fuel,
+      userAction: 'bridge_l1_to_l2_initiated',
+    })
+
     const result = await bridge.bridgeL1ToL2({
       token: selectedToken?.symbol ?? 'USDC',
       amount: amountDisplayL1,
