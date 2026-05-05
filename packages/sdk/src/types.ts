@@ -127,6 +127,69 @@ export type BridgeEvent =
 
 export type BridgeEventCallback = (event: BridgeEvent) => void
 
+/**
+ * Single source of truth for BridgeEvent `type` discriminators. Use
+ * `BridgeEventType.X` at emit sites and in `case` clauses so renames flow
+ * through the type system and IDE go-to-definition works. The values here
+ * are the literal strings used in the BridgeEvent union above.
+ */
+export const BridgeEventType = {
+  // Lifecycle
+  OPERATION_CREATED: 'operation_created',
+  OPERATION_COMPLETED: 'operation_completed',
+  // Danger-zone (irreversible on-chain tx imminent)
+  DO_NOT_RELOAD: 'do_not_reload',
+  // L1→L2 deposit
+  DEPOSIT_SENT: 'deposit_sent',
+  DEPOSIT_CONFIRMED: 'deposit_confirmed',
+  CLAIM_ATTEMPT: 'claim_attempt',
+  CLAIM_RETRY: 'claim_retry',
+  // L2→L1 withdrawal
+  BURN_SENT: 'burn_sent',
+  BURN_CONFIRMED: 'burn_confirmed',
+  WITNESS_COMPUTED: 'witness_computed',
+  L1_WITHDRAW_SENT: 'l1_withdraw_sent',
+  // Polling progress
+  SYNC_POLL: 'sync_poll',
+  L2_BLOCK_WAIT: 'l2_block_wait',
+  PROVEN_POLL: 'proven_poll',
+  PROVEN_FALLBACK: 'proven_fallback',
+  // Token registration (post-claim)
+  TOKEN_REGISTERED: 'token_registered',
+  TOKEN_REGISTRATION_FAILED: 'token_registration_failed',
+  // Recovery / resume
+  RECOVERY_FROM_RECEIPT: 'recovery_from_receipt',
+  RECOVERY_FROM_BLOCK_SCAN: 'recovery_from_block_scan',
+  RECOVERY_L2_BLOCK: 'recovery_l2_block',
+  // Server backup warnings
+  PATCH_FAILED: 'patch_failed',
+  // Errors
+  ERROR: 'error',
+  // Attestation
+  ATTESTATION_FETCH: 'attestation_fetch',
+  ATTESTATION_FALLBACK: 'attestation_fallback',
+  // Secrets (hashes + encrypted payload only)
+  SECRETS_GENERATED: 'secrets_generated',
+  NONCE_GENERATED: 'nonce_generated',
+} as const
+
+/** All valid BridgeEvent `type` values, derived from BridgeEventType. */
+export type BridgeEventTypeValue = (typeof BridgeEventType)[keyof typeof BridgeEventType]
+
+/** Phase identifier for the `do_not_reload` event. */
+export const BridgePhase = {
+  L1_DEPOSIT: 'l1_deposit',
+  L2_BURN: 'l2_burn',
+} as const
+export type BridgePhaseValue = (typeof BridgePhase)[keyof typeof BridgePhase]
+
+/** Attestation method identifier (used in `attestation_fetch`/`_fallback` and elsewhere). */
+export const AttestationMethod = {
+  POCH: 'poch',
+  PASSPORT: 'passport',
+} as const
+export type AttestationMethodValue = (typeof AttestationMethod)[keyof typeof AttestationMethod]
+
 // ─── Bridge Operation (from backend) ────────────────────────────────
 
 export type BridgeDirection = 'L1_TO_L2' | 'L2_TO_L1'

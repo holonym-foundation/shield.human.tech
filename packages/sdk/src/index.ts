@@ -4,6 +4,12 @@ export { HumanTechBridge } from './client'
 // Status info
 export { BRIDGE_STATUS_INFO } from './types'
 
+// Event-discriminator constants — use these instead of string literals at
+// emit sites and in `case` clauses to get IDE go-to-definition + refactor
+// support, and to avoid silent typos in untyped contexts.
+export { BridgeEventType, BridgePhase, AttestationMethod } from './types'
+export type { BridgeEventTypeValue, BridgePhaseValue, AttestationMethodValue } from './types'
+
 // Types
 export type {
   HumanTechBridgeConfig,
