@@ -46,7 +46,7 @@ import {
 } from '@/config'
 import MetaMaskPrompt from '@/components/model/MetaMaskPrompt'
 import BalanceCard from '@/components/BalanceCard'
-import { logInfo, logError } from '@/utils/datadog'
+import { logInfo, logError, DatadogUserAction } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { AztecLoginMethod } from '@/types/wallet'
 import AztecWalletConnectionModals from '@/components/AztecWalletConnectionModals'
@@ -279,7 +279,7 @@ export default function Home() {
       faucetProvider: 'Google Cloud',
       faucetUrl: googleFaucetUrl,
       redirectType: 'external',
-      userAction: 'faucet_redirect',
+      userAction: DatadogUserAction.FAUCET_REDIRECT,
       network: 'Ethereum Sepolia',
     })
 
@@ -347,7 +347,7 @@ export default function Home() {
         walletProvider: null,
         address: '',
         chainId: null,
-        userAction: 'wallet_connection_attempt',
+        userAction: DatadogUserAction.WALLET_CONNECTION_ATTEMPT,
       })
 
       await connectAztecWallet()
@@ -359,7 +359,7 @@ export default function Home() {
         walletProvider: null,
         address: '',
         chainId: null,
-        userAction: 'wallet_connection_failure',
+        userAction: DatadogUserAction.WALLET_CONNECTION_FAILURE,
         error: extractErrorMessage(error),
       })
 
@@ -388,7 +388,7 @@ export default function Home() {
       userAgent: navigator.userAgent,
       timestamp: Date.now(),
       referrer: document.referrer,
-      userAction: 'session_start',
+      userAction: DatadogUserAction.SESSION_START,
     })
   }, [])
 

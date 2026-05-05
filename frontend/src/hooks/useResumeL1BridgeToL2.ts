@@ -6,9 +6,10 @@ import { useWalletAdapter } from './useWalletAdapter'
 import { useToast } from './useToast'
 import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent } from '@human.tech/aztec-bridge-sdk'
+import { BridgeEventType } from '@human.tech/aztec-bridge-sdk'
 import { getAztecscanUrl, L2_CHAIN_ID } from '@/config'
 import { verifyEncryptionDomain } from '@/utils'
-import { logInfo, logError } from '@/utils/datadog'
+import { logInfo, logError, DatadogUserAction } from '@/utils/datadog'
 
 export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
   const { setProgressStep, setTransactionUrls, clearRecovery } = useBridgeStore()
@@ -54,35 +55,35 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
       onStep: (step, status) => setProgressStep(step, status),
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
-          case 'recovery_from_receipt':
+          case BridgeEventType.RECOVERY_FROM_RECEIPT:
             logInfo('L1→L2 resume from receipt', {
               direction: 'L1_TO_L2_RESUME',
               l1TxHash: (event as any).l1TxHash,
               l1Address,
-              userAction: 'resume_l1_to_l2_from_receipt',
+              userAction: DatadogUserAction.RESUME_L1_TO_L2_FROM_RECEIPT,
             })
             notify('info', 'Recovering from L1 receipt...', { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 })
             break
-          case 'recovery_from_block_scan':
+          case BridgeEventType.RECOVERY_FROM_BLOCK_SCAN:
             logInfo('L1→L2 resume via block scan', {
               direction: 'L1_TO_L2_RESUME',
               l1BlockNumberBeforeTx: (event as any).l1BlockNumberBeforeTx,
               l1Address,
-              userAction: 'resume_l1_to_l2_block_scan',
+              userAction: DatadogUserAction.RESUME_L1_TO_L2_BLOCK_SCAN,
             })
             notify('info', 'Scanning L1 blocks for deposit...', {
               toastId: 'resume-l1-to-l2-progress',
               autoClose: 15000,
             })
             break
-          case 'l2_block_wait':
+          case BridgeEventType.L2_BLOCK_WAIT:
             logInfo('L1→L2 resume sequencer block wait', {
               direction: 'L1_TO_L2_RESUME',
               elapsedSec: event.elapsedSec,
               currentBlock: event.currentBlock,
               targetBlock: event.targetBlock,
               l1Address,
-              userAction: 'resume_l1_to_l2_sequencer_wait',
+              userAction: DatadogUserAction.RESUME_L1_TO_L2_SEQUENCER_WAIT,
             })
             notify(
               'info',
@@ -90,63 +91,63 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
               { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 },
             )
             break
-          case 'token_registered':
+          case BridgeEventType.TOKEN_REGISTERED:
             logInfo('Token added to wallet after resume', {
               direction: 'L1_TO_L2_RESUME',
               tokenAddressL2: event.tokenAddressL2,
               l1Address,
-              userAction: 'resume_token_added_to_wallet',
+              userAction: DatadogUserAction.RESUME_TOKEN_ADDED_TO_WALLET,
             })
             break
-          case 'token_registration_failed':
+          case BridgeEventType.TOKEN_REGISTRATION_FAILED:
             logError(
               'Failed to add token to wallet after resume',
               {
                 direction: 'L1_TO_L2_RESUME',
                 tokenAddressL2: event.tokenAddressL2,
                 l1Address,
-                userAction: 'resume_token_add_to_wallet_failed',
+                userAction: DatadogUserAction.RESUME_TOKEN_ADD_TO_WALLET_FAILED,
               },
               event.error,
             )
             break
-          case 'sync_poll':
+          case BridgeEventType.SYNC_POLL:
             logInfo('L1→L2 resume sync poll', {
               direction: 'L1_TO_L2_RESUME',
               elapsedMinutes: event.elapsedMinutes,
               synced: event.synced,
               l1Address,
-              userAction: 'resume_l1_to_l2_sync_poll',
+              userAction: DatadogUserAction.RESUME_L1_TO_L2_SYNC_POLL,
             })
             notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, {
               toastId: 'resume-l1-to-l2-progress',
               autoClose: 15000,
             })
             break
-          case 'deposit_confirmed':
+          case BridgeEventType.DEPOSIT_CONFIRMED:
             if ('l1TxUrl' in event) setTransactionUrls(event.l1TxUrl, null)
             break
-          case 'claim_attempt':
+          case BridgeEventType.CLAIM_ATTEMPT:
             logInfo('L1→L2 resume claim attempt', {
               direction: 'L1_TO_L2_RESUME',
               attempt: event.attempt,
               maxAttempts: event.maxAttempts,
               l1Address,
-              userAction: 'resume_l1_to_l2_claim_attempt',
+              userAction: DatadogUserAction.RESUME_L1_TO_L2_CLAIM_ATTEMPT,
             })
             notify('info', `Claiming tokens on L2 (attempt ${event.attempt}/${event.maxAttempts})...`, {
               toastId: 'resume-l1-to-l2-progress',
               autoClose: 15000,
             })
             break
-          case 'claim_retry':
+          case BridgeEventType.CLAIM_RETRY:
             logInfo('L1→L2 resume claim retry', {
               direction: 'L1_TO_L2_RESUME',
               attempt: event.attempt,
               maxAttempts: event.maxAttempts,
               delayMs: event.delayMs,
               l1Address,
-              userAction: 'resume_l1_to_l2_claim_retry',
+              userAction: DatadogUserAction.RESUME_L1_TO_L2_CLAIM_RETRY,
             })
             notify(
               'info',
@@ -154,45 +155,45 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
               { toastId: 'resume-l1-to-l2-progress', autoClose: 15000 },
             )
             break
-          case 'operation_completed':
+          case BridgeEventType.OPERATION_COMPLETED:
             logInfo('L1→L2 resume completed', {
               direction: 'L1_TO_L2_RESUME',
               operationId: event.operationId,
               l2TxHash: event.l2TxHash,
               alreadyCompleted: event.alreadyCompleted,
               l1Address,
-              userAction: 'resume_l1_to_l2_completed',
+              userAction: DatadogUserAction.RESUME_L1_TO_L2_COMPLETED,
             })
             if ('l2TxHash' in event && event.l2TxHash) {
               const l2TxUrl = `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${event.l2TxHash}`
               setTransactionUrls(claimData.l1TxUrl ?? null, l2TxUrl)
             }
             break
-          case 'attestation_fetch':
+          case BridgeEventType.ATTESTATION_FETCH:
             logInfo('Resume attestation fetch', {
               direction: 'L1_TO_L2_RESUME',
               method: event.method,
               l1Address,
-              userAction: 'resume_attestation_fetch',
+              userAction: DatadogUserAction.RESUME_ATTESTATION_FETCH,
             })
             break
-          case 'attestation_fallback':
+          case BridgeEventType.ATTESTATION_FALLBACK:
             logInfo('Resume attestation fallback', {
               direction: 'L1_TO_L2_RESUME',
               from: event.from,
               to: event.to,
               reason: event.reason,
               l1Address,
-              userAction: 'resume_attestation_fallback',
+              userAction: DatadogUserAction.RESUME_ATTESTATION_FALLBACK,
             })
             break
-          case 'patch_failed':
+          case BridgeEventType.PATCH_FAILED:
             logError(`Resume PATCH failed: ${event.label}`, {
               direction: 'L1_TO_L2_RESUME',
               operationId: event.operationId,
               patchLabel: event.label,
               l1Address,
-              userAction: 'resume_l1_to_l2_patch_failed',
+              userAction: DatadogUserAction.RESUME_L1_TO_L2_PATCH_FAILED,
             })
             notify(
               'warn',
@@ -203,7 +204,7 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
               { autoClose: false },
             )
             break
-          case 'error':
+          case BridgeEventType.ERROR:
             logError(
               event.error?.message ?? 'Resume error event',
               {
@@ -211,7 +212,7 @@ export function useResumeL1BridgeToL2(onSuccess?: (data: any) => void) {
                 fundsAtRisk: event.fundsAtRisk,
                 operationId: event.operationId,
                 l1Address,
-                userAction: 'resume_l1_to_l2_error',
+                userAction: DatadogUserAction.RESUME_L1_TO_L2_ERROR,
               },
               event.error,
             )

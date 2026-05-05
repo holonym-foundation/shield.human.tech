@@ -5,9 +5,10 @@ import { useWalletStore, requestWaapWallet, WAAP_METHOD } from '@/stores/walletS
 import { useToast } from './useToast'
 import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent } from '@human.tech/aztec-bridge-sdk'
+import { BridgeEventType } from '@human.tech/aztec-bridge-sdk'
 import { verifyEncryptionDomain } from '@/utils'
 import { getEtherscanUrl, L1_CHAIN_ID } from '@/config'
-import { logInfo, logError } from '@/utils/datadog'
+import { logInfo, logError, DatadogUserAction } from '@/utils/datadog'
 
 export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
   const { setProgressStep, setTransactionUrls, clearRecovery } = useBridgeStore()
@@ -45,32 +46,32 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
       onStep: (step, status) => setProgressStep(step, status),
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
-          case 'recovery_l2_block':
+          case BridgeEventType.RECOVERY_L2_BLOCK:
             logInfo('L2→L1 resume recovered l2BlockNumber from receipt', {
               direction: 'L2_TO_L1_RESUME',
               l2TxHash: event.l2TxHash,
               l2BlockNumber: event.l2BlockNumber,
               l1Address: withdrawRecipient,
-              userAction: 'resume_l2_to_l1_recovered_l2_block',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_RECOVERED_L2_BLOCK,
             })
             break
-          case 'witness_computed':
+          case BridgeEventType.WITNESS_COMPUTED:
             logInfo('Resume witness computed', {
               direction: 'L2_TO_L1_RESUME',
               leafIndex: event.leafIndex,
               epoch: event.epoch,
               l1Address: withdrawRecipient,
-              userAction: 'resume_l2_to_l1_witness_computed',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_WITNESS_COMPUTED,
             })
             break
-          case 'proven_poll':
+          case BridgeEventType.PROVEN_POLL:
             logInfo('L2→L1 resume proven poll', {
               direction: 'L2_TO_L1_RESUME',
               provenBlock: event.provenBlock,
               neededBlock: event.neededBlock,
               elapsedMs: event.elapsedMs,
               l1Address: withdrawRecipient,
-              userAction: 'resume_l2_to_l1_proven_poll',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_PROVEN_POLL,
             })
             notify(
               'info',
@@ -78,52 +79,52 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
               { toastId: 'resume-l2-to-l1-progress', autoClose: 15000 },
             )
             break
-          case 'proven_fallback':
+          case BridgeEventType.PROVEN_FALLBACK:
             logInfo('L2→L1 resume proven fallback', {
               direction: 'L2_TO_L1_RESUME',
               fixedWaitMs: event.fixedWaitMs,
               l1Address: withdrawRecipient,
-              userAction: 'resume_l2_to_l1_proven_fallback',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_PROVEN_FALLBACK,
             })
             notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, {
               toastId: 'resume-l2-to-l1-progress',
               autoClose: 15000,
             })
             break
-          case 'l1_withdraw_sent':
+          case BridgeEventType.L1_WITHDRAW_SENT:
             logInfo('Resume L1 withdraw tx sent', {
               direction: 'L2_TO_L1_RESUME',
               l1TxHash: event.l1TxHash,
               l1Address: withdrawRecipient,
-              userAction: 'resume_l2_to_l1_l1_withdraw_sent',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_L1_WITHDRAW_SENT,
             })
             setTransactionUrls(event.l1TxUrl, data.l2TxUrl ?? null)
             break
-          case 'attestation_fetch':
+          case BridgeEventType.ATTESTATION_FETCH:
             logInfo('Resume attestation fetch', {
               direction: 'L2_TO_L1_RESUME',
               method: event.method,
               l1Address: withdrawRecipient,
-              userAction: 'resume_attestation_fetch',
+              userAction: DatadogUserAction.RESUME_ATTESTATION_FETCH,
             })
             break
-          case 'attestation_fallback':
+          case BridgeEventType.ATTESTATION_FALLBACK:
             logInfo('Resume attestation fallback', {
               direction: 'L2_TO_L1_RESUME',
               from: event.from,
               to: event.to,
               reason: event.reason,
               l1Address: withdrawRecipient,
-              userAction: 'resume_attestation_fallback',
+              userAction: DatadogUserAction.RESUME_ATTESTATION_FALLBACK,
             })
             break
-          case 'patch_failed':
+          case BridgeEventType.PATCH_FAILED:
             logError(`Resume PATCH failed: ${event.label}`, {
               direction: 'L2_TO_L1_RESUME',
               operationId: event.operationId,
               patchLabel: event.label,
               l1Address: withdrawRecipient,
-              userAction: 'resume_l2_to_l1_patch_failed',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_PATCH_FAILED,
             })
             notify(
               'warn',
@@ -134,14 +135,14 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
               { autoClose: false },
             )
             break
-          case 'operation_completed': {
+          case BridgeEventType.OPERATION_COMPLETED: {
             logInfo('Resume L2→L1 withdrawal completed', {
               direction: 'L2_TO_L1_RESUME',
               operationId: event.operationId,
               l1TxHash: event.l1TxHash,
               alreadyCompleted: event.alreadyCompleted,
               l1Address: withdrawRecipient,
-              userAction: 'resume_l2_to_l1_completed',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_COMPLETED,
             })
             if (event.l1TxHash) {
               const l1Url = `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${event.l1TxHash}`
@@ -149,7 +150,7 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
             }
             break
           }
-          case 'error':
+          case BridgeEventType.ERROR:
             logError(
               event.error?.message ?? 'Resume error event',
               {
@@ -157,7 +158,7 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
                 fundsAtRisk: event.fundsAtRisk,
                 operationId: event.operationId,
                 l1Address: withdrawRecipient,
-                userAction: 'resume_l2_to_l1_error',
+                userAction: DatadogUserAction.RESUME_L2_TO_L1_ERROR,
               },
               event.error,
             )

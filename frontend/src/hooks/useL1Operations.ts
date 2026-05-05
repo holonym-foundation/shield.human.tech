@@ -7,7 +7,7 @@ import {
   verifyEncryptionDomain,
   extractErrorMessage,
 } from '@/utils'
-import { logError, logInfo } from '@/utils/datadog'
+import { logError, logInfo, DatadogUserAction } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { useWalletAdapter } from './useWalletAdapter'
 import { ADDRESS, getAztecscanUrl, getEtherscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
@@ -23,7 +23,7 @@ import { axiosErrorMessage } from './helper'
 import { networkConfig } from '@/config/l1.config'
 import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent, StepStatus } from '@human.tech/aztec-bridge-sdk'
-import { STORAGE_KEYS } from '@human.tech/aztec-bridge-sdk'
+import { STORAGE_KEYS, BridgeEventType } from '@human.tech/aztec-bridge-sdk'
 
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
@@ -205,7 +205,7 @@ export function useL1Faucet() {
         token: 'USDC',
         faucetProvider: 'Internal API',
         faucetType: 'internal',
-        userAction: 'faucet_request_initiated',
+        userAction: DatadogUserAction.FAUCET_REQUEST_INITIATED,
       })
 
       if (!l1Address) throw new Error('Wallet not connected')
@@ -293,7 +293,7 @@ export function useL1Faucet() {
         token: 'USDC',
         faucetProvider: 'Internal API',
         faucetType: 'internal',
-        userAction: 'faucet_request_failed',
+        userAction: DatadogUserAction.FAUCET_REQUEST_FAILED,
         // extractErrorMessage peels apart axios/wallet errors so faucet
         // failures stay actionable in Datadog. Plain `error.message` returned
         // "Unknown error" for any non-Error object (most axios shapes).
@@ -326,7 +326,7 @@ export function useL1Faucet() {
           token: 'USDC',
           faucetProvider: 'Internal API',
           faucetType: 'internal',
-          userAction: 'faucet_request_successful',
+          userAction: DatadogUserAction.FAUCET_REQUEST_SUCCESSFUL,
           success: data?.success,
         })
 
@@ -443,7 +443,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       amountL2: params.amountL2,
       isPrivate: isPrivacyModeEnabled ?? false,
       fuelEnabled: !!fuel,
-      userAction: 'bridge_l1_to_l2_initiated',
+      userAction: DatadogUserAction.BRIDGE_L1_TO_L2_INITIATED,
     })
 
     const result = await bridge.bridgeL1ToL2({
@@ -471,7 +471,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       },
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
-          case 'do_not_reload':
+          case BridgeEventType.DO_NOT_RELOAD:
             // Persistent banner — stays up until deposit_sent / deposit_confirmed
             // arrives. Tab close at this point loses recovery state.
             notify(
@@ -485,7 +485,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             )
             break
           // Persist encrypted payload on secrets_generated (recovery-critical)
-          case 'secrets_generated':
+          case BridgeEventType.SECRETS_GENERATED:
             console.log('[L1→L2] Secrets generated, encrypted payload persisted to localStorage via SDK')
             notify(
               'warn',
@@ -512,23 +512,23 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             )
             break
           // Track operation ID for correlation
-          case 'operation_created':
+          case BridgeEventType.OPERATION_CREATED:
             logInfo('Bridge operation created', {
               direction: 'L1_TO_L2',
               operationId: event.operationId,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_l1_to_l2_created',
+              userAction: DatadogUserAction.BRIDGE_L1_TO_L2_CREATED,
             })
             console.log('[L1→L2] Operation created:', event.operationId)
             break
-          case 'deposit_sent':
+          case BridgeEventType.DEPOSIT_SENT:
             logInfo('L1 deposit tx sent', {
               direction: 'L1_TO_L2',
               l1TxHash: event.l1TxHash,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_l1_to_l2_deposit_sent',
+              userAction: DatadogUserAction.BRIDGE_L1_TO_L2_DEPOSIT_SENT,
             })
             setTransactionUrls(event.l1TxUrl, null)
             notify(
@@ -541,7 +541,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               { autoClose: false },
             )
             break
-          case 'deposit_confirmed':
+          case BridgeEventType.DEPOSIT_CONFIRMED:
             logInfo('L1 deposit confirmed', {
               direction: 'L1_TO_L2',
               l1TxHash: event.l1TxHash,
@@ -550,7 +550,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               hasFuel: !!event.fuelMessageHash,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_l1_to_l2_deposit_confirmed',
+              userAction: DatadogUserAction.BRIDGE_L1_TO_L2_DEPOSIT_CONFIRMED,
             })
             setTransactionUrls(event.l1TxUrl, null)
             // Prompt user to backup their claim secret (matches old flow)
@@ -580,7 +580,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             )
             break
           // sequencer wait between sync and claim — used to be silent for ~19 min.
-          case 'l2_block_wait':
+          case BridgeEventType.L2_BLOCK_WAIT:
             logInfo('L1→L2 sequencer block wait', {
               direction: 'L1_TO_L2',
               elapsedSec: event.elapsedSec,
@@ -588,7 +588,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               targetBlock: event.targetBlock,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_l1_to_l2_sequencer_wait',
+              userAction: DatadogUserAction.BRIDGE_L1_TO_L2_SEQUENCER_WAIT,
             })
             notify(
               'info',
@@ -597,16 +597,16 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             )
             break
           // token registration observability.
-          case 'token_registered':
+          case BridgeEventType.TOKEN_REGISTERED:
             logInfo('Token added to wallet after bridge', {
               direction: 'L1_TO_L2',
               tokenAddressL2: event.tokenAddressL2,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'token_added_to_wallet',
+              userAction: DatadogUserAction.TOKEN_ADDED_TO_WALLET,
             })
             break
-          case 'token_registration_failed':
+          case BridgeEventType.TOKEN_REGISTRATION_FAILED:
             logError(
               'Failed to add token to wallet after bridge',
               {
@@ -614,41 +614,41 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
                 tokenAddressL2: event.tokenAddressL2,
                 l1Address,
                 l2Address: aztecAddress,
-                userAction: 'token_add_to_wallet_failed',
+                userAction: DatadogUserAction.TOKEN_ADD_TO_WALLET_FAILED,
               },
               event.error,
             )
             break
           // Show sync progress to prevent users from force-closing
-          case 'sync_poll':
+          case BridgeEventType.SYNC_POLL:
             logInfo('L1→L2 sync poll', {
               direction: 'L1_TO_L2',
               elapsedMinutes: event.elapsedMinutes,
               synced: event.synced,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_l1_to_l2_sync_poll',
+              userAction: DatadogUserAction.BRIDGE_L1_TO_L2_SYNC_POLL,
             })
             notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, {
               toastId: 'l1-to-l2-progress',
               autoClose: 15000,
             })
             break
-          case 'claim_attempt':
+          case BridgeEventType.CLAIM_ATTEMPT:
             logInfo('L2 claim attempt', {
               direction: 'L1_TO_L2',
               attempt: event.attempt,
               maxAttempts: event.maxAttempts,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_l1_to_l2_claim_attempt',
+              userAction: DatadogUserAction.BRIDGE_L1_TO_L2_CLAIM_ATTEMPT,
             })
             notify('info', `Claiming tokens on L2 (attempt ${event.attempt}/${event.maxAttempts})...`, {
               toastId: 'l1-to-l2-progress',
               autoClose: 15000,
             })
             break
-          case 'claim_retry':
+          case BridgeEventType.CLAIM_RETRY:
             logInfo('L2 claim retry', {
               direction: 'L1_TO_L2',
               attempt: event.attempt,
@@ -656,7 +656,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               delayMs: event.delayMs,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_l1_to_l2_claim_retry',
+              userAction: DatadogUserAction.BRIDGE_L1_TO_L2_CLAIM_RETRY,
             })
             notify(
               'info',
@@ -664,22 +664,22 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               { toastId: 'l1-to-l2-progress', autoClose: 15000 },
             )
             break
-          case 'operation_completed': {
+          case BridgeEventType.OPERATION_COMPLETED: {
             const l1Url = event.l1TxHash ? `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${event.l1TxHash}` : null
             const l2Url = event.l2TxHash ? `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${event.l2TxHash}` : null
             setTransactionUrls(l1Url, l2Url)
             break
           }
-          case 'attestation_fetch':
+          case BridgeEventType.ATTESTATION_FETCH:
             logInfo('Attestation fetch', {
               direction: 'L1_TO_L2',
               method: event.method,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_attestation_fetch',
+              userAction: DatadogUserAction.BRIDGE_ATTESTATION_FETCH,
             })
             break
-          case 'attestation_fallback':
+          case BridgeEventType.ATTESTATION_FALLBACK:
             logInfo('Attestation cascade fallback', {
               direction: 'L1_TO_L2',
               from: event.from,
@@ -687,10 +687,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               reason: event.reason,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_attestation_fallback',
+              userAction: DatadogUserAction.BRIDGE_ATTESTATION_FALLBACK,
             })
             break
-          case 'patch_failed':
+          case BridgeEventType.PATCH_FAILED:
             // Observability: PATCH failures mean server-side state drift from
             // the actual on-chain state. If these spike we need to know fast,
             // otherwise resume flows silently rely on localStorage/queue fallback.
@@ -700,7 +700,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               patchLabel: event.label,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_patch_failed',
+              userAction: DatadogUserAction.BRIDGE_PATCH_FAILED,
             })
             notify(
               'warn',
@@ -712,7 +712,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               { autoClose: false },
             )
             break
-          case 'error': {
+          case BridgeEventType.ERROR: {
             // classify the error so Datadog dashboards/alerts can segment
             // congestion vs. contract revert vs. claim failure vs. sync timeout
             // vs. funds-at-risk vs. generic. Without these tags, all bridge
@@ -841,7 +841,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       l1TxHash: result.l1TxHash,
       l2TxHash: result.l2TxHash,
       isPrivacyModeEnabled,
-      userAction: 'bridge_l1_to_l2_completed',
+      userAction: DatadogUserAction.BRIDGE_L1_TO_L2_COMPLETED,
     })
 
     return result.l2TxHash
@@ -936,7 +936,7 @@ export function useExportClaimData() {
         operationId: result.entry.id,
         tokenSymbol: result.entry.tokenSymbol,
         amount: result.entry.amount?.toString(),
-        userAction: 'copy_claim_secret',
+        userAction: DatadogUserAction.COPY_CLAIM_SECRET,
       })
 
       const success = await copyToClipboard(result.value)

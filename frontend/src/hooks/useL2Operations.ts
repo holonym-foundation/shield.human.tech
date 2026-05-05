@@ -1,6 +1,6 @@
 import { L1_TOKENS, L1_CHAIN_ID, L2_CHAIN_ID, BRIDGED_FPC_ADDRESS, getAztecscanUrl, getEtherscanUrl } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
-import { logInfo, logError } from '@/utils/datadog'
+import { logInfo, logError, DatadogUserAction } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -12,7 +12,7 @@ import { requestWaapWallet, WAAP_METHOD, useWalletStore } from '@/stores/walletS
 import { useWalletAdapter } from './useWalletAdapter'
 import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent, StepStatus } from '@human.tech/aztec-bridge-sdk'
-import { getPendingWithdrawals, getWithdrawalById, getWithdrawals } from '@human.tech/aztec-bridge-sdk'
+import { getPendingWithdrawals, getWithdrawalById, getWithdrawals, BridgeEventType } from '@human.tech/aztec-bridge-sdk'
 
 // Define types for balance queries
 export interface L2TokenBalanceData {
@@ -307,7 +307,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       amountL1: params.amountL1,
       amountL2: params.amountL2,
       isPrivate: isPrivacyModeEnabled ?? false,
-      userAction: 'withdrawal_l2_to_l1_initiated',
+      userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_INITIATED,
     })
 
     const result = await bridge.withdrawL2ToL1({
@@ -329,7 +329,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       },
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
-          case 'do_not_reload':
+          case BridgeEventType.DO_NOT_RELOAD:
             // Persistent banner — stays up until burn_sent / burn_confirmed.
             // Tab close at this point loses the encrypted nonce needed to resume.
             notify(
@@ -343,7 +343,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             )
             break
           // Persist encrypted nonce payload (recovery-critical)
-          case 'nonce_generated':
+          case BridgeEventType.NONCE_GENERATED:
             console.log('[L2→L1] Nonce generated, encrypted payload persisted to localStorage via SDK')
             notify(
               'warn',
@@ -367,23 +367,23 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
             )
             break
           // Track operation ID for correlation
-          case 'operation_created':
+          case BridgeEventType.OPERATION_CREATED:
             logInfo('Withdrawal operation created', {
               direction: 'L2_TO_L1',
               operationId: event.operationId,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'withdrawal_l2_to_l1_created',
+              userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_CREATED,
             })
             console.log('[L2→L1] Operation created:', event.operationId)
             break
-          case 'burn_sent':
+          case BridgeEventType.BURN_SENT:
             logInfo('L2 burn tx sent', {
               direction: 'L2_TO_L1',
               l2TxHash: event.l2TxHash,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'withdrawal_l2_to_l1_burn_sent',
+              userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_BURN_SENT,
             })
             notify(
               'warn',
@@ -395,14 +395,14 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               { autoClose: false },
             )
             break
-          case 'burn_confirmed':
+          case BridgeEventType.BURN_CONFIRMED:
             logInfo('L2 burn confirmed', {
               direction: 'L2_TO_L1',
               l2TxHash: event.l2TxHash,
               l2BlockNumber: event.l2BlockNumber,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'withdrawal_l2_to_l1_burn_confirmed',
+              userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_BURN_CONFIRMED,
             })
             setTransactionUrls(null, event.l2TxUrl)
             // Prompt user to backup their withdrawal data (matches old flow pattern)
@@ -427,29 +427,29 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               },
             )
             break
-          case 'recovery_l2_block':
+          case BridgeEventType.RECOVERY_L2_BLOCK:
             logInfo('L2→L1 recovered l2BlockNumber from receipt', {
               direction: 'L2_TO_L1',
               l2TxHash: event.l2TxHash,
               l2BlockNumber: event.l2BlockNumber,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'withdrawal_l2_to_l1_recovered_l2_block',
+              userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_RECOVERED_L2_BLOCK,
             })
             break
           // Persist witness data on witness_computed (recovery-critical)
-          case 'witness_computed':
+          case BridgeEventType.WITNESS_COMPUTED:
             logInfo('L2→L1 witness computed', {
               direction: 'L2_TO_L1',
               leafIndex: event.leafIndex,
               epoch: event.epoch,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'withdrawal_l2_to_l1_witness_computed',
+              userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_WITNESS_COMPUTED,
             })
             console.log('[L2→L1] Witness computed: leafIndex=', event.leafIndex, 'epoch=', event.epoch)
             break
-          case 'proven_poll':
+          case BridgeEventType.PROVEN_POLL:
             logInfo('L2→L1 proven poll', {
               direction: 'L2_TO_L1',
               provenBlock: event.provenBlock,
@@ -457,7 +457,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               elapsedMs: event.elapsedMs,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_l2_to_l1_proven_poll',
+              userAction: DatadogUserAction.BRIDGE_L2_TO_L1_PROVEN_POLL,
             })
             notify(
               'info',
@@ -465,45 +465,45 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               { toastId: 'l2-to-l1-progress', autoClose: 15000 },
             )
             break
-          case 'proven_fallback':
+          case BridgeEventType.PROVEN_FALLBACK:
             logInfo('L2→L1 proven fallback', {
               direction: 'L2_TO_L1',
               fixedWaitMs: event.fixedWaitMs,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'bridge_l2_to_l1_proven_fallback',
+              userAction: DatadogUserAction.BRIDGE_L2_TO_L1_PROVEN_FALLBACK,
             })
             notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, {
               toastId: 'l2-to-l1-progress',
               autoClose: 15000,
             })
             break
-          case 'l1_withdraw_sent':
+          case BridgeEventType.L1_WITHDRAW_SENT:
             logInfo('L1 withdraw tx sent', {
               direction: 'L2_TO_L1',
               l1TxHash: event.l1TxHash,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'withdrawal_l2_to_l1_l1_withdraw_sent',
+              userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_L1_WITHDRAW_SENT,
             })
             setTransactionUrls(event.l1TxUrl, currentL2TxUrl)
             break
-          case 'operation_completed': {
+          case BridgeEventType.OPERATION_COMPLETED: {
             const l1Url = event.l1TxHash ? `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${event.l1TxHash}` : null
             const l2Url = event.l2TxHash ? `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${event.l2TxHash}` : null
             setTransactionUrls(l1Url, l2Url)
             break
           }
-          case 'attestation_fetch':
+          case BridgeEventType.ATTESTATION_FETCH:
             logInfo('Attestation fetch', {
               direction: 'L2_TO_L1',
               method: event.method,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'withdrawal_attestation_fetch',
+              userAction: DatadogUserAction.WITHDRAWAL_ATTESTATION_FETCH,
             })
             break
-          case 'attestation_fallback':
+          case BridgeEventType.ATTESTATION_FALLBACK:
             logInfo('Attestation cascade fallback', {
               direction: 'L2_TO_L1',
               from: event.from,
@@ -511,10 +511,10 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               reason: event.reason,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'withdrawal_attestation_fallback',
+              userAction: DatadogUserAction.WITHDRAWAL_ATTESTATION_FALLBACK,
             })
             break
-          case 'patch_failed':
+          case BridgeEventType.PATCH_FAILED:
             // Observability: mirrors useL1Operations — PATCH failures here
             // mean withdrawal proof state drifts from on-chain reality.
             logError(`Withdrawal PATCH failed: ${event.label}`, {
@@ -523,7 +523,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               patchLabel: event.label,
               l1Address,
               l2Address: aztecAddress,
-              userAction: 'withdrawal_patch_failed',
+              userAction: DatadogUserAction.WITHDRAWAL_PATCH_FAILED,
             })
             notify(
               'warn',
@@ -535,7 +535,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               { autoClose: false },
             )
             break
-          case 'error':
+          case BridgeEventType.ERROR:
             // Classify so Datadog can segment L2→L1 failures the same way it
             // does L1→L2 (mirrors useL1Operations.ts:680). Without these tags,
             // every withdrawal failure collapses into a single user_action and
@@ -639,7 +639,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
       l2TxHash: result.l2TxHash,
       l1TxHash: result.l1TxHash,
       isPrivacyModeEnabled,
-      userAction: 'withdrawal_l2_to_l1_completed',
+      userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_COMPLETED,
     })
 
     return result.l2TxHash
@@ -671,7 +671,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
         toToken: selectedToken?.pairedSymbol ?? 'USDC',
         l1Address: l1Address,
         l2Address: aztecAddress,
-        userAction: 'withdrawal_l2_to_l1_callback',
+        userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_CALLBACK,
         txHash: typeof txHash === 'string' ? txHash : 'completed',
       })
 
@@ -734,7 +734,7 @@ export function useL2RecoverWithdrawal() {
       onStep: (step, status) => setProgressStep(step, status),
       onEvent: (event: BridgeEvent) => {
         switch (event.type) {
-          case 'proven_poll':
+          case BridgeEventType.PROVEN_POLL:
             logInfo('L2→L1 resume proven poll', {
               direction: 'L2_TO_L1_RESUME',
               provenBlock: event.provenBlock,
@@ -742,7 +742,7 @@ export function useL2RecoverWithdrawal() {
               elapsedMs: event.elapsedMs,
               l1Address: resolvedL1Address,
               l2Address: aztecAddress,
-              userAction: 'resume_l2_to_l1_proven_poll',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_PROVEN_POLL,
             })
             notify(
               'info',
@@ -750,30 +750,30 @@ export function useL2RecoverWithdrawal() {
               { toastId: 'resume-l2-to-l1-progress', autoClose: false },
             )
             break
-          case 'proven_fallback':
+          case BridgeEventType.PROVEN_FALLBACK:
             logInfo('L2→L1 resume proven fallback', {
               direction: 'L2_TO_L1_RESUME',
               fixedWaitMs: event.fixedWaitMs,
               l1Address: resolvedL1Address,
               l2Address: aztecAddress,
-              userAction: 'resume_l2_to_l1_proven_fallback',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_PROVEN_FALLBACK,
             })
             notify('info', `Waiting ~${Math.round(event.fixedWaitMs / 60_000)} min for block finalization...`, {
               toastId: 'resume-l2-to-l1-progress',
               autoClose: false,
             })
             break
-          case 'l1_withdraw_sent':
+          case BridgeEventType.L1_WITHDRAW_SENT:
             logInfo('Resume L1 withdraw tx sent', {
               direction: 'L2_TO_L1_RESUME',
               l1TxHash: event.l1TxHash,
               l1Address: resolvedL1Address,
               l2Address: aztecAddress,
-              userAction: 'resume_l2_to_l1_l1_withdraw_sent',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_L1_WITHDRAW_SENT,
             })
             setTransactionUrls(event.l1TxUrl, currentL2TxUrl)
             break
-          case 'operation_completed':
+          case BridgeEventType.OPERATION_COMPLETED:
             logInfo('Resume withdrawal completed', {
               direction: 'L2_TO_L1_RESUME',
               operationId: event.operationId,
@@ -781,21 +781,21 @@ export function useL2RecoverWithdrawal() {
               alreadyCompleted: event.alreadyCompleted,
               l1Address: resolvedL1Address,
               l2Address: aztecAddress,
-              userAction: 'resume_l2_to_l1_completed',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_COMPLETED,
             })
             if (event.l1TxHash) {
               const l1Url = `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${event.l1TxHash}`
               setTransactionUrls(l1Url, null)
             }
             break
-          case 'patch_failed':
+          case BridgeEventType.PATCH_FAILED:
             logError(`Resume PATCH failed: ${event.label}`, {
               direction: 'L2_TO_L1_RESUME',
               operationId: event.operationId,
               patchLabel: event.label,
               l1Address: resolvedL1Address,
               l2Address: aztecAddress,
-              userAction: 'resume_l2_to_l1_patch_failed',
+              userAction: DatadogUserAction.RESUME_L2_TO_L1_PATCH_FAILED,
             })
             notify(
               'warn',
@@ -806,7 +806,7 @@ export function useL2RecoverWithdrawal() {
               { autoClose: false },
             )
             break
-          case 'error':
+          case BridgeEventType.ERROR:
             logError(
               event.error?.message ?? 'Resume error event',
               {
@@ -815,7 +815,7 @@ export function useL2RecoverWithdrawal() {
                 operationId: event.operationId,
                 l1Address: resolvedL1Address,
                 l2Address: aztecAddress,
-                userAction: 'resume_l2_to_l1_error',
+                userAction: DatadogUserAction.RESUME_L2_TO_L1_ERROR,
               },
               event.error,
             )
@@ -889,7 +889,7 @@ export function useExportWithdrawalData() {
         operationId: result.entry.id,
         tokenSymbol: result.entry.tokenSymbol,
         amount: result.entry.amount?.toString(),
-        userAction: 'copy_nonce',
+        userAction: DatadogUserAction.COPY_NONCE,
       })
 
       const ok = await copyToClipboard(result.value)

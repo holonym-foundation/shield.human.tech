@@ -12,7 +12,7 @@ import {
 } from '@/stores/waapWalletHelpers'
 import { AztecLoginMethod, LOGIN_METHODS, WaapLoginMethod, WalletType } from '@/types/wallet'
 import { extractErrorMessage } from '@/utils'
-import { logError, logInfo } from '@/utils/datadog'
+import { logError, logInfo, DatadogUserAction } from '@/utils/datadog'
 import {
   discoverWallets,
   connectToProvider,
@@ -270,7 +270,7 @@ const walletStore = create<WalletState>((set, get) => ({
       loginMethod: 'wallet-sdk',
       address: '',
       chainId: null,
-      userAction: 'aztec_wallet_discovery_start',
+      userAction: DatadogUserAction.AZTEC_WALLET_DISCOVERY_START,
     })
 
     const collectedWallets: Array<{ name: string; provider: WalletProvider }> = []
@@ -352,7 +352,7 @@ const walletStore = create<WalletState>((set, get) => ({
         loginMethod: 'wallet-sdk',
         address: '',
         chainId: null,
-        userAction: 'aztec_wallet_channel_failed',
+        userAction: DatadogUserAction.AZTEC_WALLET_CHANNEL_FAILED,
         error: errorMessage,
       })
       set({
@@ -498,7 +498,7 @@ const walletStore = create<WalletState>((set, get) => ({
         loginMethod: 'wallet-sdk',
         address: '',
         chainId: null,
-        userAction: 'aztec_wallet_confirm_failed',
+        userAction: DatadogUserAction.AZTEC_WALLET_CONFIRM_FAILED,
         error: errorMessage,
       })
       // Only reset state if we're not already connected (avoid nuking a
@@ -593,7 +593,7 @@ const walletStore = create<WalletState>((set, get) => ({
         loginMethod: 'wallet-sdk',
         address: account.address,
         chainId: null,
-        userAction: 'aztec_wallet_connection_success',
+        userAction: DatadogUserAction.AZTEC_WALLET_CONNECTION_SUCCESS,
       })
     } catch (error) {
       const errorMessage = extractErrorMessage(error)
@@ -645,7 +645,7 @@ const walletStore = create<WalletState>((set, get) => ({
         loginMethod: 'wallet-sdk',
         address: '',
         chainId: null,
-        userAction: 'aztec_wallet_connection_attempt',
+        userAction: DatadogUserAction.AZTEC_WALLET_CONNECTION_ATTEMPT,
       })
 
       // Start the wallet-sdk discovery flow
@@ -657,7 +657,7 @@ const walletStore = create<WalletState>((set, get) => ({
         loginMethod: 'wallet-sdk',
         address: '',
         chainId: null,
-        userAction: 'aztec_wallet_connection_failure',
+        userAction: DatadogUserAction.AZTEC_WALLET_CONNECTION_FAILURE,
         error: errorMessage,
       })
       showToast('error', `Failed to connect Aztec wallet: ${errorMessage}`)
@@ -677,7 +677,7 @@ const walletStore = create<WalletState>((set, get) => ({
         walletProvider: null,
         address: aztecAddress || '',
         chainId: null,
-        userAction: 'aztec_wallet_disconnection_attempt',
+        userAction: DatadogUserAction.AZTEC_WALLET_DISCONNECTION_ATTEMPT,
       })
 
       // Disconnect via provider
@@ -725,7 +725,7 @@ const walletStore = create<WalletState>((set, get) => ({
         walletProvider: null,
         address: '',
         chainId: null,
-        userAction: 'aztec_wallet_disconnection_success',
+        userAction: DatadogUserAction.AZTEC_WALLET_DISCONNECTION_SUCCESS,
       })
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
@@ -737,7 +737,7 @@ const walletStore = create<WalletState>((set, get) => ({
         walletProvider: null,
         address: get().aztecAddress || '',
         chainId: null,
-        userAction: 'aztec_wallet_disconnection_failure',
+        userAction: DatadogUserAction.AZTEC_WALLET_DISCONNECTION_FAILURE,
         error,
       })
 
@@ -806,7 +806,7 @@ const walletStore = create<WalletState>((set, get) => ({
         walletProvider: waapWalletProvider,
         address: waapAddress || '',
         chainId: waapChainId,
-        userAction: 'waap_wallet_connection_attempt',
+        userAction: DatadogUserAction.WAAP_WALLET_CONNECTION_ATTEMPT,
       })
 
       const result = (await window.waap.login()) as WaapLoginMethod
@@ -860,7 +860,7 @@ const walletStore = create<WalletState>((set, get) => ({
         walletProvider: walletProvider,
         address: address || '',
         chainId: chainId,
-        userAction: 'waap_wallet_connection_completed',
+        userAction: DatadogUserAction.WAAP_WALLET_CONNECTION_COMPLETED,
       })
     } catch (err: any) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error'
@@ -886,7 +886,7 @@ const walletStore = create<WalletState>((set, get) => ({
         walletProvider: waapWalletProvider,
         address: waapAddress || '',
         chainId: waapChainId,
-        userAction: 'waap_wallet_connection_failure',
+        userAction: DatadogUserAction.WAAP_WALLET_CONNECTION_FAILURE,
         error: err,
       })
 
@@ -906,7 +906,7 @@ const walletStore = create<WalletState>((set, get) => ({
         walletProvider: waapWalletProvider,
         address: waapAddress || '',
         chainId: waapChainId,
-        userAction: 'waap_wallet_disconnection_attempt',
+        userAction: DatadogUserAction.WAAP_WALLET_DISCONNECTION_ATTEMPT,
       })
 
       await window.waap.logout()
@@ -926,7 +926,7 @@ const walletStore = create<WalletState>((set, get) => ({
         walletProvider: waapWalletProvider,
         address: waapAddress || '',
         chainId: waapChainId,
-        userAction: 'waap_wallet_disconnection_success',
+        userAction: DatadogUserAction.WAAP_WALLET_DISCONNECTION_SUCCESS,
       })
     } catch (err) {
       const { waapLoginMethod, waapWalletProvider, waapAddress, waapChainId } = get()
@@ -936,7 +936,7 @@ const walletStore = create<WalletState>((set, get) => ({
         walletProvider: waapWalletProvider,
         address: waapAddress || '',
         chainId: waapChainId,
-        userAction: 'waap_wallet_disconnection_failure',
+        userAction: DatadogUserAction.WAAP_WALLET_DISCONNECTION_FAILURE,
         error: err,
       })
       showToast('error', 'Failed to disconnect Ethereum wallet')

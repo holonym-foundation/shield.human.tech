@@ -6,7 +6,7 @@ import {
   decryptOperationPayload as sdkDecrypt,
 } from '@human.tech/aztec-bridge-sdk'
 import type { BridgeOperation, BridgeActivityData } from '@human.tech/aztec-bridge-sdk'
-import { logInfo } from '@/utils/datadog'
+import { logInfo, DatadogUserAction } from '@/utils/datadog'
 
 /**
  * Hook to fetch the authenticated user's bridge operations from the backend.
@@ -59,7 +59,7 @@ export async function decryptOperationPayload(
       l1Address,
       isPrivacyModeEnabled: operation.isPrivacyModeEnabled,
       tokenSymbol: operation.tokenSymbol,
-      userAction: 'decrypt_operation_payload',
+      userAction: DatadogUserAction.DECRYPT_OPERATION_PAYLOAD,
     })
   }
 
