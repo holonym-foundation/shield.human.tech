@@ -77,8 +77,6 @@ export const AUTH_EXPECTED_DOMAIN = process.env.AUTH_EXPECTED_DOMAIN ?? 'bridge.
 
 // ─── Datadog (client) ───────────────────────────────────────────────
 
-export const DATADOG_APPLICATION_ID = process.env.NEXT_PUBLIC_DATADOG_APPLICATION_ID ?? ''
-export const DATADOG_CLIENT_TOKEN = process.env.NEXT_PUBLIC_DATADOG_CLIENT_TOKEN ?? ''
 export const DATADOG_SITE = process.env.NEXT_PUBLIC_DATADOG_SITE ?? ''
 export const DATADOG_SERVICE = process.env.NEXT_PUBLIC_DATADOG_SERVICE ?? ''
 export const DATADOG_ENV = process.env.NEXT_PUBLIC_DATADOG_ENV ?? process.env.NODE_ENV ?? 'production'
