@@ -42,6 +42,7 @@ import type {
   BridgeEventCallback,
   FuelQuote,
 } from '../types'
+import { BridgeEventType, BridgePhase } from '../types'
 
 // ─── Permit2 Constants ──────────────────────────────────────────────
 
@@ -553,7 +554,7 @@ export async function bridgeL1ToL2(
     // Only emit hashes and encrypted payload — never plaintext secrets.
     // Any consumer that logs events (Datadog, Sentry) would expose secrets otherwise.
     emit({
-      type: 'secrets_generated',
+      type: BridgeEventType.SECRETS_GENERATED,
       claimSecretHash: claimSecretHash.toString(),
       fuelSecretHash: fuelSecretHash?.toString(),
       encryptedPayload: encrypted,
@@ -626,7 +627,7 @@ export async function bridgeL1ToL2(
       )
     }
 
-    emit({ type: 'operation_created', operationId, data: operationData })
+    emit({ type: BridgeEventType.OPERATION_CREATED, operationId, data: operationData })
 
     // localStorage push with ALL fields matching frontend (including id, timestamp, etc.)
     pushDeposit({
@@ -777,7 +778,7 @@ export async function bridgeL1ToL2(
 
     // Danger zone: from here on, the L1 tx may go through irreversibly.
     // Consumers map this to a persistent "do not reload" banner.
-    emit({ type: 'do_not_reload', phase: 'l1_deposit' })
+    emit({ type: BridgeEventType.DO_NOT_RELOAD, phase: BridgePhase.L1_DEPOSIT })
 
     if (isFuelEnabled) {
       // ── Fuel path: call SwapBridgeRouter.bridgeWithFuel via Permit2 ──
@@ -919,7 +920,7 @@ export async function bridgeL1ToL2(
     l1TxSent = true
     const l1TxUrl = `${getEtherscanBaseUrl(config.l1ChainId)}/tx/${l1TxHash}`
 
-    emit({ type: 'deposit_sent', l1TxHash, l1TxUrl })
+    emit({ type: BridgeEventType.DEPOSIT_SENT, l1TxHash, l1TxUrl })
 
     // Persist l1TxHash to localStorage immediately (before backend patch).
     // Pass a fallback entry so that if the original pushDeposit entry was lost
@@ -945,7 +946,7 @@ export async function bridgeL1ToL2(
 
     const l1TxPatchOk = await patchOperationWithRetry(apiClient, operationId, { l1TxHash, l1TxUrl }, { label: 'l1TxHash' })
     if (!l1TxPatchOk) {
-      emit({ type: 'patch_failed', operationId: operationId!, label: 'l1TxHash', data: { l1TxHash, l1TxUrl } })
+      emit({ type: BridgeEventType.PATCH_FAILED, operationId: operationId!, label: 'l1TxHash', data: { l1TxHash, l1TxUrl } })
     }
 
     // Wait for receipt — only AFTER receipt confirms do we know funds are locked.
@@ -1096,7 +1097,7 @@ export async function bridgeL1ToL2(
     }
 
     emit({
-      type: 'deposit_confirmed',
+      type: BridgeEventType.DEPOSIT_CONFIRMED,
       l1TxHash,
       l1TxUrl,
       messageHash: messageHashStr,
@@ -1158,7 +1159,7 @@ export async function bridgeL1ToL2(
 
     const receiptPatchOk = await patchOperationWithRetry(apiClient, operationId, receiptPatchData, { label: 'receipt data' })
     if (!receiptPatchOk) {
-      emit({ type: 'patch_failed', operationId: operationId!, label: 'receipt data', data: { messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr } })
+      emit({ type: BridgeEventType.PATCH_FAILED, operationId: operationId!, label: 'receipt data', data: { messageHash: messageHashStr, messageLeafIndex: messageLeafIndexStr } })
     }
 
     onStep?.(1, 'completed')
@@ -1177,7 +1178,7 @@ export async function bridgeL1ToL2(
     const syncResult = syncResults[0]
     const fuelSyncResult = syncResults[1]
 
-    emit({ type: 'sync_poll', elapsedMinutes: syncResult.elapsedMinutes, synced: syncResult.synced })
+    emit({ type: BridgeEventType.SYNC_POLL, elapsedMinutes: syncResult.elapsedMinutes, synced: syncResult.synced })
 
     if (!syncResult.synced) {
       throw new Error(
@@ -1199,7 +1200,7 @@ export async function bridgeL1ToL2(
     // this multi-minute wait. Without it the UI is silent for ~19 min.
     await waitForNextL2Block(aztecNode, {
       onPoll: (elapsedSec, currentBlock, targetBlock) =>
-        emit({ type: 'l2_block_wait', elapsedSec, currentBlock, targetBlock }),
+        emit({ type: BridgeEventType.L2_BLOCK_WAIT, elapsedSec, currentBlock, targetBlock }),
     })
 
     onStep?.(2, 'completed')
@@ -1287,10 +1288,10 @@ export async function bridgeL1ToL2(
       { amount: claimAmount, claimSecret, messageLeafIndex: BigInt(messageLeafIndexStr) },
       {
         onAttempt: (attempt, maxAttempts) => {
-          emit({ type: 'claim_attempt', attempt, maxAttempts })
+          emit({ type: BridgeEventType.CLAIM_ATTEMPT, attempt, maxAttempts })
         },
         onRetry: (attempt, maxAttempts, delayMs) => {
-          emit({ type: 'claim_retry', attempt, maxAttempts, delayMs })
+          emit({ type: BridgeEventType.CLAIM_RETRY, attempt, maxAttempts, delayMs })
         },
         feeOption,
       },
@@ -1335,7 +1336,7 @@ export async function bridgeL1ToL2(
     if (l2ClaimBlockNumber) completionData.l2BlockNumber = l2ClaimBlockNumber
     const completionPatchOk = await patchOperationWithRetry(apiClient, operationId, completionData, { label: 'L1→L2 completion' })
     if (!completionPatchOk) {
-      emit({ type: 'patch_failed', operationId: operationId!, label: 'L1→L2 completion', data: { l2TxHash, status: 'completed' } })
+      emit({ type: BridgeEventType.PATCH_FAILED, operationId: operationId!, label: 'L1→L2 completion', data: { l2TxHash, status: 'completed' } })
     }
 
     onStep?.(3, 'completed')
@@ -1343,7 +1344,7 @@ export async function bridgeL1ToL2(
     // ── Step 4: Complete ──
     onStep?.(4, 'active')
 
-    emit({ type: 'operation_completed', operationId, l1TxHash, l2TxHash })
+    emit({ type: BridgeEventType.OPERATION_COMPLETED, operationId, l1TxHash, l2TxHash })
 
     // Mark localStorage entry as completed with URL fields
     updateDeposit(
@@ -1365,10 +1366,10 @@ export async function bridgeL1ToL2(
     if (walletAdapter?.registerToken) {
       try {
         await walletAdapter.registerToken(tokenConfig.l2TokenContract)
-        emit({ type: 'token_registered', tokenAddressL2: tokenConfig.l2TokenContract })
+        emit({ type: BridgeEventType.TOKEN_REGISTERED, tokenAddressL2: tokenConfig.l2TokenContract })
       } catch (regErr) {
         emit({
-          type: 'token_registration_failed',
+          type: BridgeEventType.TOKEN_REGISTRATION_FAILED,
           tokenAddressL2: tokenConfig.l2TokenContract,
           error: regErr instanceof Error ? regErr : new Error(String(regErr)),
         })
@@ -1389,7 +1390,7 @@ export async function bridgeL1ToL2(
 
     // Funds may be at risk if deposit confirmed OR tx was broadcast
     const fundsAtRisk = depositConfirmed || l1TxSent
-    emit({ type: 'error', error: err, fundsAtRisk, operationId })
+    emit({ type: BridgeEventType.ERROR, error: err, fundsAtRisk, operationId })
 
     if (operationId) {
       const patchData: Record<string, unknown> = {

@@ -15,6 +15,7 @@ import type {
   L2PassportStruct,
   BridgeEventCallback,
 } from './types'
+import { AttestationMethod } from './types'
 
 // ─── Empty Structs ──────────────────────────────────────────────────
 
@@ -153,7 +154,7 @@ export async function fetchAttestationsForDeposit(
   emit?: BridgeEventCallback,
 ): Promise<{ cleanHands: CleanHandsStruct; passport: PassportStruct }> {
   // Try POCH first
-  emit?.({ type: 'attestation_fetch', method: 'poch' })
+  emit?.({ type: 'attestation_fetch', method: AttestationMethod.POCH })
   try {
     const poch = await apiClient.postPochAttestation(portalAddress)
     assertL1SignatureShape(poch.l1Signature, 'POCH (L1 CleanHands)')
@@ -180,7 +181,7 @@ export async function fetchAttestationsForDeposit(
   }
 
   // Fallback to Passport
-  emit?.({ type: 'attestation_fetch', method: 'passport' })
+  emit?.({ type: 'attestation_fetch', method: AttestationMethod.PASSPORT })
   try {
     const passport = await apiClient.postPassportAttestation(portalAddress)
 
@@ -246,7 +247,7 @@ export async function fetchAttestationsForWithdrawal(
   emit?: BridgeEventCallback,
 ): Promise<{ cleanHands: L2CleanHandsStruct; passport: L2PassportStruct }> {
   // Try POCH first
-  emit?.({ type: 'attestation_fetch', method: 'poch' })
+  emit?.({ type: 'attestation_fetch', method: AttestationMethod.POCH })
   try {
     const poch = await apiClient.postPochAttestation(portalAddress)
     assertL2SignatureShape(poch.l2Signature, 'POCH (L2 CleanHands)')
@@ -270,7 +271,7 @@ export async function fetchAttestationsForWithdrawal(
   }
 
   // Fallback to Passport
-  emit?.({ type: 'attestation_fetch', method: 'passport' })
+  emit?.({ type: 'attestation_fetch', method: AttestationMethod.PASSPORT })
   try {
     const passport = await apiClient.postPassportAttestation(portalAddress, bridgeAddress)
 

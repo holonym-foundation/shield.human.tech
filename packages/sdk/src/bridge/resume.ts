@@ -38,6 +38,7 @@ import type {
   BridgeActivityData,
   BridgeEventCallback,
 } from '../types'
+import { BridgeEventType } from '../types'
 import { createL1PublicClient, wait, isAlreadyConsumedError, assertBlockScanRange } from './utils'
 import { getAztecscanUrl as getAztecscanBaseUrl, getEtherscanUrl as getEtherscanBaseUrl } from '../config'
 import { pollL1ToL2MessageSync, waitForBlockProven, waitForNextL2Block } from './polling'
@@ -369,7 +370,7 @@ async function resumeL1ToL2(
   // succeeded but the PATCH to the UI/session failed). Avoids a wasted wallet
   // popup and a confusing "already consumed" error surfaced after the fact.
   if (op.status === 'completed') {
-    emit({ type: 'operation_completed', operationId: op.id, alreadyCompleted: true })
+    emit({ type: BridgeEventType.OPERATION_COMPLETED, operationId: op.id, alreadyCompleted: true })
     onStep?.(3, 'completed')
     return {
       operationId: op.id,
@@ -585,7 +586,7 @@ async function resumeL1ToL2(
     if (op.l1TxHash) {
       // Path A: We have the L1 tx hash — get receipt and extract event.
       // For fuel-enabled deposits, try SwapBridgeRouter contract first, then fall back to portal.
-      emit({ type: 'recovery_from_receipt', l1TxHash: op.l1TxHash })
+      emit({ type: BridgeEventType.RECOVERY_FROM_RECEIPT, l1TxHash: op.l1TxHash })
       let recovered: {
         messageHash: string
         messageLeafIndex: string
@@ -676,7 +677,7 @@ async function resumeL1ToL2(
       // Path B: No tx hash — scan L1 blocks. Pass the SwapBridgeRouter address
       // so fuel-enabled bridges that crashed before the receipt PATCH can
       // still recover their fuel message fields from BridgeWithFuel events.
-      emit({ type: 'recovery_from_block_scan', l1BlockNumberBeforeTx: op.l1BlockNumberBeforeTx })
+      emit({ type: BridgeEventType.RECOVERY_FROM_BLOCK_SCAN, l1BlockNumberBeforeTx: op.l1BlockNumberBeforeTx })
       const recovered = await recoverFromBlockScan(
         publicClient,
         op.l1BlockNumberBeforeTx,
@@ -707,7 +708,7 @@ async function resumeL1ToL2(
           l1TxUrl,
         }, { label: 'recovered l1TxHash from block scan' })
         if (!l1TxPatchOk) {
-          emit({ type: 'patch_failed', operationId: op.id, label: 'recovered l1TxHash', data: { l1TxHash: recovered.l1TxHash } })
+          emit({ type: BridgeEventType.PATCH_FAILED, operationId: op.id, label: 'recovered l1TxHash', data: { l1TxHash: recovered.l1TxHash } })
         }
       }
       // Persist fuel fields and claimAmount recovered from the block scan so
@@ -767,7 +768,7 @@ async function resumeL1ToL2(
   }
   const syncResults = await Promise.all(syncPromises)
   const syncResult = syncResults[0]
-  emit({ type: 'sync_poll', elapsedMinutes: syncResult.elapsedMinutes, synced: syncResult.synced })
+  emit({ type: BridgeEventType.SYNC_POLL, elapsedMinutes: syncResult.elapsedMinutes, synced: syncResult.synced })
 
   if (!syncResult.synced) {
     throw new Error(
@@ -783,7 +784,7 @@ async function resumeL1ToL2(
   // during the multi-minute sequencer wait.
   await waitForNextL2Block(aztecNode, {
     onPoll: (elapsedSec, currentBlock, targetBlock) =>
-      emit({ type: 'l2_block_wait', elapsedSec, currentBlock, targetBlock }),
+      emit({ type: BridgeEventType.L2_BLOCK_WAIT, elapsedSec, currentBlock, targetBlock }),
   })
 
   onStep?.(2, 'completed')
@@ -807,7 +808,7 @@ async function resumeL1ToL2(
       onStep?.(3, 'completed')
       onStep?.(4, 'completed')
       emit({
-        type: 'operation_completed',
+        type: BridgeEventType.OPERATION_COMPLETED,
         operationId: op.id,
         l1TxHash: fresh.l1TxHash ?? op.l1TxHash ?? undefined,
         l2TxHash: fresh.l2TxHash ?? undefined,
@@ -840,10 +841,10 @@ async function resumeL1ToL2(
       },
       {
         onAttempt: (attempt, maxAttempts) => {
-          emit({ type: 'claim_attempt', attempt, maxAttempts })
+          emit({ type: BridgeEventType.CLAIM_ATTEMPT, attempt, maxAttempts })
         },
         onRetry: (attempt, maxAttempts, delayMs) => {
-          emit({ type: 'claim_retry', attempt, maxAttempts, delayMs })
+          emit({ type: BridgeEventType.CLAIM_RETRY, attempt, maxAttempts, delayMs })
         },
         feeOption: fuelFeeOption,
       },
@@ -891,7 +892,7 @@ async function resumeL1ToL2(
   // Step 4: Complete
   // ═════════════════════════════════════════════════════════════════════
   onStep?.(4, 'active')
-  emit({ type: 'operation_completed', operationId: op.id, l1TxHash: op.l1TxHash ?? undefined, l2TxHash })
+  emit({ type: BridgeEventType.OPERATION_COMPLETED, operationId: op.id, l1TxHash: op.l1TxHash ?? undefined, l2TxHash })
 
   // Mark localStorage deposit as completed with URL fields
   updateDeposit(
@@ -914,10 +915,10 @@ async function resumeL1ToL2(
   if (walletAdapter?.registerToken && op.tokenAddressL2) {
     try {
       await walletAdapter.registerToken(op.tokenAddressL2)
-      emit({ type: 'token_registered', tokenAddressL2: op.tokenAddressL2 })
+      emit({ type: BridgeEventType.TOKEN_REGISTERED, tokenAddressL2: op.tokenAddressL2 })
     } catch (regErr) {
       emit({
-        type: 'token_registration_failed',
+        type: BridgeEventType.TOKEN_REGISTRATION_FAILED,
         tokenAddressL2: op.tokenAddressL2,
         error: regErr instanceof Error ? regErr : new Error(String(regErr)),
       })
@@ -937,7 +938,7 @@ async function resumeL1ToL2(
   }
   } catch (err) {
     emit({
-      type: 'error',
+      type: BridgeEventType.ERROR,
       error: err instanceof Error ? err : new Error(String(err)),
       fundsAtRisk: true,
     })
@@ -997,7 +998,7 @@ async function resumeL2ToL1(
 
   // Short-circuit if the operation is already completed.
   if (op.status === 'completed') {
-    emit({ type: 'operation_completed', operationId: op.id, alreadyCompleted: true })
+    emit({ type: BridgeEventType.OPERATION_COMPLETED, operationId: op.id, alreadyCompleted: true })
     onStep?.(5, 'completed')
     return {
       operationId: op.id,
@@ -1034,7 +1035,7 @@ async function resumeL2ToL1(
       'Tokens will be sent to the original recipient address.',
     )
     emit({
-      type: 'error',
+      type: BridgeEventType.ERROR,
       error: new Error(
         `Connected wallet (${params.l1Address}) differs from the original recipient (${l1Address}). ` +
         'Tokens will be sent to the original recipient address. If this is not what you want, switch wallets and retry.',
@@ -1070,11 +1071,11 @@ async function resumeL2ToL1(
     if (l2BlockNumber) {
       blockNum = Number(l2BlockNumber)
     } else if (op.l2TxHash) {
-      emit({ type: 'recovery_l2_block', l2TxHash: op.l2TxHash, l2BlockNumber: 0 })
+      emit({ type: BridgeEventType.RECOVERY_L2_BLOCK, l2TxHash: op.l2TxHash, l2BlockNumber: 0 })
       try {
         blockNum = await recoverL2BlockNumber(aztecNode, op.l2TxHash)
         l2BlockNumber = String(blockNum)
-        emit({ type: 'recovery_l2_block', l2TxHash: op.l2TxHash, l2BlockNumber: blockNum })
+        emit({ type: BridgeEventType.RECOVERY_L2_BLOCK, l2TxHash: op.l2TxHash, l2BlockNumber: blockNum })
         await patchOperationWithRetry(apiClient, op.id, { l2BlockNumber: String(blockNum) }, { label: 'recovered l2BlockNumber' })
       } catch (recoverErr) {
         // If receipt polling fails but we have l2BlockNumberBeforeTx, fall through to block scan
@@ -1221,7 +1222,7 @@ async function resumeL2ToL1(
     )
 
     emit({
-      type: 'witness_computed',
+      type: BridgeEventType.WITNESS_COMPUTED,
       leafIndex: l2ToL1MessageIndex!,
       siblingPath: siblingPath as string[],
       epoch: Number(withdrawEpoch ?? 0),
@@ -1297,10 +1298,10 @@ async function resumeL2ToL1(
     aztecNode,
     blockNumberForProof,
     onPoll: (provenBlock, neededBlock, elapsedMs) => {
-      emit({ type: 'proven_poll', provenBlock, neededBlock, elapsedMs })
+      emit({ type: BridgeEventType.PROVEN_POLL, provenBlock, neededBlock, elapsedMs })
     },
     onFallback: (fixedWaitMs) => {
-      emit({ type: 'proven_fallback', fixedWaitMs })
+      emit({ type: BridgeEventType.PROVEN_FALLBACK, fixedWaitMs })
     },
   })
 
@@ -1356,7 +1357,7 @@ async function resumeL2ToL1(
     if (withdrawL1TxHash === 'already-consumed') {
       alreadyWithdrawn = true
     } else {
-      emit({ type: 'l1_withdraw_sent', l1TxHash: withdrawL1TxHash, l1TxUrl: withdrawL1TxUrl })
+      emit({ type: BridgeEventType.L1_WITHDRAW_SENT, l1TxHash: withdrawL1TxHash, l1TxUrl: withdrawL1TxUrl })
     }
   } catch (withdrawErr) {
     // If the withdraw reverts because the message was already consumed
@@ -1393,7 +1394,7 @@ async function resumeL2ToL1(
   // Step 5: Done
   // ═════════════════════════════════════════════════════════════════════
   onStep?.(5, 'active')
-  emit({ type: 'operation_completed', operationId: op.id, l1TxHash: withdrawL1TxHash, l2TxHash: op.l2TxHash ?? undefined })
+  emit({ type: BridgeEventType.OPERATION_COMPLETED, operationId: op.id, l1TxHash: withdrawL1TxHash, l2TxHash: op.l2TxHash ?? undefined })
 
   // Mark localStorage withdrawal as completed with URL fields
   updateWithdrawal(
@@ -1421,7 +1422,7 @@ async function resumeL2ToL1(
   }
   } catch (err) {
     emit({
-      type: 'error',
+      type: BridgeEventType.ERROR,
       error: err instanceof Error ? err : new Error(String(err)),
       fundsAtRisk: true,
     })

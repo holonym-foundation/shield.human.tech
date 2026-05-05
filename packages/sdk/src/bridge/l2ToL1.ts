@@ -35,6 +35,7 @@ import type {
   L1WithdrawResult,
   BridgeEventCallback,
 } from '../types'
+import { BridgeEventType, BridgePhase } from '../types'
 import {
   createL1PublicClient,
   serializeNodeInfo,
@@ -279,7 +280,7 @@ export async function withdrawL2ToL1(
 
     // Never emit plaintext nonce — only encrypted payload
     emit({
-      type: 'nonce_generated',
+      type: BridgeEventType.NONCE_GENERATED,
       l2BridgeAddress,
       encryptedPayload: encrypted,
       l1BlockNumberBeforeTx,
@@ -348,7 +349,7 @@ export async function withdrawL2ToL1(
       )
     }
 
-    emit({ type: 'operation_created', operationId, data: operationData })
+    emit({ type: BridgeEventType.OPERATION_CREATED, operationId, data: operationData })
 
     // localStorage push with ALL fields matching frontend
     pushWithdrawal({
@@ -405,7 +406,7 @@ export async function withdrawL2ToL1(
     // we check for the txHash before re-throwing.
     // Danger zone: from here on, the L2 burn is irreversible. Consumers map
     // this event to a persistent "do not reload" banner.
-    emit({ type: 'do_not_reload', phase: 'l2_burn' })
+    emit({ type: BridgeEventType.DO_NOT_RELOAD, phase: BridgePhase.L2_BURN })
     const userAddress = AztecAddress.fromString(l2Address)
     let burnResult: { txHash: string; blockNumber?: number }
     try {
@@ -475,7 +476,7 @@ export async function withdrawL2ToL1(
       currentStep: 2,
     }, { label: 'l2TxHash' })
 
-    emit({ type: 'burn_sent', l2TxHash })
+    emit({ type: BridgeEventType.BURN_SENT, l2TxHash })
 
     onStep?.(1, 'completed')
 
@@ -485,10 +486,10 @@ export async function withdrawL2ToL1(
     // Await the PATCH we fired above
     const l2TxPatchOk = await l2TxPatchPromise
     if (!l2TxPatchOk) {
-      emit({ type: 'patch_failed', operationId: operationId!, label: 'l2TxHash', data: { l2TxHash, l2TxUrl } })
+      emit({ type: BridgeEventType.PATCH_FAILED, operationId: operationId!, label: 'l2TxHash', data: { l2TxHash, l2TxUrl } })
     }
 
-    emit({ type: 'burn_confirmed', l2TxHash, l2TxUrl, l2BlockNumber: l2BlockNumber ?? undefined })
+    emit({ type: BridgeEventType.BURN_CONFIRMED, l2TxHash, l2TxUrl, l2BlockNumber: l2BlockNumber ?? undefined })
 
     // Poll for block number if not returned
     if (l2BlockNumber == null) {
@@ -498,7 +499,7 @@ export async function withdrawL2ToL1(
           const receipt = await aztecNode.getTxReceipt(l2TxHash as any)
           if (receipt?.blockNumber != null) {
             l2BlockNumber = receipt.blockNumber
-            emit({ type: 'recovery_l2_block', l2TxHash, l2BlockNumber: l2BlockNumber! })
+            emit({ type: BridgeEventType.RECOVERY_L2_BLOCK, l2TxHash, l2BlockNumber: l2BlockNumber! })
             break
           }
         } catch {
@@ -515,7 +516,7 @@ export async function withdrawL2ToL1(
       l2BlockNumber: String(l2BlockNumber),
     }, { label: 'l2BlockNumber' })
     if (!blockPatchOk) {
-      emit({ type: 'patch_failed', operationId: operationId!, label: 'l2BlockNumber', data: { l2BlockNumber: String(l2BlockNumber) } })
+      emit({ type: BridgeEventType.PATCH_FAILED, operationId: operationId!, label: 'l2BlockNumber', data: { l2BlockNumber: String(l2BlockNumber) } })
     }
 
     // Update localStorage with l2BlockNumber and status:'submitted'
@@ -616,7 +617,7 @@ export async function withdrawL2ToL1(
     }
     const witnessPatchOk = await patchOperationWithRetry(apiClient, operationId, witnessPatchData, { label: 'witness data' })
     if (!witnessPatchOk) {
-      emit({ type: 'patch_failed', operationId: operationId!, label: 'witness data', data: { l2ToL1MessageIndex: witnessResult.leafIndex } })
+      emit({ type: BridgeEventType.PATCH_FAILED, operationId: operationId!, label: 'witness data', data: { l2ToL1MessageIndex: witnessResult.leafIndex } })
     }
 
     // Update localStorage with witness data
@@ -635,7 +636,7 @@ export async function withdrawL2ToL1(
     )
 
     emit({
-      type: 'witness_computed',
+      type: BridgeEventType.WITNESS_COMPUTED,
       leafIndex: witnessResult.leafIndex,
       siblingPath: witnessResult.siblingPath,
       epoch: Number(resolvedEpoch ?? witnessResult.epoch),
@@ -651,10 +652,10 @@ export async function withdrawL2ToL1(
       aztecNode,
       blockNumberForProof: l2BlockNumber,
       onPoll: (provenBlock, neededBlock, elapsedMs) => {
-        emit({ type: 'proven_poll', provenBlock, neededBlock, elapsedMs })
+        emit({ type: BridgeEventType.PROVEN_POLL, provenBlock, neededBlock, elapsedMs })
       },
       onFallback: (fixedWaitMs) => {
-        emit({ type: 'proven_fallback', fixedWaitMs })
+        emit({ type: BridgeEventType.PROVEN_FALLBACK, fixedWaitMs })
       },
     })
 
@@ -722,7 +723,7 @@ export async function withdrawL2ToL1(
     }
 
     if (withdrawResult.l1TxHash !== 'already-consumed') {
-      emit({ type: 'l1_withdraw_sent', l1TxHash: withdrawResult.l1TxHash, l1TxUrl: withdrawResult.l1TxUrl })
+      emit({ type: BridgeEventType.L1_WITHDRAW_SENT, l1TxHash: withdrawResult.l1TxHash, l1TxUrl: withdrawResult.l1TxUrl })
     }
 
     // Mark as completed on server (retry — critical for DB consistency)
@@ -736,7 +737,7 @@ export async function withdrawL2ToL1(
     if (withdrawResult.l1BlockNumber) completionPatchData.l1BlockNumber = withdrawResult.l1BlockNumber
     const completionPatchOk = await patchOperationWithRetry(apiClient, operationId, completionPatchData, { label: 'L2→L1 completion' })
     if (!completionPatchOk) {
-      emit({ type: 'patch_failed', operationId: operationId!, label: 'L2→L1 completion', data: { l1TxHash: withdrawResult.l1TxHash, status: 'completed' } })
+      emit({ type: BridgeEventType.PATCH_FAILED, operationId: operationId!, label: 'L2→L1 completion', data: { l1TxHash: withdrawResult.l1TxHash, status: 'completed' } })
     }
 
     onStep?.(4, 'completed')
@@ -744,7 +745,7 @@ export async function withdrawL2ToL1(
     // ── Step 5: Done ──
     onStep?.(5, 'active')
 
-    emit({ type: 'operation_completed', operationId, l1TxHash: withdrawResult.l1TxHash, l2TxHash })
+    emit({ type: BridgeEventType.OPERATION_COMPLETED, operationId, l1TxHash: withdrawResult.l1TxHash, l2TxHash })
 
     // Mark localStorage entry as completed with URL fields
     updateWithdrawal(
@@ -796,7 +797,7 @@ export async function withdrawL2ToL1(
       )
     }
 
-    emit({ type: 'error', error: surfaced, fundsAtRisk: burnConfirmed, operationId })
+    emit({ type: BridgeEventType.ERROR, error: surfaced, fundsAtRisk: burnConfirmed, operationId })
 
     if (operationId) {
       const patchData: Record<string, unknown> = {
