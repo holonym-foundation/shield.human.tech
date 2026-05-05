@@ -137,4 +137,19 @@ export class BridgeApiError extends Error {
     super(`Bridge API ${method} ${path} failed (${status}): ${body}`)
     this.name = 'BridgeApiError'
   }
+
+  /**
+   * Parse `body` as JSON. Returns the parsed object when the response was a
+   * JSON envelope (typical shape: `{ error, reason }`), or null when the body
+   * was a plain string / non-JSON. Lets callers surface a friendly
+   * `reason`/`error` field in toasts instead of the raw stringified body.
+   */
+  get parsedBody(): Record<string, unknown> | null {
+    try {
+      const parsed = JSON.parse(this.body)
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
+    } catch {
+      return null
+    }
+  }
 }
