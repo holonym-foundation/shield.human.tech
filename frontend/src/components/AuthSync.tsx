@@ -6,10 +6,7 @@ import { useWalletStore } from '@/stores/walletStore'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { useBridge } from '@/hooks/useBridge'
 import { showToast } from '@/hooks/useToast'
-import {
-  requestWaapWallet,
-  WAAP_METHOD,
-} from '@/stores/walletStore'
+import { requestWaapWallet, WAAP_METHOD } from '@/stores/walletStore'
 import { L1_CHAIN_ID } from '@/config'
 
 const MAX_AUTH_RETRIES = 2
@@ -19,13 +16,7 @@ const MAX_AUTH_RETRIES = 2
  * via SIWE (EIP-4361) using the SDK. Auto-retries on nonce expiry.
  */
 export default function AuthSync() {
-  const {
-    waapAddress,
-    aztecAddress,
-    waapLoginMethod,
-    waapWalletProvider,
-    aztecLoginMethod,
-  } = useWalletStore()
+  const { waapAddress, aztecAddress, waapLoginMethod, waapWalletProvider, aztecLoginMethod } = useWalletStore()
   const { setAuth, setAuthFailed, clearAuth, user, retryAuth } = useAuthStore()
   const prevKeyRef = useRef<string | null>(null)
   const bridge = useBridge()
@@ -37,10 +28,7 @@ export default function AuthSync() {
   const bothConnected = !!l1Normalized && !!l2Normalized
   const currentKey = bothConnected ? `${l1Normalized}:${l2Normalized}` : null
 
-  const l2WalletProvider =
-    aztecLoginMethod === 'wallet-sdk'
-      ? 'WalletSDK'
-      : null
+  const l2WalletProvider = aztecLoginMethod === 'wallet-sdk' ? 'WalletSDK' : null
 
   // Sync persisted JWT to bridge instance on mount/token change + verify session + drain failed patches
   useEffect(() => {
@@ -109,10 +97,7 @@ export default function AuthSync() {
           uri: window.location.origin,
           chainId: L1_CHAIN_ID,
           signMessage: async (msg: string) => {
-            const sig = await requestWaapWallet(WAAP_METHOD.personal_sign, [
-              msg,
-              waapAddress,
-            ])
+            const sig = await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, waapAddress])
             return sig as string
           },
           l1LoginMethod: waapLoginMethod ?? undefined,
@@ -132,9 +117,18 @@ export default function AuthSync() {
       } catch (err: any) {
         if (cancelled) return
 
-        const errorMsg = err?.response?.data?.error || err?.body || err?.message || 'Unknown error'
-        const isNonceError =
-          errorMsg.includes('nonce') || errorMsg.includes('expired')
+        // BridgeApiError exposes `friendlyMessage` (status-mapped fallback +
+        // JSON {reason,error} parsing). Falls back to err.message for
+        // non-API errors (wallet rejection, network, etc.). Avoid `err.body`
+        // as a raw string — it can be a 5KB Next.js HTML error page.
+        const errorMsg: string =
+          (typeof err?.friendlyMessage === 'string' && err.friendlyMessage) ||
+          err?.response?.data?.reason ||
+          err?.response?.data?.error ||
+          err?.message ||
+          'Unknown error'
+
+        const isNonceError = /nonce|expired/i.test(errorMsg)
 
         // Auto-retry on nonce errors (up to MAX_AUTH_RETRIES)
         if (isNonceError && retryCount < MAX_AUTH_RETRIES) {
