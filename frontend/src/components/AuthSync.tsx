@@ -11,6 +11,11 @@ import { L1_CHAIN_ID } from '@/config'
 
 const MAX_AUTH_RETRIES = 2
 
+// Stable toast id so the "Authenticating…" toast updates in place across
+// nonce-retries instead of stacking, and so we can dismiss it deterministically
+// on success/failure.
+const AUTH_PENDING_TOAST_ID = 'auth-pending'
+
 /**
  * When both L1 (Waap) and L2 (Aztec) wallets are connected, authenticate
  * via SIWE (EIP-4361) using the SDK. Auto-retries on nonce expiry.
@@ -97,8 +102,24 @@ export default function AuthSync() {
           uri: window.location.origin,
           chainId: L1_CHAIN_ID,
           signMessage: async (msg: string) => {
-            const sig = await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, waapAddress])
-            return sig as string
+            // Surface a clear "this is auth, not a bridge tx" toast right
+            // before the wallet popup so the user knows what they're signing.
+            // Dismissed on any outcome (success, rejection, network error).
+            showToast(
+              'info',
+              {
+                heading: 'Authenticating',
+                message:
+                  'Sign the message in your wallet to confirm ownership of your accounts. This does NOT authorize a bridge transaction.',
+              },
+              { toastId: AUTH_PENDING_TOAST_ID, autoClose: false },
+            )
+            try {
+              const sig = await requestWaapWallet(WAAP_METHOD.personal_sign, [msg, waapAddress])
+              return sig as string
+            } finally {
+              showToast.dismiss(AUTH_PENDING_TOAST_ID)
+            }
           },
           l1LoginMethod: waapLoginMethod ?? undefined,
           l1WalletProvider: waapWalletProvider ?? undefined,
