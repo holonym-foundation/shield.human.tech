@@ -6,7 +6,15 @@ import { signJWT } from '@/lib/jwt'
 import { consumeNonce } from '@/lib/siweNonceStore'
 import { AuthenticateSchema } from '@/lib/validation'
 import { AUTH_EXPECTED_DOMAIN } from '@/config/env.config'
-import { L2_RESOURCE_PREFIX } from '@human.tech/aztec-bridge-sdk'
+
+// Must stay in sync with `L2_RESOURCE_PREFIX` in packages/sdk/src/auth.ts.
+// Inlined here on purpose: importing the constant via the SDK barrel
+// pulls @aztec/aztec.js transitively, which does readFileSync on a .wasm
+// at module-load time and fails under Next.js server bundling
+// (vendor-chunks/noirc_abi_wasm_bg.wasm not copied to .next/dev/server).
+// Client and server MUST produce/parse the same string — divergence
+// breaks SIWE address extraction.
+const L2_RESOURCE_PREFIX = 'https://bridge.human.tech/aztec/address/'
 
 /** Aztec address: 0x followed by 64 hex chars */
 const AZTEC_ADDRESS_REGEX = /^0x[a-fA-F0-9]{64}$/
