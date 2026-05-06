@@ -134,7 +134,11 @@ export class BridgeApiError extends Error {
     public readonly method: string,
     public readonly path: string,
   ) {
-    super(`Bridge API ${method} ${path} failed (${status}): ${body}`)
+    // `message` stays a developer-readable summary — never the raw body.
+    // The previous version embedded `body` here, which produced 5KB+ messages
+    // when the server returned an HTML error page (Next.js 500). Callers that
+    // need the body should read `.body` (raw) or `.parsedBody` (JSON envelope).
+    super(`Bridge API ${method} ${path} failed (${status})`)
     this.name = 'BridgeApiError'
   }
 
@@ -151,5 +155,31 @@ export class BridgeApiError extends Error {
     } catch {
       return null
     }
+  }
+
+  /**
+   * Best-effort human-readable error string for toasts/banners. Order:
+   *   1. JSON `reason` field (most specific, e.g. sanctions reason)
+   *   2. JSON `error` field
+   *   3. Plain-text body if it's short and not HTML
+   *   4. A status-mapped fallback (`Server error (500)`, etc.)
+   * Always returns a string short enough for a toast.
+   */
+  get friendlyMessage(): string {
+    const parsed = this.parsedBody
+    const fromJson = (parsed?.reason as string | undefined) ?? (parsed?.error as string | undefined)
+    if (typeof fromJson === 'string' && fromJson.length > 0) return fromJson
+
+    const trimmed = (this.body ?? '').trim()
+    const looksLikeHtml = trimmed.startsWith('<')
+    if (!looksLikeHtml && trimmed.length > 0 && trimmed.length <= 200) return trimmed
+
+    if (this.status >= 500) return `Server error (${this.status}). Please try again shortly.`
+    if (this.status === 401) return 'Authentication required. Please reconnect your wallets.'
+    if (this.status === 403) return 'Request not allowed.'
+    if (this.status === 404) return 'Not found.'
+    if (this.status === 400) return 'Invalid request.'
+    if (this.status === 0) return 'Network error. Please check your connection.'
+    return `Request failed (${this.status}).`
   }
 }
