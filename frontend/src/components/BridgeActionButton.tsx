@@ -391,7 +391,7 @@ function BridgeActionButton({
     if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...'
     if (balancesLoading) return 'Loading balances...'
     if (isConnecting) return 'Connecting...'
-    if (requestFaucetPending) return 'Getting Eth & Testnet USDC...'
+    if (requestFaucetPending) return 'Getting Testnet USDC...'
     if (pochLoading) return 'Checking eligibility...'
     if (withdrawTokensToL1Pending) return 'Withdrawing Tokens...'
     if (bridgeTokensToL2Pending) return 'Bridging Tokens...'
