@@ -52,6 +52,7 @@ import { AztecLoginMethod } from '@/types/wallet'
 import AztecWalletConnectionModals from '@/components/AztecWalletConnectionModals'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
+import { useAuthStore } from '@/stores/useAuthStore'
 import { useRouter } from 'next/navigation'
 import MaintenanceOverlay from '@/components/MaintenanceOverlay'
 import FuelToggle from '@/components/FuelToggle'
@@ -132,6 +133,11 @@ export default function Home() {
     aztecAddress,
     waapAddress,
   } = useWalletStore()
+
+  // Disable the bridge action when JWT issuance failed; the deposit/withdraw
+  // backup POST to /api/bridge/operations would 401, aborting before any
+  // on-chain tx but only after the user clicked through. Block at the button.
+  const authFailed = useAuthStore((s) => s.authFailed)
 
   // Success callbacks
   const mintL1SBTOnSuccess = (_data: any) => {
@@ -545,7 +551,7 @@ export default function Home() {
           <div className="self-end">
             <div className="rounded-[16px] border border-[#D4D4D4] bg-white shadow-[0px_0px_16px_0px_rgba(0,0,0,0.16)] flex flex-col items-center gap-[16px] pt-[16px] pr-[10px] pb-0 pl-[10px] w-full">
               <BridgeActionButton
-                isDisabled={!fuelSufficient || !fuelRecipientValid}
+                isDisabled={!fuelSufficient || !fuelRecipientValid || authFailed}
                 // Connection states
                 isWaapConnected={isWaapConnected}
                 connectWaapWallet={connectWaapWallet}

@@ -8,6 +8,7 @@ import { useWalletStore } from './stores/walletStore'
 import { init as initDatadog } from '@/utils/datadog'
 import AuthSync from '@/components/AuthSync'
 import { BridgeContext, useBridgeInstance } from '@/hooks/useBridge'
+import { L1_RPC_URL } from './config'
 
 function InitializeWaapWallet() {
   const { initializeWaapWallet } = useWalletStore()
@@ -52,7 +53,7 @@ function BridgeProvider({ children }: { children: ReactNode }) {
   // External SDK consumers don't need to set this — it defaults to https://bridge.human.tech
   const bridge = useBridgeInstance({
     apiUrl: '',
-    l1RpcUrl: process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL ?? '',
+    l1RpcUrl: L1_RPC_URL ?? '',
   })
   return (
     <BridgeContext.Provider value={bridge}>{children}</BridgeContext.Provider>
