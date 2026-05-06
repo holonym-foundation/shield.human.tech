@@ -2013,6 +2013,10 @@ async function testPrivateFuelFlow(
     logger.info(`BridgedFPC registered at ${bridgedFpcInstance.address.toString()}`)
 
     // 1. Generate private fuel secret (poseidon2 derivation — same as frontend)
+    // NOTE: Keep this value in sync with `BRIDGED_FPC_DOMAIN_SEPARATOR` in
+    //   packages/sdk/src/contracts/constants.ts (canonical source) AND with
+    //   the BridgedFPC Noir contract's domain separator. Out-of-sync values
+    //   make private-fuel claims silently impossible to settle on L2.
     const DOM_SEP_FPC_BRIDGE_SECRET = 3952304070
     const privateFuelSalt = Fr.random()
     const claimerFr = Fr.fromString(ownerAztecAddress.toString())

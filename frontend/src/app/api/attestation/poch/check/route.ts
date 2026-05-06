@@ -57,9 +57,6 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('[attestation/poch/check]', error)
-    return NextResponse.json(
-      { error: 'Failed to check POCH eligibility' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to check POCH eligibility' }, { status: 500 })
   }
 }

@@ -209,6 +209,7 @@ import { getEtherscanUrl as getEtherscanBaseUrl, getAztecscanUrl as getAztecscan
 import { pollL1ToL2MessageSync, waitForNextL2Block } from './polling'
 import { pushDeposit, updateDeposit } from '../storage'
 import { fetchAttestationsForDeposit, assertNonEmptyDepositAttestation } from '../attestation'
+import { BRIDGED_FPC_DOMAIN_SEPARATOR } from '../contracts/constants'
 
 // ─── L2 Claim Execution ─────────────────────────────────────────────
 
@@ -490,8 +491,8 @@ export async function bridgeL1ToL2(
     // Public fuel: random secret (used with FeeJuicePaymentMethodWithClaim on L2).
     // Private fuel (BridgedFPC): derived secret = poseidon2([salt, aztecAddress], DOM_SEP)
     //   so BridgedFPC can recompute the secret from salt + caller when mint_and_pay_fee
-    //   is invoked during L2 claim.
-    const DOM_SEP_FPC_BRIDGE_SECRET = 3952304070
+    //   is invoked during L2 claim. Domain separator is centralized at
+    //   `../contracts/constants` — the BridgedFPC contract has the matching value baked in.
     const isPrivateFuel = fuel?.enabled && fuel.fuelType === 'private'
     let fuelSecret: Fr | undefined
     let fuelSecretHash: Fr | undefined
@@ -505,7 +506,7 @@ export async function bridgeL1ToL2(
         const claimerFr = Fr.fromString(l2Address)
         privateFuelSecret = await poseidon2HashWithSeparator(
           [privateFuelSalt, claimerFr],
-          DOM_SEP_FPC_BRIDGE_SECRET,
+          BRIDGED_FPC_DOMAIN_SEPARATOR,
         )
         privateFuelSecretHash = await computeSecretHash(privateFuelSecret)
         // The SwapBridgeRouter still receives `fuelSecretHash` at the contract
@@ -751,28 +752,34 @@ export async function bridgeL1ToL2(
     let txHash: string
     const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
 
-    // Fetch attestation for private deposits (both fuel and standard paths)
+    // Fetch attestation for ALL deposits (public AND private). The L1
+    // TokenPortal calls `_validateAttestations` in `depositToAztecPublicFor`
+    // and `depositToAztecPrivateFor` alike — sending empty `cleanHands` /
+    // `passport` structs reverts with `InvalidVerification()` regardless of
+    // privacy mode. Earlier versions gated this on `isPrivate` and silently
+    // produced reverts on public deposits.
     let cleanHandsData = { nonce: 0n, signature: '0x' as `0x${string}` }
     let passportData = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
-    if (isPrivate) {
-      const attestResult =
-        await fetchAttestationsForDeposit(apiClient, tokenConfig.l1PortalContract, amount, tokenConfig.decimals, emit)
-      // Defense-in-depth: refuse to submit the deposit if the cascade somehow
-      // returned both-empty structs (would revert on-chain otherwise).
-      assertNonEmptyDepositAttestation(attestResult)
-      const { cleanHands: attestCleanHands, passport: attestPassport } = attestResult
-      cleanHandsData = {
-        nonce: attestCleanHands.nonce,
-        signature: attestCleanHands.signature as `0x${string}`,
-      }
-      passportData = {
-        maxAmount: attestPassport.maxAmount,
-        nonce: attestPassport.nonce,
-        deadline: attestPassport.deadline,
-        signature: attestPassport.signature as `0x${string}`,
-      }
-      // Passport deadline buffer. L1 portal rejects once block.timestamp >=
-      // deadline; reject too-short attestations before paying gas.
+    const attestResult =
+      await fetchAttestationsForDeposit(apiClient, tokenConfig.l1PortalContract, amount, tokenConfig.decimals, emit)
+    // Defense-in-depth: refuse to submit the deposit if the cascade somehow
+    // returned both-empty structs (would revert on-chain otherwise).
+    assertNonEmptyDepositAttestation(attestResult)
+    const { cleanHands: attestCleanHands, passport: attestPassport } = attestResult
+    cleanHandsData = {
+      nonce: attestCleanHands.nonce,
+      signature: attestCleanHands.signature as `0x${string}`,
+    }
+    passportData = {
+      maxAmount: attestPassport.maxAmount,
+      nonce: attestPassport.nonce,
+      deadline: attestPassport.deadline,
+      signature: attestPassport.signature as `0x${string}`,
+    }
+    // Passport deadline buffer. L1 portal rejects once block.timestamp >=
+    // deadline; reject too-short attestations before paying gas. Only relevant
+    // when passport is the chosen path (cleanHands carries no deadline).
+    if (passportData.signature.length > 2) {
       assertPassportDeadlineBuffer(passportData.deadline, 120n, 'the deposit tx')
     }
 

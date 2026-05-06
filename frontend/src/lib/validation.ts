@@ -42,18 +42,24 @@ export const AuthenticateSchema = z.object({
  *  portalAddress is REQUIRED — the L1 ECDSA passport attestation is bound
  *  to a specific TokenPortal so the signature can't be replayed against any
  *  other portal. Allowing it to be optional + signing `?? ''` produced
- *  wildcard-binding attestations. */
+ *  wildcard-binding attestations.
+ *  l2Address is OPTIONAL — the route uses authResult.user.l2Address from
+ *  the JWT (cryptographically SIWE-bound), so a body field is redundant and
+ *  the SDK doesn't pass one. */
 export const PassportAttestationSchema = z.object({
-  l2Address: z.string().min(1),
+  l2Address: z.string().min(1).optional(),
   isPrivate: z.boolean().optional().default(false),
   bridgeAddress: z.string().regex(ETH_ADDRESS_REGEX, 'bridgeAddress must be 0x + 40 hex chars').optional(),
   portalAddress: z.string().regex(ETH_ADDRESS_REGEX, 'portalAddress must be 0x + 40 hex chars'),
   deadline: z.number().int().nonnegative().optional(),
 })
 
-/** Schema for POST /api/attestation/poch */
+/** Schema for POST /api/attestation/poch.
+ *  All fields optional — the route reads l1/l2 addresses from the JWT
+ *  (authResult.user) and never reads the body data. The schema is kept as
+ *  a sanity guard against accidental wrong-type bodies. */
 export const PochAttestationSchema = z.object({
-  l2Address: z.string().min(1),
+  l2Address: z.string().min(1).optional(),
   isPrivate: z.boolean().optional().default(false),
 })
 
