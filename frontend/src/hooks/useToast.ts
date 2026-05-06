@@ -119,20 +119,29 @@ const extractOptions = (messageObj: string | ToastMessageObject) =>
   typeof messageObj === 'object' ? messageObj.options || {} : {}
 
 /**
- * Extracts a human-readable error message from axios errors or generic errors
+ * Extracts a human-readable error message from axios errors or generic errors.
+ * Order: BridgeApiError.friendlyMessage (status-mapped + JSON-aware) →
+ * axios `response.data.reason|error|message` → standard `err.message`.
+ *
+ * Never returns `err.body` raw — it can be a 5KB HTML error page.
  */
 const extractErrorMessage = (error: unknown): string | null => {
   if (!error || typeof error !== 'object') return null
   const err = error as any
+  // BridgeApiError: prefer the curated friendlyMessage
+  if (typeof err?.friendlyMessage === 'string' && err.friendlyMessage.length > 0) {
+    return err.friendlyMessage
+  }
   // Axios error with response body
   const responseData = err?.response?.data
   if (responseData) {
-    if (typeof responseData === 'string') return responseData
+    if (typeof responseData === 'string' && responseData.length <= 200 && !responseData.trim().startsWith('<')) {
+      return responseData
+    }
+    if (responseData.reason) return responseData.reason
     if (responseData.error) return responseData.error
     if (responseData.message) return responseData.message
   }
-  // BridgeApiError
-  if (err?.body) return err.body
   // Standard Error
   if (err?.message) return err.message
   return null
