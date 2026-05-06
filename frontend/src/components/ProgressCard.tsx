@@ -154,7 +154,9 @@ export default function ProgressCard({
 
         {hasError && (
           <p className="text-center text-12 text-latest-grey-500 mt-1">
-            The transaction was cancelled or could not be completed. You can safely go back and try again.
+            {l1TxUrl
+              ? 'Your deposit confirmed on L1 but a later step did not complete. Your funds are safe — go to Activity to resume.'
+              : 'The transaction was cancelled or could not be completed. You can safely go back and try again.'}
           </p>
         )}
 

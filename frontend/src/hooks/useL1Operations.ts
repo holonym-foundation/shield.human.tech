@@ -25,6 +25,22 @@ import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent, StepStatus } from '@human.tech/aztec-bridge-sdk'
 import { STORAGE_KEYS, BridgeEventType } from '@human.tech/aztec-bridge-sdk'
 
+// Stable toast IDs for the L1→L2 bridge flow. Each phase emits a persistent
+// (autoClose: false) toast; without dismissing the prior phase's toast on
+// transition, the user ends up with the full pile (Do Not Reload + Backup
+// Available + Deposit In Progress + ...). These ids let us dismiss precisely.
+const TOAST_ID_L1L2_DO_NOT_RELOAD = 'l1-to-l2-do-not-reload'
+const TOAST_ID_L1L2_BACKUP_AVAILABLE = 'l1-to-l2-backup-available'
+const TOAST_ID_L1L2_DEPOSIT_IN_PROGRESS = 'l1-to-l2-deposit-in-progress'
+const TOAST_ID_L1L2_DEPOSIT_CONFIRMED = 'l1-to-l2-deposit-confirmed'
+
+const L1L2_TRANSIENT_TOAST_IDS = [
+  TOAST_ID_L1L2_DO_NOT_RELOAD,
+  TOAST_ID_L1L2_BACKUP_AVAILABLE,
+  TOAST_ID_L1L2_DEPOSIT_IN_PROGRESS,
+  TOAST_ID_L1L2_DEPOSIT_CONFIRMED,
+] as const
+
 // Fix the bytecode format
 const PortalSBTAbi = PortalSBTJson.abi
 
@@ -481,7 +497,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
                 message:
                   'Your deposit transaction is being prepared. Closing or reloading this page now may make recovery harder.',
               },
-              { autoClose: false, toastId: 'l1-to-l2-do-not-reload' },
+              { autoClose: false, toastId: TOAST_ID_L1L2_DO_NOT_RELOAD },
             )
             break
           // Persist encrypted payload on secrets_generated (recovery-critical)
@@ -496,6 +512,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               },
               {
                 autoClose: false,
+                toastId: TOAST_ID_L1L2_BACKUP_AVAILABLE,
                 onClick: () => {
                   try {
                     const claims = localStorage.getItem(STORAGE_KEYS.deposits)
@@ -531,6 +548,8 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               userAction: DatadogUserAction.BRIDGE_L1_TO_L2_DEPOSIT_SENT,
             })
             setTransactionUrls(event.l1TxUrl, null)
+            // Tx is in mempool — the "Do Not Reload" prep banner is now stale.
+            notify.dismiss(TOAST_ID_L1L2_DO_NOT_RELOAD)
             notify(
               'warn',
               {
@@ -538,7 +557,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
                 message:
                   'Please keep this page open while your deposit completes. Your data is encrypted and backed up — only you can access it.',
               },
-              { autoClose: false },
+              { autoClose: false, toastId: TOAST_ID_L1L2_DEPOSIT_IN_PROGRESS },
             )
             break
           case BridgeEventType.DEPOSIT_CONFIRMED:
@@ -553,6 +572,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               userAction: DatadogUserAction.BRIDGE_L1_TO_L2_DEPOSIT_CONFIRMED,
             })
             setTransactionUrls(event.l1TxUrl, null)
+            // Deposit landed on-chain — earlier "preparing" / "in progress"
+            // toasts are now stale.
+            notify.dismiss(TOAST_ID_L1L2_DO_NOT_RELOAD)
+            notify.dismiss(TOAST_ID_L1L2_DEPOSIT_IN_PROGRESS)
             // Prompt user to backup their claim secret (matches old flow)
             notify(
               'warn',
@@ -563,6 +586,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               },
               {
                 autoClose: false,
+                toastId: TOAST_ID_L1L2_DEPOSIT_CONFIRMED,
                 onClick: () => {
                   try {
                     const claims = localStorage.getItem(STORAGE_KEYS.deposits)
@@ -592,7 +616,10 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             })
             notify(
               'info',
-              `Waiting for L2 sequencer to include message (${Math.round(event.elapsedSec / 60)}m elapsed)...`,
+              {
+                heading: 'Waiting for Aztec sequencer',
+                message: `Your L1 deposit is included; the Aztec sequencer is now picking it up. This step typically takes ~5–15 minutes — keep this tab open. (${Math.round(event.elapsedSec / 60)}m elapsed)`,
+              },
               { toastId: 'l1-to-l2-progress', autoClose: 15000 },
             )
             break
@@ -629,10 +656,17 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               l2Address: aztecAddress,
               userAction: DatadogUserAction.BRIDGE_L1_TO_L2_SYNC_POLL,
             })
-            notify('info', `Waiting for L1→L2 message sync (${event.elapsedMinutes.toFixed(0)} min elapsed)...`, {
-              toastId: 'l1-to-l2-progress',
-              autoClose: 15000,
-            })
+            notify(
+              'info',
+              {
+                heading: 'Waiting for L1→L2 sync',
+                message: `Aztec is syncing your deposit message from L1. Total wait is usually ~5–15 minutes — keep this tab open. (${event.elapsedMinutes.toFixed(0)} min elapsed)`,
+              },
+              {
+                toastId: 'l1-to-l2-progress',
+                autoClose: 15000,
+              },
+            )
             break
           case BridgeEventType.CLAIM_ATTEMPT:
             logInfo('L2 claim attempt', {
@@ -768,6 +802,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               },
               event.error,
             )
+            // Terminal error — clear all in-flight transient toasts so the
+            // user sees only the actionable error message, not a stack of
+            // mid-flow status banners.
+            for (const id of L1L2_TRANSIENT_TOAST_IDS) notify.dismiss(id)
+
             if (event.fundsAtRisk) {
               notify(
                 'warn',
@@ -820,6 +859,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
         }
       },
     })
+
+    // Bridge succeeded — clear any lingering mid-flow toasts (deposit
+    // confirmed / backup available / etc.) so the activity card is the only
+    // post-completion surface the user sees.
+    for (const id of L1L2_TRANSIENT_TOAST_IDS) notify.dismiss(id)
 
     // Log completion
     logInfo('Bridge from L1 to L2 completed', {
