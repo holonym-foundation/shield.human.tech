@@ -73,18 +73,20 @@ export default function ResumePage() {
     }
   }, [recoveryClaimData, recoveryWithdrawalData, router])
 
-  // Warn user before leaving while operation is in progress
+  // Arm beforeunload only inside the irrecoverable window. l1TxUrl/l2TxUrl may already be set
+  // from persisted recovery data on mount — that's correct: a resume is itself an in-flight bridge.
   useEffect(() => {
     const steps = getProgressSteps()
-    const isInProgress = steps.some((step) => step.status === 'active')
-    if (!isInProgress) return
+    const hasInFlightTx = !!(l1TxUrl || l2TxUrl)
+    const hasActiveStep = steps.some((step) => step.status === 'active')
+    if (!hasInFlightTx || !hasActiveStep) return
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault()
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [getProgressSteps])
+  }, [getProgressSteps, l1TxUrl, l2TxUrl])
 
   // Prefetch activity route
   useEffect(() => {

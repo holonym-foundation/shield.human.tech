@@ -3,19 +3,14 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { STORAGE_KEYS } from '@human.tech/aztec-bridge-sdk'
 import { buildFuelClaimUrl } from '@/utils/fuelClaimLink'
+import { useBridgeStore } from '@/stores/bridgeStore'
 
 const LS_KEY_BRIDGE_DEPOSITS = STORAGE_KEYS.deposits
 
-/**
- * Shows the recipient claim link after a bridge with a third-party fuel recipient. The bridger
- * needs to deliver this URL to the recipient out-of-band — anyone with it can submit the L2
- * claim, but the FeeJuice always mints to the recipient address that was set at L1 deposit time
- * (stored in `fuelRecipient` on the localStorage entry).
- *
- * We poll localStorage rather than subscribing to a store update because the bridge flow writes
- * the fuel-message metadata directly via `updateLocalStorageItem`, not through zustand.
- */
+// Polls localStorage because the bridge flow writes fuel-message metadata via
+// updateLocalStorageItem, not zustand — no subscribable signal.
 export function FuelClaimLinkPanel() {
+  const { currentOperationId } = useBridgeStore()
   const [link, setLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [recipient, setRecipient] = useState<string | null>(null)
@@ -23,6 +18,11 @@ export function FuelClaimLinkPanel() {
 
   const readEntry = useCallback(() => {
     if (typeof window === 'undefined') return
+    if (!currentOperationId) {
+      setLink(null)
+      setRecipient(null)
+      return
+    }
     try {
       const raw = localStorage.getItem(LS_KEY_BRIDGE_DEPOSITS)
       if (!raw) {
@@ -30,20 +30,21 @@ export function FuelClaimLinkPanel() {
         return
       }
       const claims = JSON.parse(raw) as any[]
-      // Pick the most recent third-party-fuel entry that has the receipt fields populated.
-      const candidates = claims.filter(
-        (c) => c?.fuelClaimByOther && c.fuelRecipient && c.fuelMessageHash && c.fuelMessageLeafIndex && c.fuelAmount,
+      // SDK stores `id` as number|string — normalize both sides for the comparison.
+      const entry = claims.find(
+        (c) =>
+          c &&
+          String(c.id) === currentOperationId &&
+          c.fuelClaimByOther &&
+          c.fuelRecipient &&
+          c.fuelMessageHash &&
+          c.fuelMessageLeafIndex &&
+          c.fuelAmount,
       )
-      if (candidates.length === 0) {
+      if (!entry) {
         setLink(null)
         return
       }
-      candidates.sort((a, b) => Number(b.timestamp ?? 0) - Number(a.timestamp ?? 0))
-      const entry = candidates[0]
-      // The claim secret is stored encrypted in the backup blob and not directly in this entry.
-      // We surface it via the bridge flow's in-memory backup; for a reload-friendly version we
-      // would need to decrypt the blob client-side. For now, only show the panel if the entry
-      // also has `fuelSecret` (set by the bridge flow when it persists post-receipt).
       if (!entry.fuelSecret) {
         setLink(null)
         return
@@ -62,7 +63,7 @@ export function FuelClaimLinkPanel() {
     } catch {
       setLink(null)
     }
-  }, [])
+  }, [currentOperationId])
 
   useEffect(() => {
     readEntry()
@@ -100,6 +101,14 @@ export function FuelClaimLinkPanel() {
           onClick={(e) => (e.target as HTMLInputElement).select()}
           className="flex-1 min-w-0 px-2 py-1 text-xs font-mono border border-amber-300 rounded-md bg-white"
         />
+        <a
+          href={link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 px-3 py-1 text-xs font-medium border border-amber-300 bg-white text-amber-900 rounded-md hover:bg-amber-100"
+        >
+          Open
+        </a>
         <button
           type="button"
           onClick={onCopy}

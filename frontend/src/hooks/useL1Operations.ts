@@ -398,6 +398,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
     fuelAmount: fuelAmountStr,
     fuelType,
     fuelRecipientOverride,
+    setCurrentOperationId,
   } = useBridgeStore()
   const notify = useToast()
 
@@ -538,6 +539,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               userAction: DatadogUserAction.BRIDGE_L1_TO_L2_CREATED,
             })
             console.log('[L1→L2] Operation created:', event.operationId)
+            setCurrentOperationId(event.operationId)
             break
           case BridgeEventType.DEPOSIT_SENT:
             logInfo('L1 deposit tx sent', {

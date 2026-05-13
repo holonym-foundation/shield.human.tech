@@ -89,6 +89,10 @@ export default function Home() {
   const [bridgeCompleted, setBridgeCompleted] = useState(false)
   const [fuelSufficient, setFuelSufficient] = useState(true)
   const [fuelRecipientValid, setFuelRecipientValid] = useState(true)
+  // Fuel amount must be strictly less than the bridge amount (carved out, not additive). The
+  // FuelToggle shows an inline error for the user; this flag also disables the bridge button
+  // so we never push an invalid pair to the SDK.
+  const [fuelAmountValid, setFuelAmountValid] = useState(true)
 
   // Notification system
   const notify = useToast()
@@ -112,6 +116,7 @@ export default function Home() {
     setFuelAmount,
     setFuelType,
     setFuelRecipientOverride,
+    setCurrentOperationId,
   } = useBridgeStore()
 
   // Get wallet state from useWalletStore. Modal-driving fields (walletConnectionPhase,
@@ -406,6 +411,7 @@ export default function Home() {
   if (!mounted) return null
 
   const handleBridgeTokensToL2 = (amount: string) => {
+    setCurrentOperationId(null)
     setDirection(BridgeDirection.L1_TO_L2)
     setBridgeConfig({
       ...bridgeConfig,
@@ -415,6 +421,7 @@ export default function Home() {
   }
 
   const handleWithdrawTokensToL1 = (amount: string) => {
+    setCurrentOperationId(null)
     setDirection(BridgeDirection.L2_TO_L1)
     setBridgeConfig({
       ...bridgeConfig,
@@ -525,6 +532,7 @@ export default function Home() {
                         onFuelTypeChange={setFuelType}
                         onSufficiencyChange={setFuelSufficient}
                         onRecipientValidityChange={setFuelRecipientValid}
+                        onFuelAmountValidChange={setFuelAmountValid}
                         isPrivacyModeEnabled={isPrivacyModeEnabled}
                         selfAztecAddress={aztecAddress ?? ''}
                         fuelRecipientOverride={fuelRecipientOverride}
@@ -551,7 +559,13 @@ export default function Home() {
           <div className="self-end">
             <div className="rounded-[16px] border border-[#D4D4D4] bg-white shadow-[0px_0px_16px_0px_rgba(0,0,0,0.16)] flex flex-col items-center gap-[16px] pt-[16px] pr-[10px] pb-0 pl-[10px] w-full">
               <BridgeActionButton
-                isDisabled={!fuelSufficient || !fuelRecipientValid || authFailed}
+                // Fuel gating only applies once both wallets are connected — otherwise it
+                // disables the Connect CTAs the button itself drives.
+                isDisabled={
+                  (isWaapConnected && isAztecConnected &&
+                    (!fuelSufficient || !fuelRecipientValid || !fuelAmountValid)) ||
+                  authFailed
+                }
                 // Connection states
                 isWaapConnected={isWaapConnected}
                 connectWaapWallet={connectWaapWallet}

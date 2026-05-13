@@ -277,6 +277,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
     isPrivacyModeEnabled,
     bridgeConfig,
     l2TxUrl: currentL2TxUrl,
+    setCurrentOperationId,
   } = useBridgeStore()
 
   const { waapLoginMethod: loginMethod, waapWalletProvider: walletProvider, waapChainId: chainId } = useWalletStore()
@@ -376,6 +377,7 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               userAction: DatadogUserAction.WITHDRAWAL_L2_TO_L1_CREATED,
             })
             console.log('[L2→L1] Operation created:', event.operationId)
+            setCurrentOperationId(event.operationId)
             break
           case BridgeEventType.BURN_SENT:
             logInfo('L2 burn tx sent', {

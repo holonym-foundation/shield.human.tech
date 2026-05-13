@@ -137,19 +137,18 @@ export default function ProgressPage() {
     }
   }, [isBridgeTokensToL2Error, withdrawTokensToL1Error, steps, setProgressStep])
 
-  // warn the user before unloading the page while a step is active.
-  // The encrypted secrets payload is in localStorage so a survivable reload
-  // is possible, but recovery is meaningfully easier if the tab stays open
-  // through the irreversible L1/L2 tx.
+  // Arm beforeunload only inside the irrecoverable window: a tx is broadcast and the bridge
+  // hasn't reached a terminal state. Otherwise nothing is at risk and the prompt is noise.
   useEffect(() => {
-    const isInProgress = steps.some((step) => step.status === 'active')
-    if (!isInProgress) return
+    const hasInFlightTx = !!(l1TxUrl || l2TxUrl)
+    const hasActiveStep = steps.some((step) => step.status === 'active')
+    if (!hasInFlightTx || !hasActiveStep) return
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault()
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [steps])
+  }, [steps, l1TxUrl, l2TxUrl])
 
   const hasError = isBridgeTokensToL2Error || withdrawTokensToL1Error
 
