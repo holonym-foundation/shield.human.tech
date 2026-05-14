@@ -1,9 +1,10 @@
 'use client'
 
 import React from 'react'
-import type { BridgeOperation } from '@/hooks/useBridgeOperations'
+import type { BridgeOperation } from '@human.tech/aztec-bridge-sdk'
 import { formatUnits } from 'viem'
 import { L1_TOKEN_METADATA } from '@/config'
+import { isResumable, hasPossibleLockedFunds } from '@/utils/resumability'
 
 const STATUS_STYLES: Record<string, { label: string; className: string }> = {
   pending: { label: 'Pending', className: 'bg-yellow-100 text-yellow-800' },
@@ -21,41 +22,7 @@ function StatusBadge({ status }: { status: string }) {
     label: status,
     className: 'bg-gray-100 text-gray-800',
   }
-  return (
-    <span
-      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.className}`}>
-      {style.label}
-    </span>
-  )
-}
-
-/** True for statuses where the user's funds are locked and can be resumed */
-function isResumable(op: BridgeOperation): boolean {
-  if (op.direction === 'L1_TO_L2') {
-    // L1→L2: resumable if deposited/claimed AND we have at least one recovery path:
-    // - Best: messageHash + messageLeafIndex already stored
-    // - Fallback: l1TxHash → scan receipt for portal events
-    // - Last resort: l1BlockNumberBeforeTx → scan L1 blocks for portal events
-    // Also allow 'pending' if l1TxHash exists (L1 tx mined but status PATCH failed)
-    const resumableStatus =
-      op.status === 'deposited' ||
-      op.status === 'claimed' ||
-      (op.status === 'pending' && !!op.l1TxHash)
-    return (
-      resumableStatus &&
-      (!!op.messageHash || !!op.l1TxHash || !!op.l1BlockNumberBeforeTx)
-    )
-  }
-  if (op.direction === 'L2_TO_L1') {
-    // L2→L1: resumable when tokens are burned on L2 but L1 withdraw isn't complete.
-    // leafIndex/siblingPath can be recomputed from l2BlockNumber if missing.
-    return (
-      op.status === 'submitted' ||
-      op.status === 'ready' ||
-      op.status === 'pending_finalize'
-    )
-  }
-  return false
+  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style.className}`}>{style.label}</span>
 }
 
 /**
@@ -86,8 +53,8 @@ export default function ActivityCard({
 }: ActivityCardProps) {
   const decimals = operation.tokenDecimalsL1 ?? L1_TOKEN_METADATA.decimals
   const tokenSymbol = operation.tokenSymbol ?? operation.tokenSymbolL1 ?? L1_TOKEN_METADATA.symbol
-  const amount = operation.amountDisplayL1
-    ?? (operation.amountL1 ? formatUnits(BigInt(operation.amountL1), decimals) : '?')
+  const amount =
+    operation.amountDisplayL1 ?? (operation.amountL1 ? formatUnits(BigInt(operation.amountL1), decimals) : '?')
   const date = new Date(operation.createdAt).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -95,63 +62,76 @@ export default function ActivityCard({
     hour: '2-digit',
     minute: '2-digit',
   })
-  const directionLabel =
-    operation.direction === 'L1_TO_L2' ? 'L1 → L2' : 'L2 → L1'
+  const directionLabel = operation.direction === 'L1_TO_L2' ? 'L1 → L2' : 'L2 → L1'
+
+  // Resume button shown for both standard resumable states AND the edge case
+  // where status='pending' but a tx hash exists (session died after tx send
+  // but before the status-update PATCH landed — funds may be locked on-chain).
+  // Both branches use the same decrypt + resume pipeline; the badge below
+  // tells the user which case they're in.
+  const resumable = isResumable(operation)
+  const lockedFunds = hasPossibleLockedFunds(operation)
+  const showResume = resumable || lockedFunds
 
   return (
-    <div className='bg-white rounded-lg p-4 shadow-sm border border-gray-100'>
-      <div className='flex items-center justify-between'>
-        <div className='flex items-center gap-2'>
-          <span className='text-sm font-medium text-gray-600'>
-            {directionLabel}
-          </span>
+    <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-gray-600">{directionLabel}</span>
           <StatusBadge status={operation.status} />
+          {lockedFunds && (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-800">
+              Funds may be locked
+            </span>
+          )}
         </div>
-        <span className='text-xs text-gray-400'>{date}</span>
+        <span className="text-xs text-gray-400">{date}</span>
       </div>
 
-      <p className='text-xl font-semibold mt-2'>{amount} {tokenSymbol}</p>
+      <p className="text-xl font-semibold mt-2">
+        {amount} {tokenSymbol}
+      </p>
 
-      {operation.lastErrorMessage && (
-        <p className='text-xs text-red-500 mt-1 truncate'>
-          {operation.lastErrorMessage}
-        </p>
-      )}
+      {operation.lastErrorMessage && <p className="text-xs text-red-500 mt-1 truncate">{operation.lastErrorMessage}</p>}
 
-      <div className='flex items-center gap-3 mt-3'>
+      <div className="flex items-center gap-3 mt-3">
         {operation.l1TxUrl && (
           <a
             href={operation.l1TxUrl}
-            target='_blank'
-            rel='noopener noreferrer'
-            className='text-xs font-medium text-blue-600 hover:text-blue-800'>
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium text-blue-600 hover:text-blue-800"
+          >
             L1 Tx ↗
           </a>
         )}
         {operation.l2TxUrl && (
           <a
             href={operation.l2TxUrl}
-            target='_blank'
-            rel='noopener noreferrer'
-            className='text-xs font-medium text-purple-600 hover:text-purple-800'>
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium text-purple-600 hover:text-purple-800"
+          >
             L2 Tx ↗
           </a>
         )}
 
-        <div className='ml-auto flex items-center gap-2'>
+        <div className="ml-auto flex items-center gap-2">
           {onShareFuelClaim && hasFuelClaimData(operation) && (
             <button
               onClick={() => onShareFuelClaim(operation)}
               disabled={!!sharingFuelClaim}
-              className='text-xs font-semibold text-black bg-amber-100 hover:bg-amber-200 disabled:opacity-50 px-3 py-1 rounded-lg'>
+              className="text-xs font-semibold text-black bg-amber-100 hover:bg-amber-200 disabled:opacity-50 px-3 py-1 rounded-lg"
+            >
               {sharingFuelClaim ? 'Decrypting…' : 'Share fuel claim'}
             </button>
           )}
-          {isResumable(operation) && (
+          {showResume && (
             <button
               onClick={() => onResume(operation)}
               disabled={resuming}
-              className='text-xs font-semibold text-white bg-black hover:bg-gray-800 disabled:bg-gray-400 px-3 py-1 rounded-lg'>
+              className="text-xs font-semibold text-white bg-black hover:bg-gray-800 disabled:bg-gray-400 px-3 py-1 rounded-lg"
+            >
               {resuming ? 'Decrypting...' : 'Resume'}
             </button>
           )}

@@ -7,16 +7,9 @@ import BridgeHeader from '@/components/BridgeHeader'
 import ActivityCard from '@/components/ActivityCard'
 import TextButton from '@/components/TextButton'
 import FuelClaimLinkModal from '@/components/FuelClaimLinkModal'
-import {
-  useBridgeOperations,
-  decryptOperationPayload,
-  type BridgeOperation,
-} from '@/hooks/useBridgeOperations'
-import {
-  useBridgeStore,
-  type RecoveryClaimData,
-  type RecoveryWithdrawalData,
-} from '@/stores/bridgeStore'
+import { useBridgeOperations, decryptOperationPayload } from '@/hooks/useBridgeOperations'
+import type { BridgeOperation, RecoveryClaimData, RecoveryWithdrawalData } from '@human.tech/aztec-bridge-sdk'
+import { useBridgeStore } from '@/stores/bridgeStore'
 import { useWalletStore } from '@/stores/walletStore'
 import { useToast } from '@/hooks/useToast'
 import { BridgeDirection } from '@/types/bridge'
@@ -34,16 +27,12 @@ export default function ActivityPage() {
 
   // Prefetch routes this page navigates to
   useEffect(() => {
-    router.prefetch('/progress')
+    router.prefetch('/progress/resume')
+    router.prefetch('/activity/local-recovery')
     router.prefetch('/')
   }, [router])
 
-  const {
-    data: operations,
-    isLoading,
-    isError,
-    error,
-  } = useBridgeOperations()
+  const { data: operations, isLoading, isError, error } = useBridgeOperations()
 
   const handleResume = useCallback(
     async (operation: BridgeOperation) => {
@@ -55,11 +44,7 @@ export default function ActivityPage() {
       setResumingId(operation.id)
       try {
         // Decrypt the encrypted payload to verify wallet ownership
-        const decrypted = await decryptOperationPayload(
-          operation,
-          l1Address,
-          signWaapMessage,
-        )
+        const decrypted = await decryptOperationPayload(operation, l1Address, signWaapMessage)
 
         if (!decrypted) {
           throw new Error(
@@ -97,7 +82,7 @@ export default function ActivityPage() {
 
           setDirection(BridgeDirection.L2_TO_L1)
           setWithdrawalRecovery(operation.id, recoveryData)
-          router.push('/progress')
+          router.push('/progress/resume')
         } else {
           // ── L1→L2 Resume ──
           if (!decrypted.claimSecret || !decrypted.claimSecretHash) {
@@ -139,7 +124,7 @@ export default function ActivityPage() {
 
           setDirection(BridgeDirection.L1_TO_L2)
           setRecovery(operation.id, recoveryData)
-          router.push('/progress')
+          router.push('/progress/resume')
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to decrypt'
@@ -181,10 +166,7 @@ export default function ActivityPage() {
         // Self-fuel bridges never write it, so a missing field here means there's nothing to share.
         const recipient = decrypted.fuelRecipient
         if (!recipient || recipient === decrypted.l2Address) {
-          notify(
-            'info',
-            'This bridge sent fuel to your own L2 account — no claim link is needed; the fuel is yours.',
-          )
+          notify('info', 'This bridge sent fuel to your own L2 account — no claim link is needed; the fuel is yours.')
           return
         }
         const link = buildFuelClaimUrl(window.location.origin, {
@@ -207,33 +189,27 @@ export default function ActivityPage() {
   )
 
   return (
-    <RootStyle className='overflow-y-auto'>
-      <div className='px-5 pt-5 pb-5 flex flex-col h-full'>
-        <div className='flex items-center gap-4'>
+    <RootStyle className="overflow-y-auto">
+      <div className="px-5 pt-5 pb-5 flex flex-col h-full">
+        <div className="flex items-center gap-4">
           <BridgeHeader />
         </div>
 
-        <h2 className='text-lg font-semibold mt-4'>Bridge Activity</h2>
+        <h2 className="text-lg font-semibold mt-4">Bridge Activity</h2>
 
-        {isLoading && (
-          <p className='text-sm text-gray-400 mt-4 text-center'>
-            Loading operations...
-          </p>
-        )}
+        {isLoading && <p className="text-sm text-gray-400 mt-4 text-center">Loading operations...</p>}
 
         {isError && (
-          <p className='text-sm text-red-500 mt-4 text-center'>
+          <p className="text-sm text-red-500 mt-4 text-center">
             {error instanceof Error ? error.message : 'Failed to load'}
           </p>
         )}
 
         {!isLoading && operations && operations.length === 0 && (
-          <p className='text-sm text-gray-400 mt-4 text-center'>
-            No bridge operations yet.
-          </p>
+          <p className="text-sm text-gray-400 mt-4 text-center">No bridge operations yet.</p>
         )}
 
-        <div className='flex flex-col gap-3 mt-3 flex-1 overflow-y-auto'>
+        <div className="flex flex-col gap-3 mt-3 flex-1 overflow-y-auto">
           {operations?.map((op) => (
             <ActivityCard
               key={op.id}
@@ -246,9 +222,13 @@ export default function ActivityPage() {
           ))}
         </div>
 
-        <div className='mt-4'>
-          <TextButton onClick={() => router.push('/')}>
-            Back to Bridge
+        <div className="mt-4 flex flex-col gap-2">
+          <TextButton onClick={() => router.push('/')}>Back to Bridge</TextButton>
+          <TextButton
+            onClick={() => router.push('/activity/local-recovery')}
+            className="!bg-transparent !text-gray-600 hover:!text-gray-900 !font-medium"
+          >
+            Recover from local data
           </TextButton>
         </div>
       </div>

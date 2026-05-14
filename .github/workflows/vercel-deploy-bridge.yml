@@ -3,10 +3,10 @@ name: Deploy Aztec Bridge to Vercel
 env:
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_AZTEC_BRIDGE_PROJECT_ID }}
-  FAUCET_PRIVATE_KEY: ${{ secrets.FAUCET_PRIVATE_KEY }}
   ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
   ETHEREUM_RPC_URL_2: ${{ secrets.ETHEREUM_RPC_URL_2 }}
   ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+  JWT_SECRET: ${{ secrets.JWT_SECRET }}
   NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
   NEXT_PUBLIC_DATADOG_APPLICATION_ID: ${{ secrets.NEXT_PUBLIC_DATADOG_APPLICATION_ID }}
   NEXT_PUBLIC_DATADOG_CLIENT_TOKEN: ${{ secrets.NEXT_PUBLIC_DATADOG_CLIENT_TOKEN }}
@@ -27,11 +27,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
+
       - uses: ./.github/actions/setup-pnpm-and-install
         with:
           pnpm-version: 8
-          working-directory: ./frontend
+          working-directory: .
+
+      - name: Build SDK
+        working-directory: ./packages/sdk
+        run: pnpm build
+
+      - name: Run DB migrations
+        working-directory: ./frontend
+        run: pnpm exec prisma migrate deploy
 
       - name: Install Vercel CLI
         run: pnpm add --global vercel@latest
@@ -44,11 +52,11 @@ jobs:
         run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Build Project Artifacts
-        run: vercel build --token=${{ secrets.VERCEL_TOKEN }} 
-      
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+
       - name: Deploy Project Artifacts to Vercel
         run: vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
-  
+
   Deploy-Production:
     permissions: write-all
     runs-on: ubuntu-latest
@@ -61,7 +69,15 @@ jobs:
       - uses: ./.github/actions/setup-pnpm-and-install
         with:
           pnpm-version: 8
-          working-directory: ./frontend
+          working-directory: .
+
+      - name: Build SDK
+        working-directory: ./packages/sdk
+        run: pnpm build
+
+      - name: Run DB migrations
+        working-directory: ./frontend
+        run: pnpm exec prisma migrate deploy
 
       - name: Install Vercel CLI
         run: pnpm add --global vercel@latest
@@ -69,13 +85,13 @@ jobs:
       - name: Build Next App
         working-directory: ./frontend
         run: pnpm build
-      
+
       - name: Pull Production Environment From Vercel
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-        
+
       - name: Build Project Artifacts
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }} 
-        
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
       - name: Deploy to Production
         run: vercel deploy --prod --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
       

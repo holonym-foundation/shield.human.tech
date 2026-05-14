@@ -101,6 +101,19 @@ model AttestationNonce {
 }
 
 // ---------------------------------------------------------------------------
+// AuthNonce: server-managed SIWE nonces with TTL for replay protection
+// ---------------------------------------------------------------------------
+
+model AuthNonce {
+  id        String   @id @default(cuid(2))
+  nonce     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("auth_nonces")
+}
+
+// ---------------------------------------------------------------------------
 // BridgeActivity: one bridge activity (L1→L2 or L2→L1) with encrypted backup
 // ---------------------------------------------------------------------------
 
@@ -149,6 +162,7 @@ model BridgeActivity {
 
   // --- L1→L2 recovery hint ---
   l1BlockNumberBeforeTx String? // L1 block number captured before sending deposit tx; starting point if receipt lost
+  l1BlockNumber         String? // L1 block number from the settled deposit (or L1 withdraw) receipt; lets resume skip block-scan recovery
   claimAmount           String? // Post-fee token amount from DepositToAztec event; must match L2 content hash exactly
 
   // --- Progress tracking (for resume from activity page) ---

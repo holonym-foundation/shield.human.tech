@@ -6,7 +6,9 @@ import type { ContractFunctionPattern } from '@aztec/aztec.js/wallet'
 const FEE_JUICE_ADDRESS = AztecAddress.fromString('0x0000000000000000000000000000000000000000000000000000000000000005')
 
 /** Auth Registry protocol contract on L2 (canonical address = 1) */
-const AUTH_REGISTRY_ADDRESS = AztecAddress.fromString('0x0000000000000000000000000000000000000000000000000000000000000001')
+const AUTH_REGISTRY_ADDRESS = AztecAddress.fromString(
+  '0x0000000000000000000000000000000000000000000000000000000000000001',
+)
 
 function pattern(contract: AztecAddress, fn: string): ContractFunctionPattern {
   return { contract, function: fn }

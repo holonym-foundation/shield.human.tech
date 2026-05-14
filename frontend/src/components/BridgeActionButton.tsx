@@ -262,9 +262,9 @@ function BridgeActionButton({
       return
     }
 
-    // Step 5: Compliance attestation check (required for both public and private).
-    // The L1 TokenPortal and L2 TokenBridge gate every deposit and exit on a
-    // POCH or Passport attestation regardless of privacy mode.
+    // Step 5: Attestation check — required for BOTH public and private flows.
+    // The L1 TokenPortal and L2 TokenBridge gate every deposit/exit on POCH or
+    // Passport regardless of privacy mode.
     if (pochLoading) {
       notify('info', 'Checking eligibility...')
       return
@@ -278,7 +278,7 @@ function BridgeActionButton({
           React.createElement(
             'span',
             null,
-            pochReason ? `${pochReason}. ` : 'Compliance attestation required. ',
+            pochReason ? `${pochReason}. ` : 'Cannot bridge without a valid attestation. ',
           ),
           React.createElement('br'),
           React.createElement(
@@ -302,13 +302,13 @@ function BridgeActionButton({
             },
             `Build your Passport score${passportScore != null && passportThreshold != null ? ` (current: ${passportScore}/${passportThreshold} needed)` : ''}`,
           ),
-        ),
+        ) as unknown as string,
       })
       return
     }
 
     // Step 6: Validate amount
-    // Step 6a: Passport amount limit check (applies to both public and private).
+    // Step 6a: Passport amount limit check (applies to both public and private)
     if (attestationMethod === 'passport' && passportMaxAmount != null) {
       try {
         const decimals = 6 // USDC decimals
@@ -332,7 +332,7 @@ function BridgeActionButton({
                 'Mint a POCH SBT',
               ),
               ' to remove this limit.',
-            ),
+            ) as unknown as string,
           })
           return
         }
@@ -382,13 +382,14 @@ function BridgeActionButton({
     l2NodeIsReadyLoading ||
     balancesLoading ||
     isOperationInFlight ||
+    // Attestation eligibility check is required for both modes.
     (pochLoading && bothWalletsConnected)
 
   const getLoadingText = () => {
     if (l2NodeIsReadyLoading) return 'Checking Aztec Network Status...'
     if (balancesLoading) return 'Loading balances...'
     if (isConnecting) return 'Connecting...'
-    if (requestFaucetPending) return 'Getting Eth & Testnet USDC...'
+    if (requestFaucetPending) return 'Getting Testnet USDC...'
     if (pochLoading) return 'Checking eligibility...'
     if (withdrawTokensToL1Pending) return 'Withdrawing Tokens...'
     if (bridgeTokensToL2Pending) return 'Bridging Tokens...'
@@ -419,7 +420,7 @@ function BridgeActionButton({
       if (hasL1SBT !== true) return `Get SBT on ${requiredChain}`
     }
 
-    // Attestation requirement (required for both public and private)
+    // Attestation requirement applies to both public and private modes.
     if (pochLoading) return 'Checking eligibility...'
     if (!pochEligible) return 'Attestation Required'
 

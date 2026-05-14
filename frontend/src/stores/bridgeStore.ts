@@ -94,11 +94,11 @@ interface RecoveryState {
   recoveryWithdrawalData: RecoveryWithdrawalData | null
 }
 
-interface BridgeStoreState
-  extends StepState,
-    BridgeConfigState,
-    TransactionState,
-    RecoveryState {
+interface CurrentOperationState {
+  currentOperationId: string | null
+}
+
+interface BridgeStoreState extends StepState, BridgeConfigState, TransactionState, RecoveryState, CurrentOperationState {
   direction: BridgeDirection
 
   // Privacy Mode toggle
@@ -120,14 +120,8 @@ interface BridgeStoreState
   setFuelRecipientOverride: (address: string) => void
 
   // Step actions
-  setHeaderStep: (
-    step: number,
-    status?: 'pending' | 'active' | 'completed' | 'error'
-  ) => void
-  setProgressStep: (
-    step: number,
-    status?: 'pending' | 'active' | 'completed' | 'error'
-  ) => void
+  setHeaderStep: (step: number, status?: 'pending' | 'active' | 'completed' | 'error') => void
+  setProgressStep: (step: number, status?: 'pending' | 'active' | 'completed' | 'error') => void
   getHeaderSteps: () => LoadingStep[]
   getProgressSteps: () => LoadingStep[]
 
@@ -143,6 +137,7 @@ interface BridgeStoreState
   setRecovery: (operationId: string, claimData: RecoveryClaimData) => void
   setWithdrawalRecovery: (operationId: string, withdrawalData: RecoveryWithdrawalData) => void
   clearRecovery: () => void
+  setCurrentOperationId: (id: string | number | null) => void
 
   // Reset
   resetStepState: () => void
@@ -228,10 +223,35 @@ const getInitialPrivacyMode = (): boolean => {
   }
 }
 
+const LS_KEY_CURRENT_OPERATION_ID = 'currentOperationId'
+
+const getInitialCurrentOperationId = (): string | null => {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null
+  try {
+    return localStorage.getItem(LS_KEY_CURRENT_OPERATION_ID)
+  } catch {
+    return null
+  }
+}
+
+const writeCurrentOperationIdToStorage = (id: string | null): void => {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return
+  try {
+    if (id == null) localStorage.removeItem(LS_KEY_CURRENT_OPERATION_ID)
+    else localStorage.setItem(LS_KEY_CURRENT_OPERATION_ID, id)
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
 const initialRecoveryState: RecoveryState = {
   recoveryOperationId: null,
   recoveryClaimData: null,
   recoveryWithdrawalData: null,
+}
+
+const initialCurrentOperationState: CurrentOperationState = {
+  currentOperationId: getInitialCurrentOperationId(),
 }
 
 const initialState = {
@@ -239,6 +259,7 @@ const initialState = {
   ...initialBridgeConfigState,
   ...initialTransactionState,
   ...initialRecoveryState,
+  ...initialCurrentOperationState,
   isPrivacyModeEnabled: getInitialPrivacyMode(),
   fuelEnabled: false,
   fuelAmount: '',
@@ -268,8 +289,7 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   fuelAmount: '',
   fuelType: 'public' as const,
   fuelRecipientOverride: '',
-  setFuelEnabled: (enabled: boolean) =>
-    set({ fuelEnabled: enabled, fuelAmount: '', fuelRecipientOverride: '' }),
+  setFuelEnabled: (enabled: boolean) => set({ fuelEnabled: enabled, fuelAmount: '', fuelRecipientOverride: '' }),
   setFuelAmount: (amount: string) => set({ fuelAmount: amount }),
   setFuelType: (type: 'public' | 'private') =>
     // Clear any third-party recipient when switching to private fuel — private always routes to FPC.
@@ -277,10 +297,7 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   setFuelRecipientOverride: (address: string) => set({ fuelRecipientOverride: address }),
 
   // Step actions
-  setHeaderStep: (
-    step: number,
-    status: 'pending' | 'active' | 'completed' | 'error' = 'active'
-  ) => {
+  setHeaderStep: (step: number, status: 'pending' | 'active' | 'completed' | 'error' = 'active') => {
     set((state) => {
       // Update header steps (wallet connection)
       const updatedWalletSteps = state.walletSteps.map((s, index) => {
@@ -298,15 +315,9 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
     })
   },
 
-  setProgressStep: (
-    step: number,
-    status: 'pending' | 'active' | 'completed' | 'error' = 'active'
-  ) => {
+  setProgressStep: (step: number, status: 'pending' | 'active' | 'completed' | 'error' = 'active') => {
     set((state) => {
-      const steps =
-        state.direction === BridgeDirection.L1_TO_L2
-          ? state.l1ToL2Steps
-          : state.l2ToL1Steps
+      const steps = state.direction === BridgeDirection.L1_TO_L2 ? state.l1ToL2Steps : state.l2ToL1Steps
 
       const updatedSteps = steps.map((s, index) => {
         if (index === step - 1) {
@@ -327,18 +338,12 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
 
   getHeaderSteps: () => {
     const { direction, walletSteps, l1ToL2Steps, l2ToL1Steps } = get()
-    return [
-      ...walletSteps,
-      ...(direction === BridgeDirection.L1_TO_L2 ? l1ToL2Steps : l2ToL1Steps),
-    ]
+    return [...walletSteps, ...(direction === BridgeDirection.L1_TO_L2 ? l1ToL2Steps : l2ToL1Steps)]
   },
 
   getProgressSteps: () => {
     const { direction, l1ToL2Steps, l2ToL1Steps, progressStep } = get()
-    const steps =
-      direction === BridgeDirection.L1_TO_L2
-        ? [...l1ToL2Steps]
-        : [...l2ToL1Steps]
+    const steps = direction === BridgeDirection.L1_TO_L2 ? [...l1ToL2Steps] : [...l2ToL1Steps]
 
     return steps
   },
@@ -375,9 +380,7 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   swapDirection: () =>
     set((state) => {
       const newDirection =
-        state.direction === BridgeDirection.L1_TO_L2
-          ? BridgeDirection.L2_TO_L1
-          : BridgeDirection.L1_TO_L2
+        state.direction === BridgeDirection.L1_TO_L2 ? BridgeDirection.L2_TO_L1 : BridgeDirection.L1_TO_L2
 
       return {
         bridgeConfig: {
@@ -394,27 +397,52 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
   setTransactionUrls: (l1TxUrl, l2TxUrl) => set({ l1TxUrl, l2TxUrl }),
 
   // Recovery actions
-  setRecovery: (operationId: string, claimData: RecoveryClaimData) =>
-    set({ recoveryOperationId: operationId, recoveryClaimData: claimData, recoveryWithdrawalData: null }),
-  setWithdrawalRecovery: (operationId: string, withdrawalData: RecoveryWithdrawalData) =>
-    set({ recoveryOperationId: operationId, recoveryWithdrawalData: withdrawalData, recoveryClaimData: null }),
+  setRecovery: (operationId: string, claimData: RecoveryClaimData) => {
+    writeCurrentOperationIdToStorage(operationId)
+    set({
+      recoveryOperationId: operationId,
+      recoveryClaimData: claimData,
+      recoveryWithdrawalData: null,
+      currentOperationId: operationId,
+    })
+  },
+  setWithdrawalRecovery: (operationId: string, withdrawalData: RecoveryWithdrawalData) => {
+    writeCurrentOperationIdToStorage(operationId)
+    set({
+      recoveryOperationId: operationId,
+      recoveryWithdrawalData: withdrawalData,
+      recoveryClaimData: null,
+      currentOperationId: operationId,
+    })
+  },
   clearRecovery: () =>
     set({ recoveryOperationId: null, recoveryClaimData: null, recoveryWithdrawalData: null }),
 
+  // Current operation tracking
+  setCurrentOperationId: (id) => {
+    const normalized = id == null ? null : String(id)
+    writeCurrentOperationIdToStorage(normalized)
+    set({ currentOperationId: normalized })
+  },
+
   // Reset
   resetStepState: () => set({ ...initialStepState }),
-  reset: () => set((state) => ({
-    ...initialState,
-    direction: BridgeDirection.L1_TO_L2,
-    isPrivacyModeEnabled: state.isPrivacyModeEnabled,
-    recoveryOperationId: null,
-    recoveryClaimData: null,
-    recoveryWithdrawalData: null,
-    fuelEnabled: false,
-    fuelAmount: '',
-    fuelType: 'public' as const,
-    fuelRecipientOverride: '',
-  })),
+  reset: () => {
+    writeCurrentOperationIdToStorage(null)
+    set((state) => ({
+      ...initialState,
+      direction: BridgeDirection.L1_TO_L2,
+      isPrivacyModeEnabled: state.isPrivacyModeEnabled,
+      recoveryOperationId: null,
+      recoveryClaimData: null,
+      recoveryWithdrawalData: null,
+      currentOperationId: null,
+      fuelEnabled: false,
+      fuelAmount: '',
+      fuelType: 'public' as const,
+      fuelRecipientOverride: '',
+    }))
+  },
 }))
 
 // Export main store with all state and actions
@@ -477,5 +505,9 @@ export const useBridgeStore = () =>
       setRecovery: state.setRecovery,
       setWithdrawalRecovery: state.setWithdrawalRecovery,
       clearRecovery: state.clearRecovery,
-    }))
+
+      // Current operation tracking
+      currentOperationId: state.currentOperationId,
+      setCurrentOperationId: state.setCurrentOperationId,
+    })),
   )

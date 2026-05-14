@@ -82,6 +82,11 @@ l1-contracts/                — Solidity contracts (Foundry)
 - Token configs live in `bridge-script/constants/tokens.ts`
 - Deployment state persists in `bridge-script/deployments/` — scripts skip already-deployed tokens
 
+## Code Style
+- No comments explaining what code does. Only add a comment when the *why* is non-obvious — a hidden constraint, an invariant, or a workaround for a specific bug. Removing the comment shouldn't confuse a future reader.
+- Don't reference the current task or fix in comments ("added for X", "handles case from issue Y"). That belongs in the commit message; comments rot.
+- Edit existing files; don't create new ones unless required. The codebase is small; keep it that way.
+
 ## Git & Commits
 - Do NOT commit code — user reviews and commits manually
 - Do NOT include `Co-Authored-By` lines in commit messages

@@ -59,6 +59,14 @@ export default function FuelClaimLinkModal({
             onClick={(e) => (e.target as HTMLInputElement).select()}
             className='flex-1 min-w-0 px-2 py-1.5 text-xs font-mono border border-gray-300 rounded-md bg-gray-50'
           />
+          <a
+            href={link}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='shrink-0 px-3 py-1.5 text-xs font-medium border border-gray-300 bg-white text-latest-grey-700 rounded-md hover:bg-gray-50'
+          >
+            Open
+          </a>
           <button
             type='button'
             onClick={onCopy}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
-import { sanitizeEthAddress } from '@/lib/validation'
+import { PochAttestationSchema } from '@/lib/validation'
 import { enforceAddressBinding, getNextNonce } from '@/lib/address-binding'
 import {
   checkCleanHands,
@@ -16,10 +16,11 @@ import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctio
  *
  * 1. Authenticate user (JWT)
  * 2. Enforce 1:1 address binding (l1Address <-> l2Address)
- * 3. Verify clean hands via Holonym sandbox API
- * 4. Issue signed attestation from our POCH attester (L1 ECDSA + L2 Schnorr)
+ * 3. Sanctions screening (fail closed on vendor outage)
+ * 4. Verify clean hands via Holonym sandbox API
+ * 5. Issue signed attestation from our POCH attester (L1 ECDSA + L2 Schnorr)
  *
- * Body: { portalAddress: string }
+ * Body: { l2Address: string, isPrivate?: boolean }
  * Returns: { l1Signature, l2Signature, nonce, circuitId, actionId }
  */
 export async function POST(request: NextRequest) {
@@ -33,13 +34,18 @@ export async function POST(request: NextRequest) {
     const { l1Address, l2Address } = authResult.user
 
     const body = await request.json()
-    const portalAddress = sanitizeEthAddress(body.portalAddress)
-    if (!portalAddress) {
+
+    // ── Validate + sanitize inputs via Zod ──────────────────────────────
+    const parsed = PochAttestationSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0]
       return NextResponse.json(
-        { error: 'Invalid portalAddress (must be 0x + 40 hex chars)' },
-        { status: 400 }
+        { error: `Validation error: ${firstError.path.join('.')} — ${firstError.message}` },
+        { status: 400 },
       )
     }
+
+    const data = parsed.data
 
     // 2. Enforce 1:1 address binding
     const bindingError = await enforceAddressBinding(l1Address, l2Address)
@@ -51,10 +57,7 @@ export async function POST(request: NextRequest) {
     try {
       const screening = await screenAddress(l1Address)
       if (!screening.clear) {
-        return NextResponse.json(
-          { error: screening.reason, reason: 'sanctions_match' },
-          { status: 403 },
-        )
+        return NextResponse.json({ error: screening.reason, reason: 'sanctions_match' }, { status: 403 })
       }
     } catch (err) {
       if (err instanceof SanctionsScreeningUnavailableError) {
@@ -74,7 +77,7 @@ export async function POST(request: NextRequest) {
     if (!holonymResult.isUnique) {
       return NextResponse.json(
         { error: 'Clean hands check failed: address does not have a valid attestation', isUnique: false },
-        { status: 403 }
+        { status: 403 },
       )
     }
 
@@ -105,9 +108,6 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('[attestation/poch]', error)
-    return NextResponse.json(
-      { error: 'Failed to issue POCH attestation' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to issue POCH attestation' }, { status: 500 })
   }
 }

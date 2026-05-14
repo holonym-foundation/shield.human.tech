@@ -1,6 +1,6 @@
 'use client'
 
-import { Icon } from '@iconify/react'
+import { Icon, loadIcons } from '@iconify/react'
 import { useToast } from '@/hooks/useToast'
 import { useWalletStore } from '@/stores/walletStore'
 import { useBridgeStore } from '@/stores/bridgeStore'
@@ -16,6 +16,16 @@ import DeploymentSelector from '@/components/DeploymentSelector'
 
 /** Delay before auto-starting Aztec wallet discovery after WaaP connects. */
 const AZTEC_AUTO_CONNECT_DELAY_MS = 2000
+
+// Preload the icons used inside the wallet dropdown so they're cached in
+// iconify's store before the menu first opens. The dropdown is rendered
+// conditionally (`{showDropdown && (...)}`), so without preloading the icons
+// only start fetching on the first click and visibly pop in once the API
+// response arrives. Module-level + window-guard so it runs once per page in
+// the browser only.
+if (typeof window !== 'undefined') {
+  loadIcons(['ph:copy', 'majesticons:open', 'ph:wallet', 'ph:sign-out'])
+}
 
 type WalletDisplayProps = {
   address?: string
@@ -55,10 +65,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setShowDropdown(false)
       }
     }
@@ -99,85 +106,77 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
   if (!isConnected) return null
 
   return (
-    <div className='relative' ref={dropdownRef}>
+    <div className="relative" ref={dropdownRef}>
       <div
-        className='flex pr-[8px] justify-center items-center gap-[12px] rounded-[8px] border border-[#D4D4D4] bg-white cursor-pointer hover:shadow-md transition-shadow duration-200'
-        onClick={handleClick}>
-        <div className='flex w-8 h-8 p-1 justify-center items-center rounded-[8px] bg-[#E5EFFF]'>
-          <Image src={walletIcon} alt='Wallet' width={32} height={32} />
+        className="flex pr-[8px] justify-center items-center gap-[12px] rounded-[8px] border border-[#D4D4D4] bg-white cursor-pointer hover:shadow-md transition-shadow duration-200"
+        onClick={handleClick}
+      >
+        <div className="flex w-8 h-8 p-1 justify-center items-center rounded-[8px] bg-[#E5EFFF]">
+          <Image src={walletIcon} alt="Wallet" width={32} height={32} />
         </div>
-        {networkIcon && (
-          <Image src={networkIcon} alt='Network' width={20} height={20} />
-        )}
-        <div className='flex items-center gap-2'>
-          <span className='text-sm font-medium' title={address || ''}>
+        {networkIcon && <Image src={networkIcon} alt="Network" width={20} height={20} />}
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium" title={address || ''}>
             {displayName || (address ? truncateAddr(address) : '')}
           </span>
-          {balance && walletType === WalletType.WAAP && (
-            <span className='text-xs text-gray-500'>
-              {balance} ETH
-            </span>
-          )}
+          {balance && walletType === WalletType.WAAP && <span className="text-xs text-gray-500">{balance} ETH</span>}
         </div>
-        <Image
-          src='/assets/svg/drop-down-logo.svg'
-          alt='Dropdown'
-          width={24}
-          height={24}
-        />
+        <Image src="/assets/svg/drop-down-logo.svg" alt="Dropdown" width={24} height={24} />
       </div>
 
       {showDropdown && (
-        <div className='absolute right-0 mt-2 shadow-lg z-10 min-w-[180px] py-2 rounded-[12px] border border-[#D4D4D4] bg-white '>
+        <div className="absolute right-0 mt-2 shadow-lg z-10 min-w-[180px] py-2 rounded-[12px] border border-[#D4D4D4] bg-white ">
           <div
-            className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer relative transition-colors duration-150'
-            onClick={handleCopyAddress}>
-            <Icon icon='ph:copy' width={20} height={20} />
+            className="flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer relative transition-colors duration-150"
+            onClick={handleCopyAddress}
+          >
+            <Icon icon="ph:copy" width={20} height={20} />
             <span>{copied ? 'Copied!' : 'Copy Address'}</span>
           </div>
 
           {loginMethod === LOGIN_METHODS.WAAP && (
             <div
-              className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer relative transition-colors duration-150'
-              onClick={handleOpenWallet}>
-              <Icon icon='majesticons:open' width={20} height={20} />
+              className="flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer relative transition-colors duration-150"
+              onClick={handleOpenWallet}
+            >
+              <Icon icon="majesticons:open" width={20} height={20} />
               <span>Open Human Wallet</span>
             </div>
           )}
 
           {availableAccounts && availableAccounts.length > 1 && onSelectAccount && (
             <>
-              <div className='border-t border-[#E5E5E5] my-1' />
-              <div className='px-4 py-1'>
-                <span className='text-xs text-gray-400 font-medium'>Switch Account</span>
+              <div className="border-t border-[#E5E5E5] my-1" />
+              <div className="px-4 py-1">
+                <span className="text-xs text-gray-400 font-medium">Switch Account</span>
               </div>
               {availableAccounts
                 .filter((acc) => acc.address !== address)
                 .map((acc) => (
                   <div
                     key={acc.address}
-                    className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer transition-colors duration-150'
+                    className="flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer transition-colors duration-150"
                     onClick={() => {
                       onSelectAccount(acc)
                       setShowDropdown(false)
-                    }}>
-                    <Icon icon='ph:wallet' width={18} height={18} className='text-gray-500' />
-                    <div className='flex flex-col'>
-                      <span className='text-sm'>{acc.alias || truncateAddr(acc.address)}</span>
-                      {acc.alias && (
-                        <span className='text-xs text-gray-400'>{truncateAddr(acc.address)}</span>
-                      )}
+                    }}
+                  >
+                    <Icon icon="ph:wallet" width={18} height={18} className="text-gray-500" />
+                    <div className="flex flex-col">
+                      <span className="text-sm">{acc.alias || truncateAddr(acc.address)}</span>
+                      {acc.alias && <span className="text-xs text-gray-400">{truncateAddr(acc.address)}</span>}
                     </div>
                   </div>
                 ))}
-              <div className='border-t border-[#E5E5E5] my-1' />
+              <div className="border-t border-[#E5E5E5] my-1" />
             </>
           )}
 
           <div
-            className='flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer text-red-500 transition-colors duration-150'
-            onClick={handleDisconnect}>
-            <Icon icon='ph:sign-out' width={20} height={20} />
+            className="flex items-center gap-2 px-4 py-2 hover:bg-latest-grey-300 cursor-pointer text-red-500 transition-colors duration-150"
+            onClick={handleDisconnect}
+          >
+            <Icon icon="ph:sign-out" width={20} height={20} />
             <span>Disconnect</span>
           </div>
         </div>
@@ -191,43 +190,30 @@ interface ConnectWalletButtonProps {
   minimal?: boolean
 }
 
-const ConnectWalletButton: React.FC<ConnectWalletButtonProps> = ({
-  onClick,
-  minimal = false,
-}) => {
+const ConnectWalletButton: React.FC<ConnectWalletButtonProps> = ({ onClick, minimal = false }) => {
   return (
     <button
       className={`flex justify-center items-center gap-[8px] rounded-[8px] bg-latest-grey-300 hover:bg-latest-grey-400 transition-colors duration-200 ${
         minimal ? 'p-2' : 'px-[10px] py-[5px]'
       }`}
-      onClick={onClick}>
-      <svg
-        width='20'
-        height='20'
-        viewBox='0 0 24 24'
-        fill='none'
-        xmlns='http://www.w3.org/2000/svg'>
+      onClick={onClick}
+    >
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path
-          d='M2 7C2 5.89543 2.89543 5 4 5H20C21.1046 5 22 5.89543 22 7V18C22 19.1046 21.1046 20 20 20H4C2.89543 20 2 19.1046 2 18V7Z'
-          stroke='currentColor'
-          strokeWidth='2'
-          strokeLinecap='round'
-          strokeLinejoin='round'
+          d="M2 7C2 5.89543 2.89543 5 4 5H20C21.1046 5 22 5.89543 22 7V18C22 19.1046 21.1046 20 20 20H4C2.89543 20 2 19.1046 2 18V7Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
         <path
-          d='M16 14C16 12.8954 16.8954 12 18 12C19.1046 12 20 12.8954 20 14C20 15.1046 19.1046 16 18 16C16.8954 16 16 15.1046 16 14Z'
-          stroke='currentColor'
-          strokeWidth='2'
-          strokeLinecap='round'
-          strokeLinejoin='round'
+          d="M16 14C16 12.8954 16.8954 12 18 12C19.1046 12 20 12.8954 20 14C20 15.1046 19.1046 16 18 16C16.8954 16 16 15.1046 16 14Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
-        <path
-          d='M2 10H22'
-          stroke='currentColor'
-          strokeWidth='2'
-          strokeLinecap='round'
-          strokeLinejoin='round'
-        />
+        <path d="M2 10H22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
       {!minimal && <span>Connect Wallet</span>}
     </button>
@@ -262,7 +248,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
   const { data: l1TokenBalances = [] } = useL1TokenBalances()
 
   const sepoliaNativeTokens = l1TokenBalances.find(
-    (token) => token.type === 'native' && token.network?.chainId === L1_CHAIN_ID
+    (token) => token.type === 'native' && token.network?.chainId === L1_CHAIN_ID,
   )
   const l1NativeBalance = sepoliaNativeTokens?.balance_formatted?.toString()
 
@@ -283,13 +269,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
 
       return () => clearTimeout(timer)
     }
-  }, [
-    isWaapConnected,
-    isAztecConnected,
-    walletButtonPressed,
-    walletConnectionPhase,
-    connectAztecWallet,
-  ])
+  }, [isWaapConnected, isAztecConnected, walletButtonPressed, walletConnectionPhase, connectAztecWallet])
 
   const handleConnectWallet = async () => {
     // Set the button pressed flag
@@ -313,17 +293,10 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
 
   if (!mounted) {
     return (
-      <header className='w-full px-4 flex justify-between items-center'>
-        <div className='flex-shrink-0'>
-          <Link
-            href='/'
-            className='hover:opacity-80 transition-opacity duration-200'>
-            <Image
-              src='/assets/svg/human.tech.logo.svg'
-              alt='human.tech'
-              width={120}
-              height={30}
-            />
+      <header className="w-full px-4 flex justify-between items-center">
+        <div className="flex-shrink-0">
+          <Link href="/" className="hover:opacity-80 transition-opacity duration-200">
+            <Image src="/assets/svg/human.tech.logo.svg" alt="human.tech" width={120} height={30} />
           </Link>
         </div>
       </header>
@@ -331,50 +304,35 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
   }
 
   return (
-    <header className='w-full px-4 pt-3 flex justify-between items-center relative'>
-      <div className='flex-shrink-0'>
-        <Link
-          href='/'
-          className='hover:opacity-80 transition-opacity duration-200'>
-          <Image
-            src='/assets/svg/human.tech.logo.svg'
-            alt='human.tech'
-            width={120}
-            height={30}
-          />
+    <header className="w-full px-4 pt-3 flex justify-between items-center relative">
+      <div className="flex-shrink-0">
+        <Link href="/" className="hover:opacity-80 transition-opacity duration-200">
+          <Image src="/assets/svg/human.tech.logo.svg" alt="human.tech" width={120} height={30} />
         </Link>
       </div>
 
       {/* Desktop Navigation */}
-      <div className='hidden md:flex gap-6 items-center'>
+      <div className="hidden md:flex gap-6 items-center">
         {credentials && (
-          <div className='text-sm font-medium cursor-pointer hover:text-latest-grey-800 transition-colors duration-200'>
+          <div className="text-sm font-medium cursor-pointer hover:text-latest-grey-800 transition-colors duration-200">
             {credentials}
           </div>
         )}
 
-        <div className='flex items-center gap-4'>
+        <div className="flex items-center gap-4">
           <DeploymentSelector />
 
           {/* Privacy Mode Toggle */}
           <div
-            className='flex px-[3px] py-[3px] pl-[8px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200'
-            data-tooltip-id='privacy-mode-tooltip'
-            data-tooltip-content={isPrivacyModeEnabled ? 'Private transactions enabled' : 'Enable private transactions'}>
-            <Image
-              src='/assets/svg/human.aztec.svg'
-              alt='Aztec'
-              width={28}
-              height={28}
-            />
-            <span className='text-[#0A0A0A] text-[14px] font-[450] leading-[20px] font-sans'>
-              Privacy Mode
-            </span>
+            className="flex px-[3px] py-[3px] pl-[8px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative privacy-mode-toggle hover:shadow-md transition-shadow duration-200"
+            data-tooltip-id="privacy-mode-tooltip"
+            data-tooltip-content={isPrivacyModeEnabled ? 'Private transactions enabled' : 'Enable private transactions'}
+          >
+            <Image src="/assets/svg/human.aztec.svg" alt="Aztec" width={28} height={28} />
+            <span className="text-[#0A0A0A] text-[14px] font-[450] leading-[20px] font-sans">Privacy Mode</span>
             <button
               className={`flex w-[40px] h-[24px] py-[3px] px-1 items-center rounded-[8px] transition-all duration-200 border-0 focus:outline-none relative z-10 ${
-                isPrivacyModeEnabled
-                  ? 'bg-[#3B3B3B] justify-end pl-[19px]'
-                  : 'bg-[#D4D4D4] justify-start pr-[19px]'
+                isPrivacyModeEnabled ? 'bg-[#3B3B3B] justify-end pl-[19px]' : 'bg-[#D4D4D4] justify-start pr-[19px]'
               }`}
               onClick={() => {
                 setPrivacyModeEnabled(!isPrivacyModeEnabled)
@@ -391,14 +349,10 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
               }}
               aria-pressed={isPrivacyModeEnabled}
               tabIndex={0}
-              style={{ border: 'none' }}>
-              <span className='flex w-[18px] h-[18px] p-[1px] justify-center items-center flex-shrink-0 rounded-[6px] bg-white shadow-[0px_1px_3px_0px_rgba(0,0,0,0.25)] transition-transform duration-200'>
-                <Image
-                  src='/assets/svg/shield.svg'
-                  alt='Shield'
-                  width={14}
-                  height={14}
-                />
+              style={{ border: 'none' }}
+            >
+              <span className="flex w-[18px] h-[18px] p-[1px] justify-center items-center flex-shrink-0 rounded-[6px] bg-white shadow-[0px_1px_3px_0px_rgba(0,0,0,0.25)] transition-transform duration-200">
+                <Image src="/assets/svg/shield.svg" alt="Shield" width={14} height={14} />
               </span>
             </button>
           </div>
@@ -412,7 +366,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
                 address={waapAddress || undefined}
                 isConnected={isWaapConnected}
                 walletIcon={walletIcon || '/assets/wallets/wally-dark.svg'}
-                networkIcon='/assets/svg/network-logo.svg'
+                networkIcon="/assets/svg/network-logo.svg"
                 balance={l1NativeBalance}
                 onDisconnect={disconnectWaapWallet}
                 walletType={WalletType.WAAP}
@@ -423,7 +377,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
                 address={aztecAddress || undefined}
                 displayName={aztecAlias || undefined}
                 isConnected={isAztecConnected}
-                walletIcon='/assets/svg/aztec-wallet-logo.svg'
+                walletIcon="/assets/svg/aztec-wallet-logo.svg"
                 onDisconnect={disconnectAztecWallet}
                 availableAccounts={availableAccounts}
                 onSelectAccount={switchAztecAccount}
@@ -435,61 +389,18 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
       </div>
 
       {/* Mobile Menu Button */}
-      <div className='md:hidden'>
-        <button
-          onClick={toggleMobileMenu}
-          className='p-2'
-          aria-label='Toggle mobile menu'>
+      <div className="md:hidden">
+        <button onClick={toggleMobileMenu} className="p-2" aria-label="Toggle mobile menu">
           {mobileMenuOpen ? (
-            <svg
-              width='24'
-              height='24'
-              viewBox='0 0 24 24'
-              fill='none'
-              xmlns='http://www.w3.org/2000/svg'>
-              <path
-                d='M18 6L6 18'
-                stroke='currentColor'
-                strokeWidth='2'
-                strokeLinecap='round'
-                strokeLinejoin='round'
-              />
-              <path
-                d='M6 6L18 18'
-                stroke='currentColor'
-                strokeWidth='2'
-                strokeLinecap='round'
-                strokeLinejoin='round'
-              />
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           ) : (
-            <svg
-              width='24'
-              height='24'
-              viewBox='0 0 24 24'
-              fill='none'
-              xmlns='http://www.w3.org/2000/svg'>
-              <path
-                d='M3 12H21'
-                stroke='currentColor'
-                strokeWidth='2'
-                strokeLinecap='round'
-                strokeLinejoin='round'
-              />
-              <path
-                d='M3 6H21'
-                stroke='currentColor'
-                strokeWidth='2'
-                strokeLinecap='round'
-                strokeLinejoin='round'
-              />
-              <path
-                d='M3 18H21'
-                stroke='currentColor'
-                strokeWidth='2'
-                strokeLinecap='round'
-                strokeLinejoin='round'
-              />
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 12H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3 6H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3 18H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           )}
         </button>
@@ -497,9 +408,9 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
 
       {/* Mobile Menu */}
       {mobileMenuOpen && (
-        <div className='md:hidden absolute top-full left-0 right-0 bg-white z-50 shadow-lg py-4 px-6 flex flex-col gap-4'>
+        <div className="md:hidden absolute top-full left-0 right-0 bg-white z-50 shadow-lg py-4 px-6 flex flex-col gap-4">
           {credentials && (
-            <div className='text-sm font-medium cursor-pointer hover:text-latest-grey-800 transition-colors duration-200'>
+            <div className="text-sm font-medium cursor-pointer hover:text-latest-grey-800 transition-colors duration-200">
               {credentials}
             </div>
           )}
@@ -507,21 +418,12 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
           <DeploymentSelector />
 
           {/* Mobile Privacy Mode Toggle */}
-          <div className='flex px-[3px] py-[3px] pl-[8px] w-[240px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative hover:shadow-md transition-shadow duration-200 max-w-[190px]'>
-            <Image
-              src='/assets/svg/human.aztec.svg'
-              alt='Aztec'
-              width={28}
-              height={28}
-            />
-            <span className='text-[#0A0A0A] text-[14px] font-[450] leading-[20px] font-sans'>
-              Privacy Mode
-            </span>
+          <div className="flex px-[3px] py-[3px] pl-[8px] w-[240px] justify-center items-center gap-[8px] rounded-[8px] bg-white border border-[#D4D4D4] z-10 relative hover:shadow-md transition-shadow duration-200 max-w-[190px]">
+            <Image src="/assets/svg/human.aztec.svg" alt="Aztec" width={28} height={28} />
+            <span className="text-[#0A0A0A] text-[14px] font-[450] leading-[20px] font-sans">Privacy Mode</span>
             <button
               className={`flex w-[40px] h-[24px] py-[3px] px-1 items-center rounded-[8px] transition-all duration-200 border-0 focus:outline-none relative z-10 ${
-                isPrivacyModeEnabled
-                  ? 'bg-[#3B3B3B] justify-end pl-[19px]'
-                  : 'bg-[#D4D4D4] justify-start pr-[19px]'
+                isPrivacyModeEnabled ? 'bg-[#3B3B3B] justify-end pl-[19px]' : 'bg-[#D4D4D4] justify-start pr-[19px]'
               }`}
               onClick={() => {
                 setPrivacyModeEnabled(!isPrivacyModeEnabled)
@@ -538,19 +440,15 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
               }}
               aria-pressed={isPrivacyModeEnabled}
               tabIndex={0}
-              style={{ border: 'none' }}>
-              <span className='flex w-[18px] h-[18px] p-[1px] justify-center items-center flex-shrink-0 rounded-[6px] bg-white shadow-[0px_1px_3px_0px_rgba(0,0,0,0.25)] transition-transform duration-200'>
-                <Image
-                  src='/assets/svg/shield.svg'
-                  alt='Shield'
-                  width={14}
-                  height={14}
-                />
+              style={{ border: 'none' }}
+            >
+              <span className="flex w-[18px] h-[18px] p-[1px] justify-center items-center flex-shrink-0 rounded-[6px] bg-white shadow-[0px_1px_3px_0px_rgba(0,0,0,0.25)] transition-transform duration-200">
+                <Image src="/assets/svg/shield.svg" alt="Shield" width={14} height={14} />
               </span>
             </button>
           </div>
 
-          <div className='flex flex-col items-start gap-3'>
+          <div className="flex flex-col items-start gap-3">
             {!isAnyWalletConnected ? (
               <ConnectWalletButton onClick={handleConnectWallet} />
             ) : (
@@ -569,7 +467,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
                   address={aztecAddress || undefined}
                   displayName={aztecAlias || undefined}
                   isConnected={isAztecConnected}
-                  walletIcon='/assets/svg/aztec-wallet-logo.svg'
+                  walletIcon="/assets/svg/aztec-wallet-logo.svg"
                   onDisconnect={disconnectAztecWallet}
                   availableAccounts={availableAccounts}
                   onSelectAccount={switchAztecAccount}
@@ -582,9 +480,9 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
       )}
 
       <ReactTooltip
-        id='privacy-mode-tooltip'
-        place='bottom'
-        className='z-[100]'
+        id="privacy-mode-tooltip"
+        place="bottom"
+        className="z-[100]"
         style={{
           fontSize: '12px',
           padding: '4px 8px',

@@ -29,6 +29,8 @@ interface FuelToggleProps {
    * gate the bridge button so we don't accept an unparseable address.
    */
   onRecipientValidityChange?: (valid: boolean) => void
+  // Fuel is carved OUT of the bridge amount, so the SDK requires `fuel < bridge` strictly.
+  onFuelAmountValidChange?: (valid: boolean) => void
   isPrivacyModeEnabled?: boolean
   /** L2 address of the bridger — used as the default fuel recipient and for "self" comparisons. */
   selfAztecAddress?: string
@@ -178,6 +180,7 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
   onFuelTypeChange,
   onSufficiencyChange,
   onRecipientValidityChange,
+  onFuelAmountValidChange,
   isPrivacyModeEnabled = false,
   selfAztecAddress = '',
   fuelRecipientOverride,
@@ -271,6 +274,10 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
       onSufficiencyChange?.(fuelSufficient)
     }
   }, [fuelEnabled, isValid, fuelSufficient, sufficiencyLoading, onSufficiencyChange])
+
+  useEffect(() => {
+    onFuelAmountValidChange?.(!fuelEnabled || isValid)
+  }, [fuelEnabled, isValid, onFuelAmountValidChange])
 
   // Check which USD preset is currently selected (if any)
   const activePreset = USD_PRESETS.find((usd) => fuelAmount === usdToTokenAmount(usd, tokenSymbol, prices))

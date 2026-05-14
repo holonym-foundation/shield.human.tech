@@ -7,6 +7,8 @@ import { ToastContainer } from 'react-toastify'
 import { useWalletStore } from './stores/walletStore'
 import { init as initDatadog } from '@/utils/datadog'
 import AuthSync from '@/components/AuthSync'
+import { BridgeContext, useBridgeInstance } from '@/hooks/useBridge'
+import { L1_RPC_URL } from './config'
 
 function InitializeWaapWallet() {
   const { initializeWaapWallet } = useWalletStore()
@@ -46,6 +48,18 @@ function InitializeDatadog() {
   return null
 }
 
+function BridgeProvider({ children }: { children: ReactNode }) {
+  // apiUrl: '' uses same-origin (relative URLs) since this app hosts the API routes.
+  // External SDK consumers don't need to set this — it defaults to https://bridge.human.tech
+  const bridge = useBridgeInstance({
+    apiUrl: '',
+    l1RpcUrl: L1_RPC_URL ?? '',
+  })
+  return (
+    <BridgeContext.Provider value={bridge}>{children}</BridgeContext.Provider>
+  )
+}
+
 export function Providers({ children }: { children: ReactNode }) {
   // Create QueryClient in component to ensure it's created on the client side
   const [queryClient] = useState(
@@ -83,12 +97,14 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <>
       <QueryClientProvider client={queryClient}>
-        <InitializeWaapWallet />
-        <InitializeAztecWallet />
-        <InitializeDatadog />
-        <AuthSync />
+        <BridgeProvider>
+          <InitializeWaapWallet />
+          <InitializeAztecWallet />
+          <InitializeDatadog />
+          <AuthSync />
 
-        {children}
+          {children}
+        </BridgeProvider>
         <ReactQueryDevtools initialIsOpen={false} />
       </QueryClientProvider>
       <ToastContainer toastClassName={'toast-container'} newestOnTop={true} />

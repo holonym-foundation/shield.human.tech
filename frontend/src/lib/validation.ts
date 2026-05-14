@@ -6,6 +6,63 @@
  * attempts, and accidental whitespace issues.
  */
 
+import { z } from 'zod'
+
+// ─── Regex patterns (declared first so Zod schemas below can reference them) ─
+
+/** Ethereum address: 0x followed by 40 hex chars. */
+export const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/
+
+/** Ethereum tx hash: 0x followed by 64 hex chars. */
+export const TX_HASH_REGEX = /^0x[a-fA-F0-9]{64}$/
+
+/** Hex string (with 0x prefix, variable length). Used for Aztec addresses and message hashes. */
+export const HEX_STRING_REGEX = /^0x[a-fA-F0-9]+$/
+
+/** Numeric string (non-negative integer). Used for amounts, block numbers, and leaf indices. */
+export const NUMERIC_STRING_REGEX = /^\d+$/
+
+// ─── Zod Schemas ──────────────────────────────────────────────────────
+
+/** Schema for POST /api/auth/authenticate.
+ *  Bound message/signature length so an attacker can't post megabytes
+ *  of payload and force the SIWE parser/verifier to do meaningful work. */
+export const AuthenticateSchema = z.object({
+  // SIWE messages are typically ~500-800 chars; 2048 is generous.
+  message: z.string().min(1).max(2048),
+  // ECDSA hex signatures are 132 chars; 256 is generous.
+  signature: z.string().min(1).max(256),
+  l1LoginMethod: z.string().max(64).optional(),
+  l1WalletProvider: z.string().max(64).optional(),
+  l2LoginMethod: z.string().max(64).optional(),
+  l2WalletProvider: z.string().max(64).optional(),
+})
+
+/** Schema for POST /api/attestation/passport.
+ *  portalAddress is REQUIRED — the L1 ECDSA passport attestation is bound
+ *  to a specific TokenPortal so the signature can't be replayed against any
+ *  other portal. Allowing it to be optional + signing `?? ''` produced
+ *  wildcard-binding attestations.
+ *  l2Address is OPTIONAL — the route uses authResult.user.l2Address from
+ *  the JWT (cryptographically SIWE-bound), so a body field is redundant and
+ *  the SDK doesn't pass one. */
+export const PassportAttestationSchema = z.object({
+  l2Address: z.string().min(1).optional(),
+  isPrivate: z.boolean().optional().default(false),
+  bridgeAddress: z.string().regex(ETH_ADDRESS_REGEX, 'bridgeAddress must be 0x + 40 hex chars').optional(),
+  portalAddress: z.string().regex(ETH_ADDRESS_REGEX, 'portalAddress must be 0x + 40 hex chars'),
+  deadline: z.number().int().nonnegative().optional(),
+})
+
+/** Schema for POST /api/attestation/poch.
+ *  All fields optional — the route reads l1/l2 addresses from the JWT
+ *  (authResult.user) and never reads the body data. The schema is kept as
+ *  a sanity guard against accidental wrong-type bodies. */
+export const PochAttestationSchema = z.object({
+  l2Address: z.string().min(1).optional(),
+  isPrivate: z.boolean().optional().default(false),
+})
+
 // ─── Length limits ──────────────────────────────────────────────────────
 
 /** Max length for standard string fields (tx hashes, addresses, URLs). */
@@ -25,20 +82,6 @@ export const MAX_SIBLING_PATH_ENTRY_LENGTH = 200
 
 /** Max number of sibling path entries. */
 export const MAX_SIBLING_PATH_ENTRIES = 128
-
-// ─── Regex patterns ─────────────────────────────────────────────────────
-
-/** Ethereum address: 0x followed by 40 hex chars. */
-export const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/
-
-/** Ethereum tx hash: 0x followed by 64 hex chars. */
-export const TX_HASH_REGEX = /^0x[a-fA-F0-9]{64}$/
-
-/** Hex string (with 0x prefix, variable length). Used for Aztec addresses and message hashes. */
-export const HEX_STRING_REGEX = /^0x[a-fA-F0-9]+$/
-
-/** Numeric string (non-negative integer). Used for amounts, block numbers, and leaf indices. */
-export const NUMERIC_STRING_REGEX = /^\d+$/
 
 // ─── Sanitization helpers ───────────────────────────────────────────────
 

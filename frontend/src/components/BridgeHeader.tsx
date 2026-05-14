@@ -1,4 +1,5 @@
 import React from 'react'
+import { useRouter } from 'next/navigation'
 import StyledImage from './StyledImage'
 import LoadingBar from './LoadingBar'
 import { useBridgeStore } from '@/stores/bridgeStore'
@@ -9,8 +10,9 @@ interface BridgeHeaderProps {
 }
 
 const BridgeHeader: React.FC<BridgeHeaderProps> = ({ onClick }) => {
-  const { 
-    getHeaderSteps, 
+  const router = useRouter()
+  const {
+    getHeaderSteps,
     headerStep,
     setHeaderStep
   } = useBridgeStore()
@@ -55,6 +57,16 @@ const BridgeHeader: React.FC<BridgeHeaderProps> = ({ onClick }) => {
         }}>
         BRIDGE
       </p>
+      <button
+        onClick={() => router.push('/activity')}
+        className='ml-auto flex items-center justify-center p-1 rounded-full hover:bg-gray-100 transition-colors'
+        aria-label='Bridge activity'
+      >
+        <svg width='20' height='20' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>
+          <path d='M12 8V12L15 15' stroke='#0A0A0A' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'/>
+          <circle cx='12' cy='12' r='9' stroke='#0A0A0A' strokeWidth='2'/>
+        </svg>
+      </button>
     </div>
   )
 }

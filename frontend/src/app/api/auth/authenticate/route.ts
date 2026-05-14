@@ -1,87 +1,118 @@
+// frontend/src/app/api/auth/authenticate/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyMessage } from 'viem'
+import { SiweMessage } from 'siwe'
 import { prisma } from '@/lib/prisma'
 import { signJWT } from '@/lib/jwt'
-import {
-  sanitizeEthAddress,
-  sanitizeHexString,
-  sanitizeString,
-} from '@/lib/validation'
+import { consumeNonce } from '@/lib/siweNonceStore'
+import { AuthenticateSchema } from '@/lib/validation'
+import { AUTH_EXPECTED_DOMAIN } from '@/config/env.config'
+
+// Must stay in sync with `L2_RESOURCE_PREFIX` in packages/sdk/src/auth.ts.
+// Inlined here on purpose: importing the constant via the SDK barrel
+// pulls @aztec/aztec.js transitively, which does readFileSync on a .wasm
+// at module-load time and fails under Next.js server bundling
+// (vendor-chunks/noirc_abi_wasm_bg.wasm not copied to .next/dev/server).
+// Client and server MUST produce/parse the same string — divergence
+// breaks SIWE address extraction.
+const L2_RESOURCE_PREFIX = 'https://bridge.human.tech/aztec/address/'
+
+/** Aztec address: 0x followed by 64 hex chars */
+const AZTEC_ADDRESS_REGEX = /^0x[a-fA-F0-9]{64}$/
 
 /**
- * Build the deterministic auth message that the frontend signs.
- * Must match the message constructed in AuthSync.tsx.
+ * Extract and validate the L2 (Aztec) address from SIWE resources.
+ * Returns lowercase address or null if invalid.
  */
-function buildAuthMessage(l1Address: string, l2Address: string): string {
-  return [
-    'Aztec Bridge - Authenticate',
-    '',
-    'Sign this message to prove you own this wallet.',
-    'This does not cost any gas.',
-    '',
-    `L1 Wallet: ${l1Address.toLowerCase()}`,
-    `L2 Wallet: ${l2Address.toLowerCase()}`,
-  ].join('\n')
+function extractL2Address(resources: string[] | undefined): string | null {
+  if (!resources || resources.length === 0) return null
+  const resource = resources[0]
+  if (!resource.startsWith(L2_RESOURCE_PREFIX)) return null
+  const address = resource.slice(L2_RESOURCE_PREFIX.length)
+  if (!AZTEC_ADDRESS_REGEX.test(address)) return null
+  return address.toLowerCase()
 }
 
 /**
  * POST /api/auth/authenticate
- * Find or create User by (l1Address, l2Address); store L1/L2 login method and provider.
- * Requires a wallet signature to prove ownership of the L1 address.
+ *
+ * Verifies a SIWE (EIP-4361) signed message to prove L1 wallet ownership.
+ * Extracts L2 address from the message's resources field.
+ * Issues a JWT on success.
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
 
-    // ── Sanitize inputs ─────────────────────────────────────────────────
-    const normalizedL1 = sanitizeEthAddress(body.l1Address)
-    const normalizedL2 = sanitizeHexString(body.l2Address, 130)
-    const signature = sanitizeString(body.signature, 200)
-    const l1LoginMethod = sanitizeString(body.l1LoginMethod, 50)
-    const l1WalletProvider = sanitizeString(body.l1WalletProvider, 100)
-    const l2LoginMethod = sanitizeString(body.l2LoginMethod, 50)
-    const l2WalletProvider = sanitizeString(body.l2WalletProvider, 100)
-
-    if (!normalizedL1) {
+    // ── Validate + sanitize inputs via Zod ──────────────────────────────
+    const parsed = AuthenticateSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0]
       return NextResponse.json(
-        { error: 'Invalid L1 address (must be 0x + 40 hex chars)' },
-        { status: 400 }
+        { error: `Validation error: ${firstError.path.join('.')} — ${firstError.message}` },
+        { status: 400 },
       )
     }
+
+    const data = parsed.data
+
+    // ── Parse SIWE message ────────────────────────────────────────────
+    let siweMessage: SiweMessage
+    try {
+      siweMessage = new SiweMessage(data.message)
+    } catch {
+      return NextResponse.json({ error: 'Invalid SIWE message format' }, { status: 400 })
+    }
+
+    // ── Validate nonce exists (check without consuming) ────────────────
+    const messageNonce = siweMessage.nonce
+    if (!messageNonce) {
+      return NextResponse.json({ error: 'Missing nonce in SIWE message.' }, { status: 400 })
+    }
+
+    // ── Verify SIWE signature BEFORE consuming the nonce ──────────────
+    // This prevents a DoS where an attacker submits a valid nonce with an
+    // invalid signature, burning the nonce before the legitimate user.
+    //
+    // pin the expected domain to env (AUTH_EXPECTED_DOMAIN) instead of
+    // trusting the request Host header. A misconfigured proxy that lets an
+    // attacker send Host: evil.com would otherwise verify a SIWE message
+    // signed for evil.com. localhost is still allowed for dev convenience.
+    const requestHost = request.headers.get('host') ?? ''
+    const isLocalhost = requestHost.startsWith('localhost') || requestHost.startsWith('127.0.0.1')
+    const expectedDomain = isLocalhost ? requestHost : AUTH_EXPECTED_DOMAIN
+    try {
+      await siweMessage.verify({
+        signature: data.signature as string,
+        nonce: messageNonce,
+        domain: expectedDomain,
+      })
+    } catch (err) {
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    }
+
+    // ── Consume nonce AFTER signature is verified ─────────────────────
+    // Atomic: lookup + delete in one DB call. If the nonce was already
+    // consumed (replay) or expired, reject.
+    if (!(await consumeNonce(messageNonce))) {
+      return NextResponse.json({ error: 'Invalid or expired nonce. Please try again.' }, { status: 401 })
+    }
+
+    // ── Extract addresses from verified message ───────────────────────
+    // L1 address: from the SIWE message (cryptographically verified)
+    const normalizedL1 = siweMessage.address.toLowerCase()
+
+    // L2 address: from resources field (validated format)
+    const normalizedL2 = extractL2Address(siweMessage.resources)
     if (!normalizedL2) {
       return NextResponse.json(
-        { error: 'Invalid L2 address (must be a hex string)' },
-        { status: 400 }
-      )
-    }
-    if (!signature) {
-      return NextResponse.json(
-        { error: 'Missing wallet signature. Please sign to prove wallet ownership.' },
-        { status: 400 }
+        { error: 'L2 address required in resources (must be valid Aztec address format)' },
+        { status: 400 },
       )
     }
 
-    // ── Verify wallet signature ─────────────────────────────────────────
-    const message = buildAuthMessage(normalizedL1, normalizedL2)
-    const isValid = await verifyMessage({
-      address: normalizedL1 as `0x${string}`,
-      message,
-      signature: signature as `0x${string}`,
-    })
-
-    if (!isValid) {
-      console.warn('[auth/authenticate] Invalid signature for', normalizedL1)
-      return NextResponse.json(
-        { error: 'Invalid wallet signature. The signature does not match the claimed L1 address.' },
-        { status: 401 }
-      )
-    }
-
-    // Extract client IP from headers (works behind proxies / Vercel)
+    // ── Upsert user ──────────────────────────────────────────────────
     const clientIp =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-      request.headers.get('x-real-ip') ??
-      null
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip') ?? null
 
     const user = await prisma.user.upsert({
       where: {
@@ -93,18 +124,18 @@ export async function POST(request: NextRequest) {
       create: {
         l1Address: normalizedL1,
         l2Address: normalizedL2,
-        l1LoginMethod: l1LoginMethod ?? null,
-        l1WalletProvider: l1WalletProvider ?? null,
-        l2LoginMethod: l2LoginMethod ?? null,
-        l2WalletProvider: l2WalletProvider ?? null,
+        l1LoginMethod: data.l1LoginMethod ?? null,
+        l1WalletProvider: data.l1WalletProvider ?? null,
+        l2LoginMethod: data.l2LoginMethod ?? null,
+        l2WalletProvider: data.l2WalletProvider ?? null,
         lastLoginAt: new Date(),
         lastLoginIp: clientIp,
       },
       update: {
-        ...(l1LoginMethod !== undefined && { l1LoginMethod }),
-        ...(l1WalletProvider !== undefined && { l1WalletProvider }),
-        ...(l2LoginMethod !== undefined && { l2LoginMethod }),
-        ...(l2WalletProvider !== undefined && { l2WalletProvider }),
+        ...(data.l1LoginMethod !== undefined && { l1LoginMethod: data.l1LoginMethod }),
+        ...(data.l1WalletProvider !== undefined && { l1WalletProvider: data.l1WalletProvider }),
+        ...(data.l2LoginMethod !== undefined && { l2LoginMethod: data.l2LoginMethod }),
+        ...(data.l2WalletProvider !== undefined && { l2WalletProvider: data.l2WalletProvider }),
         lastLoginAt: new Date(),
         lastLoginIp: clientIp,
       },
@@ -140,9 +171,6 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('[auth/authenticate]', error)
-    return NextResponse.json(
-      { error: 'Authentication failed' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Authentication failed' }, { status: 500 })
   }
 }

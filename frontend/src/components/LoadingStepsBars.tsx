@@ -35,6 +35,7 @@ const LoadingStepsBars: React.FC<LoadingStepsBarsProps> = ({
               {/* Animated fill */}
               {(isActive || isCompleted || isError) && (
                 <motion.div
+                  key={`${index}-${step.status}`}
                   className={`absolute top-0 left-0 h-1 rounded-full ${
                     isError
                       ? 'bg-red'
