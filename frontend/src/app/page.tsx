@@ -606,8 +606,7 @@ export default function Home() {
                 hasL2SBT={hasL2SBT}
                 setShowSBTModal={setShowSBTModal}
                 setCurrentSBTChain={setCurrentSBTChain}
-                // Privacy mode / attestation
-                isPrivacyModeEnabled={isPrivacyModeEnabled}
+                // Compliance attestation
                 pochEligible={attestationData?.eligible}
                 pochLoading={attestationLoading}
                 pochReason={attestationData?.reason}

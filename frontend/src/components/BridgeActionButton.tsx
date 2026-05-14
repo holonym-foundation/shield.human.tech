@@ -75,8 +75,7 @@ interface BridgeActionButtonProps {
   setShowSBTModal: (show: boolean) => void
   setCurrentSBTChain: (chain: 'Ethereum' | 'Aztec') => void
 
-  // Privacy mode / attestation
-  isPrivacyModeEnabled?: boolean
+  // Compliance attestation
   pochEligible?: boolean
   pochLoading?: boolean
   pochReason?: string
@@ -125,7 +124,6 @@ function BridgeActionButton({
   hasL2SBT,
   setShowSBTModal,
   setCurrentSBTChain,
-  isPrivacyModeEnabled = false,
   pochEligible,
   pochLoading = false,
   pochReason,
