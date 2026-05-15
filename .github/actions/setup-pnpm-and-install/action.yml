@@ -1,11 +1,6 @@
 name: Setup pnpm and install
 
 inputs:
-  pnpm-version:
-    description: 'PNPM version to use'
-    default: '8'
-    required: false
-    type: string
   working-directory:
     description: 'Directory containing package.json'
     default: '.'
@@ -15,9 +10,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: pnpm/action-setup@v2
-      with:
-        version: ${{ inputs.pnpm-version }}
+    - uses: pnpm/action-setup@v4
 
     # Setup pnpm cache
     - name: Get pnpm store directory

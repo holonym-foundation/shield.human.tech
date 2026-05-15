@@ -30,7 +30,6 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm-and-install
         with:
-          pnpm-version: 8
           working-directory: .
 
       - name: Build SDK
@@ -68,7 +67,6 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm-and-install
         with:
-          pnpm-version: 8
           working-directory: .
 
       - name: Build SDK
