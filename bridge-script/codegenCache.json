@@ -1,7 +1,7 @@
 {
   "token_bridge_contract-TokenBridge.json": {
     "contractName": "TokenBridge",
-    "hash": "fd81c7bc82df2fc10127f74e16f5f905be36bdbdfe96c6d0fb1d2aaf62db7d3b"
+    "hash": "76a3d05ccfaccb8444901fc2fdb4e73246c1064bb1560569917b433a7730113f"
   },
   "token_minter_proxy-TokenMinterProxy.json": {
     "contractName": "TokenMinterProxy",
