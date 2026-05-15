@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "prisma generate && prisma migrate deploy && next build --webpack",
+    "build": "prisma generate && prisma migrate deploy && next build --webpack && node ./scripts/check-bb-wasm-trace.mjs",
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "next lint",
