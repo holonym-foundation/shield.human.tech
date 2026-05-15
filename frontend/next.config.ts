@@ -1,7 +1,12 @@
 import type { NextConfig } from 'next'
 import webpack from 'webpack'
+import path from 'path'
 
 const nextConfig: NextConfig = {
+  // bb.js lives in the workspace-root node_modules/.pnpm (not under frontend/),
+  // so the lambda needs the monorepo as its tracing root for Vercel to copy
+  // files that resolve above this Next project.
+  outputFileTracingRoot: path.join(__dirname, '..'),
   // NOTE: COOP/COEP headers were removed because 'same-origin' COOP blocks
   // the WaaP/Silk iframe (waap.xyz) from communicating via postMessage,
   // breaking L1 wallet connections entirely. SharedArrayBuffer (needed by
@@ -21,14 +26,16 @@ const nextConfig: NextConfig = {
       },
     ]
   },
+  // Next's NFT trace can't see the runtime readFile that loads
+  // barretenberg-threads.wasm.gz. Two patterns: the first matches when bb.js
+  // is installed under frontend/node_modules/.pnpm (legacy per-package
+  // install); the second matches when it's hoisted to the workspace root
+  // (the layout produced by `pnpm install` from the monorepo root, which
+  // is what CI does).
   outputFileTracingIncludes: {
     '/api/**/*': [
       './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz',
-      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.js',
-    ],
-    '/**/*': [
-      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz',
-      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.js',
+      '../node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz',
     ],
   },
   // Keep @aztec/bb.js as external on the server so the WASM file resolves
