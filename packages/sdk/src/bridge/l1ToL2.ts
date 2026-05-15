@@ -544,10 +544,18 @@ export async function bridgeL1ToL2(
       payloadToEncrypt.fuelAmount = fuel.amount ?? '0'
       if (tokenConfig.decimals != null) payloadToEncrypt.fuelDecimals = tokenConfig.decimals
     }
-    // Override fuel recipient: persisted inside the blob (not the DB) so any of the bridger's
-    // devices can re-decrypt and rebuild the claim link without trusting the server with secrets.
-    if (fuel?.recipient && fuel.recipient !== l2Address) {
-      payloadToEncrypt.fuelRecipient = fuel.recipient
+    // Diverges from the on-chain recipient for private fuel: the contract sends FJ to the
+    // BridgedFPC, but the FPC immediately pays gas for the bridger, so the stored value tracks
+    // the fuel *beneficiary*, not the custodian.
+    const resolvedFuelRecipient: string | undefined = fuel?.enabled
+      ? isPrivateFuel
+        ? l2Address
+        : fuel.recipient && fuel.recipient.length > 0
+          ? fuel.recipient
+          : l2Address
+      : undefined
+    if (resolvedFuelRecipient) {
+      payloadToEncrypt.fuelRecipient = resolvedFuelRecipient
     }
 
     const encrypted = await encryptData(JSON.stringify(payloadToEncrypt), encryptionKey)
@@ -613,6 +621,7 @@ export async function bridgeL1ToL2(
       claimSecretHash: claimSecretHash.toString(),
       fuelSecretHash: fuelSecretHash?.toString(),
       privateFuelSecretHash: privateFuelSecretHash?.toString(),
+      fuelRecipient: resolvedFuelRecipient,
       currentStep: 1,
     }
 
@@ -802,14 +811,14 @@ export async function bridgeL1ToL2(
           'Private fuel requires bridgedFpcAddress in the active deployment config.',
         )
       }
-      // Public fuel can be sent to a third-party L2 address (FJ is non-transferable, so this is
-      // the only way to fund someone else's account during bridging). Private fuel always routes
-      // to the FPC.
-      const resolvedPublicFuelRecipient = (fuel?.recipient && fuel.recipient.length > 0
-        ? fuel.recipient
-        : l2Address) as `0x${string}`
+      // FJ is non-transferable: routing private fuel through the FPC is the only way it can pay
+      // gas privately, and a public override is the only way to fund someone else's L2 account.
       const fuelRecipientOnchain = (
-        isPrivateFuel ? config.bridgedFpcAddress : resolvedPublicFuelRecipient
+        isPrivateFuel
+          ? config.bridgedFpcAddress
+          : fuel?.recipient && fuel.recipient.length > 0
+            ? fuel.recipient
+            : l2Address
       ) as `0x${string}`
 
       // Sign Permit2 witness-bound transfer

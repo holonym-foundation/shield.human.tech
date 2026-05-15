@@ -66,6 +66,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         fuelMessageHash: true,
         fuelMessageLeafIndex: true,
         fuelAmount: true,
+        fuelRecipient: true,
         // L2→L1 recovery fields
         l2BlockNumber: true,
         l2BlockNumberBeforeTx: true,
@@ -241,6 +242,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       'claimSecretHash',
       'fuelSecretHash',
       'privateFuelSecretHash',
+      'fuelRecipient',
     ] as const
 
     const blockedFields: string[] = []

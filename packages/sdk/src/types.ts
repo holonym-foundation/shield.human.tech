@@ -255,6 +255,8 @@ export interface BridgeOperation {
   fuelMessageHash: string | null
   fuelMessageLeafIndex: string | null
   fuelAmount: string | null
+  // L2 fuel beneficiary. For private fuel this is the bridger, not the on-chain FPC custodian.
+  fuelRecipient: string | null
   // L2→L1 recovery fields
   l2BlockNumber: string | null
   l2BlockNumberBeforeTx: string | null
@@ -493,9 +495,8 @@ export interface BridgeActivityData {
   privateFuelSecret?: string
   privateFuelSecretHash?: string
   /**
-   * L2 address of the fuel recipient when the bridger overrode the default (own L2). Persisted
-   * inside the encrypted blob so the bridger can rebuild the recipient claim link from any device
-   * after re-decryption — the DB never sees this field, only the encrypted ciphertext.
+   * L2 fuel beneficiary. For private fuel this is the bridger, not the on-chain FPC custodian.
+   * Mirrored to the BridgeActivity plaintext column; the claim *secret* stays in the blob.
    */
   fuelRecipient?: string
   // Portal address snapshot (for resume/recovery)

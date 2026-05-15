@@ -1,3 +1,5 @@
+mod test;
+
 use aztec::macros::aztec;
 
 #[aztec]
@@ -15,7 +17,8 @@ pub contract TokenMinterProxy {
 
     #[storage]
     struct Storage<Context> {
-        owner: PublicImmutable<AztecAddress, Context>,
+        owner: PublicMutable<AztecAddress, Context>,
+        pending_owner: PublicMutable<AztecAddress, Context>,
         token: PublicImmutable<AztecAddress, Context>,
         can_mint: Map<AztecAddress, PublicMutable<bool, Context>, Context>,
     }
@@ -23,7 +26,7 @@ pub contract TokenMinterProxy {
     #[external("public")]
     #[initializer]
     fn constructor() {
-        self.storage.owner.initialize(self.msg_sender());
+        self.storage.owner.write(self.msg_sender());
     }
 
     #[external("public")]
@@ -31,6 +34,34 @@ pub contract TokenMinterProxy {
         let sender = self.msg_sender();
         assert(self.storage.owner.read().eq(sender), "not owner");
         self.storage.token.initialize(token_address);
+    }
+
+    #[external("public")]
+    fn transfer_ownership(new_owner: AztecAddress) {
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
+        assert(!new_owner.is_zero(), "New owner cannot be zero address");
+        self.storage.pending_owner.write(new_owner);
+    }
+
+    #[external("public")]
+    fn cancel_ownership_transfer() {
+        assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
+        assert(!self.storage.pending_owner.read().is_zero(), "No pending owner");
+        self.storage.pending_owner.write(AztecAddress::zero());
+    }
+
+    #[external("public")]
+    fn claim_ownership() {
+        let sender = self.msg_sender();
+        assert(self.storage.pending_owner.read() == sender, "Only pending owner can claim");
+        self.storage.owner.write(sender);
+        self.storage.pending_owner.write(AztecAddress::zero());
+    }
+
+    #[external("public")]
+    #[view]
+    fn get_pending_owner() -> AztecAddress {
+        self.storage.pending_owner.read()
     }
 
     #[external("public")]

@@ -152,6 +152,9 @@ model BridgeActivity {
   fuelMessageHash     String? // Fuel message key from BridgeWithFuel event (fuelKey)
   fuelMessageLeafIndex String? // Fuel leaf index from BridgeWithFuel event (fuelIndex)
   fuelAmount           String? // Fuel amount received (in smallest unit, from BridgeWithFuel event)
+  // L2 fuel beneficiary. For private fuel this is the bridger's address, not the on-chain
+  // BridgedFPC custodian — the FPC immediately spends the FJ to pay gas for the bridger.
+  fuelRecipient        String?
 
   // --- L2→L1 withdrawal recovery (for L1 withdraw proof) ---
   l2BlockNumber      String? // L2 block where exit tx was included; required for witness and L1 withdraw
@@ -237,5 +240,6 @@ model BridgeActivity {
   @@index([messageHash])
   @@index([l2BlockNumber])
   @@index([completedAt])
+  @@index([fuelRecipient])
   @@map("bridge_activities")
 }

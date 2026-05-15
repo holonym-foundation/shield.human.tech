@@ -90,10 +90,13 @@ export class TokenMinterProxyContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'owner' | 'token' | 'can_mint'> {
+  public static get storage(): ContractStorageLayout<'owner' | 'pending_owner' | 'token' | 'can_mint'> {
       return {
         owner: {
       slot: new Fr(1n),
+    },
+pending_owner: {
+      slot: new Fr(2n),
     },
 token: {
       slot: new Fr(3n),
@@ -101,7 +104,7 @@ token: {
 can_mint: {
       slot: new Fr(5n),
     }
-      } as ContractStorageLayout<'owner' | 'token' | 'can_mint'>;
+      } as ContractStorageLayout<'owner' | 'pending_owner' | 'token' | 'can_mint'>;
     }
     
 
@@ -114,11 +117,20 @@ can_mint: {
     /** burn_public(user_address: struct, amount: integer, authwit_nonce: field) */
     burn_public: ((user_address: AztecAddressLike, amount: (bigint | number), authwit_nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
+    /** cancel_ownership_transfer() */
+    cancel_ownership_transfer: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** claim_ownership() */
+    claim_ownership: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
     /** constructor() */
     constructor: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** get_owner() */
     get_owner: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_pending_owner() */
+    get_pending_owner: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** get_token() */
     get_token: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -146,6 +158,9 @@ can_mint: {
 
     /** sync_state(scope: struct) */
     sync_state: ((scope: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** transfer_ownership(new_owner: struct) */
+    transfer_ownership: ((new_owner: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
   };
 
   

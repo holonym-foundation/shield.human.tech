@@ -74,6 +74,7 @@ export async function GET(request: NextRequest) {
         fuelMessageHash: true,
         fuelMessageLeafIndex: true,
         fuelAmount: true,
+        fuelRecipient: true,
         // L2→L1 recovery fields
         l2BlockNumber: true,
         l2BlockNumberBeforeTx: true,
@@ -223,6 +224,7 @@ export async function POST(request: NextRequest) {
     const claimSecretHash = sanitizeHexString(body.claimSecretHash, 130)
     const fuelSecretHash = sanitizeHexString(body.fuelSecretHash, 130)
     const privateFuelSecretHash = sanitizeHexString(body.privateFuelSecretHash, 130)
+    const fuelRecipient = sanitizeHexString(body.fuelRecipient, 130) ?? undefined
 
     // ── Validate required fields ────────────────────────────────────────
     if (!encryptedCiphertext || !encryptedIv || !encryptedTag) {
@@ -314,6 +316,7 @@ export async function POST(request: NextRequest) {
         claimSecretHash: claimSecretHash ?? undefined,
         fuelSecretHash: fuelSecretHash ?? undefined,
         privateFuelSecretHash: privateFuelSecretHash ?? undefined,
+        fuelRecipient: isL2ToL1 ? undefined : fuelRecipient,
         // Client IP for audit trail
         clientIp:
           request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
