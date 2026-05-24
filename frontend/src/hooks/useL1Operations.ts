@@ -8,6 +8,7 @@ import {
   extractErrorMessage,
 } from '@/utils'
 import { logError, logInfo, DatadogUserAction } from '@/utils/datadog'
+import { captureBridgeInitiated, captureBridgeCompleted } from '@/utils/posthog'
 import { WalletType } from '@/types/wallet'
 import { useWalletAdapter } from './useWalletAdapter'
 import { ADDRESS, getAztecscanUrl, getEtherscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
@@ -549,6 +550,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               l2Address: aztecAddress,
               userAction: DatadogUserAction.BRIDGE_L1_TO_L2_DEPOSIT_SENT,
             })
+            captureBridgeInitiated({
+              token: selectedToken?.symbol ?? 'unknown',
+              amount: amountDisplayL1,
+              fuel_enabled: !!fuel,
+            })
             setTransactionUrls(event.l1TxUrl, null)
             // Tx is in mempool — the "Do Not Reload" prep banner is now stale.
             notify.dismiss(TOAST_ID_L1L2_DO_NOT_RELOAD)
@@ -704,6 +710,11 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             const l1Url = event.l1TxHash ? `${getEtherscanUrl(L1_CHAIN_ID)}/tx/${event.l1TxHash}` : null
             const l2Url = event.l2TxHash ? `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${event.l2TxHash}` : null
             setTransactionUrls(l1Url, l2Url)
+            captureBridgeCompleted({
+              token: selectedToken?.symbol ?? 'unknown',
+              l1_tx_hash: event.l1TxHash ?? null,
+              l2_tx_hash: event.l2TxHash ?? null,
+            })
             break
           }
           case BridgeEventType.ATTESTATION_FETCH:

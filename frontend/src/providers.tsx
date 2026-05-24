@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { ToastContainer } from 'react-toastify'
 import { useWalletStore } from './stores/walletStore'
 import { init as initDatadog } from '@/utils/datadog'
+import { init as initPostHog } from '@/utils/posthog'
 import AuthSync from '@/components/AuthSync'
 import { BridgeContext, useBridgeInstance } from '@/hooks/useBridge'
 import { L1_RPC_URL } from './config'
@@ -41,8 +42,15 @@ function InitializeAztecWallet() {
 
 function InitializeDatadog() {
   useEffect(() => {
-    // Initialize Datadog on client-side only
     initDatadog()
+  }, [])
+
+  return null
+}
+
+function InitializePostHog() {
+  useEffect(() => {
+    initPostHog()
   }, [])
 
   return null
@@ -101,6 +109,7 @@ export function Providers({ children }: { children: ReactNode }) {
           <InitializeWaapWallet />
           <InitializeAztecWallet />
           <InitializeDatadog />
+          <InitializePostHog />
           <AuthSync />
 
           {children}

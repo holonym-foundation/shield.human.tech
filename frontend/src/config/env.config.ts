@@ -75,6 +75,11 @@ export const SANCTIONS_SCREENING_ENABLED = (process.env.SANCTIONS_SCREENING_ENAB
  */
 export const AUTH_EXPECTED_DOMAIN = process.env.AUTH_EXPECTED_DOMAIN ?? 'bridge.human.tech'
 
+// ─── PostHog (client) ───────────────────────────────────────────────
+
+export const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY ?? ''
+export const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://eu.i.posthog.com'
+
 // ─── Datadog (client) ───────────────────────────────────────────────
 
 export const DATADOG_SITE = process.env.NEXT_PUBLIC_DATADOG_SITE ?? ''

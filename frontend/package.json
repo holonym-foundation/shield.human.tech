@@ -50,6 +50,7 @@
     "framer-motion": "^12.4.10",
     "jsonwebtoken": "^9.0.3",
     "next": "^16.0.10",
+    "posthog-js": "^1.376.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-loader-spinner": "^6.1.6",
