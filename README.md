@@ -5,17 +5,22 @@ A visual overview of the Aztec Bridge flow:
 
 A comprehensive bridge application for transferring tokens between Ethereum (L1) and Aztec Network (L2), featuring a modern React/Next.js frontend with seamless Web3 integration.
 
-## ⚠️ **TESTNET ONLY - SECURITY WARNING**
+## ⚠️ **Aztec Mainnet Alpha — Use Caution**
 
-**🚨 THIS IS A TESTNET BRIDGE WITH KNOWN VULNERABILITIES 🚨**
+Active deployment: **Ethereum mainnet (L1) + Aztec Mainnet Alpha v4.3.0 (L2)** with real ZK proofs, live since 2026-05-29 per `bridge-script/deployments/registry.json`.
 
-- **NOT FOR PRODUCTION USE**: This bridge is designed for testing and development purposes only
-- **KNOWN SECURITY ISSUES**: The bridge contains known vulnerabilities and should never be used with real funds
-- **TESTNET TOKENS ONLY**: Only use with testnet tokens that have no real value
-- **NO SECURITY GUARANTEES**: Do not rely on this code for any production or mainnet deployments
-- **EDUCATIONAL PURPOSE**: This implementation is for learning and testing Aztec network functionality
+**Aztec is in Alpha**, not full production:
 
-**⚠️ USE AT YOUR OWN RISK - NEVER USE WITH REAL FUNDS ⚠️**
+- ~1 TPS, 6-72s block times
+- Ongoing audits + bug bounty (see [aztec.network/blog/alpha-network-security-what-to-expect](https://aztec.network/blog/alpha-network-security-what-to-expect))
+- Aztec advises users to only deposit funds they can afford to lose
+
+**Bridge-specific:**
+
+- Audited by Nethermind Security (NM-0756, May 2026) — 1 critical / 2 high / 3 medium findings, all resolved before deployment
+- Public marketing launch aligned with Aztec v5 release (~July 2026)
+
+Prior testnet deployments (Sepolia + Aztec testnet 4.2.0-rc.1) remain in `bridge-script/deployments/` for historical reference but are no longer the active deployment.
 
 ## 🌟 Overview
 
