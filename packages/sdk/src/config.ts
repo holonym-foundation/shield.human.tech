@@ -17,15 +17,35 @@ import deploymentsData from './contracts/deployments.json'
 /** Uniswap Permit2 contract (canonical deployment, same on all EVM chains) */
 export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
 
-/** Wrapped ETH on Sepolia */
-export const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as const
+// ─── Per-chain Uniswap V4 + WETH addresses ─────────────────────────
+// Resolved by L1 chain id so one SDK build serves both mainnet and Sepolia.
+// Used by the on-chain fuel quoter (fuelPricing.ts) and the SwapBridgeRouter callers.
+// Kept in sync with frontend/src/config/index.ts.
+const V4_ADDRESSES_BY_CHAIN: Record<
+  number,
+  { weth: `0x${string}`; quoter: `0x${string}`; poolManager: `0x${string}` }
+> = {
+  1: {
+    weth: '0xc02aaa39b223fe8d0a0e8e4f27ead9083c756cc2',
+    quoter: '0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203',
+    poolManager: '0x000000000004444c5dc75cB358380D2e3dE08A90',
+  },
+  11155111: {
+    weth: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14',
+    quoter: '0x61b3f2011a92d183c7dbadbda940a7555ccf9227',
+    poolManager: '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543',
+  },
+}
 
-// ─── Uniswap V4 Constants ──────────────────────────────────────────
-// Used by the on-chain fuel quoter (fuelPricing.ts) and the SwapBridgeRouter
-// callers. Kept in sync with main's frontend/src/config/index.ts.
+export function getV4Addresses(chainId: number) {
+  return V4_ADDRESSES_BY_CHAIN[chainId] ?? V4_ADDRESSES_BY_CHAIN[11155111]
+}
 
-/** Uniswap V4 Quoter (canonical on Sepolia) */
-export const V4_QUOTER = '0x61b3f2011a92d183c7dbadbda940a7555ccf9227' as const
+/** Wrapped ETH — Sepolia default; mainnet resolved per-deployment in createConfig. */
+export const WETH_ADDRESS = V4_ADDRESSES_BY_CHAIN[11155111].weth
+
+/** Uniswap V4 Quoter — Sepolia default; mainnet resolved per-deployment in createConfig. */
+export const V4_QUOTER = V4_ADDRESSES_BY_CHAIN[11155111].quoter
 
 /** Native ETH sentinel in V4 pools (currency0 can be zero address) */
 export const NATIVE_ETH = '0x0000000000000000000000000000000000000000' as const
@@ -33,8 +53,9 @@ export const NATIVE_ETH = '0x0000000000000000000000000000000000000000' as const
 /** Fees and tick spacings for the canonical fuel swap pools */
 export const INTERMEDIATE_POOL_FEE = 3000 as const
 export const INTERMEDIATE_POOL_TICK_SPACING = 60 as const
-export const FEE_POOL_FEE = 3000 as const
-export const FEE_POOL_TICK_SPACING = 60 as const
+// Mainnet ETH/AZTEC V4 pool is fee=10000 / tickSpacing=200 (verified on-chain; fee=3000 is empty).
+export const FEE_POOL_FEE = 10000 as const
+export const FEE_POOL_TICK_SPACING = 200 as const
 export const DIRECT_POOL_FEE = 3000 as const
 export const DIRECT_POOL_TICK_SPACING = 60 as const
 
@@ -94,7 +115,8 @@ export function createConfig(
     uniswapFuelSwapAddress: dep.uniswapFuelSwapAddress ?? '',
     bridgedFpcAddress: dep.bridgedFpcAddress ?? '',
     permit2Address: PERMIT2_ADDRESS,
-    wethAddress: WETH_ADDRESS,
+    wethAddress: getV4Addresses(dep.network.l1ChainId).weth,
+    v4QuoterAddress: getV4Addresses(dep.network.l1ChainId).quoter,
     feeJuicePortalAddress: (nodeInfoAddresses as any).feeJuicePortalAddress ?? '',
     feeJuiceAddress: (nodeInfoAddresses as any).feeJuiceAddress ?? '',
     sponsoredFeeAddress: dep.sponsoredFeeAddress ?? '',

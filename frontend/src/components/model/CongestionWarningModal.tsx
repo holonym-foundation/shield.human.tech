@@ -52,7 +52,7 @@ const CongestionWarningModal: React.FC<CongestionWarningModalProps> = ({
             </div>
             <div className='mt-4 mx-2.5'>
               <p className='text-[#737373] text-14 mb-6'>
-                Aztec Testnet is busy right now.
+                Aztec network is busy right now.
                 <br />
                 Transactions might be slow or fail.
               </p>

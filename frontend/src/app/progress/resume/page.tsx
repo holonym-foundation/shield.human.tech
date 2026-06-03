@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import BridgeHeader from '@/components/BridgeHeader'
 import ProgressCard from '@/components/ProgressCard'
 import { useBridgeStore } from '@/stores/bridgeStore'
+import { useWalletStore } from '@/stores/walletStore'
 import { formatUnits } from 'viem'
 import { useL2TokenBalance, useL2FeeJuiceBalance } from '@/hooks/useL2Operations'
 import { useL1TokenBalances } from '@/hooks/useL1Operations'
@@ -34,20 +35,25 @@ export default function ResumePage() {
   const isL2ToL1Recovery = !!recoveryWithdrawalData
 
   // Refetch balances on success
+  const { aztecAddress } = useWalletStore()
   const { refetch: refetchL1Balance } = useL1TokenBalances()
   const { refetch: refetchL2Balance } = useL2TokenBalance()
   const { refetch: refetchFeeJuiceBalance } = useL2FeeJuiceBalance()
 
   const handleResumeSuccess = useCallback(() => {
-    notify.promise(
-      Promise.all([refetchL1Balance(), refetchL2Balance(), refetchFeeJuiceBalance()]),
-      {
-        pending: 'Refreshing balances...',
-        success: 'Balances updated',
-        error: 'Failed to refresh balances',
-      }
-    )
-  }, [notify, refetchL1Balance, refetchL2Balance, refetchFeeJuiceBalance])
+    // The L2 balance queries require a connected Aztec wallet. On an L2→L1 resume the L2 wallet
+    // is often absent (resume runs from persisted data + an L1 client), and refetch() bypasses
+    // the queries' `enabled` guard — so only refresh L2 balances when the address is present.
+    const refetches: Promise<unknown>[] = [refetchL1Balance()]
+    if (aztecAddress) {
+      refetches.push(refetchL2Balance(), refetchFeeJuiceBalance())
+    }
+    notify.promise(Promise.allSettled(refetches), {
+      pending: 'Refreshing balances...',
+      success: 'Balances updated',
+      error: 'Failed to refresh balances',
+    })
+  }, [notify, aztecAddress, refetchL1Balance, refetchL2Balance, refetchFeeJuiceBalance])
 
   const {
     mutate: resumeL1ToL2,

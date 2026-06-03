@@ -39,6 +39,7 @@ export interface ResolvedConfig {
   bridgedFpcAddress: string
   permit2Address: string
   wethAddress: string
+  v4QuoterAddress: string
   feeJuicePortalAddress: string
   feeJuiceAddress: string
   sponsoredFeeAddress: string
@@ -697,6 +698,9 @@ export interface FuelParams {
 export interface PochCheckResult {
   eligible: boolean
   reason?: string
+  /** Alpha deposit cap: present only when the cap is enabled. */
+  depositLimitReached?: boolean
+  remainingUsd?: number
 }
 
 /** Passport eligibility pre-check result from GET /api/attestation/passport/check */
@@ -706,6 +710,9 @@ export interface PassportCheckResult {
   threshold: number
   maxAmount: string
   reason?: string
+  /** Alpha deposit cap: present only when the cap is enabled. */
+  depositLimitReached?: boolean
+  remainingUsd?: number
 }
 
 // ─── L1 Token Balance Types ──────────────────────────────────────────
@@ -736,6 +743,16 @@ export interface MintTokensResult {
 }
 
 // ─── Attestation Types ──────────────────────────────────────────────
+
+/** Optional bridge metadata sent with an attestation request so the server can
+ *  enforce the Alpha cumulative deposit cap. Only the deposit (L1_TO_L2) path
+ *  is gated; `amount` is in token base units. */
+export interface AttestationDepositMeta {
+  direction?: BridgeDirection
+  amount?: string
+  tokenSymbol?: string
+  tokenDecimals?: number
+}
 
 /** POCH attestation response from POST /api/attestation/poch */
 export interface PochAttestationData {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 import { PassportAttestationSchema } from '@/lib/validation'
-import { enforceAddressBinding, getNextNonce } from '@/lib/address-binding'
+import { enforceAddressBinding, getNextNonce, evaluateDepositLimit, usdToTokenBaseUnits } from '@/lib/address-binding'
 import {
   fetchPassportScore,
   signPassportAttestation,
@@ -87,8 +87,37 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // 3b. Alpha cumulative deposit cap (L1→L2 only). Unlike POCH, the Passport
+    // maxAmount is enforced on-chain, so we both refuse when over budget AND cap
+    // the signed maxAmount to the remaining budget for cryptographic enforcement.
+    let maxAmount = getPassportMaxAmount()
+    if (data.direction === 'L1_TO_L2') {
+      const limit = await evaluateDepositLimit({
+        userId: authResult.user.id,
+        amount: data.amount,
+        tokenSymbol: data.tokenSymbol,
+        tokenDecimals: data.tokenDecimals,
+      })
+      if (limit.enabled) {
+        if (limit.overLimit || limit.remainingUsd <= 0) {
+          return NextResponse.json(
+            {
+              error: `Alpha deposit limit reached ($${limit.limitUsd.toFixed(0)} per user). You have $${limit.confirmedUsd.toFixed(2)} of $${limit.limitUsd.toFixed(2)} used.`,
+              reason: 'deposit_limit',
+            },
+            { status: 403 },
+          )
+        }
+        const remainingBaseUnits = usdToTokenBaseUnits(
+          limit.remainingUsd,
+          data.tokenSymbol ?? 'USDC',
+          data.tokenDecimals ?? 6,
+        )
+        if (remainingBaseUnits < maxAmount) maxAmount = remainingBaseUnits
+      }
+    }
+
     // 4. Issue signed attestation (L1 ECDSA + L2 Schnorr)
-    const maxAmount = getPassportMaxAmount()
     const nonce = await getNextNonce(l1Address, 'passport')
 
     // Default deadline: 1 hour from now

@@ -696,11 +696,13 @@ export async function bridgeL1ToL2(
       const candidates = buildSwapCandidates(
         tokenConfig.l1TokenContract as `0x${string}`,
         config.feeJuiceAddress as `0x${string}`,
+        config.wethAddress as `0x${string}`,
       )
       const best = await getBestRoute({
         candidates,
         inputAmount: fuelAmountTokenUnits,
         l1RpcUrl: config.l1RpcUrl,
+        quoter: config.v4QuoterAddress as `0x${string}`,
       })
       resolvedFuelQuote = getUniswapFuelQuote({
         expectedOutput: best.expectedOutput,
@@ -770,7 +772,7 @@ export async function bridgeL1ToL2(
     let cleanHandsData = { nonce: 0n, signature: '0x' as `0x${string}` }
     let passportData = { maxAmount: 0n, nonce: 0n, deadline: 0n, signature: '0x' as `0x${string}` }
     const attestResult =
-      await fetchAttestationsForDeposit(apiClient, tokenConfig.l1PortalContract, amount, tokenConfig.decimals, emit)
+      await fetchAttestationsForDeposit(apiClient, tokenConfig.l1PortalContract, amount, tokenConfig.decimals, emit, tokenSymbolL1)
     // Defense-in-depth: refuse to submit the deposit if the cascade somehow
     // returned both-empty structs (would revert on-chain otherwise).
     assertNonEmptyDepositAttestation(attestResult)

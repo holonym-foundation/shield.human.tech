@@ -1,5 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# Runtime recovery artifact from redeploy-fuel-swap-mainnet.ts
+bridge-script/deployments/redeploy-fuel-swap.recovery.json
+
 # dependencies
 /node_modules
 node_modules
@@ -34,7 +37,13 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env
-.env.local
+.env.*
+!.env.example
+
+# bridged FeeJuice claim secrets — losing these loses bridged-but-unclaimed funds
+.fee-juice-claims.json
+# local mainnet deploy runbook
+MAINNET_DEPLOY_NOTES.md
 
 # vercel
 .vercel

@@ -51,6 +51,8 @@ export const CLEAN_HANDS_CIRCUIT_ID =
 export const CLEAN_HANDS_ACTION_ID = process.env.CLEAN_HANDS_ACTION_ID ?? '123456789'
 export const PASSPORT_SCORE_THRESHOLD = process.env.PASSPORT_SCORE_THRESHOLD ?? '20'
 export const PASSPORT_MAX_AMOUNT = process.env.PASSPORT_MAX_AMOUNT ?? '1000000000'
+// Alpha Mainnet cumulative-per-user deposit cap (USD). '' or '0' disables it.
+export const BRIDGE_MAX_DEPOSIT_USD = process.env.BRIDGE_MAX_DEPOSIT_USD ?? '10'
 export const HOLONYM_API_URL = process.env.HOLONYM_API_URL ?? 'https://api.holonym.io'
 export const PASSPORT_API_KEY = process.env.PASSPORT_API_KEY ?? ''
 export const PASSPORT_SCORER_ID = process.env.PASSPORT_SCORER_ID ?? ''

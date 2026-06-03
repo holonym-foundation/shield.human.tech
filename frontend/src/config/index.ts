@@ -105,6 +105,7 @@ const activeEnvConfig = ENV_CONFIG[AZTEC_ENV]
 // ─── Network Constants ───────────────────────────────────────────────
 
 export const L1_CHAIN_ID = activeDeployment.network.l1ChainId
+export const IS_MAINNET = L1_CHAIN_ID === 1
 export const L2_CHAIN_ID = activeDeployment.network.l2ChainId
 export const L2_CHAIN_KEY = `aztec:${L2_CHAIN_ID}`
 export const L1_RPC_URL = activeEnvConfig.l1RpcUrl
@@ -148,10 +149,26 @@ export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as c
 export const SWAP_BRIDGE_ROUTER_ADDRESS: `0x${string}` = ((activeDeployment as any).swapBridgeRouterAddress ??
   '') as `0x${string}`
 
-// ─── Uniswap V4 Sepolia Constants ───────────────────────────────────
-export const V4_POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as const
-export const V4_QUOTER = '0x61b3f2011a92d183c7dbadbda940a7555ccf9227' as const
-export const WETH_ADDRESS = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as const
+// ─── Uniswap V4 + WETH (resolved by L1 chain id) ────────────────────
+const V4_ADDRESSES_BY_CHAIN: Record<
+  number,
+  { poolManager: `0x${string}`; quoter: `0x${string}`; weth: `0x${string}` }
+> = {
+  1: {
+    poolManager: '0x000000000004444c5dc75cB358380D2e3dE08A90',
+    quoter: '0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203',
+    weth: '0xc02aaa39b223fe8d0a0e8e4f27ead9083c756cc2',
+  },
+  11155111: {
+    poolManager: '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543',
+    quoter: '0x61b3f2011a92d183c7dbadbda940a7555ccf9227',
+    weth: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14',
+  },
+}
+const _v4 = V4_ADDRESSES_BY_CHAIN[L1_CHAIN_ID] ?? V4_ADDRESSES_BY_CHAIN[11155111]
+export const V4_POOL_MANAGER = _v4.poolManager
+export const V4_QUOTER = _v4.quoter
+export const WETH_ADDRESS = _v4.weth
 export const NATIVE_ETH = '0x0000000000000000000000000000000000000000' as const
 
 // UniswapFuelSwap — deployed swap contract (set after running DeployUniswapFuelSwap)
@@ -163,8 +180,9 @@ export const UNISWAP_FUEL_SWAP_ADDRESS: `0x${string}` = ((activeDeployment as an
 export const INTERMEDIATE_POOL_FEE = 3000 as const
 export const INTERMEDIATE_POOL_TICK_SPACING = 60 as const
 // Final hop (ETH/AZTEC pool) — 0.3% fee, 60 tick spacing
-export const FEE_POOL_FEE = 3000 as const
-export const FEE_POOL_TICK_SPACING = 60 as const
+// Mainnet ETH/AZTEC V4 pool is fee=10000 / tickSpacing=200 (verified on-chain; fee=3000 is empty).
+export const FEE_POOL_FEE = 10000 as const
+export const FEE_POOL_TICK_SPACING = 200 as const
 // Native ETH pool: mainnet uses native ETH (address(0)), Sepolia too
 export const FEE_POOL_USES_NATIVE_ETH = true as const
 // Direct pool (e.g. USDC/FeeJuice) — for smart routing when a direct path exists
@@ -175,7 +193,7 @@ export const DIRECT_POOL_TICK_SPACING = 60 as const
 export const ADDRESS = {
   [L1_CHAIN_ID]: {
     CHAIN_ID: L1_CHAIN_ID,
-    CHAIN_NAME: 'Sepolia',
+    CHAIN_NAME: IS_MAINNET ? 'Ethereum' : 'Sepolia',
     L1: {
       PORTAL_SBT_CONTRACT: '0x983ad7bdc7701a77a6c22e2245d7eafe893b21fe',
     },
@@ -193,9 +211,9 @@ export const L1_NETWORKS: Network[] = [
   {
     id: 1,
     img: '/assets/svg/ethereum.svg',
-    title: 'Eth Sepolia',
+    title: IS_MAINNET ? 'Ethereum' : 'Eth Sepolia',
     chainId: L1_CHAIN_ID,
-    network: 'sepolia',
+    network: IS_MAINNET ? 'ethereum' : 'sepolia',
     symbol: 'ETH',
   },
 ]
@@ -204,7 +222,7 @@ export const L2_NETWORKS: Network[] = [
   {
     id: 2,
     img: '/assets/svg/aztec.svg',
-    title: 'Aztec Testnet',
+    title: activeEnvConfig.chainName,
     chainId: L2_CHAIN_ID,
     network: 'aztec',
     symbol: 'ETH',

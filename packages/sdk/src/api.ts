@@ -70,12 +70,19 @@ export class BridgeApiClient {
     return this.request<T>('PATCH', path, body)
   }
 
-  async postPochAttestation(portalAddress: string): Promise<import('./types').PochAttestationData> {
-    return this.post('/api/attestation/poch', { portalAddress })
+  async postPochAttestation(
+    portalAddress: string,
+    opts?: import('./types').AttestationDepositMeta,
+  ): Promise<import('./types').PochAttestationData> {
+    return this.post('/api/attestation/poch', { portalAddress, ...opts })
   }
 
-  async postPassportAttestation(portalAddress: string, bridgeAddress?: string): Promise<import('./types').PassportAttestationData> {
-    return this.post('/api/attestation/passport', { portalAddress, bridgeAddress })
+  async postPassportAttestation(
+    portalAddress: string,
+    bridgeAddress?: string,
+    opts?: import('./types').AttestationDepositMeta,
+  ): Promise<import('./types').PassportAttestationData> {
+    return this.post('/api/attestation/passport', { portalAddress, bridgeAddress, ...opts })
   }
 
   async getAttestationStatus(): Promise<import('./types').AttestationStatus> {

@@ -10,6 +10,9 @@ interface AttestationCheckResult {
   passportScore?: number
   passportThreshold?: number
   passportMaxAmount?: bigint
+  // Alpha deposit cap (L1→L2 only). undefined when the cap is disabled.
+  depositLimitReached?: boolean
+  remainingDepositUsd?: number
 }
 
 /**
@@ -34,7 +37,12 @@ export function useAttestationCheck() {
       try {
         const pochData = await bridge.checkPochEligibility()
         if (pochData.eligible) {
-          return { eligible: true, method: 'poch' }
+          return {
+            eligible: true,
+            method: 'poch',
+            depositLimitReached: pochData.depositLimitReached,
+            remainingDepositUsd: pochData.remainingUsd,
+          }
         }
       } catch (err: any) {
         console.warn('[attestationCheck] POCH check failed, trying Passport:', err?.message)
@@ -50,6 +58,8 @@ export function useAttestationCheck() {
             passportScore: passportData.score,
             passportThreshold: passportData.threshold,
             passportMaxAmount: BigInt(passportData.maxAmount),
+            depositLimitReached: passportData.depositLimitReached,
+            remainingDepositUsd: passportData.remainingUsd,
           }
         }
 
@@ -60,6 +70,8 @@ export function useAttestationCheck() {
           passportScore: passportData.score,
           passportThreshold: passportData.threshold,
           passportMaxAmount: BigInt(passportData.maxAmount),
+          depositLimitReached: passportData.depositLimitReached,
+          remainingDepositUsd: passportData.remainingUsd,
         }
       } catch (err: any) {
         const parsed = err?.parsedBody as { reason?: string; error?: string } | null | undefined

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 import { PochAttestationSchema } from '@/lib/validation'
-import { enforceAddressBinding, getNextNonce } from '@/lib/address-binding'
+import { enforceAddressBinding, getNextNonce, evaluateDepositLimit } from '@/lib/address-binding'
 import {
   checkCleanHands,
   signCleanHandsAttestation,
@@ -79,6 +79,27 @@ export async function POST(request: NextRequest) {
         { error: 'Clean hands check failed: address does not have a valid attestation', isUnique: false },
         { status: 403 },
       )
+    }
+
+    // 3b. Alpha cumulative deposit cap (L1→L2 only). POCH has no on-chain
+    // amount binding, so this refuses to issue a signature once the user is
+    // over budget — the honest-client / UI guardrail.
+    if (data.direction === 'L1_TO_L2') {
+      const limit = await evaluateDepositLimit({
+        userId: authResult.user.id,
+        amount: data.amount,
+        tokenSymbol: data.tokenSymbol,
+        tokenDecimals: data.tokenDecimals,
+      })
+      if (limit.enabled && limit.overLimit) {
+        return NextResponse.json(
+          {
+            error: `Alpha deposit limit reached ($${limit.limitUsd.toFixed(0)} per user). You have $${limit.confirmedUsd.toFixed(2)} of $${limit.limitUsd.toFixed(2)} used.`,
+            reason: 'deposit_limit',
+          },
+          { status: 403 },
+        )
+      }
     }
 
     // 4. Get next nonce and sign attestations (L1 ECDSA + L2 Schnorr)

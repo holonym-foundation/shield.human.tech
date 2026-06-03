@@ -27,7 +27,7 @@ const BannerAztecTestnet = () => {
             <div className='flex items-center gap-3'>
               <img src='/assets/svg/alert.svg' alt='Alert' className='w-6 h-6' />
               <span>
-                The Aztec Testnet appears to be down. Bridging is temporarily
+                The Aztec network appears to be down. Bridging is temporarily
                 disabled.
               </span>
             </div>
@@ -52,7 +52,7 @@ const BannerAztecTestnet = () => {
             <div className='flex items-center gap-3'>
               <img src='/assets/svg/alert.svg' alt='Alert' className='w-6 h-6' />
               <span>
-                The Aztec Testnet is congested right now. Your transactions may take
+                The Aztec network is congested right now. Your transactions may take
                 longer or may be dropped.
               </span>
             </div>

@@ -13,6 +13,8 @@ export interface DeployedToken {
   // L2 contracts
   l2TokenContract: string;
   l2BridgeContract: string;
+  // TokenMinterProxy — burn/mint authority; REQUIRED for L2→L1 withdrawals (Bridge → Proxy → Token).
+  l2ProxyContract: string;
   // Fee infrastructure
   feeAssetHandler: string;
   sponsoredFee: string;
@@ -70,6 +72,7 @@ export interface DeploymentRegistry {
 const DEPLOYMENTS_DIR = join('deployments');
 const REGISTRY_FILE = join(DEPLOYMENTS_DIR, 'registry.json');
 const FRONTEND_DEPLOYMENTS = resolve('..', 'frontend', 'src', 'constants', 'deployments.json');
+const SDK_DEPLOYMENTS = resolve('..', 'packages', 'sdk', 'src', 'contracts', 'deployments.json');
 const FRONTEND_ARTIFACTS_DIR = resolve('..', 'frontend', 'src', 'constants', 'aztec', 'artifacts');
 
 // Source artifact paths (compiled Noir contracts + codegen)
@@ -279,6 +282,37 @@ export function copyToFrontend(): void {
       console.warn(`⚠️  Artifact not found, skipping: ${src}`);
     }
   }
+}
+
+/**
+ * Bundle all deployments + registry into the SDK's contracts/deployments.json.
+ *
+ * The SDK (`@human.tech/aztec-bridge-sdk`) resolves contract/token addresses for the actual
+ * bridge transaction from THIS file — `createConfig(deployment ?? ACTIVE_DEPLOYMENT_ID)`. The
+ * frontend imports the SDK as a workspace package, so without this sync the tx path silently
+ * falls back to whatever (stale) deployment the SDK was last built with. Keep it in lockstep
+ * with copyToFrontend so quoting (frontend bundle) and execution (SDK bundle) agree.
+ */
+export function copyToSdk(): void {
+  const registry = loadRegistry();
+  if (!registry || registry.deployments.length === 0) {
+    console.warn('⚠️  No deployments to copy to SDK');
+    return;
+  }
+
+  const allDeployments: DeploymentFile[] = [];
+  for (const entry of registry.deployments) {
+    const deployment = readJson<DeploymentFile>(join(DEPLOYMENTS_DIR, entry.file));
+    if (deployment) allDeployments.push(deployment);
+  }
+
+  const bundle = {
+    activeDeploymentId: registry.activeDeploymentId,
+    deployments: allDeployments,
+  };
+
+  writeJson(SDK_DEPLOYMENTS, bundle);
+  console.log(`📋 Synced ${allDeployments.length} deployment(s) to SDK: ${SDK_DEPLOYMENTS}`);
 }
 
 /**

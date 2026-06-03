@@ -11,7 +11,7 @@ import { logError, logInfo, DatadogUserAction } from '@/utils/datadog'
 import { captureBridgeInitiated, captureBridgeCompleted } from '@/utils/posthog'
 import { WalletType } from '@/types/wallet'
 import { useWalletAdapter } from './useWalletAdapter'
-import { ADDRESS, getAztecscanUrl, getEtherscanUrl, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
+import { ADDRESS, getAztecscanUrl, getEtherscanUrl, IS_MAINNET, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -80,6 +80,25 @@ export function useL1TokenBalance() {
 }
 
 // -----------------------------------
+
+/**
+ * Read the active token's L1 TokenPortal fee rate (basis points).
+ * The rate rarely changes, so cache it long; the UI computes the per-amount
+ * fee locally from this rate.
+ */
+export function usePortalFeeBps() {
+  const bridge = useBridge()
+  const { bridgeConfig } = useBridgeStore()
+  const portalAddress = bridgeConfig.from.token?.l1PortalContract ?? bridgeConfig.to.token?.l1PortalContract
+
+  return useQuery({
+    queryKey: ['portalFeeBps', portalAddress],
+    queryFn: () => bridge.getPortalFeeBasisPoints(portalAddress!),
+    enabled: !!portalAddress,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  })
+}
 
 /**
  * Hook to get token balances for an address across multiple chains
@@ -191,15 +210,17 @@ export function useL1Faucet() {
   // Helper function to check if user has gas
   const hasGas = !!l1NativeBalance && Number(l1NativeBalance || 0) > mintNativeAmount
 
-  // Check balances - only if balance data is loaded
+  // Check balances - only if balance data is loaded.
+  // No faucet on mainnet — users supply their own ETH/USDC, so the faucet step and
+  // "Click to Get Testnet ETH" prompt must never appear.
   const balancesLoaded = !l1BalanceLoading
-  const needsGas = balancesLoaded && (!l1NativeBalance || Number(l1NativeBalance || 0) <= mintNativeAmount)
-  const needsTokens = balancesLoaded && Number(l1Balance || 0) <= mintTokenAmount
+  const needsGas = !IS_MAINNET && balancesLoaded && (!l1NativeBalance || Number(l1NativeBalance || 0) <= mintNativeAmount)
+  const needsTokens = !IS_MAINNET && balancesLoaded && Number(l1Balance || 0) <= mintTokenAmount
 
   // User is eligible for faucet if they need gas OR tokens
   // Check if user has gas but still needs tokens - they should be eligible for tokens only
-  const isEligibleForFaucet = balancesLoaded && (needsGas || needsTokens)
-  const needsTokensOnly = balancesLoaded && !needsGas && needsTokens
+  const isEligibleForFaucet = !IS_MAINNET && balancesLoaded && (needsGas || needsTokens)
+  const needsTokensOnly = !IS_MAINNET && balancesLoaded && !needsGas && needsTokens
 
   // Main faucet function - handles both gas and tokens
   const requestFaucet = async () => {

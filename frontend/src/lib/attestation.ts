@@ -17,6 +17,7 @@ import {
   CLEAN_HANDS_ACTION_ID,
   PASSPORT_SCORE_THRESHOLD,
   PASSPORT_MAX_AMOUNT,
+  BRIDGE_MAX_DEPOSIT_USD,
   HOLONYM_API_URL,
   PASSPORT_API_KEY,
   PASSPORT_SCORER_ID,
@@ -70,6 +71,16 @@ export function getPassportScoreThreshold(): number {
 
 export function getPassportMaxAmount(): bigint {
   return BigInt(PASSPORT_MAX_AMOUNT)
+}
+
+/**
+ * Alpha Mainnet cumulative-per-user deposit cap in USD.
+ * Returns 0 when unset/'0'/'' — callers treat 0 as "no limit".
+ */
+export function getBridgeMaxDepositUsd(): number {
+  const parsed = Number(BRIDGE_MAX_DEPOSIT_USD)
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0
+  return parsed
 }
 
 export function getAttesterAddress(): string {

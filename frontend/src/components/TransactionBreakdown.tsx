@@ -4,11 +4,21 @@ import StyledImage from './StyledImage'
 interface TransactionBreakdownProps {
   isOpen: boolean
   onToggle: () => void
+  // Portal fee deducted from the bridged token. `bridgeFee` is undefined while
+  // the fee rate is still loading.
+  bridgeFee?: string
+  bridgeFeeUsd?: string
+  receiveAmount?: string
+  tokenSymbol?: string
 }
 
 const TransactionBreakdown: React.FC<TransactionBreakdownProps> = ({
   isOpen,
   onToggle,
+  bridgeFee,
+  bridgeFeeUsd,
+  receiveAmount,
+  tokenSymbol,
 }) => {
   if (!isOpen) {
     return (
@@ -46,10 +56,6 @@ const TransactionBreakdown: React.FC<TransactionBreakdownProps> = ({
           <p className='text-latest-black-300 text-14 font-medium'>~2 mins</p>
         </div>
         <div className='mt-[14px] flex justify-between'>
-          <p className='text-sm font-medium text-latest-grey-700'>Net fee</p>
-          <p className='text-latest-black-300 text-14 font-medium'>$ 0.04</p>
-        </div>
-        <div className='mt-[14px] flex justify-between'>
           <div className='flex gap-1 items-center text-center'>
             <p className='text-sm font-medium text-latest-grey-700'>
               Bridge fee
@@ -61,22 +67,22 @@ const TransactionBreakdown: React.FC<TransactionBreakdownProps> = ({
             />
           </div>
           <p className='text-latest-grey-100 text-14 font-medium'>
-            $ 0.01 <span className='text-latest-black-300'>0.0000029 ETH</span>
+            {bridgeFee != null ? (
+              <>
+                {bridgeFeeUsd != null && <>$ {bridgeFeeUsd} </>}
+                <span className='text-latest-black-300'>
+                  {bridgeFee} {tokenSymbol}
+                </span>
+              </>
+            ) : (
+              <span className='text-latest-black-300'>—</span>
+            )}
           </p>
         </div>
         <div className='mt-[14px] flex justify-between'>
-          <div className='flex gap-1 items-center'>
-            <p className='text-sm font-medium text-latest-grey-700'>
-              Destination <br /> Gas fee
-            </p>
-            <StyledImage
-              src='/assets/svg/info.svg'
-              alt=''
-              className='h-4 w-4'
-            />
-          </div>
-          <p className='text-latest-grey-100 text-14 font-medium'>
-            $ 0.03 <span className='text-latest-black-300'>0.0000103 ETH</span>
+          <p className='text-sm font-medium text-latest-grey-700'>You receive</p>
+          <p className='text-latest-black-300 text-14 font-medium'>
+            {receiveAmount ?? '—'} {tokenSymbol}
           </p>
         </div>
       </div>

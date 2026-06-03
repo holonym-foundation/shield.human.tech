@@ -42,26 +42,44 @@
  *   AZTEC_NODE_URL=…            Override Aztec node.
  *   FORCE_REDEPLOY_SWAPS=true   Redeploy UniswapFuelSwap + SwapBridgeRouter.
  *   DEPLOY_TOKEN=USDC           Only (re)deploy this token.
+ *   FEE_JUICE_FUNDING=…         AZTEC (18-dec) to bridge as L2 FeeJuice for deploy gas (default 10e18).
+ *   L2_DEPLOYER_SECRET_KEY=0x…  L2 deployer account keys. Auto-generated + logged if unset;
+ *   L2_DEPLOYER_SIGNING_KEY=0x… save them to reuse the same funded admin account on re-runs
+ *   L2_DEPLOYER_SALT=0x…        (this account owns the L2 TokenMinterProxy).
+ *   <SYMBOL>_L1_ADDRESS=0x…     Override the pre-existing L1 token address (e.g. USDC_L1_ADDRESS).
+ *   STRICT_POOL_CHECK=true      Abort if the V4 pool preflight finds no liquid AZTEC fuel pool
+ *                               at the assumed key (default: warn + continue).
+ *
+ * Prerequisite: Aztec Alpha Mainnet has no SponsoredFPC, so the deployer bridges AZTEC →
+ * L2 FeeJuice to pay for L2 deploys. The L1 deployer EOA must therefore hold
+ * ≥ FEE_JUICE_FUNDING AZTEC (0xa27ec0…e62d2) in addition to ETH for L1 gas.
  *
  * Run: AZTEC_ENV=mainnet node --import tsx deploy-mainnet.ts
  */
 
 import { EthAddress } from '@aztec/foundation/eth-address'
-import { Fr } from '@aztec/aztec.js/fields'
-import { createLogger } from '@aztec/aztec.js/log'
+import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields'
+import { createLogger, type Logger } from '@aztec/aztec.js/log'
 import { createExtendedL1Client } from '@aztec/ethereum/client'
 import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
 import { createEthereumChain } from '@aztec/ethereum/chain'
 import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
 import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js'
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee'
+import { FeeJuicePaymentMethodWithClaim } from '@aztec/aztec.js/fee'
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
+import { L1FeeJuicePortalManager } from '@aztec/aztec.js/ethereum'
+import { NO_FROM } from '@aztec/aztec.js/account'
+import type { AccountManager } from '@aztec/aztec.js/wallet'
+import type { EmbeddedWallet } from '@aztec/wallets/embedded'
+import { FeeJuiceContract } from '@aztec/noir-contracts.js/FeeJuice'
+import { getCanonicalFeeJuice } from '@aztec/protocol-contracts/fee-juice'
 import { Schnorr } from '@aztec/foundation/crypto/schnorr'
 import { deriveSigningKey } from '@aztec/stdlib/keys'
 import { registerPrivateContract } from '@wonderland/aztec-fee-payment'
-import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC'
-import { getContract, type Hex } from 'viem'
+import { getContract, keccak256, encodeAbiParameters, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { resolve as resolvePath } from 'path'
 import 'dotenv/config'
 
 import { TokenBridgeContract } from './artifacts/TokenBridge.js'
@@ -75,8 +93,6 @@ import UniswapFuelSwapJson from '../l1-contracts/out/UniswapFuelSwap.sol/Uniswap
 import SwapBridgeRouterJson from '../l1-contracts/out/SwapBridgeRouter.sol/SwapBridgeRouter.json'
 
 import { setupWallet } from './utils/setup_wallet.js'
-import { deploySchnorrAccount } from './utils/deploy_account.js'
-import { getSponsoredFPCInstance } from './utils/sponsored_fpc.js'
 import { TOKEN_CONFIGS, TokenConfig } from './constants/tokens.js'
 import {
   createDeployment,
@@ -96,9 +112,26 @@ import {
 import configManager from './config/config.js'
 
 // ─── Mainnet constants ──────────────────────────────────────────────
-const POOL_MANAGER = '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543' as const
-const WETH = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14' as const
+const POOL_MANAGER = '0x000000000004444c5dc75cB358380D2e3dE08A90' as const
+const WETH = '0xc02aaa39b223fe8d0a0e8e4f27ead9083c756cc2' as const
 const PERMIT2 = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
+
+// Pre-existing L1 token addresses on mainnet, overridable per symbol via <SYMBOL>_L1_ADDRESS.
+// Deliberately NOT in the shared TOKEN_CONFIGS — the testnet/devnet scripts treat a set
+// l1TokenAddress as "use this real token", so a mainnet address there would break Sepolia.
+const MAINNET_L1_TOKENS: Record<string, Hex> = {
+  USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+}
+
+const ERC20_BALANCE_ABI = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
 
 // ─── Env ────────────────────────────────────────────────────────────
 const L1_PRIVATE_KEY = process.env.L1_PRIVATE_KEY as Hex | undefined
@@ -112,6 +145,13 @@ const CLEAN_HANDS_CIRCUIT_ID = BigInt(
 const CLEAN_HANDS_ACTION_ID = BigInt(process.env.CLEAN_HANDS_ACTION_ID || '123456789')
 const FORCE_REDEPLOY_SWAPS = process.env.FORCE_REDEPLOY_SWAPS === 'true'
 const DEPLOY_TOKEN = process.env.DEPLOY_TOKEN || ''
+
+// Fee Juice funding — Aztec Alpha Mainnet has no SponsoredFPC, so the deployer bridges
+// AZTEC → L2 FeeJuice to pay for L2 contract deploys. Default 10 AZTEC (18 decimals).
+const FEE_JUICE_FUNDING = BigInt(process.env.FEE_JUICE_FUNDING || (10n ** 19n).toString())
+const L2_DEPLOYER_SECRET_KEY = process.env.L2_DEPLOYER_SECRET_KEY
+const L2_DEPLOYER_SIGNING_KEY = process.env.L2_DEPLOYER_SIGNING_KEY
+const L2_DEPLOYER_SALT = process.env.L2_DEPLOYER_SALT
 
 // ─── Helpers ────────────────────────────────────────────────────────
 function asHex(pk: string): Hex {
@@ -195,6 +235,306 @@ async function deployTokenPortal(
   return address
 }
 
+function resolveL1TokenAddress(tc: TokenConfig): Hex | undefined {
+  const sym = tc.symbol.toUpperCase()
+  return (process.env[`${sym}_L1_ADDRESS`] || MAINNET_L1_TOKENS[sym] || tc.l1TokenAddress) as
+    | Hex
+    | undefined
+}
+
+// ─── FeeJuice claim persistence ─────────────────────────────────────
+// The L1→L2 FeeJuice claim secret is generated in-memory and is the ONLY way to consume the
+// bridged AZTEC. We persist it the instant it's created so an interrupted run never strands
+// funds. The claim's recipient is fixed in the L1 message (this account), so the secret can
+// only ever credit FeeJuice to that account — it is NOT a theft vector.
+const CLAIMS_FILE = resolvePath(process.cwd(), '.fee-juice-claims.json')
+
+interface SavedFeeJuiceClaim {
+  recipient: string
+  claimAmount: string
+  claimSecret: string
+  claimSecretHash?: string
+  messageLeafIndex: string
+  l1Token?: string
+  bridgedAt?: string
+  deployed?: boolean
+}
+
+function loadClaimRecord(account: string): SavedFeeJuiceClaim | undefined {
+  if (!existsSync(CLAIMS_FILE)) return undefined
+  try {
+    return (JSON.parse(readFileSync(CLAIMS_FILE, 'utf8')) as Record<string, SavedFeeJuiceClaim>)[
+      account.toLowerCase()
+    ]
+  } catch {
+    return undefined
+  }
+}
+
+function writeClaimRecord(account: string, rec: SavedFeeJuiceClaim): void {
+  const all: Record<string, SavedFeeJuiceClaim> = existsSync(CLAIMS_FILE)
+    ? JSON.parse(readFileSync(CLAIMS_FILE, 'utf8'))
+    : {}
+  all[account.toLowerCase()] = rec
+  writeFileSync(CLAIMS_FILE, JSON.stringify(all, null, 2), { mode: 0o600 })
+}
+
+function markClaimDeployed(account: string): void {
+  const rec = loadClaimRecord(account) ?? { recipient: account, claimAmount: '0', claimSecret: '', messageLeafIndex: '0' }
+  writeClaimRecord(account, { ...rec, deployed: true })
+}
+
+// ─── L2 deployer account: bridge FeeJuice + deploy (no SponsoredFPC on mainnet) ──
+async function fundAndDeployL2Account(
+  wallet: EmbeddedWallet,
+  node: ReturnType<typeof createAztecNodeClient>,
+  l1Client: ExtendedViemWalletClient,
+  feeJuiceL1: Hex,
+  logger: Logger,
+): Promise<AccountManager> {
+  const secretKey = L2_DEPLOYER_SECRET_KEY ? Fr.fromString(asHex(L2_DEPLOYER_SECRET_KEY)) : Fr.random()
+  const salt = L2_DEPLOYER_SALT ? Fr.fromString(asHex(L2_DEPLOYER_SALT)) : Fr.random()
+  const signingKey = L2_DEPLOYER_SIGNING_KEY
+    ? GrumpkinScalar.fromString(asHex(L2_DEPLOYER_SIGNING_KEY))
+    : GrumpkinScalar.random()
+
+  if (!L2_DEPLOYER_SECRET_KEY || !L2_DEPLOYER_SIGNING_KEY || !L2_DEPLOYER_SALT) {
+    logger.warn('L2 deployer keys not fully set in env — generated fresh keys.')
+    logger.warn('SAVE THESE: this account owns the L2 TokenMinterProxy (controls minting). Re-runs reuse it:')
+    logger.warn(`  L2_DEPLOYER_SECRET_KEY=${secretKey.toString()}`)
+    logger.warn(`  L2_DEPLOYER_SIGNING_KEY=${signingKey.toString()}`)
+    logger.warn(`  L2_DEPLOYER_SALT=${salt.toString()}`)
+  }
+
+  const account = await wallet.createSchnorrAccount(secretKey, salt, signingKey)
+  const address = account.address
+  logger.info(`L2 deployer account: ${address}`)
+
+  const acct = address.toString()
+  const rec = loadClaimRecord(acct)
+  const timeouts = getTimeouts()
+  const deployMethod = await account.getDeployMethod()
+
+  // Fully deployed on a prior run — nothing to fund or deploy.
+  if (rec?.deployed) {
+    logger.info('L2 deployer account already deployed (per .fee-juice-claims.json) — skipping funding.')
+    return account
+  }
+
+  // Already funded (FeeJuice claimed) but maybe not deployed? Pay the deploy from its own FeeJuice.
+  let l2FjBalance = 0n
+  try {
+    const { address: feeJuiceL2 } = await getCanonicalFeeJuice()
+    const feeJuice = await FeeJuiceContract.at(feeJuiceL2, wallet)
+    l2FjBalance = ((await feeJuice.methods.balance_of_public(address).simulate({ from: address }))
+      .result ?? 0n) as bigint
+  } catch {
+    l2FjBalance = 0n
+  }
+  if (l2FjBalance >= FEE_JUICE_FUNDING) {
+    logger.info(`Account already holds ${l2FjBalance} FeeJuice — skipping L1 bridge.`)
+    try {
+      await deployMethod.send({ from: NO_FROM, wait: { timeout: timeouts.deployTimeout } })
+    } catch (e) {
+      if (!/Existing nullifier|already deployed/.test(String(e))) throw e
+      logger.info('Account already deployed — continuing.')
+    }
+    markClaimDeployed(acct)
+    return account
+  }
+
+  // Build the claim: reuse a persisted one (interrupted prior run) or bridge fresh.
+  let claim: { claimAmount: bigint; claimSecret: Fr; messageLeafIndex: bigint }
+  if (rec?.claimSecret && rec.claimSecret !== '') {
+    logger.info('Reusing the persisted FeeJuice claim from a previous run — NOT bridging again.')
+    claim = {
+      claimAmount: BigInt(rec.claimAmount),
+      claimSecret: Fr.fromString(rec.claimSecret),
+      messageLeafIndex: BigInt(rec.messageLeafIndex),
+    }
+  } else {
+    // Pre-flight: deployer must hold enough AZTEC on L1 (no faucet on mainnet).
+    const aztec = getContract({ address: feeJuiceL1, abi: ERC20_BALANCE_ABI, client: l1Client as any }) as any
+    const l1AztecBal = (await aztec.read.balanceOf([l1Client.account.address])) as bigint
+    if (l1AztecBal < FEE_JUICE_FUNDING) {
+      throw new Error(
+        `Deployer holds ${l1AztecBal} AZTEC on L1 but needs ${FEE_JUICE_FUNDING} to fund the L2 deployer account. ` +
+          `Acquire AZTEC (${feeJuiceL1}) or lower FEE_JUICE_FUNDING.`,
+      )
+    }
+
+    logger.info(`Bridging ${FEE_JUICE_FUNDING} AZTEC → L2 FeeJuice for ${address}…`)
+    const portalMgr = await L1FeeJuicePortalManager.new(node, l1Client, logger)
+    // mint=false: bridge real AZTEC held by the deployer, never a testnet faucet mint.
+    const fresh = await portalMgr.bridgeTokensPublic(address, FEE_JUICE_FUNDING, false)
+    // Persist IMMEDIATELY — before any step that can fail. Without this, an interrupt strands
+    // the bridged AZTEC (the in-memory secret is the only way to claim it).
+    writeClaimRecord(acct, {
+      recipient: acct,
+      claimAmount: fresh.claimAmount.toString(),
+      claimSecret: fresh.claimSecret.toString(),
+      claimSecretHash: (fresh as any).claimSecretHash?.toString?.(),
+      messageLeafIndex: fresh.messageLeafIndex.toString(),
+      l1Token: feeJuiceL1,
+      bridgedAt: new Date().toISOString(),
+    })
+    logger.warn(`FeeJuice claim saved to ${CLAIMS_FILE} (gitignored). RECOVERY backup (recipient is fixed = safe to record):`)
+    logger.warn(`  recipient=${acct} amount=${fresh.claimAmount} leafIndex=${fresh.messageLeafIndex}`)
+    logger.warn(`  claimSecret=${fresh.claimSecret.toString()}`)
+    claim = { claimAmount: fresh.claimAmount, claimSecret: fresh.claimSecret, messageLeafIndex: fresh.messageLeafIndex }
+    logger.info('Bridged. Waiting for the L1→L2 message to become consumable on L2…')
+  }
+
+  // Deploy the account, claiming the bridged FJ in the same tx. The L1→L2 message takes a few
+  // L2 blocks to land — retry until it does.
+  const claimPayment = new FeeJuicePaymentMethodWithClaim(address, claim)
+  const maxAttempts = 40
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await deployMethod.send({
+        from: NO_FROM,
+        fee: { paymentMethod: claimPayment },
+        wait: { timeout: timeouts.deployTimeout },
+      })
+      logger.info('L2 deployer account deployed (paid via claimed FeeJuice).')
+      markClaimDeployed(acct)
+      return account
+    } catch (e) {
+      const msg = String(e)
+      if (/Existing nullifier|already deployed/.test(msg)) {
+        logger.info('Account already deployed — continuing.')
+        markClaimDeployed(acct)
+        return account
+      }
+      // PXE can't sync against a pruning node — retrying won't help. Fail fast; the bridged
+      // FeeJuice is persisted and will be reused on re-run, so no funds are lost.
+      if (/Unknown state|First available state/.test(msg)) {
+        throw new Error(
+          `PXE failed to sync against the Aztec node (${msg.split('\n')[0]}). The bridged FeeJuice ` +
+            `is saved in ${CLAIMS_FILE} and will be reused on re-run — no funds lost. Point ` +
+            `AZTEC_NODE_URL at a non-pruning / archive Aztec mainnet node and re-run.`,
+        )
+      }
+      if (attempt === maxAttempts) {
+        throw new Error(`Account deploy via FeeJuice claim failed after ${maxAttempts} attempts: ${msg}`)
+      }
+      logger.info(`  Attempt ${attempt}/${maxAttempts}: L1→L2 message not yet consumable (${msg.split('\n')[0]}). Retrying in 30s…`)
+      await new Promise((r) => setTimeout(r, 30_000))
+    }
+  }
+  return account
+}
+
+// ─── Uniswap V4 pool preflight (read-only) ──────────────────────────
+// Pool keys are passed per-call to UniswapFuelSwap/SwapBridgeRouter, so a mismatch is fixed in
+// packages/sdk/src/config.ts + frontend config — NOT by redeploying. This just surfaces the
+// real pool keys (and liquidity) for each leg of the fuel route before launch.
+const STATE_VIEW = '0x7ffe42c4a5deea5b0fec41c94c136cf115597227' as const
+const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const
+// MUST mirror packages/sdk/src/config.ts (FEE_POOL_FEE / tick spacing / FEE_POOL_USES_NATIVE_ETH).
+const ASSUMED_FEE = 10000
+const ASSUMED_TICK_SPACING = 200
+const FEE_POOL_USES_NATIVE_ETH = true
+const V4_FEE_TIERS: { fee: number; tickSpacing: number }[] = [
+  { fee: 100, tickSpacing: 1 },
+  { fee: 500, tickSpacing: 10 },
+  { fee: 3000, tickSpacing: 60 },
+  { fee: 10000, tickSpacing: 200 },
+]
+const STATE_VIEW_ABI = [
+  {
+    type: 'function',
+    name: 'getSlot0',
+    stateMutability: 'view',
+    inputs: [{ name: 'poolId', type: 'bytes32' }],
+    outputs: [
+      { name: 'sqrtPriceX96', type: 'uint160' },
+      { name: 'tick', type: 'int24' },
+      { name: 'protocolFee', type: 'uint24' },
+      { name: 'lpFee', type: 'uint24' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'getLiquidity',
+    stateMutability: 'view',
+    inputs: [{ name: 'poolId', type: 'bytes32' }],
+    outputs: [{ name: 'liquidity', type: 'uint128' }],
+  },
+] as const
+
+function v4PoolId(a: Hex, b: Hex, fee: number, tickSpacing: number): Hex {
+  const [c0, c1] = BigInt(a) < BigInt(b) ? [a, b] : [b, a]
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: 'address' }, { type: 'address' }, { type: 'uint24' }, { type: 'int24' }, { type: 'address' }],
+      [c0.toLowerCase() as Hex, c1.toLowerCase() as Hex, fee, tickSpacing, ZERO_ADDR],
+    ),
+  )
+}
+
+async function scanPair(stateView: any, label: string, a: Hex, b: Hex, logger: Logger): Promise<boolean> {
+  const hits: string[] = []
+  let foundAssumed = false
+  for (const { fee, tickSpacing } of V4_FEE_TIERS) {
+    const id = v4PoolId(a, b, fee, tickSpacing)
+    try {
+      const [sqrtPriceX96] = (await stateView.read.getSlot0([id])) as [bigint, number, number, number]
+      if (sqrtPriceX96 === 0n) continue
+      const liq = (await stateView.read.getLiquidity([id])) as bigint
+      const assumed = fee === ASSUMED_FEE && tickSpacing === ASSUMED_TICK_SPACING
+      hits.push(`fee=${fee} tickSpacing=${tickSpacing} liquidity=${liq}${assumed ? '  ← assumed key' : ''}`)
+      if (assumed && liq > 0n) foundAssumed = true
+    } catch {
+      // pool not initialized at this key — skip
+    }
+  }
+  if (hits.length === 0) {
+    logger.warn(`  ${label}: ❌ no initialized pool at standard fee tiers`)
+  } else {
+    logger.info(`  ${label}:`)
+    for (const h of hits) logger.info(`    ${h}`)
+  }
+  return foundAssumed
+}
+
+async function preflightPools(
+  l1Client: ExtendedViemWalletClient,
+  feeJuice: Hex,
+  tokens: TokenConfig[],
+  logger: Logger,
+): Promise<void> {
+  logger.info('\n── Uniswap V4 pool preflight (read-only) ──')
+  const stateView = getContract({ address: STATE_VIEW, abi: STATE_VIEW_ABI, client: l1Client as any }) as any
+
+  const base = FEE_POOL_USES_NATIVE_ETH ? ZERO_ADDR : WETH
+  const baseLabel = FEE_POOL_USES_NATIVE_ETH ? 'nativeETH' : 'WETH'
+  const altBase = FEE_POOL_USES_NATIVE_ETH ? WETH : ZERO_ADDR
+  const altLabel = FEE_POOL_USES_NATIVE_ETH ? 'WETH' : 'nativeETH'
+
+  // Terminal fuel leg (…→ AZTEC). Scan both bases so liquidity on the non-assumed side is visible.
+  const terminalOk = await scanPair(stateView, `${baseLabel}/AZTEC (terminal fuel leg)`, base, feeJuice, logger)
+  await scanPair(stateView, `${altLabel}/AZTEC (alt base)`, altBase, feeJuice, logger)
+
+  for (const tc of tokens) {
+    const token = resolveL1TokenAddress(tc)
+    if (!token) continue
+    await scanPair(stateView, `${tc.symbol}/WETH (multi-hop leg)`, token, WETH, logger)
+    await scanPair(stateView, `${tc.symbol}/AZTEC (direct route)`, token, feeJuice, logger)
+  }
+
+  if (!terminalOk) {
+    const msg =
+      `No liquid AZTEC fuel pool at the assumed key (fee=${ASSUMED_FEE}, tickSpacing=${ASSUMED_TICK_SPACING}, ${baseLabel}). ` +
+      'Fuel swaps will fail until a pool is seeded or the SDK/frontend pool-key config is updated to match a pool listed above.'
+    if (process.env.STRICT_POOL_CHECK === 'true') throw new Error(msg)
+    logger.warn(`  ⚠️  ${msg}`)
+    logger.warn('  (Set STRICT_POOL_CHECK=true to abort on this. Plain bridging is unaffected.)')
+  } else {
+    logger.info(`  ✅ Liquid AZTEC fuel pool found at the assumed key (fee=${ASSUMED_FEE}, ${baseLabel}).`)
+  }
+}
+
 // ─── Main ───────────────────────────────────────────────────────────
 async function main() {
   const logger = createLogger('aztec:deploy-mainnet')
@@ -225,12 +565,14 @@ async function main() {
   if (DEPLOY_TOKEN && tokensToProcess.length === 0) {
     throw new Error(`DEPLOY_TOKEN=${DEPLOY_TOKEN} not found in TOKEN_CONFIGS`)
   }
-  const missing = tokensToProcess.filter((t) => !t.l1TokenAddress)
+  const missing = tokensToProcess.filter((t) => !resolveL1TokenAddress(t))
   if (missing.length > 0) {
     throw new Error(
-      `Mainnet deploy requires l1TokenAddress on every TOKEN_CONFIGS entry. Missing: ${missing
+      `Mainnet deploy requires an L1 token address for every token. Missing: ${missing
         .map((t) => t.symbol)
-        .join(', ')}`,
+        .join(', ')}. Add it to MAINNET_L1_TOKENS or set ${missing
+        .map((t) => `${t.symbol.toUpperCase()}_L1_ADDRESS`)
+        .join('/')}.`,
     )
   }
 
@@ -276,16 +618,17 @@ async function main() {
   logger.info(`Deployer L1 balance: ${(Number(bal) / 1e18).toFixed(4)} ETH`)
   if (bal === 0n) throw new Error('Deployer has 0 ETH on L1')
 
-  // ── L2 wallet + sponsored FPC ──
-  const wallet = await setupWallet()
-  const sponsoredFPC = await getSponsoredFPCInstance()
-  await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact)
-  const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address)
+  // ── Uniswap V4 pool preflight (read-only; before spending AZTEC on FeeJuice funding) ──
+  await preflightPools(l1Client, feeJuiceAddr, tokensToProcess, logger)
 
-  const accountManager = await deploySchnorrAccount(wallet)
+  // ── L2 wallet + FeeJuice-funded deployer account (no SponsoredFPC on mainnet) ──
+  const wallet = await setupWallet()
+  const accountManager = await fundAndDeployL2Account(wallet, node, l1Client, feeJuiceAddr, logger)
   const ownerAztecAddress = accountManager.address
   await wallet.registerSender(ownerAztecAddress, 'owner')
   logger.info(`Deployer (L2):       ${ownerAztecAddress}`)
+  // Per-token L2 txs below omit fee.paymentMethod ⇒ the deployer account pays from the
+  // FeeJuice it claimed during account deploy (no SponsoredFPC on mainnet).
 
   // ── Deployment record ──
   const rollupVersion = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
@@ -333,7 +676,7 @@ async function main() {
       outboxAddress: l1Addrs.outboxAddress.toString(),
     },
     nodeInfo: serializedNodeInfo,
-    sponsoredFeeAddress: sponsoredFPC.address.toString(),
+    sponsoredFeeAddress: '',
   })
 
   // ── Shared L1 infra (idempotent across re-runs) ──
@@ -389,7 +732,7 @@ async function main() {
       continue
     }
 
-    const l1TokenContract = EthAddress.fromString(tc.l1TokenAddress!)
+    const l1TokenContract = EthAddress.fromString(resolveL1TokenAddress(tc)!)
     logger.info(`  L1 token (existing): ${l1TokenContract}`)
 
     // L1 TokenPortal — deployer = initialOwner (transferred to OWNER at the end)
@@ -410,7 +753,6 @@ async function main() {
     const { contract: l2Proxy } = await TokenMinterProxyContract.deploy(wallet).send({
       from: ownerAztecAddress,
       contractAddressSalt: salts.proxySalt,
-      fee: { paymentMethod: sponsoredPaymentMethod },
       wait: { timeout: getTimeouts().deployTimeout },
     })
     logger.info(`  TokenMinterProxy: ${l2Proxy.address}`)
@@ -426,7 +768,6 @@ async function main() {
     ).send({
       from: ownerAztecAddress,
       contractAddressSalt: salts.tokenSalt,
-      fee: { paymentMethod: sponsoredPaymentMethod },
       wait: { timeout: getTimeouts().deployTimeout },
     })
     logger.info(`  L2 Token: ${l2Token.address}`)
@@ -446,7 +787,6 @@ async function main() {
     ).send({
       from: ownerAztecAddress,
       contractAddressSalt: salts.bridgeSalt,
-      fee: { paymentMethod: sponsoredPaymentMethod },
       wait: { timeout: getTimeouts().deployTimeout },
     })
     logger.info(`  TokenBridge: ${l2Bridge.address}`)
@@ -455,13 +795,11 @@ async function main() {
     logger.info('  Wiring proxy.set_token…')
     await l2Proxy.methods.set_token(l2Token.address).send({
       from: ownerAztecAddress,
-      fee: { paymentMethod: sponsoredPaymentMethod },
       wait: { timeout: getTimeouts().txTimeout },
     })
     logger.info('  Wiring proxy.set_minter(bridge, true)…')
     await l2Proxy.methods.set_minter(l2Bridge.address, true).send({
       from: ownerAztecAddress,
-      fee: { paymentMethod: sponsoredPaymentMethod },
       wait: { timeout: getTimeouts().txTimeout },
     })
 
@@ -498,8 +836,9 @@ async function main() {
       l1PortalContract: portal.toString(),
       l2TokenContract: l2Token.address.toString(),
       l2BridgeContract: l2Bridge.address.toString(),
+      l2ProxyContract: l2Proxy.address.toString(),
       feeAssetHandler: '',
-      sponsoredFee: sponsoredFPC.address.toString(),
+      sponsoredFee: '',
     }
     saveTokenToDeployment(record)
     deployed.push(record)

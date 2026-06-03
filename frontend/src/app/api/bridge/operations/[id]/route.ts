@@ -325,19 +325,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (l2ToL1MessageIndex) updateData.l2ToL1MessageIndex = l2ToL1MessageIndex
     if (siblingPath) updateData.siblingPath = siblingPath
     if (recipientL1Address) updateData.recipientL1Address = recipientL1Address
-    if (currentStep != null) {
-      // Forward-only guard: currentStep must not regress
-      if (operation.currentStep != null && currentStep <= operation.currentStep) {
-        // Allow same step (idempotent retry) but not backward
-        if (currentStep < operation.currentStep) {
-          return NextResponse.json(
-            { error: `Cannot regress currentStep from ${operation.currentStep} to ${currentStep}` },
-            { status: 400 },
-          )
-        }
-      } else {
-        updateData.currentStep = currentStep
-      }
+    // currentStep is a non-critical UI progress marker. The resume flow legitimately
+    // re-walks earlier steps, so a lower-or-equal value is an idempotent no-op — advance
+    // the stored value forward-only, but never regress and never 400.
+    if (currentStep != null && (operation.currentStep == null || currentStep > operation.currentStep)) {
+      updateData.currentStep = currentStep
     }
     // L1→L2 receipt + fuel fields
     if (claimAmount) updateData.claimAmount = claimAmount
@@ -349,6 +341,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (epoch != null) updateData.epoch = epoch
 
     if (Object.keys(updateData).length === 0) {
+      // A currentStep-only no-op (resume re-walk / idempotent retry) is valid, not an error.
+      if (currentStep != null) {
+        return NextResponse.json({ ok: true })
+      }
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
     }
 

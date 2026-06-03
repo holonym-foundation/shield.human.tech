@@ -91,6 +91,32 @@ const calculateFeeAbi = [
   },
 ] as const
 
+/** ABI for TokenPortal.feeBasisPoints() → uint256 (the fee rate in bps). */
+const feeBasisPointsAbi = [
+  {
+    name: 'feeBasisPoints',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
+/**
+ * Read the TokenPortal's fee rate (basis points). The portal deducts
+ * `amount * feeBasisPoints / 10000` from every deposit/withdrawal. Reading the
+ * rate once lets the UI compute the fee locally for any amount without an RPC
+ * per keystroke.
+ */
+export async function getPortalFeeBasisPoints(config: ResolvedConfig, portalAddress: string): Promise<bigint> {
+  const publicClient = createL1PublicClient(config)
+  return (await publicClient.readContract({
+    address: portalAddress as `0x${string}`,
+    abi: feeBasisPointsAbi,
+    functionName: 'feeBasisPoints',
+  } as any)) as bigint
+}
+
 /**
  * Query TokenPortal.calculateFee to derive the post-fee claim amount from the
  * pre-fee input amount. The custom TokenPortal deducts a fee before producing

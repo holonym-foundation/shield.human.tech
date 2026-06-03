@@ -14,8 +14,8 @@ const TOKEN_TO_COINGECKO_ID: Record<string, string> = {
   USDT: 'tether',
   DAI: 'dai',
   WBTC: 'wrapped-bitcoin',
-  AZTEC: 'aztec-protocol',
-  FEE_JUICE: 'aztec-protocol',
+  AZTEC: 'aztec',
+  FEE_JUICE: 'aztec',
 }
 
 const COINGECKO_API_URL = 'https://api.coingecko.com/api/v3/simple/price'

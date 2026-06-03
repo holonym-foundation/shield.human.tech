@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 import { checkCleanHands, getDefaultActionId } from '@/lib/attestation'
-import { enforceAddressBinding } from '@/lib/address-binding'
+import { enforceAddressBinding, evaluateDepositLimit } from '@/lib/address-binding'
 import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctions'
 
 /**
@@ -51,9 +51,15 @@ export async function GET(request: NextRequest) {
     const actionId = getDefaultActionId()
     const result = await checkCleanHands(l1Address, actionId)
 
+    // Surface the Alpha deposit cap so the UI can block deposits up-front.
+    const limit = await evaluateDepositLimit({ userId: authResult.user.id })
+
     return NextResponse.json({
       eligible: result.isUnique,
       reason: result.isUnique ? undefined : 'Address does not have a valid clean hands attestation',
+      ...(limit.enabled
+        ? { depositLimitReached: limit.remainingUsd <= 0, remainingUsd: limit.remainingUsd }
+        : {}),
     })
   } catch (error) {
     console.error('[attestation/poch/check]', error)

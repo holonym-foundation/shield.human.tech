@@ -135,8 +135,9 @@ export interface RouteResult {
 export function buildSwapCandidates(
   inputToken: `0x${string}`,
   feeJuiceAddress: `0x${string}`,
+  wethAddress: `0x${string}` = WETH_ADDRESS,
 ): CandidateRoute[] {
-  const weth = WETH_ADDRESS
+  const weth = wethAddress
   const feePoolBase = FEE_POOL_USES_NATIVE_ETH ? NATIVE_ETH : weth
   const candidates: CandidateRoute[] = []
 
@@ -155,14 +156,24 @@ export function buildSwapCandidates(
     zeroForOnes: [isZeroForOne(inputToken, feeJuiceAddress)],
   })
 
-  candidates.push({
-    label: 'via-weth',
-    poolKeys: [
-      buildPoolKey(inputToken, weth, INTERMEDIATE_POOL_FEE, INTERMEDIATE_POOL_TICK_SPACING),
-      buildPoolKey(feePoolBase, feeJuiceAddress, FEE_POOL_FEE, FEE_POOL_TICK_SPACING),
-    ],
-    zeroForOnes: [isZeroForOne(inputToken, weth), isZeroForOne(feePoolBase, feeJuiceAddress)],
-  })
+  // Via ETH (inputToken → ETH → FeeJuice) — multi-hop.
+  // Mainnet V4 pairs the input token with NATIVE ETH (address(0)), not wrapped WETH, so the
+  // intermediate hop must use native ETH. Quote the common fee tiers; getBestRoute discards
+  // candidates whose pool doesn't exist and keeps the highest-output survivor.
+  const intermediateTiers = [
+    { fee: 500, tickSpacing: 10 },
+    { fee: INTERMEDIATE_POOL_FEE, tickSpacing: INTERMEDIATE_POOL_TICK_SPACING },
+  ]
+  for (const tier of intermediateTiers) {
+    candidates.push({
+      label: `via-eth-${tier.fee}`,
+      poolKeys: [
+        buildPoolKey(inputToken, NATIVE_ETH, tier.fee, tier.tickSpacing),
+        buildPoolKey(feePoolBase, feeJuiceAddress, FEE_POOL_FEE, FEE_POOL_TICK_SPACING),
+      ],
+      zeroForOnes: [isZeroForOne(inputToken, NATIVE_ETH), isZeroForOne(feePoolBase, feeJuiceAddress)],
+    })
+  }
 
   return candidates
 }
@@ -199,6 +210,7 @@ async function quoteExactInputSingleCall(
   poolKey: PoolKeyParam,
   zeroForOne: boolean,
   exactAmount: bigint,
+  quoter: `0x${string}` = V4_QUOTER,
 ): Promise<bigint> {
   const callData = encodeFunctionData({
     abi: V4QuoterAbi,
@@ -206,7 +218,7 @@ async function quoteExactInputSingleCall(
     args: [{ poolKey, zeroForOne, exactAmount, hookData: '0x' }] as const,
   })
 
-  const { data } = await client.call({ to: V4_QUOTER as `0x${string}`, data: callData })
+  const { data } = await client.call({ to: quoter, data: callData })
   if (!data) throw new Error('V4 Quoter returned empty data')
 
   const decoded = decodeFunctionResult({
@@ -224,6 +236,7 @@ export async function getV4Quote(params: {
   inputAmount: bigint
   l1RpcUrl: string
   chain?: Chain
+  quoter?: `0x${string}`
 }): Promise<bigint> {
   const client = getQuoteClient(params.l1RpcUrl, params.chain)
   let currentAmount = params.inputAmount
@@ -233,6 +246,7 @@ export async function getV4Quote(params: {
       params.poolKeys[i],
       params.zeroForOnes[i],
       currentAmount,
+      params.quoter ?? V4_QUOTER,
     )
   }
   return currentAmount
@@ -247,8 +261,9 @@ export async function getBestRoute(params: {
   inputAmount: bigint
   l1RpcUrl: string
   chain?: Chain
+  quoter?: `0x${string}`
 }): Promise<RouteResult> {
-  const { candidates, inputAmount, l1RpcUrl, chain } = params
+  const { candidates, inputAmount, l1RpcUrl, chain, quoter } = params
 
   const results = await Promise.allSettled(
     candidates.map(async (route) => {
@@ -258,6 +273,7 @@ export async function getBestRoute(params: {
         inputAmount,
         l1RpcUrl,
         chain,
+        quoter,
       })
       return { route, expectedOutput: output }
     }),

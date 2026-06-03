@@ -256,6 +256,53 @@ contract UniswapFuelSwapTest is Test {
         assertEq(IERC20(AZTEC).balanceOf(user), output, "AZTEC balance mismatch");
     }
 
+    function test_multiHopUsdcToNativeEthToAztec() public {
+        // Mainnet liquidity shape: the first hop sells USDC into NATIVE ETH (not WETH),
+        // and that ETH nets against the ETH/AZTEC hop inside flash accounting — no WETH
+        // is ever taken/unwrapped (Case D).
+        MockERC20 usdc = new MockERC20("Mock USDC", "USDC");
+        address usdcAddr = address(usdc);
+
+        // Build and initialize a USDC/native-ETH pool (currency0 = address(0))
+        (PoolKey memory usdcEthKey, bool usdcEthDir) = _buildPoolKey(usdcAddr, address(0));
+        try IPoolManager(POOL_MANAGER).initialize(usdcEthKey, INIT_SQRT_PRICE) {} catch {}
+
+        // Seed USDC/ETH pool
+        uint256 seed = 100 ether;
+        usdc.mint(address(seeder), seed);
+        vm.deal(address(seeder), seed);
+        seeder.seedLiquidity(usdcEthKey, -600, 600, 10e18);
+
+        // Swap: USDC → ETH → AZTEC
+        uint256 inputAmount = 0.01 ether;
+        usdc.mint(user, inputAmount);
+
+        PoolKey[] memory path = new PoolKey[](2);
+        path[0] = usdcEthKey;
+        path[1] = ethFeeKey;
+        bool[] memory dirs = new bool[](2);
+        dirs[0] = usdcEthDir;
+        dirs[1] = ethFeeZeroForOne;
+
+        // Delta check: the swapper's CREATE address may already hold stray ETH on the live
+        // fork, so assert the swap leaves its ETH balance unchanged (the netted intermediate
+        // ETH must not strand), rather than an absolute zero.
+        uint256 swapperEthBefore = address(swapper).balance;
+
+        vm.startPrank(user);
+        IERC20(usdcAddr).approve(address(swapper), inputAmount);
+        uint256 output = swapper.swap(usdcAddr, inputAmount, 0, path, dirs);
+        vm.stopPrank();
+
+        assertGt(output, 0, "Should receive some AZTEC");
+        assertEq(IERC20(AZTEC).balanceOf(user), output, "AZTEC balance mismatch");
+        assertEq(IERC20(usdcAddr).balanceOf(user), 0, "USDC not fully consumed");
+        // The netted intermediate ETH must not strand anything in the swapper.
+        assertEq(IERC20(usdcAddr).balanceOf(address(swapper)), 0, "No leftover USDC");
+        assertEq(IERC20(AZTEC).balanceOf(address(swapper)), 0, "No leftover AZTEC");
+        assertEq(address(swapper).balance, swapperEthBefore, "Swap must not change swapper ETH");
+    }
+
     // ═════════════════════════════════════════════════════════════════
     // SLIPPAGE PROTECTION
     // ═════════════════════════════════════════════════════════════════

@@ -25,7 +25,8 @@ interface IWETH {
  *           - Single-hop ERC-20:  WETH → AZTEC  (WETH/AZTEC pool)
  *           - Single-hop native:  WETH → ETH → AZTEC  (native ETH/AZTEC pool, auto-unwrap)
  *           - Multi-hop ERC-20:   USDC → WETH → AZTEC
- *           - Multi-hop native:   USDC → WETH → ETH → AZTEC  (last pool uses native ETH)
+ *           - Multi-hop WETH→native:   USDC → WETH → ETH → AZTEC  (last pool native, take+unwrap WETH)
+ *           - Multi-hop native:   USDC → ETH → AZTEC  (intermediate is native ETH; nets in flash accounting)
  *
  * @dev    Implements IUnlockCallback for V4's flash-accounting pattern.
  *         Only the PoolManager may call unlockCallback.
@@ -171,7 +172,7 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
         }
 
         // ── Settlement ───────────────────────────────────────────────
-        _settle(inputToken, inputAmount, lastPoolNative, ethBridgeAmount, path);
+        _settle(inputToken, inputAmount, lastPoolNative, ethBridgeAmount, path, zeroForOnes);
 
         // Take output FeeJuice (always ERC-20)
         poolManager.take(Currency.wrap(feeJuice), address(this), currentAmount);
@@ -190,16 +191,21 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
      *   Case B — Single-hop native (WETH → ETH/AZTEC pool):
      *     Unwrap WETH to ETH, settle with msg.value.
      *
-     *   Case C — Multi-hop, last pool native (e.g. USDC → WETH, then ETH/AZTEC):
+     *   Case C — Multi-hop, last pool native, WETH intermediate (e.g. USDC → WETH, then ETH/AZTEC):
      *     Settle input ERC-20 for first hop(s), take intermediate WETH,
      *     unwrap WETH to ETH, settle ETH for last hop.
+     *
+     *   Case D — Multi-hop, last pool native, native-ETH intermediate (e.g. USDC → ETH, then ETH/AZTEC):
+     *     Settle input ERC-20. The intermediate ETH credited by the prior hop nets against
+     *     the last hop's ETH debit inside flash accounting, so no take/unwrap is needed.
      */
     function _settle(
         address inputToken,
         uint256 inputAmount,
         bool lastPoolNative,
         uint256 ethBridgeAmount,
-        PoolKey[] memory path
+        PoolKey[] memory path,
+        bool[] memory zeroForOnes
     ) internal {
         if (!lastPoolNative) {
             // Case A: All ERC-20 — settle input token directly
@@ -211,16 +217,20 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
             IWETH(weth).withdraw(inputAmount);
             poolManager.settle{value: inputAmount}();
         } else {
-            // Case C: Multi-hop, last pool native
-            // 1. Settle the input ERC-20 for the first hop(s)
+            // Multi-hop, last pool native — settle the input ERC-20 for the first hop(s).
             poolManager.sync(Currency.wrap(inputToken));
             IERC20(inputToken).safeTransfer(address(poolManager), inputAmount);
             poolManager.settle();
 
-            // 2. Take intermediate WETH from PoolManager, unwrap, settle ETH
-            poolManager.take(Currency.wrap(weth), address(this), ethBridgeAmount);
-            IWETH(weth).withdraw(ethBridgeAmount);
-            poolManager.settle{value: ethBridgeAmount}();
+            // The currency feeding the native last hop is either WETH or native ETH.
+            address intermediate = _hopOutput(path[path.length - 2], zeroForOnes[path.length - 2]);
+            if (intermediate == weth) {
+                // Case C: WETH intermediate — take WETH from PoolManager, unwrap, settle ETH.
+                poolManager.take(Currency.wrap(weth), address(this), ethBridgeAmount);
+                IWETH(weth).withdraw(ethBridgeAmount);
+                poolManager.settle{value: ethBridgeAmount}();
+            }
+            // Case D: native-ETH intermediate — nets inside flash accounting, nothing to settle.
         }
     }
 
@@ -259,6 +269,11 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
+
+    /// @dev The output currency of a hop given its swap direction.
+    function _hopOutput(PoolKey memory key, bool zeroForOne) internal pure returns (address) {
+        return zeroForOne ? Currency.unwrap(key.currency1) : Currency.unwrap(key.currency0);
+    }
 
     function _hasNativeEth(PoolKey memory key) internal pure returns (bool) {
         return Currency.unwrap(key.currency0) == address(0)

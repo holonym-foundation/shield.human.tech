@@ -3,6 +3,7 @@
  */
 
 import { createAztecNodeClient } from '@aztec/aztec.js/node'
+import { makeFetch } from '@aztec/foundation/json-rpc/client'
 
 import { BridgeApiClient, BridgeApiError } from './api'
 import { createConfig, ACTIVE_DEPLOYMENT_ID } from './config'
@@ -11,6 +12,7 @@ import { getOperations, getOperation, retryFailedPatches } from './operations'
 import { bridgeL1ToL2 } from './bridge/l1ToL2'
 import { withdrawL2ToL1 } from './bridge/l2ToL1'
 import { resume as resumeBridge } from './bridge/resume'
+import { getPortalFeeBasisPoints } from './bridge/utils'
 import type {
   HumanTechBridgeConfig,
   ResolvedConfig,
@@ -28,6 +30,27 @@ import type {
 } from './types'
 
 const DEFAULT_API_URL = 'https://bridge.human.tech'
+
+// Some L2 RPC providers cap JSON-RPC batch size (drpc free tier rejects batches > 3 with
+// code 31). The L2→L1 witness computation fires 4+ concurrent node calls, which the client
+// bundles into one oversized batch → the whole request fails. Split oversized batches into
+// chunks and merge; the client matches responses by id, so chunk order is irrelevant.
+const MAX_RPC_BATCH = 3
+
+function createBatchLimitedFetch(): ReturnType<typeof makeFetch> {
+  const base = makeFetch([1, 2, 3], false)
+  return (async (host, body, extraHeaders, noRetry) => {
+    if (!Array.isArray(body) || body.length <= MAX_RPC_BATCH) {
+      return base(host, body, extraHeaders, noRetry)
+    }
+    const chunks: Awaited<ReturnType<typeof base>>[] = []
+    for (let i = 0; i < body.length; i += MAX_RPC_BATCH) {
+      chunks.push(await base(host, body.slice(i, i + MAX_RPC_BATCH), extraHeaders, noRetry))
+    }
+    const response = chunks.flatMap((c) => (Array.isArray(c.response) ? c.response : [c.response]))
+    return { ...chunks[0], response }
+  }) as ReturnType<typeof makeFetch>
+}
 
 function resolveDomain(domain?: string): string {
   const raw =
@@ -59,7 +82,7 @@ export class HumanTechBridge {
     })
     this.domain = resolveDomain(options.domain)
     this.apiClient = new BridgeApiClient(options.apiUrl ?? DEFAULT_API_URL)
-    this.aztecNode = createAztecNodeClient(this.config.l2NodeUrl)
+    this.aztecNode = createAztecNodeClient(this.config.l2NodeUrl, {}, createBatchLimitedFetch())
   }
 
   /**
@@ -127,11 +150,13 @@ export class HumanTechBridge {
     const candidates = buildSwapCandidates(
       tokenConfig.l1TokenContract as `0x${string}`,
       this.config.feeJuiceAddress as `0x${string}`,
+      this.config.wethAddress as `0x${string}`,
     )
     const best = await getBestRoute({
       candidates,
       inputAmount: fuelAmountTokenUnits,
       l1RpcUrl: this.config.l1RpcUrl,
+      quoter: this.config.v4QuoterAddress as `0x${string}`,
     })
     return getUniswapFuelQuote({
       expectedOutput: best.expectedOutput,
@@ -208,6 +233,14 @@ export class HumanTechBridge {
    */
   async getL1TokenBalances(address: string, chains: number[]): Promise<L1TokenBalance[]> {
     return this.apiClient.getL1TokenBalances(address, chains)
+  }
+
+  /**
+   * Read the TokenPortal's fee rate (basis points). `amount * bps / 10000` is
+   * deducted from each deposit/withdrawal; callers compute the fee locally.
+   */
+  async getPortalFeeBasisPoints(portalAddress: string): Promise<bigint> {
+    return getPortalFeeBasisPoints(this.config, portalAddress)
   }
 
   /**

@@ -17,7 +17,7 @@ bridge-script/               — Deployment & testing scripts (TypeScript + viem
   ├── constants/tokens.ts    — Token configurations (USDC, USDT, DAI, HUMN, GOAT, WBTC, WETH)
   └── deployments/           — Persisted deployment state (JSON)
 l1-contracts/                — Solidity contracts (Foundry)
-  ├── src/UniswapFuelSwap.sol    — Multi-hop V4 swap: ERC20 → WETH → ETH → FeeJuice
+  ├── src/UniswapFuelSwap.sol    — Multi-hop V4 swap: ERC20 → ETH → FeeJuice (also supports a WETH intermediate)
   ├── src/SwapBridgeRouter.sol   — Permit2-based atomic bridge + fuel swap
   ├── src/TokenPortal.sol        — L1↔L2 token bridging
   └── script/SeedUniswapPools.s.sol — PoolSeeder contract (idempotent pool init + liquidity)
@@ -27,7 +27,7 @@ l1-contracts/                — Solidity contracts (Foundry)
 
 - **Bridge only**: User deposits ERC-20 via TokenPortal → claims on L2
 - **Bridge + Fuel**: User deposits via SwapBridgeRouter → splits into token deposit + fuel swap → claims both on L2 using FeeJuice for gas
-- **Fuel swap route**: `USDC → [USDC/WETH pool] → WETH → unwrap → ETH → [ETH/AZTEC pool] → FeeJuice`
+- **Fuel swap route** (mainnet): `USDC → [USDC/ETH native pool] → ETH → [ETH/AZTEC pool] → FeeJuice`. The intermediate is **native ETH** (`address(0)`), which nets inside V4 flash accounting. The contract still supports a legacy WETH intermediate (`USDC → WETH → unwrap → ETH → AZTEC`) for pools that pair against WETH.
 
 ### Tech Stack
 

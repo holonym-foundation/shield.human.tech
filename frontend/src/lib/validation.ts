@@ -24,6 +24,16 @@ export const NUMERIC_STRING_REGEX = /^\d+$/
 
 // ─── Zod Schemas ──────────────────────────────────────────────────────
 
+/** Bridge metadata used by the Alpha cumulative deposit cap. Optional so
+ *  existing callers/tests keep working; only the deposit (L1_TO_L2) path is
+ *  gated. `amount` is the requested deposit in token base units. */
+const DepositLimitFields = {
+  direction: z.enum(['L1_TO_L2', 'L2_TO_L1']).optional(),
+  amount: z.string().regex(NUMERIC_STRING_REGEX, 'amount must be a numeric string').max(78).optional(),
+  tokenSymbol: z.string().max(16).optional(),
+  tokenDecimals: z.number().int().min(0).max(36).optional(),
+} as const
+
 /** Schema for POST /api/auth/authenticate.
  *  Bound message/signature length so an attacker can't post megabytes
  *  of payload and force the SIWE parser/verifier to do meaningful work. */
@@ -52,6 +62,7 @@ export const PassportAttestationSchema = z.object({
   bridgeAddress: z.string().regex(ETH_ADDRESS_REGEX, 'bridgeAddress must be 0x + 40 hex chars').optional(),
   portalAddress: z.string().regex(ETH_ADDRESS_REGEX, 'portalAddress must be 0x + 40 hex chars'),
   deadline: z.number().int().nonnegative().optional(),
+  ...DepositLimitFields,
 })
 
 /** Schema for POST /api/attestation/poch.
@@ -61,6 +72,7 @@ export const PassportAttestationSchema = z.object({
 export const PochAttestationSchema = z.object({
   l2Address: z.string().min(1).optional(),
   isPrivate: z.boolean().optional().default(false),
+  ...DepositLimitFields,
 })
 
 // ─── Length limits ──────────────────────────────────────────────────────

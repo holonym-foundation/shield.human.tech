@@ -9,7 +9,7 @@ import { init as initDatadog } from '@/utils/datadog'
 import { init as initPostHog } from '@/utils/posthog'
 import AuthSync from '@/components/AuthSync'
 import { BridgeContext, useBridgeInstance } from '@/hooks/useBridge'
-import { L1_RPC_URL } from './config'
+import { L1_RPC_URL, L2_NODE_URL, DEPLOYMENT_ID } from './config'
 
 function InitializeWaapWallet() {
   const { initializeWaapWallet } = useWalletStore()
@@ -60,8 +60,14 @@ function BridgeProvider({ children }: { children: ReactNode }) {
   // apiUrl: '' uses same-origin (relative URLs) since this app hosts the API routes.
   // External SDK consumers don't need to set this — it defaults to https://bridge.human.tech
   const bridge = useBridgeInstance({
+    // Pin the SDK to the same deployment the frontend resolves, so the tx path never
+    // falls back to the SDK bundle's default activeDeploymentId.
+    deployment: DEPLOYMENT_ID,
     apiUrl: '',
     l1RpcUrl: L1_RPC_URL ?? '',
+    // Override so the SDK uses the env node URL (carries the API key) instead of the
+    // git-committed deployments.json nodeUrl — keeps the key out of version control.
+    l2NodeUrl: L2_NODE_URL,
   })
   return (
     <BridgeContext.Provider value={bridge}>{children}</BridgeContext.Provider>

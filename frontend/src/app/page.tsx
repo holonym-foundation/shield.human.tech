@@ -11,7 +11,11 @@ import {
   useL1MintSoulboundToken,
   useL1TokenBalance,
   useL1TokenBalances,
+  usePortalFeeBps,
 } from '@/hooks/useL1Operations'
+import { useTokenPrices } from '@/utils/coinGeckoPrice'
+import { computePortalFee, getTokenPriceUsd } from '@/utils/fuelPricing'
+import { parseUnits, formatUnits } from 'viem'
 import { useAttestationCheck } from '@/hooks/useAttestationCheck'
 import {
   useL2HasSoulboundToken,
@@ -24,7 +28,7 @@ import {
   useL2NodeIsReady,
 } from '@/hooks/useL2Operations'
 import { showToast, useToast } from '@/hooks/useToast'
-import { extractErrorMessage } from '@/utils'
+import { extractErrorMessage, truncateDecimals } from '@/utils'
 import clsxm from '@/utils/clsxm'
 import NetworkModal from '@/components/model/Network'
 import TokensModal from '@/components/model/TokensModal'
@@ -118,6 +122,32 @@ export default function Home() {
     setFuelRecipientOverride,
     setCurrentOperationId,
   } = useBridgeStore()
+
+  // ── Portal fee (TokenPortal deducts feeBasisPoints from the bridged token) ──
+  const { data: portalFeeBps } = usePortalFeeBps()
+  const { prices: tokenPrices } = useTokenPrices()
+  const feeTokenDecimals = bridgeConfig.from.token?.decimals ?? 6
+  const feeTokenSymbol = bridgeConfig.from.token?.symbol ?? 'USDC'
+  const parseTokenAmount = (v?: string): bigint => {
+    if (!v || isNaN(Number(v))) return 0n
+    try {
+      return parseUnits(v as `${number}`, feeTokenDecimals)
+    } catch {
+      return 0n
+    }
+  }
+  const { feeRaw: portalFeeRaw, receiveRaw: portalReceiveRaw } = computePortalFee({
+    amount: parseTokenAmount(bridgeConfig.amount),
+    fuelAmount: parseTokenAmount(fuelAmount),
+    fuelEnabled: bridgeConfig.direction === BridgeDirection.L1_TO_L2 && fuelEnabled,
+    feeBps: portalFeeBps ?? 0n,
+  })
+  const portalFeeKnown = portalFeeBps != null
+  const portalFeeToken = portalFeeKnown ? `${truncateDecimals(formatUnits(portalFeeRaw, feeTokenDecimals), 6)}` : undefined
+  const portalFeeUsd = portalFeeKnown
+    ? (Number(formatUnits(portalFeeRaw, feeTokenDecimals)) * getTokenPriceUsd(feeTokenSymbol, tokenPrices)).toFixed(2)
+    : undefined
+  const youWillReceiveAmount = `${truncateDecimals(formatUnits(portalReceiveRaw, feeTokenDecimals), 6)}`
 
   // Get wallet state from useWalletStore. Modal-driving fields (walletConnectionPhase,
   // discoveredWallets, verificationEmojis, etc.) are consumed inside <AztecWalletConnectionModals />
@@ -511,6 +541,7 @@ export default function Home() {
                     feeJuiceLoading={feeJuiceBalanceLoading}
                     attestationMethod={attestationData?.method ?? null}
                     passportMaxAmount={attestationData?.passportMaxAmount}
+                    youWillReceive={youWillReceiveAmount}
                   />
                   {bridgeConfig.direction === BridgeDirection.L1_TO_L2 &&
                     !!SWAP_BRIDGE_ROUTER_ADDRESS &&
@@ -550,7 +581,14 @@ export default function Home() {
                   variants={variants}
                   transition={{ ease: 'easeInOut', duration: 0.5 }}
                 >
-                  <TransactionBreakdown isOpen={true} onToggle={() => setShowBreakdown(false)} />
+                  <TransactionBreakdown
+                    isOpen={true}
+                    onToggle={() => setShowBreakdown(false)}
+                    bridgeFee={portalFeeToken}
+                    bridgeFeeUsd={portalFeeUsd}
+                    receiveAmount={youWillReceiveAmount}
+                    tokenSymbol={feeTokenSymbol}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -614,6 +652,7 @@ export default function Home() {
                 passportMaxAmount={attestationData?.passportMaxAmount}
                 passportScore={attestationData?.passportScore}
                 passportThreshold={attestationData?.passportThreshold}
+                remainingDepositUsd={attestationData?.remainingDepositUsd}
                 // Operation completion state
                 bridgeCompleted={bridgeCompleted}
                 // Disable if L2 node error

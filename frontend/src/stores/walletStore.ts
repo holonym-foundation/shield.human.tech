@@ -960,7 +960,7 @@ const walletStore = create<WalletState>((set, get) => ({
           await requestWaapWallet(WAAP_METHOD.wallet_addEthereumChain, [
             {
               chainId: chainIdHex,
-              chainName: chainId === L1_CHAIN_ID ? 'Sepolia' : `Chain ${chainId}`,
+              chainName: chainId === L1_CHAIN_ID ? (networkConfig[L1_CHAIN_ID]?.name ?? 'Ethereum') : `Chain ${chainId}`,
               nativeCurrency: {
                 name: 'ETH',
                 symbol: 'ETH',

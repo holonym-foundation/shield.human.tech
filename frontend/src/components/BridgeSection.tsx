@@ -25,6 +25,8 @@ interface BridgeSectionProps {
   feeJuiceLoading?: boolean
   attestationMethod?: 'poch' | 'passport' | null
   passportMaxAmount?: bigint
+  // Post-fee amount the user receives on the destination (net of the portal fee)
+  youWillReceive?: string
 }
 
 const BridgeSection: React.FC<BridgeSectionProps> = ({
@@ -45,6 +47,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
   feeJuiceLoading = false,
   attestationMethod,
   passportMaxAmount,
+  youWillReceive,
 }) => {
   // Normalize balances to strings
   const l1NativeBalanceStr = l1NativeBalance != null ? l1NativeBalance.toString() : ''
@@ -210,7 +213,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
         <div className="flex justify-between">
           <p className="text-14 font-medium text-latest-grey-100">You will receive</p>
           <p className="text-black text-14 font-semibold">
-            {inputAmount} {bridge.to.token?.title}
+            {youWillReceive ?? inputAmount} {bridge.to.token?.title}
           </p>
         </div>
         <div className="flex justify-between mt-1">

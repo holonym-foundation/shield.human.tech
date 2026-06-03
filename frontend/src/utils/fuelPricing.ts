@@ -89,6 +89,26 @@ export function usdToTokenAmount(
   return tokenAmount.toFixed(6)
 }
 
+/**
+ * Compute the L1 TokenPortal fee for a bridge, in token base units.
+ *
+ * Mirrors TokenPortal.calculateFee on-chain: `fee = base * feeBps / 10000`
+ * (integer division). Fuel is carved out of the deposit before the portal
+ * charges its fee, so the fee base is `amount - fuelAmount` when fuel is on.
+ */
+export function computePortalFee(params: {
+  amount: bigint
+  fuelAmount: bigint
+  fuelEnabled: boolean
+  feeBps: bigint
+}): { baseRaw: bigint; feeRaw: bigint; receiveRaw: bigint } {
+  const { amount, fuelAmount, fuelEnabled, feeBps } = params
+  const fuel = fuelEnabled ? fuelAmount : 0n
+  const baseRaw = amount > fuel ? amount - fuel : 0n
+  const feeRaw = (baseRaw * feeBps) / 10000n
+  return { baseRaw, feeRaw, receiveRaw: baseRaw - feeRaw }
+}
+
 // ═════════════════════════════════════════════════════════════════════
 // Uniswap V4 Types & Route Building
 // ═════════════════════════════════════════════════════════════════════
@@ -166,15 +186,24 @@ export function buildSwapCandidates(inputToken: `0x${string}`): CandidateRoute[]
     zeroForOnes: [isZeroForOne(inputToken, aztec)],
   })
 
-  // Route B: Via WETH (inputToken → WETH → FeeJuice) — multi-hop
-  candidates.push({
-    label: 'via-weth',
-    poolKeys: [
-      buildPoolKey(inputToken, weth, INTERMEDIATE_POOL_FEE, INTERMEDIATE_POOL_TICK_SPACING),
-      buildPoolKey(feePoolBase, aztec, FEE_POOL_FEE, FEE_POOL_TICK_SPACING),
-    ],
-    zeroForOnes: [isZeroForOne(inputToken, weth), isZeroForOne(feePoolBase, aztec)],
-  })
+  // Route B: Via ETH (inputToken → ETH → FeeJuice) — multi-hop.
+  // Mainnet V4 pairs the input token with NATIVE ETH (address(0)), not wrapped WETH,
+  // so the intermediate hop must use native ETH. Quote the common fee tiers; getBestRoute
+  // discards candidates whose pool doesn't exist and keeps the highest-output survivor.
+  const intermediateTiers = [
+    { fee: 500, tickSpacing: 10 },
+    { fee: INTERMEDIATE_POOL_FEE, tickSpacing: INTERMEDIATE_POOL_TICK_SPACING },
+  ]
+  for (const tier of intermediateTiers) {
+    candidates.push({
+      label: `via-eth-${tier.fee}`,
+      poolKeys: [
+        buildPoolKey(inputToken, NATIVE_ETH, tier.fee, tier.tickSpacing),
+        buildPoolKey(feePoolBase, aztec, FEE_POOL_FEE, FEE_POOL_TICK_SPACING),
+      ],
+      zeroForOnes: [isZeroForOne(inputToken, NATIVE_ETH), isZeroForOne(feePoolBase, aztec)],
+    })
+  }
 
   return candidates
 }

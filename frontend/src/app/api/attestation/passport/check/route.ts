@@ -5,7 +5,7 @@ import {
   getPassportScoreThreshold,
   getPassportMaxAmount,
 } from '@/lib/attestation'
-import { enforceAddressBinding } from '@/lib/address-binding'
+import { enforceAddressBinding, evaluateDepositLimit, usdToTokenBaseUnits } from '@/lib/address-binding'
 import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctions'
 
 /**
@@ -66,11 +66,23 @@ export async function GET(request: NextRequest) {
     // Fetch Gitcoin Passport score
     const { score, passing } = await fetchPassportScore(l1Address)
 
+    // Reflect the Alpha cumulative cap: the displayed per-tx max is the lesser
+    // of the global Passport max and the user's remaining deposit budget.
+    let maxAmount = getPassportMaxAmount()
+    const limit = await evaluateDepositLimit({ userId: authResult.user.id })
+    if (limit.enabled) {
+      const remainingBaseUnits = usdToTokenBaseUnits(limit.remainingUsd, 'USDC', 6)
+      if (remainingBaseUnits < maxAmount) maxAmount = remainingBaseUnits
+    }
+
     return NextResponse.json({
       eligible: passing,
       score,
       threshold: getPassportScoreThreshold(),
-      maxAmount: getPassportMaxAmount().toString(),
+      maxAmount: maxAmount.toString(),
+      ...(limit.enabled
+        ? { depositLimitReached: limit.remainingUsd <= 0, remainingUsd: limit.remainingUsd }
+        : {}),
       reason: passing
         ? undefined
         : `Passport score too low (${score}/${getPassportScoreThreshold()} required)`,

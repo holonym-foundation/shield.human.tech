@@ -83,6 +83,8 @@ interface BridgeActionButtonProps {
   passportMaxAmount?: bigint
   passportScore?: number
   passportThreshold?: number
+  // Alpha cumulative deposit cap: USD left for this user (undefined = cap disabled)
+  remainingDepositUsd?: number
 
   // Operation completion state
   bridgeCompleted?: boolean
@@ -129,6 +131,7 @@ function BridgeActionButton({
   pochReason,
   attestationMethod,
   passportMaxAmount,
+  remainingDepositUsd,
   passportScore,
   passportThreshold,
   bridgeCompleted = false,
@@ -177,7 +180,9 @@ function BridgeActionButton({
       const operationType = getOperationType(direction)
       const errorMsg = extractErrorMessage(error)
 
-      if (errorMsg.includes('insufficient')) {
+      if (errorMsg.toLowerCase().includes('deposit limit')) {
+        notify('error', errorMsg)
+      } else if (errorMsg.includes('insufficient')) {
         notify('error', `Insufficient funds for ${operationType} operation`)
       } else if (errorMsg.includes('rejected') || errorMsg.includes('denied')) {
         notify('error', `Transaction rejected by user`)
@@ -363,6 +368,14 @@ function BridgeActionButton({
 
   // --- Derived UI state ---
 
+  // Alpha cumulative deposit cap (deposits only). Block up-front so the user
+  // can't start a bridge the attestation layer will reject. remainingDepositUsd
+  // is undefined when the cap is disabled.
+  const depositLimitBlocked =
+    direction === BridgeDirection.L1_TO_L2 &&
+    remainingDepositUsd != null &&
+    (remainingDepositUsd <= 0 || parseFloat(inputAmount || '0') > remainingDepositUsd)
+
   const isButtonDisabled =
     l2NodeIsReadyLoading ||
     l2NodeError ||
@@ -373,6 +386,7 @@ function BridgeActionButton({
     withdrawTokensToL1Pending ||
     bridgeTokensToL2Pending ||
     isOperationPending ||
+    depositLimitBlocked ||
     bridgeCompleted
 
   const isOperationInFlight =
@@ -406,6 +420,13 @@ function BridgeActionButton({
     // Connection states
     if (!isWaapConnected) return 'Connect Ethereum Wallet'
     if (!isAztecConnected) return 'Connect Aztec Wallet'
+
+    // Alpha deposit cap (deposits only)
+    if (depositLimitBlocked) {
+      return remainingDepositUsd != null && remainingDepositUsd > 0
+        ? `Only $${remainingDepositUsd.toFixed(2)} left (Alpha limit)`
+        : 'Alpha Deposit Limit Reached'
+    }
 
     // Faucet
     if (needsGas || needsTokensOnly) {

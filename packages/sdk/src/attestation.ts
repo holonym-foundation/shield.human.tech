@@ -17,6 +17,21 @@ import type {
 } from './types'
 import { AttestationMethod } from './types'
 
+/**
+ * If the error is a server-side deposit-cap rejection (403 + reason
+ * 'deposit_limit'), return its human message so the cascade surfaces it
+ * immediately instead of falling through to the generic "both failed" error.
+ */
+function depositLimitMessage(err: unknown): string | null {
+  if (err instanceof BridgeApiError && err.status === 403) {
+    const body = err.parsedBody
+    if (body?.reason === 'deposit_limit') {
+      return (typeof body.error === 'string' && body.error) || 'Alpha deposit limit reached.'
+    }
+  }
+  return null
+}
+
 // ─── Empty Structs ──────────────────────────────────────────────────
 
 export function buildEmptyCleanHands(): CleanHandsStruct {
@@ -152,11 +167,19 @@ export async function fetchAttestationsForDeposit(
   amount: bigint,
   decimals: number,
   emit?: BridgeEventCallback,
+  tokenSymbol?: string,
 ): Promise<{ cleanHands: CleanHandsStruct; passport: PassportStruct }> {
+  // Bridge metadata for the server-side Alpha cumulative deposit cap.
+  const depositMeta = {
+    direction: 'L1_TO_L2' as const,
+    amount: amount.toString(),
+    tokenSymbol,
+    tokenDecimals: decimals,
+  }
   // Try POCH first
   emit?.({ type: 'attestation_fetch', method: AttestationMethod.POCH })
   try {
-    const poch = await apiClient.postPochAttestation(portalAddress)
+    const poch = await apiClient.postPochAttestation(portalAddress, depositMeta)
     assertL1SignatureShape(poch.l1Signature, 'POCH (L1 CleanHands)')
     return {
       cleanHands: {
@@ -175,6 +198,10 @@ export async function fetchAttestationsForDeposit(
     if (err instanceof Error && err.message.startsWith('Invalid L1 signature')) {
       throw err
     }
+    // Deposit cap is a hard stop — don't fall back to Passport (which would
+    // also be rejected) and hide the message behind the generic error.
+    const limitMsg = depositLimitMessage(err)
+    if (limitMsg) throw new Error(limitMsg)
 
     const reason = err instanceof Error ? err.message : String(err)
     emit?.({ type: 'attestation_fallback', from: 'poch', to: 'passport', reason })
@@ -183,7 +210,7 @@ export async function fetchAttestationsForDeposit(
   // Fallback to Passport
   emit?.({ type: 'attestation_fetch', method: AttestationMethod.PASSPORT })
   try {
-    const passport = await apiClient.postPassportAttestation(portalAddress)
+    const passport = await apiClient.postPassportAttestation(portalAddress, undefined, depositMeta)
 
     // Enforce amount limit
     const maxAmount = BigInt(passport.maxAmount)
@@ -215,6 +242,8 @@ export async function fetchAttestationsForDeposit(
     )) {
       throw err
     }
+    const limitMsg = depositLimitMessage(err)
+    if (limitMsg) throw new Error(limitMsg)
 
     console.warn('[SDK Attestation] Both POCH and Passport failed:', err)
   }
@@ -246,10 +275,13 @@ export async function fetchAttestationsForWithdrawal(
   decimals: number,
   emit?: BridgeEventCallback,
 ): Promise<{ cleanHands: L2CleanHandsStruct; passport: L2PassportStruct }> {
+  // Withdrawals are not subject to the deposit cap; tag the direction so the
+  // server skips the gate.
+  const withdrawalMeta = { direction: 'L2_TO_L1' as const }
   // Try POCH first
   emit?.({ type: 'attestation_fetch', method: AttestationMethod.POCH })
   try {
-    const poch = await apiClient.postPochAttestation(portalAddress)
+    const poch = await apiClient.postPochAttestation(portalAddress, withdrawalMeta)
     assertL2SignatureShape(poch.l2Signature, 'POCH (L2 CleanHands)')
     return {
       cleanHands: {
@@ -273,7 +305,7 @@ export async function fetchAttestationsForWithdrawal(
   // Fallback to Passport
   emit?.({ type: 'attestation_fetch', method: AttestationMethod.PASSPORT })
   try {
-    const passport = await apiClient.postPassportAttestation(portalAddress, bridgeAddress)
+    const passport = await apiClient.postPassportAttestation(portalAddress, bridgeAddress, withdrawalMeta)
 
     // Enforce amount limit
     const maxAmount = BigInt(passport.maxAmount)
