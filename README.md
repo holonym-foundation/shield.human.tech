@@ -11,7 +11,7 @@ Active deployment: **Ethereum mainnet (L1) + Aztec Mainnet Alpha v4.3.0 (L2)** w
 
 **Aztec is in Alpha**, not full production:
 
-- ~1 TPS, 6-72s block times
+- ~1 TPS, ~6s block times (blocks bundled into ~72s checkpoints settled to L1)
 - Ongoing audits + bug bounty (see [aztec.network/blog/alpha-network-security-what-to-expect](https://aztec.network/blog/alpha-network-security-what-to-expect))
 - Aztec advises users to only deposit funds they can afford to lose
 
