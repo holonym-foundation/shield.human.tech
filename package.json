@@ -6,7 +6,7 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "typecheck": "turbo typecheck",
-    "dev:frontend": "pnpm --filter frontend dev"
+    "dev:frontend": "pnpm --filter aztec-bridge dev"
   },
   "devDependencies": {
     "turbo": "^2"

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "pnpm --filter @human.tech/aztec-bridge-sdk build",
     "dev": "next dev --webpack",
     "build": "prisma generate && prisma migrate deploy && next build --webpack && node ./scripts/check-bb-wasm-trace.mjs",
     "postinstall": "prisma generate",
