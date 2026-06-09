@@ -68,3 +68,4 @@ packages/*/dist
 docs
 
 .main-snapshot
+.gstack/
