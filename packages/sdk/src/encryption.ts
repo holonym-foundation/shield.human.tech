@@ -56,11 +56,11 @@ export async function deriveEncryptionKey(
   signature: string,
   domain: string,
 ): Promise<Uint8Array> {
-  const keyDerivationInput = `Aztec Bridge Encryption Key\nDomain: ${domain}\nL1 Address: ${l1Address}\nSignature: ${signature}`
+  const keyDerivationInput = `Shield Human Tech Encryption Key\nDomain: ${domain}\nL1 Address: ${l1Address}\nSignature: ${signature}`
   const te = new TextEncoder()
   const ikm = te.encode(keyDerivationInput)
   const salt = te.encode(domain)
-  const info = te.encode('aztec-bridge-key')
+  const info = te.encode('shield-human-tech-key')
 
   return hkdf(sha256, ikm, salt, info, 32)
 }
@@ -68,7 +68,7 @@ export async function deriveEncryptionKey(
 // ─── Encryption ─────────────────────────────────────────────────────
 
 /** Current encryption envelope format version. Increment on KDF, cipher, or payload changes. */
-export const ENCRYPTION_VERSION = 1
+export const ENCRYPTION_VERSION = 2
 
 /**
  * Encrypts data using AES-256-GCM.

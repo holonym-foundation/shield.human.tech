@@ -189,11 +189,11 @@ export async function decryptStorageEntry(
 /** Trigger a browser download of the L1→L2 claim recovery JSON. */
 export const exportClaimData = (claimData: any) => {
   const payload = buildDepositExport(claimData)
-  exportToJsonFile(payload, `aztec-bridge-claim-${claimData.id}-${Date.now()}.json`)
+  exportToJsonFile(payload, `shield-human-tech-claim-${claimData.id}-${Date.now()}.json`)
 }
 
 /** Trigger a browser download of the L2→L1 withdrawal recovery JSON. */
 export const exportWithdrawalData = (withdrawalData: any) => {
   const payload = buildWithdrawalExport(withdrawalData)
-  exportToJsonFile(payload, `aztec-bridge-withdrawal-${withdrawalData.id}-${Date.now()}.json`)
+  exportToJsonFile(payload, `shield-human-tech-withdrawal-${withdrawalData.id}-${Date.now()}.json`)
 }

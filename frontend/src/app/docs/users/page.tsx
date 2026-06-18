@@ -273,8 +273,8 @@ const sections: DocsSection[] = [
             operation.
           </li>
           <li>
-            The file is named like <Code>aztec-bridge-claim-&#123;id&#125;-&#123;timestamp&#125;.json</Code> (or{' '}
-            <Code>aztec-bridge-withdrawal-…</Code> for withdrawals).
+            The file is named like <Code>shield-human-tech-claim-&#123;id&#125;-&#123;timestamp&#125;.json</Code> (or{' '}
+            <Code>shield-human-tech-withdrawal-…</Code> for withdrawals).
           </li>
           <li>Save your operation ID — you need it to resume from a different device or browser.</li>
         </UL>

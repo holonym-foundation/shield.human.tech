@@ -14,7 +14,7 @@ export function setupQueryPersistence(queryClient: QueryClient) {
   // Create a storage persister that uses localStorage
   const localStoragePersister = createSyncStoragePersister({
     storage: window.localStorage,
-    key: 'aztec-bridge-query-state', // More descriptive key for localStorage
+    key: 'shield-human-tech-query-state', // More descriptive key for localStorage
     throttleTime: 1000, // Time (in ms) to throttle persistence to avoid excessive writes
   })
 

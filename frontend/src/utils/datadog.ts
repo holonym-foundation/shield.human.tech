@@ -33,7 +33,7 @@ export function logInfo(message: string, messageContext?: object | undefined, er
     message,
     {
       ...messageContext,
-      src: 'aztec-bridge',
+      src: 'shield-human-tech',
     },
     error,
   )
@@ -50,7 +50,7 @@ export function logError(message: string, messageContext?: object | undefined, e
     message,
     {
       ...messageContext,
-      src: 'aztec-bridge',
+      src: 'shield-human-tech',
     },
     error as Error,
   )

@@ -40,7 +40,7 @@ export const useAuthStore = create<AuthState>()(
       clearAuth: () => set({ token: null, user: null, authFailed: false, retryAuth: 0 }),
     }),
     {
-      name: 'aztec-bridge-auth',
+      name: 'shield-human-tech-auth',
       partialize: (state) => ({ token: state.token, user: state.user }),
     },
   ),
