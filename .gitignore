@@ -65,7 +65,6 @@ packages/*/dist
 
 # claude code
 .claude
-docs
 
 .main-snapshot
 .gstack/

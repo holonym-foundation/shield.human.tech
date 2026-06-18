@@ -58,7 +58,7 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
 
         {/* Right Side Links */}
         <div className='flex gap-x-4 gap-y-2 flex-wrap justify-end'>
-          <Link href="https://docs.human.tech/" className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
+          <Link href="/docs" className='text-latest-grey-600 hover:text-black'>
             Docs
           </Link>
           <Link href='https://blog.human.tech/' className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
@@ -113,7 +113,7 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
 
         {/* Middle Resource Links */}
         <div className='flex gap-4 flex-wrap justify-center'>
-          <Link href="https://docs.human.tech/" className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
+          <Link href="/docs" className='text-latest-grey-600 hover:text-black'>
             Docs
           </Link>
           <Link href='https://human.tech/blog/proof-of-clean-hands' className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
