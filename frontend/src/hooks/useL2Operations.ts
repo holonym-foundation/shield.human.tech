@@ -11,8 +11,8 @@ import { useL2ErrorHandler } from '@/utils/l2ErrorHandler'
 import { requestWaapWallet, WAAP_METHOD, useWalletStore } from '@/stores/walletStore'
 import { useWalletAdapter } from './useWalletAdapter'
 import { useBridge } from '@/hooks/useBridge'
-import type { BridgeEvent, StepStatus } from '@human.tech/aztec-bridge-sdk'
-import { getPendingWithdrawals, getWithdrawalById, getWithdrawals, BridgeEventType } from '@human.tech/aztec-bridge-sdk'
+import type { BridgeEvent, StepStatus } from '@human.tech/shield.human.sdk'
+import { getPendingWithdrawals, getWithdrawalById, getWithdrawals, BridgeEventType } from '@human.tech/shield.human.sdk'
 
 // Define types for balance queries
 export interface L2TokenBalanceData {

@@ -4,7 +4,7 @@ import CodeBlock from '@/components/CodeBlock'
 
 export const metadata = {
   title: 'Developer Guide · Aztec Bridge Docs',
-  description: 'Integrate the @human.tech/aztec-bridge-sdk into your dapp — API reference and examples.',
+  description: 'Integrate the @human.tech/shield.human.sdk into your dapp — API reference and examples.',
 }
 
 const sections: DocsSection[] = [
@@ -14,7 +14,7 @@ const sections: DocsSection[] = [
     content: (
       <>
         <P>
-          <Code>@human.tech/aztec-bridge-sdk</Code> wraps the full bridge flow — authentication, L1↔L2 transfers,
+          <Code>@human.tech/shield.human.sdk</Code> wraps the full bridge flow — authentication, L1↔L2 transfers,
           optional fuel swaps, recovery, and attestation — behind a single <Code>HumanTechBridge</Code> class.
         </P>
         <UL>
@@ -30,7 +30,7 @@ const sections: DocsSection[] = [
     label: 'Installation',
     content: (
       <>
-        <CodeBlock lang="bash">{`npm install @human.tech/aztec-bridge-sdk`}</CodeBlock>
+        <CodeBlock lang="bash">{`npm install @human.tech/shield.human.sdk`}</CodeBlock>
         <P>You supply your own Ethereum RPC URL; the SDK does not bundle a default endpoint.</P>
       </>
     ),
@@ -40,7 +40,7 @@ const sections: DocsSection[] = [
     label: 'Initialization',
     content: (
       <>
-        <CodeBlock>{`import { HumanTechBridge, ACTIVE_DEPLOYMENT_ID } from '@human.tech/aztec-bridge-sdk'
+        <CodeBlock>{`import { HumanTechBridge, ACTIVE_DEPLOYMENT_ID } from '@human.tech/shield.human.sdk'
 
 const bridge = new HumanTechBridge({
   l1RpcUrl: 'https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY', // required
@@ -97,7 +97,7 @@ if (!session.valid) {
           It&apos;s any object implementing <Code>WalletAdapterInterface</Code> (defined by this SDK), so you can wrap an{' '}
           <Code>@aztec/wallet-sdk</Code> wallet or your own.
         </P>
-        <CodeBlock>{`import type { WalletAdapterInterface } from '@human.tech/aztec-bridge-sdk'
+        <CodeBlock>{`import type { WalletAdapterInterface } from '@human.tech/shield.human.sdk'
 
 const walletAdapter: WalletAdapterInterface = {
   // L2 TokenBridge address this adapter acts on
@@ -288,7 +288,7 @@ const result = await bridge.resume(operationId, {
         <P>
           API failures throw <Code>BridgeApiError</Code>, which carries a human-readable message and the raw response.
         </P>
-        <CodeBlock>{`import { BridgeApiError } from '@human.tech/aztec-bridge-sdk'
+        <CodeBlock>{`import { BridgeApiError } from '@human.tech/shield.human.sdk'
 
 try {
   await bridge.bridgeL1ToL2(params)

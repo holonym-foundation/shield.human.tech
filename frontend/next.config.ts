@@ -40,7 +40,7 @@ const nextConfig: NextConfig = {
   },
   // Keep @aztec/bb.js as external on the server so the WASM file resolves
   // from node_modules instead of being broken by webpack bundling.
-  transpilePackages: ['@human.tech/aztec-bridge-sdk'],
+  transpilePackages: ['@human.tech/shield.human.sdk'],
   serverExternalPackages: [
     '@aztec/bb.js',
     '@aztec/aztec.js',

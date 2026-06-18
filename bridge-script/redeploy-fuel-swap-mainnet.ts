@@ -191,7 +191,7 @@ async function main() {
     logger.error(`Frontend/SDK sync failed (address persisted; re-run copyToFrontend/copyToSdk): ${e}`)
   }
 
-  logger.info('Next: rebuild the SDK so the frontend picks up the new bundle (e.g. `pnpm --filter @human.tech/aztec-bridge-sdk build`).')
+  logger.info('Next: rebuild the SDK so the frontend picks up the new bundle (e.g. `pnpm --filter @human.tech/shield.human.sdk build`).')
 }
 
 main().catch((e) => {

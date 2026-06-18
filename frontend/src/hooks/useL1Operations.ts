@@ -23,8 +23,8 @@ import { I_UserTokenBalance, T_AlchemyTokenBalanceResponse, T_UserTokenType } fr
 import { axiosErrorMessage } from './helper'
 import { networkConfig } from '@/config/l1.config'
 import { useBridge } from '@/hooks/useBridge'
-import type { BridgeEvent, StepStatus } from '@human.tech/aztec-bridge-sdk'
-import { STORAGE_KEYS, BridgeEventType } from '@human.tech/aztec-bridge-sdk'
+import type { BridgeEvent, StepStatus } from '@human.tech/shield.human.sdk'
+import { STORAGE_KEYS, BridgeEventType } from '@human.tech/shield.human.sdk'
 
 // Stable toast IDs for the L1→L2 bridge flow. Each phase emits a persistent
 // (autoClose: false) toast; without dismissing the prior phase's toast on

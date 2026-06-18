@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import type { BridgeOperation } from '@human.tech/aztec-bridge-sdk'
+import type { BridgeOperation } from '@human.tech/shield.human.sdk'
 import { formatUnits } from 'viem'
 import { L1_TOKEN_METADATA } from '@/config'
 import { isResumable, hasPossibleLockedFunds } from '@/utils/resumability'

@@ -7,7 +7,7 @@ import LoadingStepsBars from '@/components/LoadingStepsBars'
 import StyledImage from '@/components/StyledImage'
 import TextButton from '@/components/TextButton'
 import type { LoadingStep } from '@/stores/bridgeStore'
-import { STORAGE_KEYS } from '@human.tech/aztec-bridge-sdk'
+import { STORAGE_KEYS } from '@human.tech/shield.human.sdk'
 import { exportClaimData, exportWithdrawalData } from '@/utils'
 
 export interface ProgressCardProps {

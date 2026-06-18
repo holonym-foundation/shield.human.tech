@@ -1,19 +1,19 @@
-# @human.tech/aztec-bridge-sdk
+# @human.tech/shield.human.sdk
 
 Privacy-preserving bridge SDK for moving tokens between Ethereum (L1) and Aztec (L2).
 
 ## Install
 
 ```bash
-npm install @human.tech/aztec-bridge-sdk
+npm install @human.tech/shield.human.sdk
 # or
-pnpm add @human.tech/aztec-bridge-sdk
+pnpm add @human.tech/shield.human.sdk
 ```
 
 ## Quick Start
 
 ```ts
-import { HumanTechBridge } from '@human.tech/aztec-bridge-sdk'
+import { HumanTechBridge } from '@human.tech/shield.human.sdk'
 
 const bridge = new HumanTechBridge({
   l1RpcUrl: 'https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY',
@@ -141,7 +141,7 @@ import {
   createConfig,
   getAztecscanUrl,
   getEtherscanUrl,
-} from '@human.tech/aztec-bridge-sdk'
+} from '@human.tech/shield.human.sdk'
 
 // Get the active deployment
 const deployment = getDeployment(ACTIVE_DEPLOYMENT_ID)
@@ -221,7 +221,7 @@ import {
   createSigningMessage,
   deriveEncryptionKey,
   decryptData,
-} from '@human.tech/aztec-bridge-sdk'
+} from '@human.tech/shield.human.sdk'
 
 // Create the deterministic message to sign
 const message = createSigningMessage(l1Address, domain)
@@ -248,7 +248,7 @@ const header = await bridge.getAztecBlockHeader('latest')
 ## Error Handling
 
 ```ts
-import { BridgeApiError } from '@human.tech/aztec-bridge-sdk'
+import { BridgeApiError } from '@human.tech/shield.human.sdk'
 
 try {
   await bridge.bridgeL1ToL2({ ... })

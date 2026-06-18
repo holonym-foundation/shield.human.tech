@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useMemo } from 'react'
-import { HumanTechBridge, type HumanTechBridgeConfig } from '@human.tech/aztec-bridge-sdk'
+import { HumanTechBridge, type HumanTechBridgeConfig } from '@human.tech/shield.human.sdk'
 
 export const BridgeContext = createContext<HumanTechBridge | null>(null)
 

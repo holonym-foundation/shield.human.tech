@@ -1,9 +1,9 @@
 {
-  "name": "aztec-bridge",
+  "name": "shield.human.tech",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "pnpm --filter @human.tech/aztec-bridge-sdk build",
+    "predev": "pnpm --filter @human.tech/shield.human.sdk build",
     "dev": "next dev --webpack",
     "build": "prisma generate && prisma migrate deploy && next build --webpack && node ./scripts/check-bb-wasm-trace.mjs",
     "postinstall": "prisma generate",
@@ -32,7 +32,7 @@
     "@aztec/wallet-sdk": "4.2.0-aztecnr-rc.2",
     "@datadog/browser-logs": "^4.45.0",
     "@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
-    "@human.tech/aztec-bridge-sdk": "workspace:*",
+    "@human.tech/shield.human.sdk": "workspace:*",
     "@human.tech/waap-sdk": "^1.0.3",
     "@iconify/react": "^6.0.0",
     "@noble/ciphers": "^2.1.1",

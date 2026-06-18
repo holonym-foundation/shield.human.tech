@@ -6,7 +6,7 @@ import {
   buildWithdrawalExport,
   getDepositById,
   getWithdrawalById,
-} from '@human.tech/aztec-bridge-sdk'
+} from '@human.tech/shield.human.sdk'
 
 // Frontend-only anti-phishing guard: only prompt for encryption signatures on our domain.
 // This is NOT an SDK concern — the SDK is domain-agnostic.

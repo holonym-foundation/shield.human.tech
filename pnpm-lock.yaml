@@ -47,7 +47,7 @@ importers:
       '@defi-wonderland/aztec-standards':
         specifier: 4.2.0-aztecnr-rc.2
         version: 4.2.0-aztecnr-rc.2
-      '@human.tech/aztec-bridge-sdk':
+      '@human.tech/shield.human.sdk':
         specifier: workspace:*
         version: link:../packages/sdk
       '@human.tech/waap-sdk':

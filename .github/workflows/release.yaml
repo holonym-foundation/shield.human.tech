@@ -32,7 +32,7 @@ jobs:
         run: pnpm install
 
       - name: Build SDK
-        run: pnpm build --filter=@human.tech/aztec-bridge-sdk
+        run: pnpm build --filter=@human.tech/shield.human.sdk
 
       - name: Publish
         run: |

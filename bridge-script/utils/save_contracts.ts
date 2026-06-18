@@ -287,7 +287,7 @@ export function copyToFrontend(): void {
 /**
  * Bundle all deployments + registry into the SDK's contracts/deployments.json.
  *
- * The SDK (`@human.tech/aztec-bridge-sdk`) resolves contract/token addresses for the actual
+ * The SDK (`@human.tech/shield.human.sdk`) resolves contract/token addresses for the actual
  * bridge transaction from THIS file — `createConfig(deployment ?? ACTIVE_DEPLOYMENT_ID)`. The
  * frontend imports the SDK as a workspace package, so without this sync the tx path silently
  * falls back to whatever (stale) deployment the SDK was last built with. Keep it in lockstep
