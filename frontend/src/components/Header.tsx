@@ -8,6 +8,7 @@ import { useL1TokenBalances } from '@/hooks/useL1Operations'
 import { LOGIN_METHODS, WalletType } from '@/types/wallet'
 import Image from 'next/image'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import React, { useEffect, useRef, useState } from 'react'
 import { Tooltip as ReactTooltip } from 'react-tooltip'
 import { silkUrl } from '@/config/l1.config'
@@ -245,6 +246,11 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
   const { isPrivacyModeEnabled, setPrivacyModeEnabled } = useBridgeStore()
   const notify = useToast()
 
+  // The docs pages are a standalone reading view — no wallet, privacy toggle, or
+  // deployment badge.
+  const pathname = usePathname()
+  const isDocs = pathname?.startsWith('/docs') ?? false
+
   const { data: l1TokenBalances = [] } = useL1TokenBalances()
 
   const sepoliaNativeTokens = l1TokenBalances.find(
@@ -294,6 +300,18 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
   if (!mounted) {
     return (
       <header className="w-full px-4 flex justify-between items-center">
+        <div className="flex-shrink-0">
+          <Link href="/" className="hover:opacity-80 transition-opacity duration-200">
+            <Image src="/assets/svg/human.tech.logo.svg" alt="human.tech" width={120} height={30} />
+          </Link>
+        </div>
+      </header>
+    )
+  }
+
+  if (isDocs) {
+    return (
+      <header className="w-full px-4 pt-3 flex justify-between items-center relative">
         <div className="flex-shrink-0">
           <Link href="/" className="hover:opacity-80 transition-opacity duration-200">
             <Image src="/assets/svg/human.tech.logo.svg" alt="human.tech" width={120} height={30} />

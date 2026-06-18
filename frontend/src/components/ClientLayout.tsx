@@ -6,19 +6,23 @@ import Footer from '@/components/Footer'
 import Header from '@/components/Header'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { motion } from 'framer-motion'
+import { usePathname } from 'next/navigation'
 export default function ClientLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   const { isPrivacyModeEnabled } = useBridgeStore()
+  const pathname = usePathname()
+  // Docs is a neutral reading view — keep the light background even when privacy mode is on.
+  const showPrivacyBackground = isPrivacyModeEnabled && !(pathname?.startsWith('/docs') ?? false)
   return (
     <div className="relative min-h-screen flex flex-col w-full min-w-0" style={{ minHeight: '100vh', minWidth: 0 }}>
       {/* Gradient background */}
       <motion.div
         className="absolute inset-0 z-0"
         animate={{
-          background: isPrivacyModeEnabled
+          background: showPrivacyBackground
             ? 'radial-gradient(#6B6E88, #8B89A8)'
             : 'radial-gradient(#E3E6FF, #FFFFFF)',
         }}

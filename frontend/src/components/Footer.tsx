@@ -61,7 +61,7 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
           <Link href="/docs" className='text-latest-grey-600 hover:text-black'>
             Docs
           </Link>
-          <Link href='https://blog.human.tech/' className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
+          <Link href='https://human.tech/blog' className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
             Blog
           </Link>
           <Link href='https://holonym.notion.site/human-tech-Media-Brand-Guidelines-18babe540a8f809f869ef817713db597' className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
@@ -116,7 +116,7 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
           <Link href="/docs" className='text-latest-grey-600 hover:text-black'>
             Docs
           </Link>
-          <Link href='https://human.tech/blog/proof-of-clean-hands' className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
+          <Link href='https://human.tech/blog' className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
             Blog
           </Link>
           <Link href='https://holonym.notion.site/human-tech-Media-Brand-Guidelines-18babe540a8f809f869ef817713db597' className='text-latest-grey-600 hover:text-black' target='_blank' rel='noopener noreferrer'>
