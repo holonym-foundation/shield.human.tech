@@ -6,7 +6,7 @@ const maxDepositUsd = getBridgeMaxDepositUsd()
 
 export const metadata = {
   title: 'User Guide · Shield',
-  description: 'Risks, limits, tokens, backup, and recovery for Shield, the human.tech bridge to Aztec.',
+  description: 'Risks, limits, tokens, backup, and recovery for the Aztec Token Bridge.',
   alternates: { canonical: 'https://support.shield.human.tech/getting-started' },
 }
 
