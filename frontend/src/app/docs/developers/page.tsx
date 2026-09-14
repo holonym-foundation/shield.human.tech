@@ -5,6 +5,7 @@ import CodeBlock from '@/components/CodeBlock'
 export const metadata = {
   title: 'Developer Guide · Aztec Bridge Docs',
   description: 'Integrate the @human.tech/clean.sdk into your dapp — API reference and examples.',
+  alternates: { canonical: 'https://support.shield.human.tech/developers' },
 }
 
 const sections: DocsSection[] = [
