@@ -52,7 +52,7 @@ export const CLEAN_HANDS_ACTION_ID = process.env.CLEAN_HANDS_ACTION_ID ?? '12345
 export const PASSPORT_SCORE_THRESHOLD = process.env.PASSPORT_SCORE_THRESHOLD ?? '20'
 export const PASSPORT_MAX_AMOUNT = process.env.PASSPORT_MAX_AMOUNT ?? '1000000000'
 // Alpha Mainnet per-user, per-day (rolling 24h) deposit cap (USD). '' or '0' disables it.
-export const BRIDGE_MAX_DEPOSIT_USD = process.env.BRIDGE_MAX_DEPOSIT_USD ?? '25000'
+export const BRIDGE_MAX_DEPOSIT_USD = process.env.BRIDGE_MAX_DEPOSIT_USD ?? '100'
 // Cumulative per-human lifetime volume (USD) above which the passport tier is
 // refused and POCH (Clean Hands) is required. '' or '0' disables it.
 export const TRAVEL_RULE_THRESHOLD_USD = process.env.TRAVEL_RULE_THRESHOLD_USD ?? '1000'

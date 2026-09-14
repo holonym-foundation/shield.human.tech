@@ -1,0 +1,30 @@
+# Shield — human.tech's accountable privacy bridge on Aztec
+
+> Shield (shield.human.tech) is the human.tech bridge between Ethereum (L1) and Aztec (L2). It pairs privacy with accountability: every transfer proves, in zero knowledge, Proof of Personhood (a unique, verified human is behind the transfer) and Proof of Innocence (the address is screened against 23 international sanctions sources via sanctions.io, at both entry and exit). Bridge in, hold shielded on Aztec, and withdraw through a re-screened exit. Non-custodial — no operator holds bridged tokens in transit. Live on Aztec v5 mainnet. This file indexes the app and developer documentation; the support knowledge base has its own index at https://support.shield.human.tech/llms.txt.
+
+Last updated: 2026-08-27
+
+## Pages
+
+- [Shield app](https://shield.human.tech): The bridge interface. Connect a wallet, verify identity (Proof of Clean Hands or Human Passport), choose public or private mode, and bridge ERC-20 tokens (USDC today) between Ethereum and Aztec.
+- [Documentation](https://shield.human.tech/docs): Entry point to the user guides and the developer/SDK reference.
+- [User Guide](https://shield.human.tech/docs/users): risks, rate limits and deposit caps, public vs private mode, and backup/resume for in-progress transfers.
+- [Developer Guide](https://shield.human.tech/docs/developers): Integrating the `@human.tech/clean.sdk` — install and initialize, bridge L1↔L2, events and error handling, and the TypeScript reference.
+
+## Key facts
+
+- Bridge direction: Ethereum L1 to/from Aztec L2 (deposit and re-screened withdrawal).
+- Identity gate: every transfer requires a Proof of Clean Hands (full KYC, unlimited bridging) or Human Passport (humanity score 20+, up to 1,000 USDC cumulative before a Proof of Clean Hands upgrade is required) attestation, plus per-transfer sanctions screening.
+- Sanctions screening: 23 international sources via sanctions.io, applied at entry and exit; the flow fails closed if the provider is unreachable.
+- Privacy: no plaintext personal data is stored at rest — identity data is threshold-encrypted at issuance, and identity verification uses zero-knowledge proofs. Funds are held shielded on Aztec (recorded as note hashes); the L1 bridge legs (deposit and withdrawal) are public on Ethereum.
+- Custody: non-custodial. Collateral is locked in the open-source TokenPortal contract; no operator holds bridged tokens during transit.
+- Fees: 0.5% bridge fee, plus L1 gas; L2 gas is paid in FeeJuice, auto-converted from a portion of the deposit.
+- SDK: `@human.tech/clean.sdk` — https://www.npmjs.com/package/@human.tech/clean.sdk
+
+## Links
+
+- App: https://shield.human.tech
+- Docs: https://shield.human.tech/docs
+- Support knowledge base: https://support.shield.human.tech (agent index: https://support.shield.human.tech/llms.txt)
+- Source: https://github.com/holonym-foundation/aztec-bridge
+- Community: https://discord.gg/humantech

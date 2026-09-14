@@ -10,11 +10,7 @@ export function openSupport(): boolean {
   if (typeof window === 'undefined') return false
 
   // 1. A control object on the global, if a future widget build exposes one.
-  const globals = [
-    (window as any).Iris,
-    (window as any).IrisWidget,
-    (window as any).iris,
-  ]
+  const globals = [(window as any).Iris, (window as any).IrisWidget, (window as any).iris]
   for (const g of globals) {
     const fn = g?.open ?? g?.show ?? g?.toggle
     if (typeof fn === 'function') {
@@ -27,8 +23,9 @@ export function openSupport(): boolean {
     }
   }
 
-  // 2. Reach the launcher through the widget host. attachShadow is closed today so
-  //    host.shadowRoot is null, but guard for a future open-mode build.
+  // 2. Reach the launcher through the widget host. The widget itself requests a CLOSED
+  //    root; src/app/layout.tsx intercepts that call and forces it open, which is what
+  //    makes this path reachable. Still guarded in case that interception ever misses.
   try {
     const host = document.getElementById('iris-widget-host') as (HTMLElement & { shadowRoot: ShadowRoot | null }) | null
     const root = host?.shadowRoot
@@ -67,11 +64,7 @@ export function isSupportOpenable(): boolean {
   if (typeof window === 'undefined') return false
 
   // 1. A callable control method on the global (future widget build).
-  const globals = [
-    (window as any).Iris,
-    (window as any).IrisWidget,
-    (window as any).iris,
-  ]
+  const globals = [(window as any).Iris, (window as any).IrisWidget, (window as any).iris]
   for (const g of globals) {
     const fn = g?.open ?? g?.show ?? g?.toggle
     if (typeof fn === 'function') return true

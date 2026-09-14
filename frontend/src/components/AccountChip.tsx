@@ -63,8 +63,13 @@ const HUMN_POINTS_LIVE = false
 // Compliance figures surfaced in the account dropdown. Both come from env
 // (BRIDGE_MAX_DEPOSIT_USD, TRAVEL_RULE_THRESHOLD_USD) — never hardcoded — so
 // they track config. Neither is NEXT_PUBLIC, so on the client `process.env`
-// returns undefined and they resolve to their config defaults ($25k / $1,000).
-const DEPOSIT_CAP_LABEL = `$${Number(BRIDGE_MAX_DEPOSIT_USD) / 1000}k`
+// returns undefined and they resolve to their config defaults, so a server-only
+// override moves enforcement without moving this label.
+// Thousands abbreviate to "$25k"; under 1,000 must print in full, or a $10 cap
+// renders as "$0.01k".
+const DEPOSIT_CAP_USD = Number(BRIDGE_MAX_DEPOSIT_USD)
+const DEPOSIT_CAP_LABEL =
+  DEPOSIT_CAP_USD >= 1000 ? `$${DEPOSIT_CAP_USD / 1000}k` : `$${DEPOSIT_CAP_USD.toLocaleString('en-US')}`
 const TRAVEL_RULE_LABEL = `$${Number(TRAVEL_RULE_THRESHOLD_USD).toLocaleString()}`
 
 // ─── Theme helpers (ported from Header's glass-pill vocabulary; this app is

@@ -18,11 +18,7 @@ import { motion } from 'framer-motion'
 import { MeshGradient } from '@paper-design/shaders-react'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-export default function ClientLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const { isPrivacyModeEnabled } = useBridgeStore()
   const pathname = usePathname()
   // Docs is a public, neutral reading surface: reachable without the onboarding gate and
@@ -40,11 +36,10 @@ export default function ClientLayout({
   // Support binder tab until it's reliable. Flip back to true once Iris is stable. While
   // off, we also stop suppressing the native Iris launcher so support isn't fully hidden.
   const SUPPORT_TAB_ENABLED = false
-  // Iris support is unreliable right now, so pull the native floating bubble entirely
-  // until Maylynne has it working — a support entry point that opens nothing (or a
-  // broken widget) is worse than none. Flip back to true once Iris is stable (pairs
-  // with SUPPORT_TAB_ENABLED / shield.human.tech#96).
-  const IRIS_ENABLED = false
+  // Kill switch for the native floating bubble: a support entry point that opens
+  // nothing is worse than none, so flip this to false if Iris starts failing again
+  // (pairs with SUPPORT_TAB_ENABLED / shield.human.tech#96).
+  const IRIS_ENABLED = true
   const [hideNativeBubble, setHideNativeBubble] = useState(false)
   useEffect(() => {
     if (isSupportOpenable()) {
@@ -121,28 +116,28 @@ export default function ClientLayout({
           />
         </div>
       ) : (
-      <div className="absolute inset-0 z-0" aria-hidden="true">
-        <MeshGradient
-          colors={['#fff6fa', '#fde7f3', '#fcd4ea', '#fa8fc4']}
-          speed={0.16}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-        />
-        <motion.div
-          className="absolute inset-0"
-          // initial={false} renders the background at its target on mount (no
-          // enter animation) so when Privacy Mode is the default the dark field
-          // is applied synchronously on first paint instead of animating up
-          // from light — the toggle transition on later changes is unaffected (#94).
-          initial={false}
-          animate={{
-            background: showPrivacyBackground
-              ? 'rgba(31,8,22,0.66)'
-              : 'linear-gradient(180deg, rgba(255,246,250,0.30), rgba(255,246,250,0.62))',
-          }}
-          transition={{ duration: 0.6, ease: 'easeInOut' }}
-          style={{ willChange: 'background' }}
-        />
-      </div>
+        <div className="absolute inset-0 z-0" aria-hidden="true">
+          <MeshGradient
+            colors={['#fff6fa', '#fde7f3', '#fcd4ea', '#fa8fc4']}
+            speed={0.16}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+          />
+          <motion.div
+            className="absolute inset-0"
+            // initial={false} renders the background at its target on mount (no
+            // enter animation) so when Privacy Mode is the default the dark field
+            // is applied synchronously on first paint instead of animating up
+            // from light — the toggle transition on later changes is unaffected (#94).
+            initial={false}
+            animate={{
+              background: showPrivacyBackground
+                ? 'rgba(31,8,22,0.66)'
+                : 'linear-gradient(180deg, rgba(255,246,250,0.30), rgba(255,246,250,0.62))',
+            }}
+            transition={{ duration: 0.6, ease: 'easeInOut' }}
+            style={{ willChange: 'background' }}
+          />
+        </div>
       )}
       {/* Grain overlay */}
       {/* <motion.div

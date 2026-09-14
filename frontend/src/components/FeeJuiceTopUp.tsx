@@ -440,7 +440,7 @@ const FeeJuiceTopUp: React.FC<FeeJuiceTopUpProps> = ({
   // the spend against the compliance deposit cap. So we gate the top-up on the same remaining
   // figure the bridge form uses, and never let the user confirm a top-up the backend will reject.
   // Tier-appropriate remaining: a Passport user is bound by the Travel Rule (travelRuleRemainingUsd),
-  // a PoCH user by the $25k/day deposit cap (remainingDepositUsd); undefined = cap disabled, no gate.
+  // a PoCH user by the daily deposit cap (remainingDepositUsd); undefined = cap disabled, no gate.
   // This can be relaxed ONLY once the backend ships a fuel-only-deposit exemption (a `fuelOnly` flag
   // on the attestation request that skips fuel spend from the cap), at which point both layers drop
   // the gate together.

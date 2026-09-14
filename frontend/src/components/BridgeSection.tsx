@@ -229,7 +229,7 @@ interface BridgeSectionProps {
   // Max USD the user can bridge right now (remaining budget under the active cap). Undefined
   // when the cap is disabled — the pill then falls back to the static cap label.
   remainingDepositUsd?: number
-  // Passport tier is bound by the Travel Rule (the $1,000 lifetime threshold), not the $25k
+  // Passport tier is bound by the Travel Rule (the lifetime threshold), not the daily
   // deposit cap. This is the USD left before that threshold — the remaining figure the pill must
   // show for a Passport user. remainingDepositUsd is the deposit-cap remainder and does not apply
   // to them, so using it produced the "$24,700 of $1,000 left" nonsense.
@@ -341,8 +341,8 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
   const isPoch = attestationMethod === 'poch'
 
   // Per-human deposit LIMIT for the ACTIVE tier: the figure the pill shows. Passport-only
-  // is held to the Travel-Rule threshold ($1k). Clean Hands (PoCH) unlocks the full alpha
-  // cap ($25k). These are strictly tier-gated so a Passport-only user never sees the
+  // is held to the Travel-Rule threshold. Clean Hands (PoCH) is held to the alpha daily
+  // cap. These are strictly tier-gated so a Passport-only user never sees the
   // Clean-Hands cap. pochDailyLimitUsd is threaded from BRIDGE_MAX_DEPOSIT_USD upstream;
   // fall back to the same config value if it isn't passed.
   const cleanHandsLimitUsd = pochDailyLimitUsd ?? Number(BRIDGE_MAX_DEPOSIT_USD)
@@ -462,11 +462,11 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
   // tier uses the Human Passport mark, Clean Hands tier uses the Clean Hands mark. The
   // mark is rendered in black via CSS mask so it reads as the real brand logo, not a tint.
   const badgeIconSrc = isPoch ? '/assets/svg/clean-hands.svg' : '/assets/svg/passport.svg'
-  // Compact cap shown under the balance. Passport is a per-human tier limit; the Clean Hands cap
-  // ($25k) is a DAILY cap, so it carries a "/day" suffix. The "per human" framing lives in the tooltip.
+  // Compact cap shown under the balance. Passport is a per-human lifetime limit; the Clean
+  // Hands cap is a DAILY cap, so it carries a "/day" suffix. The "per human" framing lives in the tooltip.
   const limitLabel = tierLimitUsd > 0 ? `Limit: ${formatUsd(tierLimitUsd)}${isPoch ? '/day' : ''}` : null
-  // Tier-appropriate remaining budget for the pill. A PoCH user is bound by the $25k/day deposit
-  // cap, so theirs is remainingDepositUsd. A Passport user is bound by the Travel Rule (the $1k
+  // Tier-appropriate remaining budget for the pill. A PoCH user is bound by the daily deposit
+  // cap, so theirs is remainingDepositUsd. A Passport user is bound by the Travel Rule (the
   // lifetime threshold), so theirs is travelRuleRemainingUsd — remainingDepositUsd would surface
   // a deposit-cap remainder they can never reach. Clamp into [0, tierLimitUsd] so the pill never
   // reads a remaining larger than the tier's own cap.

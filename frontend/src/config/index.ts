@@ -106,6 +106,10 @@ const activeEnvConfig = ENV_CONFIG[AZTEC_ENV]
 
 export const L1_CHAIN_ID = activeDeployment.network.l1ChainId
 export const IS_MAINNET = L1_CHAIN_ID === 1
+// Distinguishes the production web deployment (Aztec mainnet → shield.human.tech) from
+// testnet.shield.human.tech. IS_MAINNET can't: it tracks the L1 chain, which is Ethereum
+// mainnet even on the Aztec testnet/alpha, so it's true on both hosts.
+export const IS_PROD_DEPLOYMENT = AZTEC_ENV === 'mainnet'
 export const L2_CHAIN_ID = activeDeployment.network.l2ChainId
 export const L2_CHAIN_KEY = `aztec:${L2_CHAIN_ID}`
 export const L1_RPC_URL = activeEnvConfig.l1RpcUrl

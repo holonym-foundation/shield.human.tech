@@ -13,7 +13,7 @@ export const metadata = {
 const sections: DocsSection[] = [
   {
     id: 'alpha',
-    label: 'Mainnet Alpha',
+    label: 'Network & Risks',
     content: (
       <>
         <P>
@@ -120,11 +120,18 @@ const sections: DocsSection[] = [
             carries the highest limit.
           </li>
           <li>
-            <strong>Human Passport.</strong> A fallback that requires a Human Passport score of at least 20. It caps each
-            transaction (see <a href="#limits" className="text-latest-blue-100 underline">Rate Limits &amp; Caps</a>);
-            completing Proof of Clean Hands removes that per-transaction cap.
+            <strong>Human Passport.</strong> A fallback that requires a Human Passport score of at least 20. It covers
+            up to 1,000 USDC in total deposits (see <a href="#limits" className="text-latest-blue-100 underline">Rate
+            Limits &amp; Caps</a>); completing Proof of Clean Hands lifts that cumulative limit. Daily limits still
+            apply either way.
           </li>
         </UL>
+        <P>
+          Separately from the one-time identity check, your Ethereum address is screened against international
+          sanctions and watchlist sources on <strong>every deposit and every withdrawal</strong>, in both public and
+          private mode. The screen looks at the address, not at the tokens. It runs again at exit because sanctions
+          listings change over time, so a withdrawal can be refused even if your deposit cleared.
+        </P>
         <Callout tone="info">
           When verification is needed, the bridge links you to the right place to complete it, then you can continue
           where you left off.
@@ -138,7 +145,7 @@ const sections: DocsSection[] = [
     content: (
       <>
         <P>
-          Two limits apply during Mainnet Alpha. See{' '}
+          Two limits apply while the network is in Alpha. See{' '}
           <a href="#verification" className="text-latest-blue-100 underline">Verification</a> for how to qualify.
         </P>
         <Table>
@@ -156,9 +163,11 @@ const sections: DocsSection[] = [
               <Td>Total deposits per rolling 24h window. Shown as &quot;Alpha Deposit Limit Reached&quot; once used up; budget frees up as deposits age past 24h.</Td>
             </tr>
             <tr>
-              <Td>Per-transaction (Human Passport)</Td>
-              <Td>up to 1,000 USDC</Td>
-              <Td>Requires a Human Passport attestation with score ≥ 20.</Td>
+              <Td>Cumulative (Human Passport)</Td>
+              <Td>up to 1,000 USDC total</Td>
+              <Td>Requires a Human Passport attestation with score ≥ 20. This is an all-time total across
+                deposits, so splitting a larger amount into several smaller ones does not get around it. Past
+                1,000 USDC you need Proof of Clean Hands.</Td>
             </tr>
           </tbody>
         </Table>
@@ -210,9 +219,11 @@ const sections: DocsSection[] = [
         <P>Toggle between modes with the icon in the header. Your choice is remembered between visits.</P>
         <UL>
           <li>
-            <strong>Private mode.</strong> Transactions are masked and untraceable. Your balance and history live as
-            private notes in your Aztec wallet — invisible on-chain. Gas funding (fuel) is routed through the Bridged
-            Fee Payment Contract.
+            <strong>Private mode.</strong> Your balance and history live as private notes in your Aztec wallet, so
+            your activity on Aztec is not visible on the Aztec explorer. Gas funding (fuel) is routed through the
+            Bridged Fee Payment Contract. Note that the Ethereum side stays public either way: your deposit and your
+            later withdrawal are both visible on Ethereum, so someone watching that address can see you used the
+            bridge and for how much.
           </li>
           <li>
             <strong>Public mode.</strong> Your balance and transfers are visible on the Aztec block explorer. Fuel can
