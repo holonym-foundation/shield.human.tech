@@ -214,9 +214,12 @@ export const INTERMEDIATE_POOL_TICK_SPACING = 60 as const
 // Final hop (ETH/AZTEC pool). Mainnet deep pool (~$11M TVL, pool id 0xce2899b1…) is
 // fee=500 / tickSpacing=10 with the CCA token-sale hook 0xd53006d1…. The hookless
 // fee=10000/ts=200 pool also exists but is ~28x shallower. Verified on-chain via V4 Quoter.
-export const FEE_POOL_FEE = 500 as const
-export const FEE_POOL_TICK_SPACING = 10 as const
-export const FEE_POOL_HOOKS = '0xd53006d1e3110fd319a79aeec4c527a0d265e080' as const
+// Sepolia pools are seeded by bridge-script/seed-pools.ts: fee=3000 / tickSpacing=60, no hook.
+export const FEE_POOL_FEE = IS_MAINNET ? 500 : 3000
+export const FEE_POOL_TICK_SPACING = IS_MAINNET ? 10 : 60
+export const FEE_POOL_HOOKS: `0x${string}` = IS_MAINNET
+  ? '0xd53006d1e3110fd319a79aeec4c527a0d265e080'
+  : '0x0000000000000000000000000000000000000000'
 // Native ETH pool: mainnet uses native ETH (address(0)), Sepolia too
 export const FEE_POOL_USES_NATIVE_ETH = true as const
 // Direct pool (e.g. USDC/FeeJuice) — for smart routing when a direct path exists
