@@ -18,7 +18,7 @@ import { computeSecretHash } from '@aztec/stdlib/hash'
 import { AztecAddress } from '@aztec/stdlib/aztec-address'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { extractEvent } from '@aztec/ethereum/utils'
-import { encodeFunctionData, decodeEventLog, parseUnits, keccak256, encodeAbiParameters } from 'viem'
+import { encodeFunctionData, decodeEventLog, parseUnits, keccak256, encodeAbiParameters, maxUint256 } from 'viem'
 import { CustomTokenPortalAbi } from '../contracts/abis/CustomTokenPortalAbi'
 
 import type { BridgeApiClient } from '../api'
@@ -874,13 +874,20 @@ export async function bridgeL1ToL2(
       }
     }
 
-    // Check and approve allowance for Permit2. All deposits go through
-    // SwapBridgeRouter with Permit2 — approve the canonical Permit2 contract for
-    // exactly this deposit's amount rather than max uint256, so a leaked/abused
-    // Permit2 allowance can't drain more than the current bridge. Consumed each
-    // deposit, so a fresh approval is sent whenever the remaining allowance is short.
+    // Approve the canonical Permit2 contract ONCE (max uint256) rather than for exactly
+    // this deposit's amount. This is the standard Permit2 pattern: the ERC-20 -> Permit2
+    // approval is a coarse allowance; the ACTUAL per-deposit spend is still bound by the
+    // signed Permit2 witness transfer sent below, so a max approval here does NOT let
+    // anything move funds without the user's per-deposit signature. The prior exact-amount
+    // approval was consumed on every deposit and re-sent each time, so an on-chain `approve`
+    // tx fired on essentially every deposit — cutting it to a one-time approval drops the
+    // wallet confirmations per deposit from 3 (approve + Permit2 sig + bridge) to 2.
+    // Security tradeoff (for review): the standing allowance is to the audited canonical
+    // Permit2 contract only, and Permit2 SignatureTransfer never moves funds without a
+    // fresh witness signature — so the added surface is a max ERC-20 allowance to Permit2,
+    // the same posture Uniswap and most Permit2 integrations ship.
     const spender = PERMIT2_ADDRESS
-    const totalApprovalNeeded = amount
+    const totalApprovalNeeded = maxUint256
 
     const allowance = await publicClient.readContract({
       address: tokenConfig.l1TokenContract as `0x${string}`,
