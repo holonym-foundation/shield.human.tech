@@ -12,7 +12,9 @@
  * the tests can recover the signer from the signature.
  */
 export const E2E_ENV = {
-  JWT_SECRET: 'e2e-jwt-secret',
+  // Long enough for the minimum the signer enforces: HS256 is a keyed hash, so a
+  // short secret is recoverable offline from any issued token.
+  JWT_SECRET: 'e2e-jwt-secret-0000000000000000000',
   AUTH_EXPECTED_DOMAIN: 'e2e.shield.test',
 
   PASSPORT_SIGNER_PRIVATE_KEY: `0x${'11'.repeat(32)}`,
@@ -31,6 +33,11 @@ export const E2E_ENV = {
 
   SANCTIONS_SCREENING_ENABLED: 'true',
   SANCTIONS_IO_API_KEY: 'e2e-sanctions-key',
+
+  // The hold resolver reads the portals' nonce mappings to decide whether an
+  // expired hold was abandoned. Point it at a host the upstream stub answers, so
+  // that decision is steerable instead of permanently unreadable.
+  NEXT_PUBLIC_L1_RPC_SEPOLIA: 'https://l1-rpc.e2e.test',
 } as const
 
 export const E2E_ORIGIN = `https://${E2E_ENV.AUTH_EXPECTED_DOMAIN}`

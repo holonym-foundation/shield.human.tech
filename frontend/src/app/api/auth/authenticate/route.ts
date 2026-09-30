@@ -4,43 +4,34 @@ import { SiweMessage } from 'siwe'
 import { prisma } from '@/lib/prisma'
 import { signJWT } from '@/lib/jwt'
 import { consumeNonce } from '@/lib/siweNonceStore'
-import { AuthenticateSchema } from '@/lib/validation'
-import { AUTH_EXPECTED_DOMAIN } from '@/config/env.config'
+import { AuthenticateSchema, getClientIp } from '@/lib/validation'
+import { getAllowedAppHosts, getAllowedAppOrigins, isLocalDevHost } from '@/lib/domainAllowlist'
 
 /** Aztec address: 0x followed by 64 hex chars */
 const AZTEC_ADDRESS_REGEX = /^0x[a-fA-F0-9]{64}$/
-const DEFAULT_ALLOWED_SIWE_DOMAINS = ['shield.human.tech', 'testnet.shield.human.tech']
 
-/**
- * Build the allow-list of SIWE domains this deployment accepts.
- * `AUTH_EXPECTED_DOMAIN` may be a single host or a comma-separated list.
- * localhost is always allowed for local development.
- */
-function getAllowedSiweDomains(requestHost: string): Set<string> {
-  const domains = new Set(DEFAULT_ALLOWED_SIWE_DOMAINS)
-  for (const part of AUTH_EXPECTED_DOMAIN.split(',')) {
-    const trimmed = part.trim()
-    if (trimmed) domains.add(trimmed)
-  }
+function isAllowedSiweDomain(domain: string): boolean {
+  return getAllowedAppHosts().has(domain) || isLocalDevHost(domain)
+}
 
-  if (requestHost.startsWith('localhost') || requestHost.startsWith('127.0.0.1')) {
-    domains.add(requestHost)
-  }
-
-  return domains
+function isAllowedResourceOrigin(origin: string): boolean {
+  return getAllowedAppOrigins().has(origin) || isLocalDevHost(origin)
 }
 
 /**
  * Extract and validate the L2 (Aztec) address from SIWE resources.
  * Returns lowercase address or null if invalid.
  */
-function extractL2Address(resources: string[] | undefined, allowedOrigins: Set<string>): string | null {
+function extractL2Address(
+  resources: string[] | undefined,
+  isAllowedOrigin: (origin: string) => boolean,
+): string | null {
   if (!resources || resources.length === 0) return null
 
   for (const resource of resources) {
     try {
       const url = new URL(resource)
-      if (!allowedOrigins.has(url.origin)) continue
+      if (!isAllowedOrigin(url.origin)) continue
 
       const match = url.pathname.match(/^\/aztec\/address\/(0x[a-fA-F0-9]{64})$/)
       if (!match) continue
@@ -97,13 +88,10 @@ export async function POST(request: NextRequest) {
     // This prevents a DoS where an attacker submits a valid nonce with an
     // invalid signature, burning the nonce before the legitimate user.
     //
-    // pin the expected domain to env (AUTH_EXPECTED_DOMAIN) instead of
-    // trusting the request Host header. A misconfigured proxy that lets an
-    // attacker send Host: evil.com would otherwise verify a SIWE message
-    // signed for evil.com. localhost is still allowed for dev convenience.
-    const requestHost = request.headers.get('host') ?? ''
-    const allowedDomains = getAllowedSiweDomains(requestHost)
-    if (!allowedDomains.has(siweMessage.domain)) {
+    // The accepted domain comes from this deployment's own network, never from
+    // the request: a proxy that let an attacker set Host would otherwise let
+    // them choose the domain the user was shown before signing.
+    if (!isAllowedSiweDomain(siweMessage.domain)) {
       return NextResponse.json({ error: `Invalid SIWE domain: ${siweMessage.domain}` }, { status: 401 })
     }
 
@@ -129,16 +117,19 @@ export async function POST(request: NextRequest) {
     const normalizedL1 = siweMessage.address.toLowerCase()
 
     // L2 address: from resources field (validated format)
-    const allowedResourceOrigins = new Set<string>()
+    // The uri is signed but attacker-chosen, so it is checked against the
+    // allow-list rather than used to widen it.
+    let siweUriOrigin: string
     try {
-      allowedResourceOrigins.add(new URL(siweMessage.uri).origin)
+      siweUriOrigin = new URL(siweMessage.uri).origin
     } catch {
       return NextResponse.json({ error: 'Invalid SIWE uri' }, { status: 400 })
     }
-    allowedResourceOrigins.add('https://shield.human.tech')
-    allowedResourceOrigins.add('https://testnet.shield.human.tech')
+    if (!isAllowedResourceOrigin(siweUriOrigin)) {
+      return NextResponse.json({ error: `Invalid SIWE uri origin: ${siweUriOrigin}` }, { status: 401 })
+    }
 
-    const normalizedL2 = extractL2Address(siweMessage.resources, allowedResourceOrigins)
+    const normalizedL2 = extractL2Address(siweMessage.resources, isAllowedResourceOrigin)
     if (!normalizedL2) {
       return NextResponse.json(
         { error: 'L2 address required in resources (must be a valid Aztec address URL for this origin)' },
@@ -147,8 +138,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Upsert user ──────────────────────────────────────────────────
-    const clientIp =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip') ?? null
+    const clientIp = getClientIp(request.headers) ?? null
 
     const user = await prisma.user.upsert({
       where: {

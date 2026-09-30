@@ -6,7 +6,7 @@ import {
   getPassportMaxAmount,
 } from '@/lib/attestation'
 import {
-  enforceAddressBinding,
+  checkAddressBindingConflict,
   evaluateDepositLimit,
   evaluateTravelRuleThreshold,
   getReservedDepositUsd,
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     const { l1Address, l2Address } = authResult.user
 
     // Check address binding (l1 <-> l2 must be 1:1)
-    const bindingError = await enforceAddressBinding(l1Address, l2Address)
+    const bindingError = await checkAddressBindingConflict(l1Address, l2Address)
     if (bindingError) {
       return NextResponse.json({
         eligible: false,

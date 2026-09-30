@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { BridgeDirection, BridgeOperationStatus } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
-import { getAllowedAppOrigins, normalizeAppOrigin } from '@/lib/domainAllowlist'
+import { getAllowedAppOrigins, normalizeAppOrigin, isLocalDevHost } from '@/lib/domainAllowlist'
 import {
   sanitizeString,
   sanitizeEthAddress,
@@ -13,6 +13,7 @@ import {
   sanitizeBoolean,
   sanitizeNodeInfo,
   sanitizeCiphertext,
+  getClientIp,
   MAX_STRING_LENGTH,
 } from '@/lib/validation'
 
@@ -20,22 +21,9 @@ import {
 const VALID_DIRECTIONS = new Set(['L1_TO_L2', 'L2_TO_L1'])
 
 /** Allow configured app origins and localhost in development for key derivation domain. */
-function isAllowedKeyDerivationDomain(domain: string, requestHost: string): boolean {
+function isAllowedKeyDerivationDomain(domain: string): boolean {
   const normalizedDomain = normalizeAppOrigin(domain)
-  const allowedOrigins = getAllowedAppOrigins()
-  if (requestHost) {
-    allowedOrigins.add(normalizeAppOrigin(`https://${requestHost}`))
-  }
-  if (allowedOrigins.has(normalizedDomain)) return true
-  if (process.env.NODE_ENV !== 'production') {
-    try {
-      const u = new URL(normalizedDomain)
-      return u.hostname === 'localhost' || u.hostname === '127.0.0.1'
-    } catch {
-      return false
-    }
-  }
-  return false
+  return getAllowedAppOrigins().has(normalizedDomain) || isLocalDevHost(normalizedDomain)
 }
 
 /**
@@ -248,8 +236,7 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       )
     }
-    const requestHost = request.headers.get('host') ?? ''
-    if (!isAllowedKeyDerivationDomain(keyDerivationDomain, requestHost)) {
+    if (!isAllowedKeyDerivationDomain(keyDerivationDomain)) {
       return NextResponse.json({ error: 'Invalid keyDerivationDomain' }, { status: 400 })
     }
     if (!l1Address) {
@@ -324,10 +311,7 @@ export async function POST(request: NextRequest) {
         privateFuelSecretHash: privateFuelSecretHash ?? undefined,
         fuelRecipient: isL2ToL1 ? undefined : fuelRecipient,
         // Client IP for audit trail
-        clientIp:
-          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-          request.headers.get('x-real-ip') ??
-          undefined,
+        clientIp: getClientIp(request.headers),
       },
     })
 

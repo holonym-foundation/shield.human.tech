@@ -7,7 +7,7 @@ import { GET as pochCheckRoute } from '@/app/api/attestation/poch/check/route'
 import { GET as statusRoute } from '@/app/api/attestation/status/route'
 import { GET as l1EligibilityRoute } from '@/app/api/attestation/l1-eligibility/route'
 
-import { db, resetDb, settleDeposit } from './helpers/db'
+import { db, resetDb, settleHold } from './helpers/db'
 import { call } from './helpers/request'
 import { aztecAddress, login, loginWithL2, wallet, type Session } from './helpers/session'
 import { installUpstreams, type UpstreamState } from './helpers/upstreams'
@@ -151,7 +151,9 @@ describe('issuing a POCH attestation', () => {
     expect(upstreams.calls.cleanHands).toBe(0)
   })
 
-  it('refuses an L2 address already bound to someone else', async () => {
+  it('does not let a claim on the Aztec address lock its owner out', async () => {
+    // Only the L1 half is proven by SIWE. Refusing on the L2 half let any wallet
+    // name a stranger's Aztec account and bar them from the bridge permanently.
     const shared = aztecAddress(actor)
     const first = await loginWithL2(actor, shared)
     await attest(first)
@@ -159,15 +161,17 @@ describe('issuing a POCH attestation', () => {
     const second = await loginWithL2(otherActor(), shared)
     const result = await attest(second)
 
-    expect(result.status).toBe(403)
-    expect(result.body.error).toContain('already bound')
+    expect(result.status).toBe(200)
+    // The first claimant keeps their binding; the second simply stays unbound.
+    expect((await db.addressBinding.findUnique({ where: { l1Address: first.l1Address } }))?.l2Address).toBe(shared)
+    expect(await db.addressBinding.findUnique({ where: { l1Address: second.l1Address } })).toBeNull()
   })
 })
 
 describe('the daily deposit cap on POCH', () => {
   it('refuses once the day\'s confirmed volume plus this request passes the cap', async () => {
     const session = await login(actor)
-    await settleDeposit(session, DAILY_CAP - 10)
+    await settleHold(session, DAILY_CAP - 10, { method: 'poch' })
 
     const result = await attest(session, {
       direction: 'L1_TO_L2',
@@ -184,7 +188,7 @@ describe('the daily deposit cap on POCH', () => {
     // The PR #27 class of bug: gating on an explicit L1_TO_L2 let a body with no
     // direction through uncapped.
     const session = await login(actor)
-    await settleDeposit(session, DAILY_CAP)
+    await settleHold(session, DAILY_CAP, { method: 'poch' })
 
     const omitted = await attest(session, { amount: (100n * USDC).toString() })
     const explicit = await attest(session, { direction: 'L1_TO_L2', amount: (100n * USDC).toString() })
@@ -197,7 +201,7 @@ describe('the daily deposit cap on POCH', () => {
     // A withdrawal is uncapped, so it must not come back with the L1 signature a
     // deposit consumes.
     const session = await login(actor)
-    await settleDeposit(session, DAILY_CAP)
+    await settleHold(session, DAILY_CAP, { method: 'poch' })
 
     const result = await attest(session, { direction: 'L2_TO_L1', amount: (100n * USDC).toString() })
 
@@ -208,7 +212,7 @@ describe('the daily deposit cap on POCH', () => {
 
   it('drops deposits that fell out of the rolling window', async () => {
     const session = await login(actor)
-    await settleDeposit(session, DAILY_CAP, { createdAt: new Date(Date.now() - 25 * 3600 * 1000) })
+    await settleHold(session, DAILY_CAP, { method: 'poch', createdAt: new Date(Date.now() - 25 * 3600 * 1000) })
 
     const result = await attest(session, { amount: (100n * USDC).toString() })
 
@@ -217,7 +221,7 @@ describe('the daily deposit cap on POCH', () => {
 
   it('ignores deposits belonging to another user', async () => {
     const other = await login(otherActor())
-    await settleDeposit(other, DAILY_CAP)
+    await settleHold(other, DAILY_CAP, { method: 'poch' })
     const session = await login(actor)
 
     const result = await attest(session, { amount: (100n * USDC).toString() })
@@ -229,7 +233,8 @@ describe('the daily deposit cap on POCH', () => {
     // The threshold is what forces the passport tier to upgrade to POCH. Applying
     // it here too would leave a verified human with nowhere left to upgrade.
     const session = await login(actor)
-    await settleDeposit(session, Number(E2E_ENV.TRAVEL_RULE_THRESHOLD_USD) * 5)
+    // Passport-tier volume, five times over the threshold, and well under the day's cap.
+    await settleHold(session, Number(E2E_ENV.TRAVEL_RULE_THRESHOLD_USD) * 5)
 
     const result = await attest(session, { amount: (100n * USDC).toString() })
 
@@ -260,7 +265,7 @@ describe('the POCH pre-check', () => {
 
   it('surfaces the budget left for today', async () => {
     const session = await login(actor)
-    await settleDeposit(session, 400)
+    await settleHold(session, 400, { method: 'poch' })
 
     const { body } = await check(session)
 
@@ -270,7 +275,7 @@ describe('the POCH pre-check', () => {
 
   it('flags a spent budget so the UI can block before signing', async () => {
     const session = await login(actor)
-    await settleDeposit(session, DAILY_CAP)
+    await settleHold(session, DAILY_CAP, { method: 'poch' })
 
     const { body } = await check(session)
 
@@ -326,7 +331,18 @@ describe('attestation status', () => {
     expect(body.binding.l2Address).toBe(session.l2Address)
   })
 
-  it('reports a conflict when the session pair contradicts the stored binding', async () => {
+  it('reports a conflict on the proven half, when the caller changes Aztec account', async () => {
+    const owner = await loginWithL2(actor, aztecAddress(actor))
+    await attest(owner)
+
+    const moved = await loginWithL2(actor, aztecAddress(actor + 90_000))
+    const { body } = await status(moved)
+
+    expect(body.binding.status).toBe('conflict')
+    expect(body.binding.l2Address).toBe(owner.l2Address)
+  })
+
+  it('discloses nothing to a wallet that merely names someone else’s Aztec account', async () => {
     const shared = aztecAddress(actor)
     const owner = await loginWithL2(actor, shared)
     await attest(owner)
@@ -334,7 +350,11 @@ describe('attestation status', () => {
     const intruder = await loginWithL2(otherActor(), shared)
     const { body } = await status(intruder)
 
-    expect(body.binding.status).toBe('conflict')
+    // Reading a binding made by some other L1 both told the intruder the account
+    // was taken and handed them the L1 address that took it.
+    expect(body.binding.status).toBe('unbound')
+    expect(body.binding.l1Address).toBeNull()
+    expect(body.binding.l2Address).toBeNull()
   })
 
   it('exposes the signer addresses the contracts are configured with', async () => {

@@ -6,12 +6,16 @@ import { L1_TOKENS } from '@/config'
 import { L1_RPC_SEPOLIA, FAUCET_PRIVATE_KEY as ENV_FAUCET_KEY } from '@/config/env.config'
 import { TestERC20Abi } from '@aztec/l1-artifacts'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
+import { checkRateLimit } from '@/lib/siweNonceStore'
 
 // Configure Vercel function timeout (300 seconds for Pro plan)
 export const maxDuration = 300
 
 // Amount of tokens to mint (1000)
 const TOKEN_AMOUNT = 1000
+
+// Mints per user per minute.
+const MINT_RATE_LIMIT_MAX = 2
 
 function getPrivateKeyAndRpc() {
   let privateKey = ENV_FAUCET_KEY
@@ -29,13 +33,15 @@ export async function POST(request: NextRequest) {
       return createAuthErrorResponse(authResult.error ?? 'Unauthorized', 401)
     }
 
-    // Get the recipient address and token address from the request body
-    const { address, tokenAddress } = await request.json()
-
-    // Validate recipient address
-    if (!address || typeof address !== 'string' || !address.startsWith('0x')) {
-      return NextResponse.json({ error: 'Invalid recipient address' }, { status: 400 })
+    if (!checkRateLimit(`mint:${authResult.user.id}`, MINT_RATE_LIMIT_MAX)) {
+      return NextResponse.json({ error: 'Too many faucet requests. Try again shortly.' }, { status: 429 })
     }
+
+    // The faucet tops up the caller's own wallet. Taking the recipient from the
+    // body let one account drain it into an unlimited number of addresses.
+    const address = authResult.user.l1Address
+
+    const { tokenAddress } = await request.json()
 
     // Validate token address — must be explicitly provided
     if (!tokenAddress || typeof tokenAddress !== 'string' || !tokenAddress.startsWith('0x')) {

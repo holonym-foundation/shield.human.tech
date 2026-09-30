@@ -357,10 +357,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
     }
 
-    await prisma.bridgeActivity.update({
-      where: { id },
+    // Scoped by owner as well as id: the ownership read above is a separate
+    // statement, so a write keyed on the id alone trusts a fact that was true
+    // when it was read rather than when it is applied.
+    const { count } = await prisma.bridgeActivity.updateMany({
+      where: { id, fkUserId: authResult.user.id },
       data: updateData,
     })
+
+    if (count === 0) {
+      return NextResponse.json({ error: 'Operation not found or access denied' }, { status: 404 })
+    }
 
     return NextResponse.json({ ok: true })
   } catch (error) {
