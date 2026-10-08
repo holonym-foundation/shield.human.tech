@@ -12,7 +12,7 @@
  *   - L1_URL (optional): L1 RPC URL
  */
 
-import { createLogger } from '@aztec/aztec.js/log'
+import { createLogger } from '@aztec-labs/aztec.js/log'
 import { createPublicClient, http } from 'viem'
 import { sepolia } from 'viem/chains'
 import 'dotenv/config'

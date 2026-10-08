@@ -1,5 +1,5 @@
 {
-  "activeDeploymentId": "5.0.0_2026-07-21",
+  "activeDeploymentId": "6.0.0-rc.1_2026-10-07",
   "deployments": [
     {
       "id": "4.2.0-nightly.20260406_2026-04-08",
@@ -47,6 +47,14 @@
       "deployedAt": "2026-07-21T12:15:29.087Z",
       "network": "mainnet",
       "aztecVersion": "5.0.0",
+      "active": false
+    },
+    {
+      "id": "6.0.0-rc.1_2026-10-07",
+      "file": "6.0.0-rc.1_2026-10-07.json",
+      "deployedAt": "2026-10-07T09:25:35.727Z",
+      "network": "testnet",
+      "aztecVersion": "6.0.0-rc.1",
       "active": true
     }
   ]

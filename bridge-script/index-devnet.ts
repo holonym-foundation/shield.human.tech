@@ -12,44 +12,44 @@
  * Devnet: AZTEC_ENV=devnet MNEMONIC="your mnemonic" npm run start-testnet
  */
 
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { EthAddress } from '@aztec/foundation/eth-address'
-import { Fr } from '@aztec/aztec.js/fields'
-import { Logger, createLogger } from '@aztec/aztec.js/log'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { EthAddress } from '@aztec-labs/foundation/eth-address'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { Logger, createLogger } from '@aztec-labs/aztec.js/log'
 import {
   generateClaimSecret,
   L1TokenManager,
   L1TokenPortalManager,
-} from '@aztec/aztec.js/ethereum'
+} from '@aztec-labs/aztec.js/ethereum'
 import {
   getContractInstanceFromInstantiationParams,
   type ContractInstanceWithAddress,
-} from '@aztec/aztec.js/contracts'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { RollupContract } from '@aztec/ethereum/contracts'
-import { CheckpointNumber } from '@aztec/foundation/branded-types'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
+} from '@aztec-labs/aztec.js/contracts'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { RollupContract } from '@aztec-labs/ethereum/contracts'
+import { CheckpointNumber } from '@aztec-labs/foundation/branded-types'
+import { deployL1Contract } from '@aztec-labs/ethereum/deploy-l1-contract'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
+import type { ExtendedViemWalletClient } from '@aztec-labs/ethereum/types'
 import {
   FeeAssetHandlerAbi,
   FeeAssetHandlerBytecode,
   RollupAbi,
   TokenPortalAbi,
   TokenPortalBytecode,
-} from '@aztec/l1-artifacts'
-import { TokenContract } from '@aztec/noir-contracts.js/Token'
+} from '@aztec-foundation/l1-artifacts'
+import { TokenContract } from '@aztec-labs/noir-contracts.js/Token'
 // import { TokenContract } from '@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js'
 // import { TokenContract } from './constants/aztec/artifacts/Token.ts'
-import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge'
+import { TokenBridgeContract } from '@aztec-labs/noir-contracts.js/TokenBridge'
 // import { TokenBridgeContract } from './constants/aztec/artifacts/TokenBridge.ts'
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee/testing'
-import { SetPublicAuthwitContractInteraction } from '@aztec/aztec.js/authorization'
-import { EmbeddedWallet } from '@aztec/wallets/embedded'
-import { createAztecNodeClient } from '@aztec/aztec.js/node'
-import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
-import { sha256ToField } from '@aztec/foundation/crypto/sha256'
-import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
+import { SponsoredFeePaymentMethod } from '@aztec-labs/aztec.js/fee/testing'
+import { SetPublicAuthwitContractInteraction } from '@aztec-labs/aztec.js/authorization'
+import { EmbeddedWallet } from '@aztec-labs/wallets/embedded'
+import { createAztecNodeClient } from '@aztec-labs/aztec.js/node'
+import { computeL2ToL1MembershipWitness } from '@aztec-labs/stdlib/messaging'
+import { sha256ToField } from '@aztec-labs/foundation/crypto/sha256'
+import { computeL2ToL1MessageHash } from '@aztec-labs/stdlib/hash'
 import 'dotenv/config'
 // @ts-ignore
 import TestERC20Json from './constants/TestERC20.json'
@@ -73,7 +73,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 import {
   SponsoredFPCContract,
   SponsoredFPCContractArtifact,
-} from '@aztec/noir-contracts.js/SponsoredFPC'
+} from '@aztec-labs/noir-contracts.js/SponsoredFPC'
 import { setupWallet } from './utils/setup_wallet.js'
 import { deploySchnorrAccount } from './utils/deploy_account.js'
 import { getSponsoredFPCInstance } from './utils/sponsored_fpc.js'
@@ -89,6 +89,7 @@ import {
 } from './utils/save_contracts.js'
 import {
   getAztecNodeUrl,
+  redactUrl,
   getL1RpcUrl,
   getTimeouts,
   isDevnet,
@@ -447,7 +448,7 @@ async function main() {
   )
   logger.info(`🌐 Using ${isDevnet() ? 'devnet' : 'local sandbox'} environment`)
   logger.info(`🔗 L1 RPC URL: ${L1_URL}`)
-  logger.info(`🌐 Node URL: ${nodeUrl}`)
+  logger.info(`🌐 Node URL: ${redactUrl(nodeUrl)}`)
 
   // Check L1 wallet balance
   try {
@@ -485,7 +486,8 @@ async function main() {
   // Create versioned deployment file with network + L1 infra info
   const rollupVersion =
     (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
-  const l2ChainId = nodeInfo.l1ChainId ^ rollupVersion
+  // `^` yields a signed int32; the chain id is the unsigned value.
+  const l2ChainId = (nodeInfo.l1ChainId ^ rollupVersion) >>> 0
   logger.info('\n🔧 Creating versioned deployment...')
   // Serialize nodeInfo for storage (convert EthAddress/AztecAddress objects to strings)
   const serializedNodeInfo: Record<string, unknown> = {}

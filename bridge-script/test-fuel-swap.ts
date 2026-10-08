@@ -15,9 +15,9 @@
  * All tests are dry-runs by default (simulate only, no gas spent).
  */
 
-import { createLogger } from '@aztec/aztec.js/log'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { createEthereumChain } from '@aztec/ethereum/chain'
+import { createLogger } from '@aztec-labs/aztec.js/log'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
 import { createPublicClient, getContract, http, encodePacked, keccak256 } from 'viem'
 import 'dotenv/config'
 

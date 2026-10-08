@@ -6,7 +6,7 @@
     "nodeUrl": "https://rpc.testnet.aztec-labs.com",
     "l1RpcUrl": "",
     "l1ChainId": 11155111,
-    "l2ChainId": -156673111,
+    "l2ChainId": 4138294185,
     "aztecVersion": "4.2.0-rc.1",
     "rollupVersion": 4127419662
   },

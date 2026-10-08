@@ -11,10 +11,10 @@
  *   - UNISWAP_FUEL_SWAP (optional): Override UniswapFuelSwap address (defaults to deployment)
  */
 
-import { createLogger } from '@aztec/aztec.js/log'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
+import { createLogger } from '@aztec-labs/aztec.js/log'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
+import { deployL1Contract } from '@aztec-labs/ethereum/deploy-l1-contract'
 import 'dotenv/config'
 
 // @ts-ignore

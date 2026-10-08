@@ -1,24 +1,24 @@
-import { createLogger, FeeJuicePaymentMethodWithClaim, Fr, L1FeeJuicePortalManager, PXE, waitForPXE , createPXEClient, Logger, FeeJuicePaymentMethod, PrivateFeePaymentMethod, PublicFeePaymentMethod } from "@aztec/aztec.js";
+import { createLogger, FeeJuicePaymentMethodWithClaim, Fr, L1FeeJuicePortalManager, PXE, waitForPXE , createPXEClient, Logger, FeeJuicePaymentMethod, PrivateFeePaymentMethod, PublicFeePaymentMethod } from "@aztec-labs/aztec.js";
 import {
     Chain,
     createPublicClient,
     createWalletClient,
     http,
 } from 'viem';
-import { getSchnorrAccount } from '@aztec/accounts/schnorr';
-import { deriveSigningKey } from '@aztec/stdlib/keys';
+import { getSchnorrAccount } from '@aztec-labs/accounts/schnorr';
+import { deriveSigningKey } from '@aztec-labs/stdlib/keys';
 import { foundry } from 'viem/chains'
 import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
-import { FeeJuiceContract } from "@aztec/noir-contracts.js/FeeJuice";
-import { FPCContract } from "@aztec/noir-contracts.js/FPC";
+import { FeeJuiceContract } from "@aztec-labs/noir-contracts.js/FeeJuice";
+import { FPCContract } from "@aztec-labs/noir-contracts.js/FPC";
 import { EasyPrivateVotingContract } from "../src/artifacts/EasyPrivateVoting.js"
-import { TokenContract } from "@aztec/noir-contracts.js/Token";
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee/testing'
+import { TokenContract } from "@aztec-labs/noir-contracts.js/Token";
+import { SponsoredFeePaymentMethod } from '@aztec-labs/aztec.js/fee/testing'
 import { getDeployedSponsoredFPCAddress } from "../src/utils/sponsored_fpc.js";
-import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
+import { SponsoredFPCContract } from "@aztec-labs/noir-contracts.js/SponsoredFPC";
 import { deploySchnorrAccount } from "./deploy-account.js";
 import { getSponsoredFPCInstance } from "../src/utils/sponsored_fpc.js";
-import { getCanonicalFeeJuice } from '@aztec/protocol-contracts/fee-juice';
+import { getCanonicalFeeJuice } from '@aztec-labs/protocol-contracts/fee-juice';
 import * as dotenv from 'dotenv';
 dotenv.config();
 

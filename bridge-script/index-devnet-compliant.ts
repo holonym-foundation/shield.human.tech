@@ -16,36 +16,36 @@
  * Run: node --import tsx index-devnet-compliant.ts
  */
 
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { EthAddress } from '@aztec/foundation/eth-address'
-import { Fr } from '@aztec/aztec.js/fields'
-import { Logger, createLogger } from '@aztec/aztec.js/log'
-import { L1TokenManager } from '@aztec/aztec.js/ethereum'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { RollupContract } from '@aztec/ethereum/contracts'
-import { CheckpointNumber } from '@aztec/foundation/branded-types'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { EthAddress } from '@aztec-labs/foundation/eth-address'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { Logger, createLogger } from '@aztec-labs/aztec.js/log'
+import { L1TokenManager } from '@aztec-labs/aztec.js/ethereum'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { RollupContract } from '@aztec-labs/ethereum/contracts'
+import { CheckpointNumber } from '@aztec-labs/foundation/branded-types'
+import { deployL1Contract } from '@aztec-labs/ethereum/deploy-l1-contract'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
+import type { ExtendedViemWalletClient } from '@aztec-labs/ethereum/types'
 import {
   FeeAssetHandlerAbi,
   FeeAssetHandlerBytecode,
   RollupAbi,
-} from '@aztec/l1-artifacts'
+} from '@aztec-foundation/l1-artifacts'
 import { TokenContract, TokenContractArtifact } from '@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js'
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee/testing'
-import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec/aztec.js/authorization'
-import { EmbeddedWallet } from '@aztec/wallets/embedded'
-import { createAztecNodeClient } from '@aztec/aztec.js/node'
-import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
-import { sha256ToField } from '@aztec/foundation/crypto/sha256'
-import { computeL2ToL1MessageHash, computeSecretHash } from '@aztec/stdlib/hash'
-import { Schnorr } from '@aztec/foundation/crypto/schnorr'
+import { SponsoredFeePaymentMethod } from '@aztec-labs/aztec.js/fee/testing'
+import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction } from '@aztec-labs/aztec.js/authorization'
+import { EmbeddedWallet } from '@aztec-labs/wallets/embedded'
+import { createAztecNodeClient } from '@aztec-labs/aztec.js/node'
+import { computeL2ToL1MembershipWitness } from '@aztec-labs/stdlib/messaging'
+import { sha256ToField } from '@aztec-labs/foundation/crypto/sha256'
+import { computeL2ToL1MessageHash, computeSecretHash } from '@aztec-labs/stdlib/hash'
+import { Schnorr } from '@aztec-labs/foundation/crypto/schnorr'
 // 5.0.0 dropped the deriveSigningKey export; it was an alias for the IVSK_M derivation,
 // so keep using that exact function to preserve previously-derived L2 account addresses.
-import { deriveMasterIncomingViewingSecretKey as deriveSigningKey } from '@aztec/stdlib/keys'
-import { computeInnerAuthWitHash } from '@aztec/stdlib/auth-witness'
-import { GrumpkinScalar } from '@aztec/foundation/curves/grumpkin'
+import { deriveMasterIncomingViewingSecretKey as deriveSigningKey } from '@aztec-labs/stdlib/keys'
+import { computeInnerAuthWitHash } from '@aztec-labs/stdlib/auth-witness'
+import { GrumpkinScalar } from '@aztec-labs/foundation/curves/grumpkin'
 import 'dotenv/config'
 
 // Custom L2 contracts (from codegen)
@@ -122,7 +122,7 @@ async function sendPrivateWithRetry<T>(
   throw new Error('sendPrivateWithRetry: unreachable')
 }
 
-import { SponsoredFPCContract, SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC'
+import { SponsoredFPCContract, SponsoredFPCContractArtifact } from '@aztec-labs/noir-contracts.js/SponsoredFPC'
 import { setupWallet } from './utils/setup_wallet.js'
 import { deploySchnorrAccount } from './utils/deploy_account.js'
 import { getSponsoredFPCInstance } from './utils/sponsored_fpc.js'
@@ -1975,7 +1975,8 @@ async function main() {
   logger.info(`Owner Aztec Address: ${ownerAztecAddress}`)
 
   const rollupVersion = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
-  const l2ChainId = nodeInfo.l1ChainId ^ rollupVersion
+  // `^` yields a signed int32; the chain id is the unsigned value.
+  const l2ChainId = (nodeInfo.l1ChainId ^ rollupVersion) >>> 0
   // Create deployment record (once, before the token loop) — skip in RUN_TESTS_ONLY
   // to avoid creating a new empty deployment that shadows the existing one with tokens.
   if (!RUN_TESTS_ONLY) {

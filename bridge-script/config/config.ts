@@ -11,6 +11,8 @@ export type Environment = 'sandbox' | 'devnet' | 'testnet' | 'mainnet';
 
 export interface NetworkConfig {
   nodeUrl: string;
+  // Keyless URL that is safe to persist. nodeUrl may come from env and carry a provider API key.
+  publicNodeUrl: string;
   l1RpcUrl: string;
   l1ChainId: number;
 }
@@ -45,6 +47,23 @@ function resolveEnvironment(): Environment {
 
 // ─── Per-Environment Config ─────────────────────────────────────────
 
+const PUBLIC_NODE_URLS: Record<Environment, string> = {
+  sandbox: 'http://localhost:8080',
+  devnet: 'https://v4-devnet-3.aztec-labs.com',
+  testnet: 'https://aztec-testnet.drpc.org',
+  mainnet: 'https://aztec-mainnet.drpc.org',
+};
+
+export function redactUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const path = u.pathname.split('/').map(seg => (seg.length >= 20 ? '<redacted>' : seg)).join('/');
+    return `${u.origin}${path}${u.search ? '?<redacted>' : ''}`;
+  } catch {
+    return '<invalid url>';
+  }
+}
+
 function buildConfig(env: Environment): EnvironmentConfig {
   switch (env) {
     case 'sandbox':
@@ -52,7 +71,8 @@ function buildConfig(env: Environment): EnvironmentConfig {
         name: 'sandbox',
         environment: 'sandbox',
         network: {
-          nodeUrl: process.env.AZTEC_NODE_SANDBOX || 'http://localhost:8080',
+          nodeUrl: process.env.AZTEC_NODE_SANDBOX || PUBLIC_NODE_URLS.sandbox,
+          publicNodeUrl: PUBLIC_NODE_URLS.sandbox,
           l1RpcUrl: process.env.L1_RPC_SANDBOX || 'http://localhost:8545',
           l1ChainId: 31337,
         },
@@ -65,7 +85,8 @@ function buildConfig(env: Environment): EnvironmentConfig {
         name: 'devnet',
         environment: 'devnet',
         network: {
-          nodeUrl: process.env.AZTEC_NODE_DEVNET || 'https://v4-devnet-3.aztec-labs.com',
+          nodeUrl: process.env.AZTEC_NODE_DEVNET || PUBLIC_NODE_URLS.devnet,
+          publicNodeUrl: PUBLIC_NODE_URLS.devnet,
           l1RpcUrl: process.env.L1_RPC_SEPOLIA || 'https://ethereum-sepolia-rpc.publicnode.com',
           l1ChainId: 11155111,
         },
@@ -78,11 +99,12 @@ function buildConfig(env: Environment): EnvironmentConfig {
         name: 'testnet',
         environment: 'testnet',
         network: {
-          nodeUrl: process.env.AZTEC_NODE_TESTNET || 'https://v5.testnet.rpc.aztec-labs.com',
+          nodeUrl: process.env.AZTEC_NODE_TESTNET || PUBLIC_NODE_URLS.testnet,
+          publicNodeUrl: PUBLIC_NODE_URLS.testnet,
           l1RpcUrl: process.env.L1_RPC_SEPOLIA || 'https://ethereum-sepolia-rpc.publicnode.com',
           l1ChainId: 11155111,
         },
-        settings: { skipSandbox: true, version: '5.0.0-rc.2' },
+        settings: { skipSandbox: true, version: '6.0.0-rc.1' },
         timeouts: { deployTimeout: 1_200_000, txTimeout: 180_000, waitTimeout: 60_000 },
       };
 
@@ -91,7 +113,8 @@ function buildConfig(env: Environment): EnvironmentConfig {
         name: 'mainnet',
         environment: 'mainnet',
         network: {
-          nodeUrl: process.env.AZTEC_NODE_MAINNET || 'https://aztec-mainnet.drpc.org',
+          nodeUrl: process.env.AZTEC_NODE_MAINNET || PUBLIC_NODE_URLS.mainnet,
+          publicNodeUrl: PUBLIC_NODE_URLS.mainnet,
           l1RpcUrl: process.env.L1_RPC_MAINNET || 'https://ethereum-rpc.publicnode.com',
           l1ChainId: 1,
         },
@@ -115,7 +138,7 @@ export class ConfigManager {
     if (process.env.L1_URL) this.config.network.l1RpcUrl = process.env.L1_URL;
     if (process.env.AZTEC_NODE_URL) this.config.network.nodeUrl = process.env.AZTEC_NODE_URL;
 
-    console.log(`[Config] ${this.config.name} | node=${this.config.network.nodeUrl} | l1=${this.config.network.l1RpcUrl} | chainId=${this.config.network.l1ChainId}`);
+    console.log(`[Config] ${this.config.name} | node=${redactUrl(this.config.network.nodeUrl)} | l1=${redactUrl(this.config.network.l1RpcUrl)} | chainId=${this.config.network.l1ChainId}`);
   }
 
   public static getInstance(): ConfigManager {
@@ -143,6 +166,7 @@ export class ConfigManager {
 const configManager = ConfigManager.getInstance();
 
 export function getAztecNodeUrl(): string { return configManager.getNodeUrl(); }
+export function getPublicAztecNodeUrl(): string { return configManager.getNetworkConfig().publicNodeUrl; }
 export function getAztecNodeApiKey(): string | undefined { return process.env.AZTEC_NODE_API_KEY || undefined; }
 export function getL1RpcUrl(): string { return configManager.getL1RpcUrl(); }
 export function getL1ChainId(): number { return configManager.getL1ChainId(); }

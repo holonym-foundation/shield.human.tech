@@ -10,9 +10,9 @@
  *   DRY_RUN=true pnpm recover-liquidity   # simulate only, don't send txs
  */
 
-import { createLogger } from '@aztec/aztec.js/log'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { createEthereumChain } from '@aztec/ethereum/chain'
+import { createLogger } from '@aztec-labs/aztec.js/log'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
 import { getContract, getAddress, createPublicClient, http } from 'viem'
 import 'dotenv/config'
 

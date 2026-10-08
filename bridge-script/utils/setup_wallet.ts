@@ -1,7 +1,7 @@
-import { createAztecNodeClient } from '@aztec/aztec.js/node';
-import { makeFetch } from '@aztec/foundation/json-rpc/client';
+import { createAztecNodeClient } from '@aztec-labs/aztec.js/node';
+import { makeFetch } from '@aztec-labs/foundation/json-rpc/client';
 import { getAztecNodeUrl, getAztecNodeApiKey, getEnv } from '../config/config.js';
-import { EmbeddedWallet } from '@aztec/wallets/embedded';
+import { EmbeddedWallet } from '@aztec-labs/wallets/embedded';
 
 // Some node endpoints (e.g. mainnet.rpc.aztec-labs.com) authenticate via an X-Aztec-API-Key
 // header. createAztecNodeClient sends no auth by default, so inject the header when
@@ -46,7 +46,8 @@ export function createNode(): ReturnType<typeof createAztecNodeClient> {
             await sleep(RATE_LIMIT_BACKOFF_MS[attempt]);
         }
     };
-    return createAztecNodeClient(url, {}, wrappedFetch);
+    // maxBatchSize: drpc's free tier rejects JSON-RPC batches larger than 3 (code 31).
+    return createAztecNodeClient(url, { fetch: wrappedFetch, maxBatchSize: 3 });
 }
 
 export async function setupWallet(): Promise<EmbeddedWallet> {

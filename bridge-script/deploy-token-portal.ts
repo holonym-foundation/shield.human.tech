@@ -18,10 +18,10 @@
  *   - L2_BRIDGE (optional): Override L2 bridge address (defaults to first token's bridge)
  */
 
-import { createLogger } from '@aztec/aztec.js/log'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
+import { createLogger } from '@aztec-labs/aztec.js/log'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
+import { deployL1Contract } from '@aztec-labs/ethereum/deploy-l1-contract'
 import { getContract } from 'viem'
 import 'dotenv/config'
 

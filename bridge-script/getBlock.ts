@@ -1,5 +1,5 @@
 
-import { PXE, waitForPXE, createPXEClient } from "@aztec/aztec.js";
+import { PXE, waitForPXE, createPXEClient } from "@aztec-labs/aztec.js";
 
 const setupPXE = async () => {
     const { PXE_URL = 'http://localhost:8081' } = process.env;

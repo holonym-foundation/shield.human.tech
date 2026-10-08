@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join, resolve } from 'path';
-import { getEnv } from '../config/config.js';
+import { getEnv, getPublicAztecNodeUrl } from '../config/config.js';
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -191,7 +191,6 @@ export function loadDeploymentById(id: string): DeploymentFile | null {
  * Call this once at the start of a deployment run (before deploying tokens).
  */
 export function createDeployment(params: {
-  nodeUrl: string;
   l1RpcUrl: string;
   l1ChainId: number;
   l2ChainId: number;
@@ -217,7 +216,7 @@ export function createDeployment(params: {
     deployedAt: existing?.deployedAt ?? new Date().toISOString(),
     network: {
       name: params.networkName,
-      nodeUrl: params.nodeUrl,
+      nodeUrl: getPublicAztecNodeUrl(),
       l1RpcUrl: '', // not saved — frontend uses NEXT_PUBLIC_ETHEREUM_RPC_URL env var
       l1ChainId: params.l1ChainId,
       l2ChainId: params.l2ChainId,

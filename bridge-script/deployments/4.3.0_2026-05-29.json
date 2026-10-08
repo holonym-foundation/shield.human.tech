@@ -6,7 +6,7 @@
     "nodeUrl": "https://aztec-mainnet.drpc.org",
     "l1RpcUrl": "",
     "l1ChainId": 1,
-    "l2ChainId": -1360210392,
+    "l2ChainId": 2934756904,
     "aztecVersion": "4.3.0",
     "rollupVersion": 2934756905
   },

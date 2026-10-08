@@ -1,6 +1,6 @@
-import { createPXEService, getPXEServiceConfig } from '@aztec/pxe/server';
-import { createStore } from "@aztec/kv-store/lmdb"
-import { createAztecNodeClient, waitForPXE } from '@aztec/aztec.js';
+import { createPXEService, getPXEServiceConfig } from '@aztec-labs/pxe/server';
+import { createStore } from "@aztec-labs/kv-store/lmdb"
+import { createAztecNodeClient, waitForPXE } from '@aztec-labs/aztec.js';
 
 const { NODE_URL = 'http://localhost:8080' } = process.env;
 

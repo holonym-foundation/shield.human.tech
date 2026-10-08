@@ -33,7 +33,7 @@ import {
   type Wallet,
   type U128Like,
   type WrappedFieldLike,
-} from '@aztec/aztec.js';
+} from '@aztec-labs/aztec.js';
 import TokenContractArtifactJson from './token-Token.json' assert { type: 'json' };
 export const TokenContractArtifact = loadContractArtifact(TokenContractArtifactJson as NoirCompiledContract);
 

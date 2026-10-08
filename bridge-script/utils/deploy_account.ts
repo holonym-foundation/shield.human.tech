@@ -1,13 +1,13 @@
-import { NO_FROM } from "@aztec/aztec.js/account";
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee";
-import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC";
+import { NO_FROM } from "@aztec-labs/aztec.js/account";
+import { SponsoredFeePaymentMethod } from "@aztec-labs/aztec.js/fee";
+import { SponsoredFPCContractArtifact } from "@aztec-labs/noir-contracts.js/SponsoredFPC";
 import { getSponsoredFPCInstance } from "./sponsored_fpc.js";
 
-import { Fr, GrumpkinScalar } from "@aztec/aztec.js/fields";
-import { Logger, createLogger } from "@aztec/aztec.js/log";
+import { Fr, GrumpkinScalar } from "@aztec-labs/aztec.js/fields";
+import { Logger, createLogger } from "@aztec-labs/aztec.js/log";
 import { setupWallet } from "./setup_wallet.js";
-import { AccountManager } from "@aztec/aztec.js/wallet";
-import { EmbeddedWallet } from "@aztec/wallets/embedded";
+import { AccountManager } from "@aztec-labs/aztec.js/wallet";
+import { EmbeddedWallet } from "@aztec-labs/wallets/embedded";
 import { getTimeouts } from "../config/config.js";
 
 export async function deploySchnorrAccount(wallet?: EmbeddedWallet): Promise<AccountManager> {
@@ -15,15 +15,21 @@ export async function deploySchnorrAccount(wallet?: EmbeddedWallet): Promise<Acc
     logger = createLogger('aztec:bridge');
     logger.info('👤 Starting Schnorr account deployment...');
 
-    // Generate account keys
-    logger.info('🔐 Generating account keys...');
-    let secretKey = Fr.random();
-    let signingKey = GrumpkinScalar.random();
-    let salt = Fr.random();
-    logger.info(`Save the following SECRET and SALT in .env for future use.`);
-    logger.info(`🔑 Secret key generated: ${secretKey.toString()}`);
-    logger.info(`🖊️ Signing key generated: ${signingKey.toString()}`);
-    logger.info(`🧂 Salt generated: ${salt.toString()}`);
+    // Reusing one account across runs keeps its L2 balances, so START_AT_TEST / RUN_ONLY can resume
+    // the suite at an exit test without redoing the deposits that funded it.
+    const { TEST_ACCOUNT_SECRET, TEST_ACCOUNT_SIGNING_KEY, TEST_ACCOUNT_SALT } = process.env;
+    const reuse = !!(TEST_ACCOUNT_SECRET && TEST_ACCOUNT_SIGNING_KEY && TEST_ACCOUNT_SALT);
+    const secretKey = reuse ? Fr.fromString(TEST_ACCOUNT_SECRET!) : Fr.random();
+    const signingKey = reuse ? GrumpkinScalar.fromString(TEST_ACCOUNT_SIGNING_KEY!) : GrumpkinScalar.random();
+    const salt = reuse ? Fr.fromString(TEST_ACCOUNT_SALT!) : Fr.random();
+    if (reuse) {
+        logger.info('🔐 Reusing account keys from TEST_ACCOUNT_SECRET / TEST_ACCOUNT_SIGNING_KEY / TEST_ACCOUNT_SALT');
+    } else {
+        logger.info('🔐 Generated account keys. Set these in .env to reuse this account on later runs:');
+        logger.info(`   TEST_ACCOUNT_SECRET=${secretKey.toString()}`);
+        logger.info(`   TEST_ACCOUNT_SIGNING_KEY=${signingKey.toString()}`);
+        logger.info(`   TEST_ACCOUNT_SALT=${salt.toString()}`);
+    }
 
     const activeWallet = wallet ?? await setupWallet()
     const account = await activeWallet.createSchnorrAccount(secretKey, salt, signingKey)

@@ -57,27 +57,26 @@
  * Run: AZTEC_ENV=mainnet node --import tsx deploy-mainnet.ts
  */
 
-import { EthAddress } from '@aztec/foundation/eth-address'
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields'
-import { createLogger, type Logger } from '@aztec/aztec.js/log'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
+import { EthAddress } from '@aztec-labs/foundation/eth-address'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { Fr, GrumpkinScalar } from '@aztec-labs/aztec.js/fields'
+import { createLogger, type Logger } from '@aztec-labs/aztec.js/log'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { deployL1Contract } from '@aztec-labs/ethereum/deploy-l1-contract'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
+import type { ExtendedViemWalletClient } from '@aztec-labs/ethereum/types'
 import { TokenContract } from '@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js'
-import { FeeJuicePaymentMethodWithClaim } from '@aztec/aztec.js/fee'
-import { createAztecNodeClient } from '@aztec/aztec.js/node'
-import { L1FeeJuicePortalManager } from '@aztec/aztec.js/ethereum'
-import { NO_FROM } from '@aztec/aztec.js/account'
-import type { AccountManager } from '@aztec/aztec.js/wallet'
-import type { EmbeddedWallet } from '@aztec/wallets/embedded'
-import { FeeJuiceContract } from '@aztec/noir-contracts.js/FeeJuice'
-import { getCanonicalFeeJuice } from '@aztec/protocol-contracts/fee-juice'
-import { Schnorr } from '@aztec/foundation/crypto/schnorr'
+import { FeeJuicePaymentMethodWithClaim } from '@aztec-labs/aztec.js/fee'
+import { createAztecNodeClient } from '@aztec-labs/aztec.js/node'
+import { L1FeeJuicePortalManager } from '@aztec-labs/aztec.js/ethereum'
+import { NO_FROM } from '@aztec-labs/aztec.js/account'
+import type { AccountManager } from '@aztec-labs/aztec.js/wallet'
+import type { EmbeddedWallet } from '@aztec-labs/wallets/embedded'
+import { FeeJuiceContract } from '@aztec-labs/aztec.js/protocol'
+import { Schnorr } from '@aztec-labs/foundation/crypto/schnorr'
 // 5.0.0 dropped the deriveSigningKey export; it was an alias for the IVSK_M derivation,
 // so keep using that exact function to preserve previously-derived L2 account addresses.
-import { deriveMasterIncomingViewingSecretKey as deriveSigningKey } from '@aztec/stdlib/keys'
+import { deriveMasterIncomingViewingSecretKey as deriveSigningKey } from '@aztec-labs/stdlib/keys'
 import { registerPrivateContract } from '@alejoamiras/private-fee-juice/utils'
 import { getContract, keccak256, encodeAbiParameters, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -328,8 +327,7 @@ async function fundAndDeployL2Account(
   // Already funded (FeeJuice claimed) but maybe not deployed? Pay the deploy from its own FeeJuice.
   let l2FjBalance = 0n
   try {
-    const { address: feeJuiceL2 } = await getCanonicalFeeJuice()
-    const feeJuice = await FeeJuiceContract.at(feeJuiceL2, wallet)
+    const feeJuice = FeeJuiceContract.withWallet(wallet)
     l2FjBalance = ((await feeJuice.methods.balance_of_public(address).simulate({ from: address }))
       .result ?? 0n) as bigint
   } catch {
@@ -709,7 +707,8 @@ async function main() {
 
   // ── Deployment record ──
   const rollupVersion = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
-  const l2ChainId = nodeInfo.l1ChainId ^ rollupVersion
+  // `^` yields a signed int32; the chain id is the unsigned value.
+  const l2ChainId = (nodeInfo.l1ChainId ^ rollupVersion) >>> 0
   const serializedNodeInfo: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(nodeInfo)) {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
@@ -738,7 +737,6 @@ async function main() {
   }
 
   createDeployment({
-    nodeUrl,
     l1RpcUrl: L1_URL,
     l1ChainId: nodeInfo.l1ChainId,
     l2ChainId,

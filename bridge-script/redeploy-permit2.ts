@@ -6,20 +6,20 @@
  * Run: AZTEC_ENV=devnet MNEMONIC="..." npm run redeploy-permit2
  */
 
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { EthAddress } from '@aztec/foundation/eth-address'
-import { Fr } from '@aztec/aztec.js/fields'
-import { createLogger } from '@aztec/aztec.js/log'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { TokenContract } from '@aztec/noir-contracts.js/Token'
-import { TokenBridgeContract } from '@aztec/noir-contracts.js/TokenBridge'
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee/testing'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { EthAddress } from '@aztec-labs/foundation/eth-address'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { createLogger } from '@aztec-labs/aztec.js/log'
+import { deployL1Contract } from '@aztec-labs/ethereum/deploy-l1-contract'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { TokenContract } from '@aztec-labs/noir-contracts.js/Token'
+import { TokenBridgeContract } from '@aztec-labs/noir-contracts.js/TokenBridge'
+import { SponsoredFeePaymentMethod } from '@aztec-labs/aztec.js/fee/testing'
 import {
   SponsoredFPCContractArtifact,
-} from '@aztec/noir-contracts.js/SponsoredFPC'
-import { createAztecNodeClient } from '@aztec/aztec.js/node'
+} from '@aztec-labs/noir-contracts.js/SponsoredFPC'
+import { createAztecNodeClient } from '@aztec-labs/aztec.js/node'
 import { getContract } from 'viem'
 import 'dotenv/config'
 

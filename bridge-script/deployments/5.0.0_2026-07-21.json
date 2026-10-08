@@ -3,10 +3,10 @@
   "deployedAt": "2026-07-21T12:15:29.087Z",
   "network": {
     "name": "mainnet",
-    "nodeUrl": "https://canonical.mainnet.rpc.aztec-labs.com/45fd83f51e76b9f7a1a63bca132365dd",
+    "nodeUrl": "https://aztec-mainnet.drpc.org",
     "l1RpcUrl": "",
     "l1ChainId": 1,
-    "l2ChainId": -46544650,
+    "l2ChainId": 4248422646,
     "aztecVersion": "5.0.0",
     "rollupVersion": 4248422647
   },

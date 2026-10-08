@@ -19,10 +19,10 @@
  * Run: node --import tsx redeploy-fuel-swap-mainnet.ts
  */
 
-import { createLogger } from '@aztec/aztec.js/log'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
+import { createLogger } from '@aztec-labs/aztec.js/log'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
+import { deployL1Contract } from '@aztec-labs/ethereum/deploy-l1-contract'
 import { getContract, encodeFunctionData, type Hex } from 'viem'
 import { writeFileSync } from 'fs'
 import { resolve as resolvePath } from 'path'

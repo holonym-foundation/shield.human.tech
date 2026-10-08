@@ -16,38 +16,39 @@
  * Run: node --import tsx index-testnet-compliant.ts
  */
 
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { EthAddress } from '@aztec/foundation/eth-address'
-import { Fr } from '@aztec/aztec.js/fields'
-import { Logger, createLogger } from '@aztec/aztec.js/log'
-import { generateClaimSecret, L1TokenManager } from '@aztec/aztec.js/ethereum'
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { deployL1Contract } from '@aztec/ethereum/deploy-l1-contract'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import type { ExtendedViemWalletClient } from '@aztec/ethereum/types'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { EthAddress } from '@aztec-labs/foundation/eth-address'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { Logger, createLogger } from '@aztec-labs/aztec.js/log'
+import { generateClaimSecret, L1TokenManager } from '@aztec-labs/aztec.js/ethereum'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { deployL1Contract } from '@aztec-labs/ethereum/deploy-l1-contract'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
+import type { ExtendedViemWalletClient } from '@aztec-labs/ethereum/types'
 import {
   FeeAssetHandlerAbi,
   FeeAssetHandlerBytecode,
-} from '@aztec/l1-artifacts'
+} from '@aztec-foundation/l1-artifacts'
 import { TokenContract, TokenContractArtifact } from '@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js'
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee'
-import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction, lookupValidity } from '@aztec/aztec.js/authorization'
-import { EmbeddedWallet } from '@aztec/wallets/embedded'
-import { createAztecNodeClient } from '@aztec/aztec.js/node'
-import { waitForL1ToL2MessageReady } from '@aztec/aztec.js/messaging'
-import { getStandardAuthRegistry } from '@aztec/standard-contracts/auth-registry'
-import { getStandardPublicChecks } from '@aztec/standard-contracts/public-checks'
-import { TxHash } from '@aztec/stdlib/tx'
-import { sha256ToField } from '@aztec/foundation/crypto/sha256'
-import { computeL2ToL1MessageHash, computeSecretHash } from '@aztec/stdlib/hash'
-import { Schnorr } from '@aztec/foundation/crypto/schnorr'
+import { FeeJuiceContract } from '@aztec-labs/aztec.js/protocol'
+import { SponsoredFeePaymentMethod } from '@aztec-labs/aztec.js/fee'
+import { SetPublicAuthwitContractInteraction, computeInnerAuthWitHashFromAction, lookupValidity } from '@aztec-labs/aztec.js/authorization'
+import { EmbeddedWallet } from '@aztec-labs/wallets/embedded'
+import { createAztecNodeClient } from '@aztec-labs/aztec.js/node'
+import { waitForL1ToL2MessageReady } from '@aztec-labs/aztec.js/messaging'
+import { getStandardAuthRegistry } from '@aztec-labs/standard-contracts/auth-registry'
+import { getStandardPublicChecks } from '@aztec-labs/standard-contracts/public-checks'
+import { TxHash } from '@aztec-labs/stdlib/tx'
+import { sha256ToField } from '@aztec-labs/foundation/crypto/sha256'
+import { computeL2ToL1MessageHash, computeSecretHash } from '@aztec-labs/stdlib/hash'
+import { Schnorr } from '@aztec-labs/foundation/crypto/schnorr'
 // 5.0.0 dropped the deriveSigningKey export; it was an alias for the IVSK_M derivation,
 // so keep using that exact function to preserve previously-derived L2 account addresses.
-import { deriveMasterIncomingViewingSecretKey as deriveSigningKey } from '@aztec/stdlib/keys'
-import { computeInnerAuthWitHash } from '@aztec/stdlib/auth-witness'
-import { GrumpkinScalar } from '@aztec/foundation/curves/grumpkin'
-import { poseidon2HashWithSeparator } from '@aztec/foundation/crypto/poseidon'
-import { Gas, GasFees } from '@aztec/stdlib/gas'
+import { deriveMasterIncomingViewingSecretKey as deriveSigningKey } from '@aztec-labs/stdlib/keys'
+import { computeInnerAuthWitHash } from '@aztec-labs/stdlib/auth-witness'
+import { GrumpkinScalar } from '@aztec-labs/foundation/curves/grumpkin'
+import { poseidon2HashWithSeparator } from '@aztec-labs/foundation/crypto/poseidon'
+import { Gas, GasFees } from '@aztec-labs/stdlib/gas'
 import 'dotenv/config'
 
 // Custom L2 contracts (from codegen)
@@ -265,7 +266,7 @@ async function sendWithoutPublicSimulation(
   logger.info(`[DirectSend] Tx ${txHash} submitted, waiting for receipt...`)
 
   // Import waitForTx to wait for mining
-  const { waitForTx } = await import('@aztec/aztec.js/node')
+  const { waitForTx } = await import('@aztec-labs/aztec.js/node')
   try {
     const receipt = await waitForTx(wallet.aztecNode, txHash, sendOpts.wait)
     logger.info(`[DirectSend] Tx mined in block ${receipt.blockNumber}`)
@@ -396,7 +397,7 @@ async function pollUntilClaimSimulationPasses(
   logger.warn(`[PreSim] ${label} simulation did not pass within ${maxWaitMs / 60_000} min — proceeding anyway`)
 }
 
-import { SponsoredFPCContract, SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC'
+import { SponsoredFPCContract, SponsoredFPCContractArtifact } from '@aztec-labs/noir-contracts.js/SponsoredFPC'
 import { setupWallet } from './utils/setup_wallet.js'
 import { deploySchnorrAccount } from './utils/deploy_account.js'
 import { getSponsoredFPCInstance } from './utils/sponsored_fpc.js'
@@ -417,6 +418,7 @@ import {
   getL1RpcUrl,
   getTimeouts,
   isDevnet,
+  isTestnet,
 } from './config/config.js'
 import configManager from './config/config.js'
 
@@ -429,6 +431,12 @@ const L1_URL = process.env.L1_URL || getL1RpcUrl()
 
 const MINT_AMOUNT = BigInt(process.env.MINT_AMOUNT || '1000000000000000') // 1e15
 const FEE_BASIS_POINTS = BigInt(process.env.FEE_BASIS_POINTS || '500') // 5% fee
+
+// Testnet keeps one L1 test token per symbol across Aztec rollup resets, so funds withdrawn through an
+// old rollup's portal can be redeposited through the new one — the path real tokens take on mainnet.
+const TESTNET_L1_TOKENS: Record<string, string> = {
+  USDC: '0xb7b803c2680cd174693488267f5819974c3f990e',
+}
 const CLEAN_HANDS_CIRCUIT_ID = BigInt(process.env.CLEAN_HANDS_CIRCUIT_ID || '0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19')
 const CLEAN_HANDS_ACTION_ID = BigInt(process.env.CLEAN_HANDS_ACTION_ID || '123456789')
 
@@ -461,6 +469,7 @@ const L2_PASSPORT_SIGNER_PRIVATE_KEY = process.env.L2_PASSPORT_SIGNER_PRIVATE_KE
 // DEPLOY_TOKEN=USDC    — only deploy this specific token (others skipped even if new)
 const RUN_TESTS_ONLY = process.env.RUN_TESTS_ONLY === 'true'
 const DEPLOY_ONLY = process.env.DEPLOY_ONLY === 'true'
+const deployFailures: string[] = []
 const SEED_ONLY = process.env.SEED_ONLY === 'true'
 const DEPLOY_TOKEN = process.env.DEPLOY_TOKEN || '' // e.g. 'USDC'
 const PROFILE_ENABLED = process.env.PROFILE === 'true'
@@ -757,6 +766,23 @@ async function addMinter(
   }) as any
   const tx = await contract.write.addMinter([l1TokenHandler.toString() as Hex])
   await l1Client.waitForTransactionReceipt({ hash: tx, timeout: getTimeouts().txTimeout })
+}
+
+async function isTokenOwner(
+  l1Client: ExtendedViemWalletClient,
+  l1TokenContract: EthAddress,
+  account: string
+): Promise<boolean> {
+  try {
+    const owner = (await l1Client.readContract({
+      address: l1TokenContract.toString() as Hex,
+      abi: TestERC20Abi,
+      functionName: 'owner',
+    })) as string
+    return owner.toLowerCase() === account.toLowerCase()
+  } catch {
+    return false
+  }
 }
 
 async function mintL1Tokens(
@@ -1067,7 +1093,6 @@ function sortCurrencies(a: `0x${string}`, b: `0x${string}`): [`0x${string}`, `0x
   return BigInt(a) < BigInt(b) ? [a, b] : [b, a]
 }
 
-const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000005'
 
 async function logFuelTestBalances(
   label: string,
@@ -1088,11 +1113,7 @@ async function logFuelTestBalances(
   }
   if (wallet) {
     try {
-      const fjContract = await TokenContract.at(
-        AztecAddress.fromStringUnsafe(FEE_JUICE_L2_ADDRESS),
-        wallet,
-      )
-      const { result: fjBal } = await fjContract.methods
+      const { result: fjBal } = await FeeJuiceContract.withWallet(wallet).methods
         .balance_of_public(ownerAztecAddress)
         .simulate({ from: ownerAztecAddress })
       logger.info(`  L2 FeeJuice:      ${(Number(fjBal) / 1e18).toFixed(6)} FJ`)
@@ -1226,6 +1247,7 @@ async function seedAllTokenPools(
   feeAssetHandlerAddr: `0x${string}` = FEE_ASSET_HANDLER_ADDR,
 ) {
   logger.info('\n=== Seeding Uniswap V4 Pools ===')
+  const failuresBeforeSeeding = deployFailures.length
 
   const deployer = l1Client.account.address
 
@@ -1309,6 +1331,7 @@ async function seedAllTokenPools(
     } else {
       logger.error(`❌ ETH/FeeJuice pool seeding failed: ${error}`)
     }
+    deployFailures.push(`ETH/FeeJuice pool seeding: ${error}`)
   }
 
   // ── 2. Seed ERC20/WETH pool for each non-WETH token ─────────────
@@ -1379,7 +1402,7 @@ async function seedAllTokenPools(
       } else {
         logger.error(`❌ ${token.symbol}/WETH pool seeding failed: ${error}`)
       }
-      // Continue with other tokens
+      deployFailures.push(`${token.symbol}/WETH pool seeding: ${error}`)
     }
   }
 
@@ -1457,6 +1480,7 @@ async function seedAllTokenPools(
       logger.info(`✅ ${token.symbol}/AZTEC direct pool done`)
     } catch (error) {
       logger.error(`❌ ${token.symbol}/AZTEC direct pool seeding failed: ${error}`)
+      deployFailures.push(`${token.symbol}/AZTEC direct pool seeding: ${error}`)
     }
   }
 
@@ -1465,7 +1489,12 @@ async function seedAllTokenPools(
     `${erc20Tokens.length} ERC20/WETH`,
     !SKIP_DIRECT_POOL && erc20Tokens.length > 0 ? '1 ERC20/AZTEC direct' : '',
   ].filter(Boolean).join(' + ')
-  logger.info(`\n✅ Pool seeding complete — ${poolsSummary}`)
+  const seedFailures = deployFailures.length - failuresBeforeSeeding
+  if (seedFailures > 0) {
+    logger.error(`\n❌ Pool seeding attempted ${poolsSummary}; ${seedFailures} failed (see errors above)`)
+  } else {
+    logger.info(`\n✅ Pool seeding complete — ${poolsSummary}`)
+  }
 }
 
 // ─── Compliant Token Setup ───────────────────────────────────────────────────
@@ -1494,8 +1523,11 @@ async function deployCompliantTokenSetup(
   // ── Step 1: Deploy or resolve L1 token ──
   let l1TokenContract: EthAddress
 
-  if (tokenConfig.l1TokenAddress) {
-    l1TokenContract = EthAddress.fromString(tokenConfig.l1TokenAddress)
+  const preExistingL1Token =
+    tokenConfig.l1TokenAddress ?? (isTestnet() ? TESTNET_L1_TOKENS[tokenConfig.symbol] : undefined)
+
+  if (preExistingL1Token) {
+    l1TokenContract = EthAddress.fromString(preExistingL1Token)
     logger.info(`[L1] Using pre-existing ${tokenConfig.symbol} at ${l1TokenContract}`)
   } else {
     logger.info(`[L1] Deploying ${tokenConfig.symbol} ERC20`)
@@ -1510,7 +1542,7 @@ async function deployCompliantTokenSetup(
   // ── Step 2: Deploy FeeAssetHandler ──
   logger.info(`[L1] Deploying fee asset handler for ${tokenConfig.symbol}`)
   const feeAssetHandler = await deployFeeAssetHandler(l1Client, l1TokenContract)
-  if (!tokenConfig.l1TokenAddress) {
+  if (!preExistingL1Token || (await isTokenOwner(l1Client, l1TokenContract, ownerEthAddress))) {
     await addMinter(l1Client, l1TokenContract, feeAssetHandler)
   }
   logger.info(`[L1] Fee asset handler at ${feeAssetHandler}`)
@@ -1533,9 +1565,8 @@ async function deployCompliantTokenSetup(
 
   // ── Step 4: Deploy L2 TokenMinterProxy ──
   logger.info(`[L2] Deploying TokenMinterProxy`)
-  const { contract: l2ProxyContract } = await TokenMinterProxyContract.deploy(wallet).send({
+  const { contract: l2ProxyContract } = await TokenMinterProxyContract.deploy(wallet, { salt: proxySalt }).send({
     from: ownerAztecAddress,
-    contractAddressSalt: proxySalt,
     fee: { paymentMethod: sponsoredPaymentMethod },
     wait: { timeout: getTimeouts().deployTimeout },
   })
@@ -1544,7 +1575,7 @@ async function deployCompliantTokenSetup(
   // ── Step 5: Deploy L2 Token (Wonderland token with minter) ──
   logger.info(`[L2] Deploying ${tokenConfig.symbol} Token (Wonderland, constructor_with_minter)`)
   const { contract: l2TokenContract } = await TokenContract.deployWithOpts(
-    { wallet, method: 'constructor_with_minter' },
+    { wallet, method: 'constructor_with_minter', instantiation: { salt: tokenSalt } },
     tokenConfig.l2Name,
     tokenConfig.l2Symbol,
     tokenConfig.decimals,
@@ -1552,7 +1583,6 @@ async function deployCompliantTokenSetup(
     AztecAddress.ZERO,          // auth_contract disabled (bridge uses AuthRegistry authwits)
   ).send({
     from: ownerAztecAddress,
-    contractAddressSalt: tokenSalt,
     fee: { paymentMethod: sponsoredPaymentMethod },
     wait: { timeout: getTimeouts().deployTimeout },
   })
@@ -1570,9 +1600,9 @@ async function deployCompliantTokenSetup(
     CLEAN_HANDS_ACTION_ID,       // action_id
     l2PassportPubkey.x,          // passport_signer_x (Grumpkin)
     l2PassportPubkey.y,          // passport_signer_y (Grumpkin)
+    { salt: bridgeSalt },
   ).send({
     from: ownerAztecAddress,
-    contractAddressSalt: bridgeSalt,
     fee: { paymentMethod: sponsoredPaymentMethod },
     wait: { timeout: getTimeouts().deployTimeout },
   })
@@ -1691,7 +1721,7 @@ async function testPublicFuelFlow(
   await logFuelTestBalances('BEFORE public fuel', l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
 
   try {
-    const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+    const { FeeJuicePaymentMethodWithClaim } = await import('@aztec-labs/aztec.js/fee')
 
     // Generate claim + fuel secrets
     const [pfClaimSecret, pfClaimSecretHash] = await generateClaimSecret()
@@ -2227,7 +2257,7 @@ async function testPrivateDepositFuelWithAttestation(
   await logFuelTestBalances(`BEFORE private deposit fuel (${label})`, l2TokenContract, ownerAztecAddress, l1Client, logger, wallet)
 
   try {
-    const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+    const { FeeJuicePaymentMethodWithClaim } = await import('@aztec-labs/aztec.js/fee')
 
     const [claimSecret, claimSecretHash] = await generateClaimSecret()
     const fuelSecret = Fr.random()
@@ -3884,7 +3914,8 @@ async function main() {
   logger.info(`Owner Aztec Address: ${ownerAztecAddress}`)
 
   const rollupVersion = (nodeInfo as { rollupVersion?: number }).rollupVersion ?? 0
-  const l2ChainId = nodeInfo.l1ChainId ^ rollupVersion
+  // `^` yields a signed int32; the chain id is the unsigned value.
+  const l2ChainId = (nodeInfo.l1ChainId ^ rollupVersion) >>> 0
   // Create deployment record (once, before the token loop) — skip in RUN_TESTS_ONLY
   // to avoid creating a new empty deployment that shadows the existing one with tokens.
   if (!RUN_TESTS_ONLY) {
@@ -3904,7 +3935,6 @@ async function main() {
     }
 
     createDeployment({
-      nodeUrl,
       l1RpcUrl: L1_URL,
       l1ChainId: nodeInfo.l1ChainId,
       l2ChainId,
@@ -3994,7 +4024,7 @@ async function main() {
         logger.info(`✅ Successfully deployed and saved ${tokenConfig.symbol} compliant token setup`)
       } catch (error) {
         logger.error(`❌ Failed to deploy ${tokenConfig.symbol}: ${error}`)
-        // Continue with other tokens even if one fails
+        deployFailures.push(`${tokenConfig.symbol}: ${error}`)
       }
     }
 
@@ -4056,6 +4086,7 @@ async function main() {
         })
       } catch (error) {
         logger.error(`Failed to deploy fuel swap infrastructure: ${error}`)
+        deployFailures.push(`fuel swap infrastructure: ${error}`)
       }
     }
 
@@ -4106,6 +4137,12 @@ async function main() {
   }
 
   // Run tests against the deployed/targeted token
+  // Failures above are logged per item so the remaining tokens still deploy, but the run must not
+  // look successful: a zero exit here previously shipped a token-less deployment to the frontend.
+  if (deployFailures.length > 0) {
+    throw new Error(`Deployment incomplete (${deployFailures.length} failure(s)):\n  ${deployFailures.join('\n  ')}`)
+  }
+
   if (DEPLOY_ONLY) {
     logger.info('\n⏭️  DEPLOY_ONLY: skipping tests')
   } else if (deployedContracts.length > 0) {
@@ -4144,8 +4181,8 @@ async function main() {
       wallet
     )
 
-    // START_AT_TEST=<id> skips all tests before <id> (e.g. '4a'). Safe because L2
-    // balances persist across runs, so exit tests don't require same-run deposits.
+    // START_AT_TEST=<id> skips all tests before <id> (e.g. '4a'). Exit tests spend L2 balances from
+    // earlier deposits, so resume with the same account (TEST_ACCOUNT_* in .env, see deploy_account).
     let gateOpen = !START_AT_TEST
     const gate = (id: string): boolean => {
       if (RUN_ONLY.length) {

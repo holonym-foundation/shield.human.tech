@@ -19,9 +19,9 @@
  *   L1_URL          — L1 RPC URL (optional, uses config default)
  */
 
-import { createExtendedL1Client } from '@aztec/ethereum/client'
-import { createEthereumChain } from '@aztec/ethereum/chain'
-import { createAztecNodeClient } from '@aztec/aztec.js/node'
+import { createExtendedL1Client } from '@aztec-labs/ethereum/client'
+import { createEthereumChain } from '@aztec-labs/ethereum/chain'
+import { createAztecNodeClient } from '@aztec-labs/aztec.js/node'
 import { getContract, createPublicClient, http } from 'viem'
 import 'dotenv/config'
 
