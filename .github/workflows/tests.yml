@@ -15,6 +15,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  no-keyed-rpc-urls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # Provider keys embedded in RPC URLs end up in the public repo, the npm SDK and the
+      # client bundle. Keyed URLs belong in untracked .env files only.
+      - name: Reject keyed RPC URLs in tracked files
+        run: |
+          pattern='(lb\.drpc\.(live|org)/[^/"'"'"' ]+/[A-Za-z0-9_-]{20,}|[?&]dkey=[A-Za-z0-9_-]{8,}|rpc\.aztec-labs\.com/[A-Za-z0-9]{16,}|alchemy\.com/v2/[A-Za-z0-9_-]{16,}|infura\.io/v3/[0-9a-f]{32})'
+          if git grep -nIE "$pattern" -- ':!l1-contracts/lib' ':!*lock*'; then
+            echo "::error::Keyed RPC URL found in a tracked file. Move it to an untracked .env and use a keyless default."
+            exit 1
+          fi
+
   unit:
     runs-on: ubuntu-latest
     steps:
