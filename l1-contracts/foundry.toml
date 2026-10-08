@@ -4,6 +4,10 @@ out = "out"
 libs = ["lib"]
 solc = "0.8.28"
 via_ir = true
+# Sepolia prices contract creation at ~1.5k gas per code byte, so the unoptimized TokenPortal
+# (~20 KB) needs ~32M gas and exceeds the 16,777,216 per-tx cap (EIP-7825).
+optimizer = true
+optimizer_runs = 200
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 remappings = [

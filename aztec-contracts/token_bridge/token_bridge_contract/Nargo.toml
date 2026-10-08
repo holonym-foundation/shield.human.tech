@@ -5,7 +5,7 @@ type = "contract"
 
 [dependencies]
 token_minter_proxy = { path = "../../token_minter_proxy" }
-aztec = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.1", directory = "noir-projects/aztec-nr/aztec" }
-token_portal_content_hash_lib = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.1", directory = "noir-projects/noir-contracts/contracts/libs/token_portal_content_hash_lib" }
+aztec = { git = "https://github.com/aztec-labs-eng/aztec-nr", tag = "v6.0.0-rc.1", directory = "aztec" }
+token_portal_content_hash_lib = { git = "https://github.com/aztec-labs-eng/aztec-node", tag = "v6.0.0-rc.1", directory = "noir-projects/noir-contracts/contracts/libs/token_portal_content_hash_lib" }
 schnorr = { tag = "v0.4.0", git = "https://github.com/noir-lang/schnorr" }
 poseidon = { tag = "v0.3.0", git = "https://github.com/noir-lang/poseidon" }

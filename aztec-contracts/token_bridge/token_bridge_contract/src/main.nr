@@ -39,7 +39,7 @@ pub contract TokenBridge {
     use schnorr::verify_signature;
     use token_minter_proxy::TokenMinterProxy;
 
-    pub(crate) global VALUE_CHANGE_DELAY: u64 = 600;
+    pub(crate) global VALUE_CHANGE_DELAY: u64 = 3600;
 
     #[derive(Deserialize, Serialize)]
     pub struct CleanHandsData {
