@@ -8,6 +8,8 @@ export interface Network {
   chainId: number;
   network: string;
   symbol: string;
+  /** Another Aztec version's app (see public/networks.json); selecting it navigates there. */
+  href?: string;
 }
 
 export interface Token {

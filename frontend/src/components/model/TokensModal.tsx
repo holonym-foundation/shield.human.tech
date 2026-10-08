@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import StyledImage from '../StyledImage'
 import { BridgeDirection, Token as TokenType } from '@/types/bridge'
-import { L1_TOKENS, L2_TOKENS } from '@/config'
+import { L1_TOKENS, L2_TOKENS, publicAsset } from '@/config'
 
 type SortOption = 'name' | 'amount' | 'percentage'
 type TokenTypeFilter = 'all' | 'stable' | 'native'
@@ -143,7 +143,7 @@ export default function TokensModal({
               className='p-1.5 rounded-full hover:bg-gray-200 transition-colors duration-200'
               aria-label='Close modal'>
               <StyledImage
-                src='/assets/svg/cross.svg'
+                src={publicAsset('/assets/svg/cross.svg')}
                 alt='Close'
                 className='h-3 w-3'
               />
@@ -159,7 +159,7 @@ export default function TokensModal({
             <div className='bg-latest-grey-800 w-full flex justify-between items-center rounded-[8px] py-1.5 px-2.5'>
               <div className='flex gap-1 items-center w-full'>
                 <StyledImage
-                  src='/assets/svg/search.svg'
+                  src={publicAsset('/assets/svg/search.svg')}
                   alt='Search'
                   className='h-4 w-4'
                 />

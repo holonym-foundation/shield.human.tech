@@ -1,7 +1,7 @@
 /**
  * Next.js server instrumentation — runs once at startup before any requests.
  *
- * Problem: @aztec/foundation/crypto/poseidon checks `typeof self !== 'undefined'`
+ * Problem: @aztec-labs/foundation/crypto/poseidon checks `typeof self !== 'undefined'`
  * to decide which Barretenberg backend to use:
  *   - browser (self defined): BarretenbergSync — loads WASM only, no CRS download
  *   - server (self undefined): Barretenberg    — downloads ~70MB CRS to ~/.bb-crs
@@ -13,7 +13,7 @@
  * Fix: define globalThis.self before any Aztec modules load so poseidon2 takes
  * the BarretenbergSync path, matching what Schnorr already does.
  *
- * Also force LOG_JSON before @aztec/foundation's logger initializes. Its logger
+ * Also force LOG_JSON before @aztec-labs/foundation's logger initializes. Its logger
  * is built at import time and, unless LOG_JSON is truthy, configures a pino
  * worker-thread transport targeting `pino-pretty`. Vercel's file tracer never
  * copies pino-pretty into the lambda (it's referenced only as a dynamic string

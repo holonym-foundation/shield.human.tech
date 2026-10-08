@@ -1,7 +1,7 @@
 /**
  * Wallet SDK connection helpers
  *
- * Wraps @aztec/wallet-sdk discovery and secure channel establishment
+ * Wraps @aztec-labs/wallet-sdk discovery and secure channel establishment
  * for use by the wallet store.
  */
 
@@ -10,10 +10,10 @@ import {
   type WalletProvider,
   type PendingConnection,
   type DiscoverySession,
-} from '@aztec/wallet-sdk/manager'
-import { hashToEmoji } from '@aztec/wallet-sdk/crypto'
-import type { ChainInfo } from '@aztec/aztec.js/account'
-import { Fr } from '@aztec/aztec.js/fields'
+} from '@aztec-labs/wallet-sdk/manager'
+import { hashToEmoji } from '@aztec-labs/wallet-sdk/crypto'
+import type { ChainInfo } from '@aztec-labs/aztec.js/account'
+import { Fr } from '@aztec-labs/aztec.js/fields'
 import { L1_CHAIN_ID, ROLLUP_VERSION } from '@/config'
 
 export const APP_ID = 'Human Tech'

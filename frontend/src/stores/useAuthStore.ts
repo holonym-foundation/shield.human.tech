@@ -2,6 +2,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { versionScopedKey } from '@/config'
 
 export interface AuthUser {
   // server returns the User CUID directly (string) — see
@@ -40,7 +41,7 @@ export const useAuthStore = create<AuthState>()(
       clearAuth: () => set({ token: null, user: null, authFailed: false, retryAuth: 0 }),
     }),
     {
-      name: 'shield-human-tech-auth',
+      name: versionScopedKey('shield-human-tech-auth'),
       partialize: (state) => ({ token: state.token, user: state.user }),
     },
   ),

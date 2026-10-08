@@ -3,6 +3,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { Icon } from '@iconify/react'
 import { Tooltip as ReactTooltip } from 'react-tooltip'
 import StyledImage from './StyledImage'
+import { publicAsset } from '@/config'
 
 interface TransactionBreakdownProps {
   isOpen: boolean
@@ -53,7 +54,7 @@ const TransactionBreakdown: React.FC<TransactionBreakdownProps> = ({
       >
         <span>Transaction breakdown</span>
         <StyledImage
-          src='/assets/svg/buttons.svg'
+          src={publicAsset('/assets/svg/buttons.svg')}
           className={`w-5 h-5 transition-transform ${isOpen ? '-rotate-90' : 'rotate-90'}`}
           alt=''
         />
@@ -87,7 +88,7 @@ const TransactionBreakdown: React.FC<TransactionBreakdownProps> = ({
                     aria-label='How the bridge fee is calculated'
                   >
                     <StyledImage
-                      src='/assets/svg/info.svg'
+                      src={publicAsset('/assets/svg/info.svg')}
                       alt=''
                       className='h-4 w-4'
                     />

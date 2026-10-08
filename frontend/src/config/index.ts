@@ -59,7 +59,15 @@ import {
   AZTEC_NODE_DEVNET,
   AZTEC_NODE_TESTNET,
   AZTEC_NODE_MAINNET,
+  BASE_PATH,
+  LEGACY_MODE,
 } from './env.config'
+
+export { BASE_PATH, LEGACY_MODE }
+
+// Files in /public. Next.js prefixes basePath for <Link> and the router but not for these
+// strings, so a legacy build at /vN must prefix them or it loads the current build's files.
+export const publicAsset = (path: string) => `${BASE_PATH}${path}`
 
 function resolveAztecEnv(): AztecEnv {
   if (AZTEC_ENV_OVERRIDE && ['devnet', 'testnet', 'mainnet'].includes(AZTEC_ENV_OVERRIDE)) {
@@ -72,6 +80,7 @@ function resolveAztecEnv(): AztecEnv {
 }
 
 const AZTEC_ENV = resolveAztecEnv()
+export const ACTIVE_AZTEC_ENV = AZTEC_ENV
 
 const ENV_CONFIG = {
   devnet: {
@@ -104,6 +113,35 @@ const activeEnvConfig = ENV_CONFIG[AZTEC_ENV]
 
 // ─── Network Constants ───────────────────────────────────────────────
 
+// ─── Config consistency guard ────────────────────────────────────────
+// The RPC/node URLs come from ENV_CONFIG[AZTEC_ENV], but the chain IDENTITY
+// (l1ChainId, rollupVersion, contract addresses) comes from `activeDeployment`.
+// Those are selected independently, so they can disagree — and when they do the app
+// talks to one network's node while telling wallets it is on another.
+//
+// That is not hypothetical. `deployments.json` currently ships mainnet deployments only,
+// so a testnet host resolves testnet node URLs while L1_CHAIN_ID stays 1 and
+// ROLLUP_VERSION stays the mainnet rollup. The chainInfo handed to the Aztec wallet is
+// therefore mainnet/Alphanet, which is why Azguard's permission dialog reads "Alphanet"
+// on testnet.shield.human.tech, derives Alphanet addresses, and inverts the
+// wrong-network check (#2295, and the binding lockouts in #2065).
+//
+// Logged rather than thrown: throwing here would hard-fail every route at import, and
+// Datadog forwards console.error, so this surfaces in production telemetry instead.
+if (ENV_CONFIG[AZTEC_ENV].l1ChainId !== activeDeployment.network.l1ChainId) {
+  console.error(
+    '[Config] Network identity mismatch: env "' +
+      AZTEC_ENV +
+      '" expects l1ChainId ' +
+      ENV_CONFIG[AZTEC_ENV].l1ChainId +
+      ' but the active deployment "' +
+      activeDeployment.id +
+      '" declares ' +
+      activeDeployment.network.l1ChainId +
+      '. Wallets are being told the wrong Aztec network. Add a deployment entry for this env.',
+  )
+}
+
 export const L1_CHAIN_ID = activeDeployment.network.l1ChainId
 export const IS_MAINNET = L1_CHAIN_ID === 1
 export const L2_CHAIN_ID = activeDeployment.network.l2ChainId
@@ -113,6 +151,13 @@ export const L2_NODE_URL = activeEnvConfig.aztecNodeUrl
 export const DEPLOYMENT_ID = activeDeployment.id
 export const ROLLUP_VERSION = activeDeployment.network.rollupVersion
 export const AZTEC_VERSION = activeDeployment.network.aztecVersion
+export const AZTEC_VERSION_ID = `v${AZTEC_VERSION.split('.')[0]}`
+
+// Builds for different Aztec rollups share an origin (current at `/`, older ones at `/vN`), so
+// rollup-specific localStorage must be scoped. v5 predates the scoping: its keys stay bare so
+// existing mainnet and `/v5` users keep their sessions and recovery data.
+export const STORAGE_NAMESPACE = AZTEC_VERSION_ID === 'v5' ? '' : AZTEC_VERSION_ID
+export const versionScopedKey = (key: string) => (STORAGE_NAMESPACE ? `${key}:${STORAGE_NAMESPACE}` : key)
 
 // L1 Aztec protocol contract addresses (from deployment snapshot)
 export const L1_CONTRACT_ADDRESSES = activeDeployment.l1ContractAddresses
@@ -146,7 +191,7 @@ import { NEXT_PUBLIC_PASSPORT_EMBED_ENABLED, NEXT_PUBLIC_PASSPORT_SCORER_ID } fr
 
 // Same-origin path the widget targets (overrideEmbedServiceUrl). All embed API
 // calls hit /api/passport-embed/embed/... and are proxied server-side.
-export const PASSPORT_EMBED_PROXY_URL = '/api/passport-embed'
+export const PASSPORT_EMBED_PROXY_URL = `${BASE_PATH}/api/passport-embed`
 // Non-secret placeholder handed to the widget's required `apiKey` prop. The real
 // key lives only in the proxy route; this value is never sent as a usable secret.
 export const PASSPORT_EMBED_API_KEY = 'proxy'
@@ -247,7 +292,7 @@ export const ADDRESS = {
 export const L1_NETWORKS: Network[] = [
   {
     id: 1,
-    img: '/assets/svg/ethereum.svg',
+    img: publicAsset('/assets/svg/ethereum.svg'),
     title: IS_MAINNET ? 'Ethereum' : 'Eth Sepolia',
     chainId: L1_CHAIN_ID,
     network: IS_MAINNET ? 'ethereum' : 'sepolia',
@@ -258,7 +303,7 @@ export const L1_NETWORKS: Network[] = [
 export const L2_NETWORKS: Network[] = [
   {
     id: 2,
-    img: '/assets/svg/aztec.svg',
+    img: publicAsset('/assets/svg/aztec.svg'),
     title: activeEnvConfig.chainName,
     chainId: L2_CHAIN_ID,
     network: 'aztec',
@@ -270,7 +315,7 @@ export const L2_NETWORKS: Network[] = [
 
 export const L1_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
   id: i + 1,
-  img: t.logo,
+  img: t.logo?.startsWith('/') ? publicAsset(t.logo) : t.logo,
   title: t.symbol,
   symbol: t.symbol,
   decimals: t.decimals,
@@ -286,7 +331,7 @@ export const L1_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
 
 export const L2_TOKENS: Token[] = activeDeployment.tokens.map((t, i) => ({
   id: i + 1,
-  img: t.logo,
+  img: t.logo?.startsWith('/') ? publicAsset(t.logo) : t.logo,
   title: `Clean ${t.symbol}`,
   symbol: `c${t.symbol}`,
   decimals: t.decimals,

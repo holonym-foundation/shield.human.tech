@@ -12,6 +12,7 @@ import {
 } from '@/config'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useOnboardingStore } from '@/stores/useOnboardingStore'
+import { useNetworkVersions } from '@/hooks/useNetworkVersions'
 
 // Current network, read from config (never hardcoded). Each Vercel deployment
 // is pinned to ONE network — the L1 chain and the Aztec network are baked in at
@@ -45,6 +46,7 @@ const DeploymentSelector: React.FC = () => {
   const splashActive = useOnboardingStore((s) => s.splashActive)
   const isDark = isPrivacyModeEnabled && !splashActive
   const [open, setOpen] = useState(false)
+  const { versions, self } = useNetworkVersions()
   const [selectedId, setSelectedId] = useState(DEPLOYMENT_ID)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -153,7 +155,7 @@ const DeploymentSelector: React.FC = () => {
               rel="noopener noreferrer"
               className="underline font-medium"
             >
-              Learn about Alpha v5
+              Learn about Aztec Alpha
             </a>
             .
           </span>
@@ -210,6 +212,50 @@ const DeploymentSelector: React.FC = () => {
             style={{ fontSize: '11px', padding: '6px 8px' }}
           />
           <div className="h-1.5" />
+
+          {/* ── Aztec version: each one is its own deployment under its own path, so switching
+              navigates (plain <a>: paths are root-relative and must skip this build's basePath). ── */}
+          {versions.length > 1 && (
+            <>
+              <div className={`mx-3 my-1 border-t ${isDark ? 'border-white/[0.12]' : 'border-[#EEEEEE]'}`} />
+              <div className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-white/[0.60]' : 'text-gray-400'}`}>
+                Aztec version
+              </div>
+              {versions.map((v) => {
+                const isSelf = v.id === self?.id
+                const row = (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-[13px] font-medium truncate ${isDark ? 'text-white/[0.90]' : 'text-[#0A0A0A]'}`}>
+                        {v.label}
+                      </div>
+                      <div className={`text-[11px] ${isDark ? 'text-white/[0.50]' : 'text-gray-400'}`}>
+                        {v.status === 'legacy' ? 'Withdraw only' : 'Deposit and withdraw'}
+                      </div>
+                    </div>
+                    {isSelf && (
+                      <span className={`flex-shrink-0 flex items-center gap-1 text-[10px] font-semibold ${isDark ? 'text-[#FA8FC4]' : 'text-[#81133B]'}`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        Active
+                      </span>
+                    )}
+                  </>
+                )
+                return isSelf ? (
+                  <div key={v.id} className="flex items-center gap-2.5 px-3 py-2">
+                    {row}
+                  </div>
+                ) : (
+                  <a
+                    key={v.id}
+                    href={v.path}
+                    className={`flex items-center gap-2.5 px-3 py-2 transition-colors ${isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-[#F5F5F5]'}`}>
+                    {row}
+                  </a>
+                )
+              })}
+            </>
+          )}
 
           {/* ── Deployment version (dev-only switch, preserved) ────────── */}
           {hasMultiple && (

@@ -1,0 +1,26 @@
+{
+  "testnet": [
+    {
+      "id": "v6",
+      "label": "Aztec Testnet v6",
+      "path": "/",
+      "status": "current"
+    },
+    {
+      "id": "v5",
+      "label": "Aztec Testnet v5",
+      "path": "/v5",
+      "status": "legacy",
+      "origin": "",
+      "pauseAt": ""
+    }
+  ],
+  "mainnet": [
+    {
+      "id": "v5",
+      "label": "Aztec",
+      "path": "/",
+      "status": "current"
+    }
+  ]
+}

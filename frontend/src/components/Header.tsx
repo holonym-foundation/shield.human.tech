@@ -11,7 +11,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Tooltip as ReactTooltip } from 'react-tooltip'
-import { L1_CHAIN_ID, POCH_MINT_URL } from '@/config'
+import { L1_CHAIN_ID, POCH_MINT_URL, publicAsset } from '@/config'
 import { useAttestationCheck } from '@/hooks/useAttestationCheck'
 import { useHumnPoints } from '@/hooks/useHumnPoints'
 import AccountChip from '@/components/AccountChip'
@@ -162,9 +162,9 @@ interface HeaderProps {
  * glyph rather than a broken image.
  */
 const ECOSYSTEM_LINKS: { label: string; href: string; icon?: string }[] = [
-  { label: 'Azguard', href: 'https://azguardwallet.io', icon: '/assets/svg/ecosystem/azguard.svg' },
-  { label: 'Aztecscan', href: 'https://aztecscan.xyz', icon: '/assets/svg/ecosystem/aztecscan.svg' },
-  { label: 'Nyx', href: 'https://www.nyx.money', icon: '/assets/svg/ecosystem/nyx.svg' },
+  { label: 'Azguard', href: 'https://azguardwallet.io', icon: publicAsset('/assets/svg/ecosystem/azguard.svg') },
+  { label: 'Aztecscan', href: 'https://aztecscan.xyz', icon: publicAsset('/assets/svg/ecosystem/aztecscan.svg') },
+  { label: 'Nyx', href: 'https://www.nyx.money', icon: publicAsset('/assets/svg/ecosystem/nyx.svg') },
 ]
 
 /**
@@ -611,7 +611,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
       <header className="w-full px-4 pt-3 flex justify-between items-center">
         <div className="flex-shrink-0">
           <Link href="/" className="hover:opacity-80 transition-opacity duration-200">
-            <Image src="/assets/svg/shield-lockup-maroon.svg" alt="Shield" width={112} height={30} />
+            <Image src={publicAsset('/assets/svg/shield-lockup-maroon.svg')} alt="Shield" width={112} height={30} />
           </Link>
         </div>
       </header>
@@ -623,7 +623,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
       <header className="w-full px-4 pt-3 flex justify-between items-center relative">
         <div className="flex-shrink-0">
           <Link href="/" className="hover:opacity-80 transition-opacity duration-200">
-            <Image src="/assets/svg/shield-lockup-maroon.svg" alt="Shield" width={112} height={30} />
+            <Image src={publicAsset('/assets/svg/shield-lockup-maroon.svg')} alt="Shield" width={112} height={30} />
           </Link>
         </div>
       </header>
@@ -669,7 +669,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
         style={{ border: 'none' }}
       >
         <span className="flex w-[16px] h-[16px] sm:w-[18px] sm:h-[18px] p-[1px] justify-center items-center flex-shrink-0 rounded-full bg-white shadow-[0px_1px_3px_0px_rgba(0,0,0,0.25)] transition-transform duration-200">
-          <Image src="/assets/svg/shield.svg" alt="Shield" width={12} height={12} />
+          <Image src={publicAsset('/assets/svg/shield.svg')} alt="Shield" width={12} height={12} />
         </span>
       </button>
     </div>
@@ -802,7 +802,7 @@ const Header: React.FC<HeaderProps> = ({ credentials }) => {
             className="flex items-center justify-center hover:opacity-80 transition-opacity duration-200"
           >
             <Image
-              src={isDark ? '/assets/svg/shield-lockup-white.svg' : '/assets/svg/shield-lockup-maroon.svg'}
+              src={isDark ? publicAsset('/assets/svg/shield-lockup-white.svg') : publicAsset('/assets/svg/shield-lockup-maroon.svg')}
               alt="Shield"
               width={100}
               height={27}

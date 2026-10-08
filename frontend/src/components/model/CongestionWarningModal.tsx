@@ -2,6 +2,7 @@ import React from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import StyledImage from '../StyledImage'
 import TextButton from '../TextButton'
+import { publicAsset } from '@/config'
 
 interface CongestionWarningModalProps {
   isOpen: boolean
@@ -44,7 +45,7 @@ const CongestionWarningModal: React.FC<CongestionWarningModalProps> = ({
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}>
                 <StyledImage
-                  src='/assets/svg/cross.svg'
+                  src={publicAsset('/assets/svg/cross.svg')}
                   alt=''
                   className='h-[14px] w-[14px] m-[2px]'
                 />
@@ -63,7 +64,7 @@ const CongestionWarningModal: React.FC<CongestionWarningModalProps> = ({
                 transition={{ delay: 0.2 }}
                 className='bg-[#FDE7F3] py-2 px-2 rounded-lg mb-6 flex items-center gap-4'>
                 <img
-                  src='/assets/svg/IconContainer.svg'
+                  src={publicAsset('/assets/svg/IconContainer.svg')}
                   alt='Warning'
                   // className='h-10 w-10'
                 />
@@ -88,7 +89,7 @@ const CongestionWarningModal: React.FC<CongestionWarningModalProps> = ({
                   onClick={onConfirm}
                   className='flex items-center justify-center gap-2 w-full'>
                   Proceed Anyway
-                  <img src='/assets/svg/white-right-arrow.svg' alt='' />
+                  <img src={publicAsset('/assets/svg/white-right-arrow.svg')} alt='' />
                 </TextButton>
               </motion.div>
 
@@ -98,7 +99,7 @@ const CongestionWarningModal: React.FC<CongestionWarningModalProps> = ({
                 transition={{ delay: 0.4 }}
                 className='flex justify-center gap-2 mt-6'>
                 <StyledImage
-                  src='/assets/svg/silk0.4.svg'
+                  src={publicAsset('/assets/svg/silk0.4.svg')}
                   alt=''
                   className='h-4 w-[14px]'
                 />

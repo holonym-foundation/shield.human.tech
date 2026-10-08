@@ -35,12 +35,17 @@ interface AttestationCheckResult {
  * attestation regardless of privacy mode.
  */
 export function useAttestationCheck() {
-  const { isWaapConnected, isAztecConnected, waapAddress } = useWalletStore()
+  const { isWaapConnected, isAztecConnected, waapAddress, aztecAddress } = useWalletStore()
   const token = useAuthStore((s) => s.token)
   const bridge = useBridge()
 
   return useQuery<AttestationCheckResult>({
-    queryKey: ['attestationCheck', waapAddress],
+    // Keyed on BOTH addresses. The server checks eligibility for the (L1, L2) pair —
+    // address binding in particular is a property of the pair, not of the L1 wallet — so
+    // keying on waapAddress alone served a stale verdict for `staleTime` (5 min) after the
+    // user switched Aztec accounts. That is #2065's "switching the Aztec account does not
+    // clear it": a user who reconnected the correct account still saw the binding error.
+    queryKey: ['attestationCheck', waapAddress, aztecAddress],
     queryFn: async (): Promise<AttestationCheckResult> => {
       // Step 1: Try POCH
       try {
@@ -101,7 +106,7 @@ export function useAttestationCheck() {
         }
       }
     },
-    enabled: isWaapConnected && isAztecConnected && !!waapAddress && !!token,
+    enabled: isWaapConnected && isAztecConnected && !!waapAddress && !!aztecAddress && !!token,
     staleTime: 5 * 60 * 1000,
     retry: false,
   })

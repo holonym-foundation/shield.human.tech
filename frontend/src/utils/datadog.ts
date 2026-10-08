@@ -78,6 +78,7 @@ export const DatadogUserAction = {
   AZTEC_WALLET_CHANNEL_FAILED: 'aztec_wallet_channel_failed',
   AZTEC_WALLET_CONFIRM_FAILED: 'aztec_wallet_confirm_failed',
   AZTEC_WALLET_CONNECTION_ATTEMPT: 'aztec_wallet_connection_attempt',
+  AZTEC_WALLET_NETWORK_CHECK_SKIPPED: 'aztec_wallet_network_check_skipped',
   AZTEC_WALLET_CONNECTION_FAILURE: 'aztec_wallet_connection_failure',
   AZTEC_WALLET_CONNECTION_SUCCESS: 'aztec_wallet_connection_success',
   AZTEC_WALLET_DISCONNECTION_ATTEMPT: 'aztec_wallet_disconnection_attempt',

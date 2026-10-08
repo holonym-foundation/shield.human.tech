@@ -77,12 +77,24 @@ export default function DocsLayout({
   const [activeId, setActiveId] = useState(sections[0]?.id)
 
   useEffect(() => {
+    // A callback only carries the sections whose intersection CHANGED, so picking the
+    // topmost entry from `entries` alone leaves the highlight on whatever last fired.
+    // Keep the full intersecting set and re-derive the topmost from the live DOM.
+    const intersecting = new Set<string>()
     const observer = new IntersectionObserver(
       (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
-        if (visible[0]) setActiveId(visible[0].target.id)
+        entries.forEach((e) => {
+          if (e.isIntersecting) intersecting.add(e.target.id)
+          else intersecting.delete(e.target.id)
+        })
+        const topmost = sections
+          .filter((s) => intersecting.has(s.id))
+          .sort(
+            (a, b) =>
+              (document.getElementById(a.id)?.getBoundingClientRect().top ?? 0) -
+              (document.getElementById(b.id)?.getBoundingClientRect().top ?? 0),
+          )[0]
+        if (topmost) setActiveId(topmost.id)
       },
       { rootMargin: '-100px 0px -65% 0px', threshold: 0 },
     )
@@ -105,7 +117,7 @@ export default function DocsLayout({
 
       <div className="flex gap-10">
         <aside className="hidden w-56 shrink-0 lg:block">
-          <nav className="sticky top-24 flex flex-col gap-1">
+          <nav className="sticky top-8 flex flex-col gap-1">
             {sections.map((s) => (
               <a
                 key={s.id}

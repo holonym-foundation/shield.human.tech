@@ -1,6 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
+import { publicAsset } from '@/config'
 
 const AppLoadingScreen = () => {
   return (
@@ -19,7 +20,7 @@ const AppLoadingScreen = () => {
           className="mb-8"
         >
           <img
-            src="/assets/svg/shield-symbol-maroon.svg"
+            src={publicAsset('/assets/svg/shield-symbol-maroon.svg')}
             alt="Shield"
             width={120}
             height={120}

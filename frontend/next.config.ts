@@ -1,8 +1,30 @@
 import type { NextConfig } from 'next'
 import webpack from 'webpack'
 import path from 'path'
+import fs from 'fs'
+
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || undefined
+
+// The root build proxies each legacy Aztec version's path to the frozen deployment that serves it.
+// Legacy builds (basePath set) never rewrite: only the current build owns the registry.
+function legacyVersionRewrites() {
+  if (BASE_PATH) return []
+  const env = process.env.NEXT_PUBLIC_AZTEC_ENV ?? ''
+  const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'public', 'networks.json'), 'utf8'))
+  const versions: { path: string; status: string; origin?: string }[] = registry[env] ?? []
+  return versions
+    .filter((v) => v.status === 'legacy' && v.origin)
+    .flatMap((v) => [
+      { source: v.path, destination: `${v.origin}${v.path}` },
+      { source: `${v.path}/:rest*`, destination: `${v.origin}${v.path}/:rest*` },
+    ])
+}
 
 const nextConfig: NextConfig = {
+  basePath: BASE_PATH,
+  async rewrites() {
+    return { beforeFiles: legacyVersionRewrites() }
+  },
   // bb.js lives in the workspace-root node_modules/.pnpm (not under frontend/),
   // so the lambda needs the monorepo as its tracing root for Vercel to copy
   // files that resolve above this Next project.
@@ -34,19 +56,18 @@ const nextConfig: NextConfig = {
   // is what CI does).
   outputFileTracingIncludes: {
     '/api/**/*': [
-      './node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz',
-      '../node_modules/.pnpm/@aztec+bb.js*/node_modules/@aztec/bb.js/dest/**/*.wasm.gz',
+      './node_modules/.pnpm/@aztec-foundation+bb.js*/node_modules/@aztec-foundation/bb.js/dest/**/*.wasm.gz',
+      '../node_modules/.pnpm/@aztec-foundation+bb.js*/node_modules/@aztec-foundation/bb.js/dest/**/*.wasm.gz',
     ],
   },
-  // Keep @aztec/bb.js as external on the server so the WASM file resolves
+  // Keep @aztec-foundation/bb.js as external on the server so the WASM file resolves
   // from node_modules instead of being broken by webpack bundling.
   transpilePackages: ['@human.tech/clean.sdk'],
   serverExternalPackages: [
-    '@aztec/bb.js',
-    '@aztec/aztec.js',
-    '@aztec/foundation',
-    '@aztec/stdlib',
-    '@aztec/circuits.js',
+    '@aztec-foundation/bb.js',
+    '@aztec-labs/aztec.js',
+    '@aztec-labs/foundation',
+    '@aztec-labs/stdlib',
     'pino',
     'pino-pretty',
   ],
@@ -82,16 +103,16 @@ const nextConfig: NextConfig = {
 
     }
 
-    // pnpm nests @aztec/aztec.js under its dependents, so packages that import
+    // pnpm nests @aztec-labs/aztec.js under its dependents, so packages that import
     // its subpath exports (e.g. @aztec-foundation/aztec-standards' generated
-    // Token.js -> '@aztec/aztec.js/abi') can't resolve them. serverExternalPackages
+    // Token.js -> '@aztec-labs/aztec.js/abi') can't resolve them. serverExternalPackages
     // only externalizes the bare package, not these subpaths. Alias them to the
     // hoisted package so both the server and client bundles resolve.
     config.resolve.alias = {
       ...config.resolve.alias,
-      '@aztec/aztec.js/abi': require.resolve('@aztec/aztec.js/abi'),
-      '@aztec/aztec.js/contracts': require.resolve('@aztec/aztec.js/contracts'),
-      '@aztec/aztec.js/fields': require.resolve('@aztec/aztec.js/fields'),
+      '@aztec-labs/aztec.js/abi': require.resolve('@aztec-labs/aztec.js/abi'),
+      '@aztec-labs/aztec.js/contracts': require.resolve('@aztec-labs/aztec.js/contracts'),
+      '@aztec-labs/aztec.js/fields': require.resolve('@aztec-labs/aztec.js/fields'),
     }
 
     return config

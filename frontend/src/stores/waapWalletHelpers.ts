@@ -1,4 +1,5 @@
 import { WaapLoginMethod, LOGIN_METHODS } from '@/types/wallet'
+import { publicAsset } from '@/config'
 
 // EIP-6963 types
 export interface EIP6963ProviderInfo {
@@ -186,9 +187,9 @@ export const getWalletIconByMethod = (
   address?: string
 ): string => {
   if (loginMethod === LOGIN_METHODS.WALLETCONNECT) {
-    return '/assets/wallets/wallet-connect-logo.svg'
+    return publicAsset('/assets/wallets/wallet-connect-logo.svg')
   } else if (loginMethod === LOGIN_METHODS.WAAP) {
-    return '/assets/wallets/wally-dark.svg' // WaaP/Human wallet logo
+    return publicAsset('/assets/wallets/wally-dark.svg') // WaaP/Human wallet logo
   } else if (loginMethod === LOGIN_METHODS.INJECTED) {
     // For injected wallets, try EIP-6963 discovery first
     if (address) {
@@ -202,19 +203,19 @@ export const getWalletIconByMethod = (
     if (walletProvider) {
       const providerLower = walletProvider.toLowerCase()
       if (providerLower.includes('metamask')) {
-        return '/assets/wallets/metamask-logo.svg'
+        return publicAsset('/assets/wallets/metamask-logo.svg')
       } else if (providerLower.includes('rabby')) {
-        return '/assets/wallets/rabby-wallet.svg' // Rabby wallet logo
+        return publicAsset('/assets/wallets/rabby-wallet.svg') // Rabby wallet logo
       } else if (providerLower.includes('coinbase')) {
-        return '/assets/wallets/metamask-logo.svg' // Fallback to MetaMask icon
+        return publicAsset('/assets/wallets/metamask-logo.svg') // Fallback to MetaMask icon
       } else if (providerLower.includes('brave')) {
-        return '/assets/wallets/metamask-logo.svg' // Fallback to MetaMask icon
+        return publicAsset('/assets/wallets/metamask-logo.svg') // Fallback to MetaMask icon
       }
     }
   }
 
   // Default fallback
-  return '/assets/svg/silk-logo.svg'
+  return publicAsset('/assets/svg/silk-logo.svg')
 }
 
 // Utility function to determine wallet provider based on login method

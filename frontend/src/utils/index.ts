@@ -1,7 +1,7 @@
 import {
   createSigningMessage,
-  deriveEncryptionKey,
-  decryptData,
+  deriveEncryptionKeyCandidates,
+  decryptDataWithCandidates,
   buildDepositExport,
   buildWithdrawalExport,
   getDepositById,
@@ -74,6 +74,20 @@ export function extractErrorMessage(error: unknown, fallback = 'Unknown error'):
  * Ordering matters: a specific shape (an Aztec checkpoint revert, a user rejection) is
  * matched before the broad "contract reverted" / "viem" catch-all so the precise message wins.
  */
+/**
+ * Whether a wallet call failed schema validation. A wallet built for a different Aztec version
+ * answers in a shape this app's SDK cannot parse; there is no reliable version handshake to check
+ * up front (wallet-SDK wallets echo the app's chain info back), so the failure is the signal.
+ */
+export function isWalletSchemaMismatch(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /"expected":|"code":\s*"invalid_type"/.test(message)
+}
+
+export function walletVersionMismatchMessage(networkName: string): string {
+  return `This Aztec wallet can't load ${networkName}. It is likely built for a different Aztec version. Connect a wallet for ${networkName}.`
+}
+
 export function humanizeError(error: unknown): string {
   const raw = extractErrorMessage(error, '').toLowerCase()
 
@@ -111,6 +125,16 @@ export function humanizeError(error: unknown): string {
     return 'Your wallet is locked. Please unlock it and try again.'
   }
 
+  // The Aztec wallet has no account on the network it currently has selected, so it
+  // throws from its own internals before it can answer. Confirmed with the Azguard team:
+  // this is their "no accounts available for this network" state, and it reaches us as an
+  // opaque property read on undefined. Azguard 0.15.2 makes it unlikely on a fresh
+  // profile (Alphanet default + auto-created account) but it stays reachable on older
+  // versions and whenever the user selects a network they have no account on.
+  if (raw.includes("reading 'paymentmethod'") || raw.includes('reading "paymentmethod"')) {
+    return 'No account exists on the network your wallet has selected. Open the wallet, pick the network, then reconnect.'
+  }
+
   // Not enough funds / gas.
   if (raw.includes('insufficient funds') || raw.includes('insufficient balance')) {
     return 'Insufficient funds to complete this transaction.'
@@ -133,6 +157,23 @@ export function humanizeError(error: unknown): string {
 
   return 'Something went wrong. Please try again in a moment.'
 }
+
+/**
+ * Shown when the SDK resends an L1 tx that reverted on the wallet's gas (BridgeEventType.L1_GAS_RETRY).
+ * MetaMask's "Added protection" sets a zero-margin gas limit on its first protected tx from an account.
+ */
+export const L1_GAS_RETRY_NOTICE = {
+  heading: 'Your wallet set too little gas',
+  message:
+    'Nothing moved. Confirm the retry in your wallet. If it fails again, turn off "Added protection" for this transaction in MetaMask.',
+} as const
+
+/** Shown when a withdrawal's wallet approval is still open as its attestation nears expiry. */
+export const ATTESTATION_EXPIRING_NOTICE = {
+  heading: 'This approval is about to expire',
+  message:
+    'Approving the request in your wallet now will fail and cost gas. Reject it and start the withdrawal again. Nothing has been withdrawn.',
+} as const
 
 /**
  * Serialize Aztec NodeInfo to a plain JSON-serializable object for storage/export.
@@ -249,9 +290,16 @@ export async function decryptStorageEntry(
 
   const signingMessage = createSigningMessage(entry.l1Address, entry.keyDerivationDomain)
   const signature = await signMessage(signingMessage, entry.l1Address)
-  const encryptionKey = await deriveEncryptionKey(entry.l1Address, signature, entry.keyDerivationDomain)
+  // Candidates, not a single key: a locally-stored entry can predate either the KDF
+  // rename or the address-casing fix, and nothing records which one applies.
+  const keys = await deriveEncryptionKeyCandidates(
+    entry.l1Address,
+    signature,
+    entry.keyDerivationDomain,
+    entry.encryptedVersion,
+  )
   const decrypted = JSON.parse(
-    await decryptData(entry.encryptedCiphertext, entry.encryptedIv, entry.encryptedTag, encryptionKey),
+    await decryptDataWithCandidates(entry.encryptedCiphertext, entry.encryptedIv, entry.encryptedTag, keys),
   )
 
   const value = decrypted[fieldName]

@@ -7,7 +7,7 @@ import { dismissNotificationByKey } from '@/stores/useNotificationsStore'
 import { useBridge } from '@/hooks/useBridge'
 import type { BridgeEvent } from '@human.tech/clean.sdk'
 import { BridgeEventType } from '@human.tech/clean.sdk'
-import { verifyEncryptionDomain } from '@/utils'
+import { L1_GAS_RETRY_NOTICE, verifyEncryptionDomain } from '@/utils'
 import { getEtherscanUrl, L1_CHAIN_ID } from '@/config'
 import { logInfo, logError, DatadogUserAction } from '@/utils/datadog'
 
@@ -107,6 +107,9 @@ export function useResumeL2WithdrawToL1(onSuccess?: (data: any) => void) {
               toastId: 'resume-l2-to-l1-progress',
               autoClose: 15000,
             })
+            break
+          case BridgeEventType.L1_GAS_RETRY:
+            notify('warn', L1_GAS_RETRY_NOTICE, { autoClose: false, toastId: 'l1-gas-retry' })
             break
           case BridgeEventType.L1_WITHDRAW_SENT:
             logInfo('Resume L1 withdraw tx sent', {

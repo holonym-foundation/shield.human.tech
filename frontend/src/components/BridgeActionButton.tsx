@@ -8,7 +8,7 @@ import { logError } from '@/utils/datadog'
 import { parseUnits } from 'viem'
 import CongestionWarningModal from './model/CongestionWarningModal'
 import { useL2PendingTxCount, useNetworkHealth } from '@/hooks/useL2Operations'
-import { POCH_MINT_URL } from '@/config'
+import { POCH_MINT_URL, publicAsset } from '@/config'
 import { PASSPORT_MAX_AMOUNT } from '@/config/env.config'
 import { pushNotification, dismissNotificationByKey } from '@/stores/useNotificationsStore'
 
@@ -616,7 +616,7 @@ function BridgeActionButton({
             <LoadingContent label={getLoadingText()} />
           ) : bridgeCompleted ? (
             <div className="flex items-center gap-2">
-              <StyledImage src="/assets/svg/check-circle.svg" alt="" className="h-5 w-5" />
+              <StyledImage src={publicAsset('/assets/svg/check-circle.svg')} alt="" className="h-5 w-5" />
               <span>Bridge Complete!</span>
             </div>
           ) : (

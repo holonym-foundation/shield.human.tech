@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion'
 import StyledImage from './StyledImage'
+import { publicAsset } from '@/config'
 
 interface MaintenanceOverlayProps {
   message?: string
@@ -37,7 +38,7 @@ export default function MaintenanceOverlay({
           <div className="flex justify-center items-center mb-4">
             <div className="w-16 h-16 rounded-full bg-warn-200 flex items-center justify-center">
               <StyledImage
-                src="/assets/svg/shield.svg"
+                src={publicAsset('/assets/svg/shield.svg')}
                 alt="Maintenance"
                 className="w-8 h-8"
               />
@@ -70,7 +71,7 @@ export default function MaintenanceOverlay({
           {/* Footer */}
           <div className="flex justify-center gap-2 mt-6">
             <StyledImage
-              src="/assets/svg/silk0.4.svg"
+              src={publicAsset('/assets/svg/silk0.4.svg')}
               alt=""
               className="h-4 w-[14px]"
             />

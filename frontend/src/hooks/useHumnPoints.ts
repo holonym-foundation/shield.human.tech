@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { BASE_PATH } from '@/config'
 
 export interface HumnPointsResult {
   totalPoints: number
@@ -17,7 +18,7 @@ export function useHumnPoints(l1Address?: string) {
   return useQuery<HumnPointsResult>({
     queryKey: ['humnPoints', l1Address],
     queryFn: async (): Promise<HumnPointsResult> => {
-      const resp = await fetch(`/api/points?address=${l1Address}`)
+      const resp = await fetch(`${BASE_PATH}/api/points?address=${l1Address}`)
       if (!resp.ok) {
         throw new Error(`Points lookup failed: ${resp.status}`)
       }

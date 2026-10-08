@@ -2,6 +2,7 @@ import clsxm from '@/utils/clsxm'
 import Image from 'next/image'
 import React from 'react'
 import { ToastContentProps } from 'react-toastify'
+import { publicAsset } from '@/config'
 
 interface PrivacyModeToastProps extends Partial<ToastContentProps> {
   heading?: string
@@ -17,7 +18,7 @@ const PrivacyModeToast = ({
   <div className='flex items-center gap-4 w-full'>
     <div className='flex p-[10px] items-center gap-[10px] rounded-full bg-[#737373]'>
       <Image
-        src='/assets/svg/toast/shield-check.svg'
+        src={publicAsset('/assets/svg/toast/shield-check.svg')}
         alt='Shield Check'
         width={heading ? 34 : 24}
         height={heading ? 34 : 24}

@@ -1,6 +1,6 @@
 'use client'
 
-import { createAztecNodeClient } from '@aztec/aztec.js/node'
+import { createRpcLimitedAztecNodeClient } from '@human.tech/clean.sdk'
 import { L2_NODE_URL } from '@/config'
 
-export const aztecNode = createAztecNodeClient(L2_NODE_URL)
+export const aztecNode = createRpcLimitedAztecNodeClient(L2_NODE_URL)

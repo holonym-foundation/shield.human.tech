@@ -2,6 +2,7 @@ import clsxm from '@/utils/clsxm'
 import Image from 'next/image';
 import React from 'react';
 import { ToastContentProps } from 'react-toastify';
+import { publicAsset } from '@/config'
 
 interface DefaultToastProps extends Partial<ToastContentProps> {
   heading?: string;
@@ -16,7 +17,7 @@ const DefaultToast = ({
 }: DefaultToastProps) => (
   <div className='flex items-center gap-4 w-full'>
       <img
-        src='/assets/svg/toast/default.svg'
+        src={publicAsset('/assets/svg/toast/default.svg')}
         alt='Info Icon'
         width={heading ? 54 : 44}
         height={heading ? 54 : 44}

@@ -46,8 +46,8 @@ const CLAIM_DA_GAS_CEILING = 50_000
  * multiplier for the max fee rate.
  */
 export async function buildClaimGasSettings() {
-  const { createAztecNodeClient } = await import('@aztec/aztec.js/node')
-  const { GasFees } = await import('@aztec/stdlib/gas')
+  const { createAztecNodeClient } = await import('@aztec-labs/aztec.js/node')
+  const { GasFees } = await import('@aztec-labs/stdlib/gas')
 
   const node = createAztecNodeClient(L2_NODE_URL)
   const baseFees = await node.getCurrentMinFees()
@@ -84,7 +84,7 @@ export async function buildClaimGasSettings() {
  * @returns The fee limit in FeeJuice wei (18 decimals)
  */
 export async function estimateClaimFeeLimit(fuelType: 'public' | 'private' = 'public'): Promise<bigint> {
-  const { createAztecNodeClient } = await import('@aztec/aztec.js/node')
+  const { createAztecNodeClient } = await import('@aztec-labs/aztec.js/node')
 
   const node = createAztecNodeClient(L2_NODE_URL)
   const baseFees = await node.getCurrentMinFees()

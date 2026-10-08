@@ -3,7 +3,7 @@
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { BridgeDirection, BridgeState, Network, Token } from '@/types/bridge'
-import { L1_NETWORKS, L2_NETWORKS, L1_TOKENS, L2_TOKENS } from '@/config'
+import { L1_NETWORKS, L2_NETWORKS, L1_TOKENS, L2_TOKENS, LEGACY_MODE, versionScopedKey } from '@/config'
 
 // Types
 export interface LoadingStep {
@@ -163,12 +163,20 @@ interface BridgeStoreState extends StepState, BridgeConfigState, TransactionStat
 
 // Initial states. Amount defaults to empty so a bare/refreshed /progress can never
 // auto-submit a stray transfer (the page only fires when amount > 0).
-const DEFAULT_BRIDGE_STATE: BridgeState = {
-  from: { network: L1_NETWORKS[0], token: L1_TOKENS[0] },
-  to: { network: L2_NETWORKS[0], token: L2_TOKENS[0] },
-  direction: BridgeDirection.L1_TO_L2,
-  amount: '',
-}
+// A legacy Aztec version accepts no new deposits, so its bridge starts (and stays) on withdraw.
+const DEFAULT_BRIDGE_STATE: BridgeState = LEGACY_MODE
+  ? {
+      from: { network: L2_NETWORKS[0], token: L2_TOKENS[0] },
+      to: { network: L1_NETWORKS[0], token: L1_TOKENS[0] },
+      direction: BridgeDirection.L2_TO_L1,
+      amount: '',
+    }
+  : {
+      from: { network: L1_NETWORKS[0], token: L1_TOKENS[0] },
+      to: { network: L2_NETWORKS[0], token: L2_TOKENS[0] },
+      direction: BridgeDirection.L1_TO_L2,
+      amount: '',
+    }
 
 const initialStepState: StepState = {
   headerStep: 0,
@@ -241,7 +249,7 @@ const getInitialPrivacyMode = (): boolean => {
   }
 }
 
-const LS_KEY_CURRENT_OPERATION_ID = 'currentOperationId'
+const LS_KEY_CURRENT_OPERATION_ID = versionScopedKey('currentOperationId')
 
 const getInitialCurrentOperationId = (): string | null => {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null
@@ -287,7 +295,7 @@ const initialState = {
 
 const bridgeStore = create<BridgeStoreState>((set, get) => ({
   ...initialState,
-  direction: BridgeDirection.L1_TO_L2,
+  direction: DEFAULT_BRIDGE_STATE.direction,
 
   // Privacy Mode toggle
   isPrivacyModeEnabled: getInitialPrivacyMode(),
@@ -466,7 +474,7 @@ const bridgeStore = create<BridgeStoreState>((set, get) => ({
     writeCurrentOperationIdToStorage(null)
     set((state) => ({
       ...initialState,
-      direction: BridgeDirection.L1_TO_L2,
+      direction: DEFAULT_BRIDGE_STATE.direction,
       isPrivacyModeEnabled: state.isPrivacyModeEnabled,
       recoveryOperationId: null,
       recoveryClaimData: null,

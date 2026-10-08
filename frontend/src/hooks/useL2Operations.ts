@@ -3,7 +3,7 @@ import { L1_TOKENS, L1_CHAIN_ID, L2_CHAIN_ID, BRIDGED_FPC_ADDRESS, getAztecscanU
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { logInfo, logError, DatadogUserAction } from '@/utils/datadog'
 import { WalletType } from '@/types/wallet'
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, parseUnits } from 'viem'
 import { useToast, useToastMutation } from './useToast'
@@ -15,6 +15,8 @@ import {
   verifyEncryptionDomain,
   extractErrorMessage,
   humanizeError,
+  L1_GAS_RETRY_NOTICE,
+  ATTESTATION_EXPIRING_NOTICE,
 } from '@/utils'
 import { useL2ErrorHandler } from '@/utils/l2ErrorHandler'
 import { estimateClaimFeeLimit } from '@/utils/fuelGasEstimate'
@@ -515,6 +517,12 @@ export function useL2WithdrawTokensToL1(onBridgeSuccess?: (data: any) => void) {
               autoClose: 15000,
             })
             break
+          case BridgeEventType.ATTESTATION_EXPIRING:
+            notify('warn', ATTESTATION_EXPIRING_NOTICE, { autoClose: false, toastId: 'attestation-expiring' })
+            break
+          case BridgeEventType.L1_GAS_RETRY:
+            notify('warn', L1_GAS_RETRY_NOTICE, { autoClose: false, toastId: 'l1-gas-retry' })
+            break
           case BridgeEventType.L1_WITHDRAW_SENT:
             logInfo('L1 withdraw tx sent', {
               direction: 'L2_TO_L1',
@@ -809,6 +817,12 @@ export function useL2RecoverWithdrawal() {
               toastId: 'resume-l2-to-l1-progress',
               autoClose: false,
             })
+            break
+          case BridgeEventType.ATTESTATION_EXPIRING:
+            notify('warn', ATTESTATION_EXPIRING_NOTICE, { autoClose: false, toastId: 'attestation-expiring' })
+            break
+          case BridgeEventType.L1_GAS_RETRY:
+            notify('warn', L1_GAS_RETRY_NOTICE, { autoClose: false, toastId: 'l1-gas-retry' })
             break
           case BridgeEventType.L1_WITHDRAW_SENT:
             logInfo('Resume L1 withdraw tx sent', {

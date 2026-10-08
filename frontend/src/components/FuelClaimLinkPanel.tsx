@@ -5,8 +5,6 @@ import { STORAGE_KEYS } from '@human.tech/clean.sdk'
 import { buildFuelClaimUrl } from '@/utils/fuelClaimLink'
 import { useBridgeStore } from '@/stores/bridgeStore'
 
-const LS_KEY_BRIDGE_DEPOSITS = STORAGE_KEYS.deposits
-
 // Polls localStorage because the bridge flow writes fuel-message metadata via
 // updateLocalStorageItem, not zustand — no subscribable signal.
 export function FuelClaimLinkPanel() {
@@ -24,7 +22,7 @@ export function FuelClaimLinkPanel() {
       return
     }
     try {
-      const raw = localStorage.getItem(LS_KEY_BRIDGE_DEPOSITS)
+      const raw = localStorage.getItem(STORAGE_KEYS.deposits)
       if (!raw) {
         setLink(null)
         return

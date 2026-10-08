@@ -9,7 +9,11 @@ import { init as initDatadog } from '@/utils/datadog'
 import { init as initPostHog } from '@/utils/posthog'
 import AuthSync from '@/components/AuthSync'
 import { BridgeContext, useBridgeInstance } from '@/hooks/useBridge'
-import { L1_RPC_URL, L2_NODE_URL, DEPLOYMENT_ID } from './config'
+import { L1_RPC_URL, L2_NODE_URL, DEPLOYMENT_ID, BASE_PATH, STORAGE_NAMESPACE } from './config'
+import { setStorageNamespace } from '@human.tech/clean.sdk'
+
+// Before any render reads or writes recovery entries.
+setStorageNamespace(STORAGE_NAMESPACE)
 
 function InitializeWaapWallet() {
   const { initializeWaapWallet } = useWalletStore()
@@ -57,13 +61,13 @@ function InitializePostHog() {
 }
 
 function BridgeProvider({ children }: { children: ReactNode }) {
-  // apiUrl: '' uses same-origin (relative URLs) since this app hosts the API routes.
+  // apiUrl: same-origin (relative URLs, under this build's basePath) since this app hosts the API routes.
   // External SDK consumers don't need to set this — it defaults to https://shield.human.tech
   const bridge = useBridgeInstance({
     // Pin the SDK to the same deployment the frontend resolves, so the tx path never
     // falls back to the SDK bundle's default activeDeploymentId.
     deployment: DEPLOYMENT_ID,
-    apiUrl: '',
+    apiUrl: BASE_PATH,
     l1RpcUrl: L1_RPC_URL ?? '',
     // Override so the SDK uses the env node URL (carries the API key) instead of the
     // git-committed deployments.json nodeUrl — keeps the key out of version control.

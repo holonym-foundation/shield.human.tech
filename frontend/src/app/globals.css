@@ -25,7 +25,7 @@
 /* Suisse Intl */
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-THIN.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-THIN.otf') format('opentype');
   font-weight: 100;
   font-style: normal;
   font-display: swap;
@@ -33,7 +33,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-THINIT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-THINIT.otf') format('opentype');
   font-weight: 100;
   font-style: italic;
   font-display: swap;
@@ -41,7 +41,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-LIGHT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-LIGHT.otf') format('opentype');
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -49,7 +49,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-LIGHTIT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-LIGHTIT.otf') format('opentype');
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -57,7 +57,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-REGULAR.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-REGULAR.otf') format('opentype');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -65,7 +65,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-REGULARIT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-REGULARIT.otf') format('opentype');
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -73,7 +73,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-BOOK.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-BOOK.otf') format('opentype');
   font-weight: 450;
   font-style: normal;
   font-display: swap;
@@ -81,7 +81,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-BOOKIT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-BOOKIT.otf') format('opentype');
   font-weight: 450;
   font-style: italic;
   font-display: swap;
@@ -89,7 +89,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-MEDIUM.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-MEDIUM.otf') format('opentype');
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -97,7 +97,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-MEDIUMIT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-MEDIUMIT.otf') format('opentype');
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -105,7 +105,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-SEMIBOLD.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-SEMIBOLD.otf') format('opentype');
   font-weight: 600;
   font-style: normal;
   font-display: swap;
@@ -113,7 +113,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-SEMIBOLDIT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-SEMIBOLDIT.otf') format('opentype');
   font-weight: 600;
   font-style: italic;
   font-display: swap;
@@ -121,7 +121,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-BOLD.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-BOLD.otf') format('opentype');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -129,7 +129,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-BOLDIT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-BOLDIT.otf') format('opentype');
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -137,7 +137,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-BLACK.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-BLACK.otf') format('opentype');
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -145,7 +145,7 @@
 
 @font-face {
   font-family: 'Suisse Intl';
-  src: url('/assets/fonts/SUISSEINTL-BLACKIT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-BLACKIT.otf') format('opentype');
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -153,7 +153,7 @@
 
 @font-face {
   font-family: 'Suisse Intl Hairline';
-  src: url('/assets/fonts/SUISSEINTL-HAIRLINE.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-HAIRLINE.otf') format('opentype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -161,7 +161,7 @@
 
 @font-face {
   font-family: 'Suisse Intl Hairline';
-  src: url('/assets/fonts/SUISSEINTL-HAIRLINEIT.OTF') format('opentype');
+  src: url('../../public/assets/fonts/SUISSEINTL-HAIRLINEIT.otf') format('opentype');
   font-weight: normal;
   font-style: italic;
   font-display: swap;
@@ -170,7 +170,7 @@
 /* PP Hatton — human.tech brand display font (headings, display, brand moments). */
 @font-face {
   font-family: 'PP Hatton';
-  src: url('/assets/fonts/PPHATTON-REGULAR.TTF') format('truetype');
+  src: url('../../public/assets/fonts/PPHATTON-REGULAR.ttf') format('truetype');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -178,7 +178,7 @@
 
 @font-face {
   font-family: 'PP Hatton';
-  src: url('/assets/fonts/PPHATTON-MEDIUM.TTF') format('truetype');
+  src: url('../../public/assets/fonts/PPHATTON-MEDIUM.ttf') format('truetype');
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -186,7 +186,7 @@
 
 @font-face {
   font-family: 'PP Hatton';
-  src: url('/assets/fonts/PPHATTON-SEMIBOLD.OTF') format('opentype');
+  src: url('../../public/assets/fonts/PPHATTON-SEMIBOLD.otf') format('opentype');
   font-weight: 600;
   font-style: normal;
   font-display: swap;

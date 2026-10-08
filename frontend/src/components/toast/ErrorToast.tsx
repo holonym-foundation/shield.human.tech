@@ -1,6 +1,7 @@
 import clsxm from '@/utils/clsxm'
 import React, { useState } from 'react'
 import { ToastContentProps } from 'react-toastify'
+import { publicAsset } from '@/config'
 
 interface ErrorToastProps extends Partial<ToastContentProps> {
   heading?: string
@@ -41,7 +42,7 @@ const ErrorToast = ({ closeToast, toastProps, heading, message }: ErrorToastProp
 
   return (
     <div className="flex items-center gap-4 w-full">
-      <img src="/assets/svg/toast/error.svg" alt="Error Icon" width={heading ? 54 : 44} height={heading ? 54 : 44} />
+      <img src={publicAsset('/assets/svg/toast/error.svg')} alt="Error Icon" width={heading ? 54 : 44} height={heading ? 54 : 44} />
       <div className="flex flex-col justify-center items-start gap-[4px] flex-1">
         {heading && (
           <span className="text-[#0A0A0A] font-sans text-[14px] font-semibold leading-[20px]">{heading}</span>

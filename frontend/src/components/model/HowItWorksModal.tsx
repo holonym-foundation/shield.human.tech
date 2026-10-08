@@ -7,6 +7,7 @@ import { Icon } from '@iconify/react'
 import StyledImage from '../StyledImage'
 import TextButton from '../TextButton'
 import { useExplainerStore } from '@/stores/useExplainerStore'
+import { publicAsset } from '@/config'
 
 export const EXPLAINER_STEPS: Array<{ title: string; body: string }> = [
   {
@@ -52,7 +53,7 @@ const HowItWorksModal: React.FC = () => {
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
                 <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#E5EFFF]">
-                  <StyledImage src="/assets/svg/shield.svg" alt="" className="h-[18px] w-[18px]" />
+                  <StyledImage src={publicAsset('/assets/svg/shield.svg')} alt="" className="h-[18px] w-[18px]" />
                 </span>
                 <h2 className="text-[18px] font-semibold text-[#0A0A0A]">How the Shield Bridge works</h2>
               </div>
@@ -61,7 +62,7 @@ const HowItWorksModal: React.FC = () => {
                 aria-label="Close"
                 className="mt-1 rounded-md p-1 text-[#737373] hover:bg-[#F5F5F5] transition-colors"
               >
-                <StyledImage src="/assets/svg/cross.svg" alt="" className="h-[14px] w-[14px]" />
+                <StyledImage src={publicAsset('/assets/svg/cross.svg')} alt="" className="h-[14px] w-[14px]" />
               </button>
             </div>
 

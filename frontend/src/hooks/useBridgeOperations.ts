@@ -13,18 +13,23 @@ import { logInfo, DatadogUserAction } from '@/utils/datadog'
  * Returns raw operations (encrypted fields are NOT decrypted here).
  */
 export function useBridgeOperations() {
-  const { waapAddress: l1Address } = useWalletStore()
+  const { waapAddress: l1Address, aztecAddress } = useWalletStore()
   const { token } = useAuthStore()
   const bridge = useBridge()
 
   return useQuery<BridgeOperation[]>({
-    queryKey: ['bridgeOperations', l1Address],
+    // Operations belong to a User, which is unique on the (l1Address, l2Address) PAIR, so
+    // the key has to carry both. Keyed on l1Address alone, switching Aztec accounts served
+    // the previous account's operations from cache for `staleTime`. Appending is safe for
+    // the existing `invalidateQueries(['bridgeOperations', l1Address])` calls, which match
+    // by prefix.
+    queryKey: ['bridgeOperations', l1Address, aztecAddress],
     queryFn: async () => {
       return bridge.getOperations()
     },
     // Gate on both l1Address AND auth token to avoid 401 errors during
     // the window between wallet state restoration and JWT restoration.
-    enabled: !!l1Address && !!token,
+    enabled: !!l1Address && !!aztecAddress && !!token,
     refetchOnWindowFocus: true,
     staleTime: 30_000, // 30s
   })

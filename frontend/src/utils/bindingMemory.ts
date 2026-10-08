@@ -1,3 +1,5 @@
+import { versionScopedKey } from '@/config'
+
 /**
  * Device-local (localStorage) memory of L1↔L2 bindings the SERVER has CONFIRMED.
  *
@@ -17,7 +19,7 @@
  * resolved; once it resolves, the live/session value takes precedence.
  */
 
-const STORAGE_KEY = 'shield-human-tech-binding-memory-v1'
+const STORAGE_KEY = versionScopedKey('shield-human-tech-binding-memory-v1')
 
 /** lowercased EVM (L1) address → lowercased Aztec (L2) address, a confirmed 1:1 pair. */
 type PairMap = Record<string, string>

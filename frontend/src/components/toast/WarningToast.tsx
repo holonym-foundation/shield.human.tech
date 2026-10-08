@@ -1,6 +1,7 @@
 import clsxm from '@/utils/clsxm'
 import React from 'react'
 import { ToastContentProps } from 'react-toastify'
+import { publicAsset } from '@/config'
 
 function highlightClickHere(text: string): React.ReactNode {
   const match = text.match(/(.*?)(click here)(.*)/i)
@@ -27,7 +28,7 @@ const WarningToast = ({
 }: WarningToastProps) => (
   <div className='flex items-center gap-4 w-full'>
     <img
-      src='/assets/svg/toast/warning.svg'
+      src={publicAsset('/assets/svg/toast/warning.svg')}
       alt='Warning Icon'
       width={heading ? 54 : 44}
       height={heading ? 54 : 44}

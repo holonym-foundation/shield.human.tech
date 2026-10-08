@@ -1,10 +1,12 @@
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { EthAddress } from '@aztec/foundation/eth-address'
-import { Fr } from '@aztec/aztec.js/fields'
-import { Contract, BatchCall } from '@aztec/aztec.js/contracts'
-import { SetPublicAuthwitContractInteraction } from '@aztec/aztec.js/authorization'
-import type { Wallet } from '@aztec/aztec.js/wallet'
-import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { EthAddress } from '@aztec-labs/foundation/eth-address'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { Contract, BatchCall } from '@aztec-labs/aztec.js/contracts'
+import { SetPublicAuthwitContractInteraction } from '@aztec-labs/aztec.js/authorization'
+import type { Wallet } from '@aztec-labs/aztec.js/wallet'
+import { BRIDGED_FPC_ADDRESS, L1_TOKENS, L2_NETWORKS } from '@/config'
+import { isWalletSchemaMismatch, walletVersionMismatchMessage } from '@/utils'
+import { showToast } from '@/hooks/useToast'
 import { aztecNode } from '@/aztec'
 
 export interface WalletContext {
@@ -30,13 +32,13 @@ type ContractType = 'token' | 'bridge' | 'proxy' | 'bridged_fpc' | 'fee_juice'
 async function getContractArtifact(type: ContractType) {
   if (type === 'bridge') {
     const bridgeJson = await import('@/constants/aztec/artifacts/token_bridge_contract-TokenBridge.json')
-    const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
+    const { loadContractArtifact } = await import('@aztec-labs/aztec.js/abi')
     // @ts-ignore — JSON import from synced artifact
     return loadContractArtifact(bridgeJson.default ?? bridgeJson)
   }
   if (type === 'proxy') {
     const proxyJson = await import('@/constants/aztec/artifacts/token_minter_proxy-TokenMinterProxy.json')
-    const { loadContractArtifact } = await import('@aztec/aztec.js/abi')
+    const { loadContractArtifact } = await import('@aztec-labs/aztec.js/abi')
     // @ts-ignore — JSON import from synced artifact
     return loadContractArtifact(proxyJson.default ?? proxyJson)
   }
@@ -45,14 +47,14 @@ async function getContractArtifact(type: ContractType) {
     return PrivateFPCContractArtifact
   }
   if (type === 'fee_juice') {
-    const { FeeJuiceContractArtifact } = await import('@aztec/noir-contracts.js/FeeJuice')
-    return FeeJuiceContractArtifact
+    const { getCanonicalFeeJuice } = await import('@aztec-labs/protocol-contracts/fee-juice/lazy')
+    return (await getCanonicalFeeJuice()).artifact
   }
   const { TokenContractArtifact } = await import('@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js')
   return TokenContractArtifact
 }
 
-// v5 canonical FeeJuice protocol-contract address (was 0x5 in v4)
+// Canonical FeeJuice protocol-contract address (0x5 in v4, 0x3 since v5)
 const FEE_JUICE_L2_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000003'
 
 /**
@@ -67,20 +69,26 @@ function assertReceiptSuccess(receipt: {
 }) {
   const hash = receipt.txHash.toString()
   // The structured txHash lets the SDK's claim retry loop watch the submitted
-  // tx instead of parsing the hash back out of the message text.
-  const fail = (message: string): never => {
+  // tx instead of parsing the hash back out of the message text. `txOutcome` says
+  // WHICH failure it was, because callers must treat them differently: a pending tx
+  // may still mine (so the operation must not be marked retryable), while a dropped
+  // or reverted one definitively did not execute. Without this, a caller that only
+  // sees `txHash` cannot tell "submitted, receipt unreadable" from "mined and
+  // reverted", and recording the latter as success strands the operation.
+  const fail = (message: string, outcome: 'dropped' | 'pending' | 'reverted'): never => {
     const err = new Error(message)
     ;(err as any).txHash = hash
+    ;(err as any).txOutcome = outcome
     throw err
   }
   if (receipt.status === 'dropped') {
-    fail(`L2 transaction was dropped by the network (${hash}). ${receipt.error ?? 'Try again.'}`)
+    fail(`L2 transaction was dropped by the network (${hash}). ${receipt.error ?? 'Try again.'}`, 'dropped')
   }
   if (receipt.status === 'pending') {
-    fail(`L2 transaction is still pending and was not included in a block (${hash}).`)
+    fail(`L2 transaction is still pending and was not included in a block (${hash}).`, 'pending')
   }
   if (receipt.executionResult && receipt.executionResult !== 'success') {
-    fail(`L2 transaction reverted (${receipt.executionResult}): ${receipt.error ?? hash}`)
+    fail(`L2 transaction reverted (${receipt.executionResult}): ${receipt.error ?? hash}`, 'reverted')
   }
 }
 
@@ -122,6 +130,7 @@ class WalletAdapter {
     // Register deployed contracts via node lookup. Failures are logged (not
     // swallowed) — a silent catch here previously hid capability/artifact
     // registration errors that only surfaced later as balance-load failures.
+    let walletVersionMismatch = false
     await Promise.all(
       deployedContracts.map(async ({ addr, type }) => {
         try {
@@ -134,16 +143,23 @@ class WalletAdapter {
           }
         } catch (err) {
           console.warn(`[walletAdapter] registerContract failed for ${type} ${addr}:`, err)
+          if (isWalletSchemaMismatch(err)) walletVersionMismatch = true
         }
       }),
     )
+    // Otherwise the user only meets this later as an unexplained balance-load failure.
+    if (walletVersionMismatch) {
+      showToast('error', walletVersionMismatchMessage(L2_NETWORKS[0]?.title ?? 'this Aztec network'), {
+        toastId: 'wallet-version-mismatch',
+      })
+    }
 
     // FeeJuice (0x5) is a canonical protocol contract — node.getContract does
     // not return it, and an external wallet's PXE has no instance for it until
     // registered. getCanonicalFeeJuice() derives the instance+artifact
     // deterministically (no node lookup) so balance_of_public can be simulated.
     try {
-      const { getCanonicalFeeJuice } = await import('@aztec/protocol-contracts/fee-juice/lazy')
+      const { getCanonicalFeeJuice } = await import('@aztec-labs/protocol-contracts/fee-juice/lazy')
       const { instance, artifact } = await getCanonicalFeeJuice()
       await this.wallet.registerContract(instance, artifact)
     } catch (err) {

@@ -66,6 +66,7 @@ interface LocalRecoveryEntry {
   encryptedCiphertext: string | null
   encryptedIv: string | null
   encryptedTag: string | null
+  encryptedVersion: number | null
   keyDerivationMessage: string | null
   keyDerivationDomain: string | null
   // Server status (fetched async)
@@ -108,6 +109,7 @@ function toLocalRecoveryEntry(
   const ciphertext = raw.encryptedCiphertext ?? raw.ciphertext ?? null
   const iv = raw.encryptedIv ?? raw.iv ?? null
   const tag = raw.encryptedTag ?? raw.tag ?? null
+  const encryptedVersion = raw.encryptedVersion != null ? Number(raw.encryptedVersion) : null
   const keyDerivationMessage = raw.keyDerivationMessage ?? null
   const keyDerivationDomain = raw.keyDerivationDomain ?? null
 
@@ -150,6 +152,7 @@ function toLocalRecoveryEntry(
     encryptedCiphertext: ciphertext,
     encryptedIv: iv,
     encryptedTag: tag,
+    encryptedVersion,
     keyDerivationMessage,
     keyDerivationDomain,
     serverStatus: null,
@@ -211,6 +214,9 @@ function toBridgeOperationShape(entry: LocalRecoveryEntry): BridgeOperation {
     encryptedCiphertext: server?.encryptedCiphertext ?? entry.encryptedCiphertext,
     encryptedIv: server?.encryptedIv ?? entry.encryptedIv,
     encryptedTag: server?.encryptedTag ?? entry.encryptedTag,
+    // Read the version off whichever source supplied the ciphertext, not independently:
+    // pairing a server blob with a local version would describe the wrong envelope.
+    encryptedVersion: server?.encryptedCiphertext ? server.encryptedVersion : entry.encryptedVersion,
     keyDerivationMessage: server?.keyDerivationMessage ?? entry.keyDerivationMessage,
     keyDerivationDomain: server?.keyDerivationDomain ?? entry.keyDerivationDomain,
   } as BridgeOperation

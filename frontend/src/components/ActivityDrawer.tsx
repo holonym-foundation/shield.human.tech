@@ -16,7 +16,7 @@ import { canResumeOp } from '@/utils/resumability'
 import { humanizeError } from '@/utils'
 import { logError } from '@/utils/datadog'
 import { formatFjAmount } from '@/utils/fuelPricing'
-import { L1_TOKEN_METADATA, L1_NETWORKS, AZTEC_VERSION } from '@/config'
+import { L1_TOKEN_METADATA, L1_NETWORKS, AZTEC_VERSION, publicAsset } from '@/config'
 import { BridgeDirection } from '@/types/bridge'
 import { LocalRecoveryPanel } from '@/components/LocalRecoveryPanel'
 import StyledImage from '@/components/StyledImage'
@@ -75,8 +75,8 @@ const DEPLOYMENT_LABEL = [L1_NETWORKS[0]?.title, AZTEC_VERSION ? `v${AZTEC_VERSI
 // gone, so the group carries an aria-label/title announcing the direction.
 function DirectionLogos({ direction }: { direction: BridgeOperation['direction'] }) {
   const isDeposit = direction === 'L1_TO_L2'
-  const eth = '/assets/svg/ethLogo.svg'
-  const aztec = '/assets/svg/aztec.svg'
+  const eth = publicAsset('/assets/svg/ethLogo.svg')
+  const aztec = publicAsset('/assets/svg/aztec.svg')
   const first = isDeposit ? eth : aztec
   const second = isDeposit ? aztec : eth
   const label = isDeposit ? 'L1 to L2' : 'L2 to L1'

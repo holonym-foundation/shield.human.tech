@@ -3,6 +3,7 @@ import StyledImage from '../StyledImage'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Oval } from 'react-loader-spinner'
 import type { WalletProvider } from '@/utils/walletSdkConnection'
+import { publicAsset } from '@/config'
 
 interface WalletDiscoveryModalProps {
   isOpen: boolean
@@ -152,7 +153,7 @@ export default function WalletDiscoveryModal({
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}>
                 <StyledImage
-                  src='/assets/svg/cross.svg'
+                  src={publicAsset('/assets/svg/cross.svg')}
                   alt=''
                   className='h-[14px] w-[14px] m-[2px]'
                 />
@@ -166,8 +167,9 @@ export default function WalletDiscoveryModal({
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.1 }}>
                   <p className='text-neutral-600 text-14 mb-4'>
-                    No Aztec wallet detected. Install Azguard to continue, or
-                    connect a web wallet below.
+                    No Aztec wallet has answered yet. If yours asked you to unlock
+                    or approve, do that and it will appear here. Otherwise install
+                    Azguard, or connect a web wallet below.
                   </p>
 
                   <motion.a
@@ -178,7 +180,7 @@ export default function WalletDiscoveryModal({
                     whileTap={{ scale: 0.98 }}
                     className='flex items-center justify-center gap-2 w-full py-3 rounded-[8px] bg-[#81133B] text-white text-14 font-semibold'>
                     <StyledImage
-                      src='/assets/svg/aztec-wallet-logo.svg'
+                      src={publicAsset('/assets/svg/aztec-wallet-logo.svg')}
                       alt=''
                       className='w-5 h-5'
                     />
@@ -191,7 +193,7 @@ export default function WalletDiscoveryModal({
                       whileHover={{ scale: 1.01 }}
                       whileTap={{ scale: 0.99 }}
                       className='w-full mt-3 py-2.5 rounded-[8px] border border-[#D4D4D4] text-latest-black-300 text-14 font-medium'>
-                      I installed it, check again
+                      Check again
                     </motion.button>
                   )}
 
@@ -232,7 +234,7 @@ export default function WalletDiscoveryModal({
                           whileHover={{ scale: 1.01 }}
                           whileTap={{ scale: 0.99 }}>
                           <StyledImage
-                            src='/assets/svg/aztec-wallet-logo.svg'
+                            src={publicAsset('/assets/svg/aztec-wallet-logo.svg')}
                             alt={w.name}
                             className='w-8 h-8'
                           />
@@ -257,7 +259,7 @@ export default function WalletDiscoveryModal({
                 transition={{ delay: 0.4 }}
                 className='flex justify-center gap-2 mt-4 mb-2'>
                 <StyledImage
-                  src='/assets/svg/silk0.4.svg'
+                  src={publicAsset('/assets/svg/silk0.4.svg')}
                   alt=''
                   className='h-4 w-[14px]'
                 />

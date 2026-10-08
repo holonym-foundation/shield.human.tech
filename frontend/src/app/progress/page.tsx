@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useRef, useCallback } from 'react'
+import React, { useEffect, useRef, useCallback, useState } from 'react'
 import RootStyle from '@/components/RootStyle'
 import { useRouter } from 'next/navigation'
 import BridgeHeader from '@/components/BridgeHeader'
@@ -37,7 +37,16 @@ export default function ProgressPage() {
     fuelAmount: fuelAmountStr,
     fuelType,
     isPrivacyModeEnabled,
+    recoveryClaimData,
+    recoveryWithdrawalData,
   } = useBridgeStore()
+
+  // The header's privacy toggle stays live on this page, so the store flag can change after the
+  // transfer started. The badge must show the operation's own mode: a resumed operation carries
+  // it in its recovery data; a fresh one started on entry, while the toggle still matched.
+  const [modeAtEntry] = useState(isPrivacyModeEnabled)
+  const operationIsPrivate =
+    recoveryClaimData?.isPrivacyModeEnabled ?? recoveryWithdrawalData?.isPrivacyModeEnabled ?? modeAtEntry
 
   const steps = getProgressSteps()
 
@@ -217,7 +226,7 @@ export default function ProgressPage() {
             toNetwork={toNetwork}
             direction={direction === BridgeDirection.L1_TO_L2 ? 'L1_TO_L2' : 'L2_TO_L1'}
             errorMessage={errorMessage}
-            isPrivate={isPrivacyModeEnabled}
+            isPrivate={operationIsPrivate}
             currentPrivacyMode={isPrivacyModeEnabled}
           />
 

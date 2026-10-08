@@ -1,6 +1,7 @@
 import StyledImage from '../StyledImage'
 import TextButton from '../TextButton'
 import { motion, AnimatePresence } from 'framer-motion'
+import { publicAsset } from '@/config'
 
 export default function MetaMaskPrompt({ onClose }: { onClose: () => void }) {
   const handleInstallClick = () => {
@@ -41,7 +42,7 @@ export default function MetaMaskPrompt({ onClose }: { onClose: () => void }) {
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}
               >
-                <StyledImage src='/assets/svg/cross.svg' alt='' className='h-[14px] w-[14px] m-[2px]' />
+                <StyledImage src={publicAsset('/assets/svg/cross.svg')} alt='' className='h-[14px] w-[14px] m-[2px]' />
               </motion.button>
             </div>
             <div className='mt-4 mx-2.5'>
@@ -55,7 +56,7 @@ export default function MetaMaskPrompt({ onClose }: { onClose: () => void }) {
                 transition={{ delay: 0.2 }}
                 className='bg-[#F5F5F5] p-2 rounded-lg mb-6 flex items-center gap-4'
               >
-                <img src='/assets/svg/metamask.svg' alt='MetaMask' />
+                <img src={publicAsset('/assets/svg/metamask.svg')} alt='MetaMask' />
                 <p className='text-neutral-600 text-14'>
                   MetaMask is the world&apos;s most secure and flexible crypto wallet,
                   trusted by millions of users to buy, sell, and swap digital
@@ -70,7 +71,7 @@ export default function MetaMaskPrompt({ onClose }: { onClose: () => void }) {
               >
                 <TextButton onClick={handleInstallClick}>
                   <StyledImage
-                    src='/assets/svg/chrome.svg'
+                    src={publicAsset('/assets/svg/chrome.svg')}
                     alt='Chrome'
                     className='h-6 w-6'
                   />
@@ -85,7 +86,7 @@ export default function MetaMaskPrompt({ onClose }: { onClose: () => void }) {
                 className='flex justify-center gap-2 mt-6'
               >
                 <StyledImage
-                  src='/assets/svg/silk0.4.svg'
+                  src={publicAsset('/assets/svg/silk0.4.svg')}
                   alt=''
                   className='h-4 w-[14px]'
                 />

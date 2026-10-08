@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import StyledImage from '../StyledImage';
 import { BridgeDirection, Network as NetworkType } from '@/types/bridge';
-import { L1_NETWORKS, L2_NETWORKS } from '@/config';
+import { L1_NETWORKS, L2_NETWORKS, publicAsset } from '@/config';
+import { useNetworkVersions } from '@/hooks/useNetworkVersions';
 
 // Reusable FilterButton component for consistency
 function FilterButton({ active, children, className = '', ...props }: React.ComponentProps<'button'> & { active: boolean }) {
@@ -38,7 +39,15 @@ export default function Network({ networkData, setNetworkData, handleClose, dire
     (direction === BridgeDirection.L2_TO_L1 && !isFromSection)
   );
 
-  const networks = shouldShowL1Networks ? L1_NETWORKS : L2_NETWORKS;
+  const { others: otherVersions } = useNetworkVersions();
+  const versionNetworks: NetworkType[] = otherVersions.map((v, i) => ({
+    ...L2_NETWORKS[0],
+    id: L2_NETWORKS[0].id * 100 + i + 1,
+    title: v.status === 'legacy' ? `${v.label} · withdraw only` : v.label,
+    href: v.path,
+  }));
+
+  const networks = shouldShowL1Networks ? L1_NETWORKS : [...L2_NETWORKS, ...versionNetworks];
 
   // Filter networks based on search query
   const filteredNetworks = networks.filter(network =>
@@ -49,6 +58,10 @@ export default function Network({ networkData, setNetworkData, handleClose, dire
     try {
       setIsLoading(true);
       setError(null);
+      if (network.href) {
+        window.location.assign(network.href);
+        return;
+      }
       await setNetworkData(network);
       handleClose();
     } catch (error) {
@@ -69,7 +82,7 @@ export default function Network({ networkData, setNetworkData, handleClose, dire
               className='p-1.5 rounded-full hover:bg-gray-200 transition-colors duration-200'
               aria-label="Close modal"
             >
-              <StyledImage src='/assets/svg/cross.svg' alt='Close' className='h-3 w-3' />
+              <StyledImage src={publicAsset('/assets/svg/cross.svg')} alt='Close' className='h-3 w-3' />
             </button>
             <p className='text-center text-latest-black-400 text-16 font-medium'>Switch network</p>
           </div>
@@ -121,13 +134,13 @@ export default function Network({ networkData, setNetworkData, handleClose, dire
         </div>
         {/* <div className='max-w-[344px] bg-white rounded-lg mt-2 mx-auto w-full p-2.5 flex justify-between'>
           <div className='flex gap-2'>
-            <StyledImage src='/assets/svg/silk.svg' alt='Silk' className='h-10 w-10' />
+            <StyledImage src={publicAsset('/assets/svg/silk.svg')} alt='Silk' className='h-10 w-10' />
             <div>
               <p className='text-latest-black-100 text-16 font-medium'>silk.sc</p>
               <p className='text-neutral-600 text-14 font-medium'>Not connected</p>
             </div>
           </div>
-          <img src='/assets/svg/Toggle.svg' alt='Toggle' />
+          <img src={publicAsset('/assets/svg/Toggle.svg')} alt='Toggle' />
         </div> */}
       </div>
     </div>

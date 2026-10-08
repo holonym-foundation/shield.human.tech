@@ -1,6 +1,7 @@
 import StyledImage from '../StyledImage'
 import TextButton from '../TextButton'
 import { motion, AnimatePresence } from 'framer-motion'
+import { publicAsset } from '@/config'
 
 interface EmojiVerificationModalProps {
   isOpen: boolean
@@ -52,7 +53,7 @@ export default function EmojiVerificationModal({
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}>
                 <StyledImage
-                  src='/assets/svg/cross.svg'
+                  src={publicAsset('/assets/svg/cross.svg')}
                   alt=''
                   className='h-[14px] w-[14px] m-[2px]'
                 />
@@ -102,7 +103,7 @@ export default function EmojiVerificationModal({
                 transition={{ delay: 0.4 }}
                 className='flex justify-center gap-2 mt-6'>
                 <StyledImage
-                  src='/assets/svg/silk0.4.svg'
+                  src={publicAsset('/assets/svg/silk0.4.svg')}
                   alt=''
                   className='h-4 w-[14px]'
                 />

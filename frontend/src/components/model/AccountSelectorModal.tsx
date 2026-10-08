@@ -1,6 +1,7 @@
 import StyledImage from '../StyledImage'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Icon } from '@iconify/react'
+import { publicAsset } from '@/config'
 
 interface AccountSelectorModalProps {
   isOpen: boolean
@@ -54,7 +55,7 @@ export default function AccountSelectorModal({
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}>
                 <StyledImage
-                  src='/assets/svg/cross.svg'
+                  src={publicAsset('/assets/svg/cross.svg')}
                   alt=''
                   className='h-[14px] w-[14px] m-[2px]'
                 />
@@ -111,7 +112,7 @@ export default function AccountSelectorModal({
                 transition={{ delay: 0.2 }}
                 className='flex justify-center gap-2 mt-2 mb-2'>
                 <StyledImage
-                  src='/assets/svg/silk0.4.svg'
+                  src={publicAsset('/assets/svg/silk0.4.svg')}
                   alt=''
                   className='h-4 w-[14px]'
                 />

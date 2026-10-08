@@ -96,10 +96,6 @@ interface NotificationsState {
     action?: NotificationAction
     amount?: string
     mode?: 'public' | 'private'
-    // When set, the entry self-removes after this many ms. Used for a transient
-    // heads-up (a momentary reminder) that shouldn't linger in the feed until
-    // the user dismisses it — everything else persists until dismissed.
-    autoDismissMs?: number
   }) => void
   dismiss: (id: string) => void
   // Remove every row carrying this stable `key`. Used to retire a transient,
@@ -122,11 +118,7 @@ export const useNotificationsStore = create<NotificationsState>()(
   unreadCount: 0,
   lastGenie: null,
 
-  pushNotification: ({ type, title, message, key, action, amount, mode, autoDismissMs }) => {
-    // Id of the row this push landed on (new or keyed-updated). Null when the
-    // push was collapsed by the dedupe guard, in which case there's nothing to
-    // auto-dismiss.
-    let scheduledId: string | null = null
+  pushNotification: ({ type, title, message, key, action, amount, mode }) => {
     set((state) => {
       // Keyed upsert — refresh the existing row in place (new text/timestamp,
       // bumped to the top) and preserve its read state so a progress row the
@@ -148,7 +140,6 @@ export const useNotificationsStore = create<NotificationsState>()(
             // rehydrated carryover — let the ticker surface it again.
             rehydrated: false,
           }
-          scheduledId = existing.id
           const rest = state.notifications.filter((_, i) => i !== idx)
           const notifications = [updated, ...rest].slice(0, MAX_NOTIFICATIONS)
           return { notifications, unreadCount: unread(notifications) }
@@ -178,15 +169,9 @@ export const useNotificationsStore = create<NotificationsState>()(
         timestamp: Date.now(),
         read: false,
       }
-      scheduledId = next.id
       const notifications = [next, ...state.notifications].slice(0, MAX_NOTIFICATIONS)
       return { notifications, unreadCount: unread(notifications), lastGenie: { id: next.id, type } }
     })
-
-    if (autoDismissMs && autoDismissMs > 0 && scheduledId) {
-      const targetId = scheduledId
-      setTimeout(() => get().dismiss(targetId), autoDismissMs)
-    }
   },
 
   dismiss: (id) =>
@@ -251,7 +236,6 @@ export const pushNotification = (input: {
   action?: NotificationAction
   amount?: string
   mode?: 'public' | 'private'
-  autoDismissMs?: number
 }) => useNotificationsStore.getState().pushNotification(input)
 
 // Non-React accessor for retiring a keyed banner from event callbacks (mirrors

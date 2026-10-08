@@ -1,9 +1,9 @@
 'use client'
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { Fr } from '@aztec/aztec.js/fields'
-import { isL1ToL2MessageReady } from '@aztec/aztec.js/messaging'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { isL1ToL2MessageReady } from '@aztec-labs/aztec.js/messaging'
 import RootStyle from '@/components/RootStyle'
 import BridgeHeader from '@/components/BridgeHeader'
 import AztecWalletConnectionModals from '@/components/AztecWalletConnectionModals'
@@ -144,7 +144,7 @@ export default function ClaimFuelPage() {
     setStatus('submitting')
     setErrorMsg(null)
     try {
-      const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+      const { FeeJuicePaymentMethodWithClaim } = await import('@aztec-labs/aztec.js/fee')
       const { buildClaimGasSettings } = await import('@/utils/fuelGasEstimate')
 
       const gasSettings = await buildClaimGasSettings()

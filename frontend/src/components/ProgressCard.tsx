@@ -10,12 +10,19 @@ import CryptexAnimation from '@/components/CryptexAnimation'
 import StyledImage from '@/components/StyledImage'
 import TextButton from '@/components/TextButton'
 import type { LoadingStep } from '@/stores/bridgeStore'
-import { STORAGE_KEYS } from '@human.tech/clean.sdk'
+import { STORAGE_KEYS, classifyL2Execution } from '@human.tech/clean.sdk'
 import type { BridgeOperation, RecoveryClaimData, RecoveryWithdrawalData } from '@human.tech/clean.sdk'
 import { exportClaimData, exportWithdrawalData, humanizeError } from '@/utils'
 import { logError } from '@/utils/datadog'
 import { useBridgeOperations, decryptOperationPayload } from '@/hooks/useBridgeOperations'
 import { useWalletStore } from '@/stores/walletStore'
+import { aztecNode } from '@/aztec'
+import { TxHash } from '@aztec-labs/stdlib/tx'
+import { computeFeeJuiceMessageNullifier } from '@aztec-labs/stdlib/messaging'
+import { siloNullifier } from '@aztec-labs/stdlib/hash'
+import { MerkleTreeId } from '@aztec-labs/stdlib/trees'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { Fr } from '@aztec-labs/aztec.js/fields'
 import { useBridgeStore } from '@/stores/bridgeStore'
 import { useToast } from '@/hooks/useToast'
 import { isResumable, hasPossibleLockedFunds } from '@/utils/resumability'
@@ -23,6 +30,7 @@ import { useResumeAttemptsStore } from '@/stores/useResumeAttemptsStore'
 import { pushNotification, dismissNotificationByKey } from '@/stores/useNotificationsStore'
 import { openSupport } from '@/utils/support'
 import { BridgeDirection } from '@/types/bridge'
+import { publicAsset } from '@/config'
 
 export interface ProgressCardProps {
   steps: LoadingStep[]
@@ -49,6 +57,8 @@ export interface ProgressCardProps {
   /** The live Privacy Mode toggle. Compared against `isPrivate` to warn when the operation the
       user is watching/resuming was created in the opposite mode from the one now selected. */
   currentPrivacyMode?: boolean
+  /** Id of the operation this screen is running or resuming, when the page knows it. */
+  operationId?: string | null
 }
 
 // A stuck L2 claim that can't pay its gas out of the bridged Fee Juice surfaces as a
@@ -89,6 +99,11 @@ const CONSUMED_ERROR_NEEDLES = [
   'has already been',
   'no non-nullified',
   'non-nullified l1 to l2',
+  // The fuel-claim shape (SDK FUEL_CLAIM_MESSAGE_GONE_ERROR). It deliberately avoids the
+  // "already consumed" phrasing, because that would make the SDK's isAlreadyConsumedError
+  // mark an undelivered deposit 'completed'. Match it here so the UI still suppresses
+  // Resume and runs the balance check rather than looping (#2146).
+  'was consumed',
 ]
 
 type FailureKind = 'fuel' | 'wallet' | 'consumed' | 'deposit-landed' | 'pre-deposit' | 'unknown'
@@ -114,8 +129,10 @@ function classifyFailure(args: { errorMessage?: string | null; isL1ToL2: boolean
   if (m && hasNeedle(m, CONSUMED_ERROR_NEEDLES)) {
     return {
       kind: 'consumed',
-      heading: 'Deposit likely already completed',
-      message: 'This deposit likely already completed. Check your L2 balance.',
+      // Deliberately states only what a consumed message proves. The screen replaces this
+      // with a balance-backed verdict (see consumedView); this is the pre-check fallback.
+      heading: 'This deposit cannot be retried',
+      message: "The L1 message was already consumed. Checking whether the tokens arrived.",
     }
   }
   if (m && hasNeedle(m, WALLET_ERROR_NEEDLES)) {
@@ -125,11 +142,27 @@ function classifyFailure(args: { errorMessage?: string | null; isL1ToL2: boolean
       message: 'Your wallet did not respond in time. Your funds are safe. Resume to finish.',
     }
   }
-  if (isL1ToL2 && isFuelError(errorMessage)) {
+  // The SDK's pre-flight fuel check runs before any L1 tx, so nothing landed to resume.
+  if (isL1ToL2 && m.startsWith('insufficient fuel:')) {
+    return {
+      kind: 'pre-deposit',
+      heading: 'Not enough gas in this deposit',
+      message: 'The Fee Juice this deposit would add cannot cover the L2 claim. No funds moved. Raise the gas amount and try again.',
+    }
+  }
+  if (isL1ToL2 && l1TxUrl && isFuelError(errorMessage)) {
     return {
       kind: 'fuel',
       heading: 'Claim ran short on gas',
       message: 'Your claim ran short on L2 gas (Fee Juice). Your funds are safe. Top up and resume.',
+    }
+  }
+  // Checked before l1TxUrl: a reverted deposit still has an L1 tx link but moved no funds.
+  if (isL1ToL2 && m.includes('reverted on-chain') && m.includes('no funds were')) {
+    return {
+      kind: 'pre-deposit',
+      heading: 'Deposit reverted',
+      message: 'Your L1 deposit transaction reverted, so no funds moved. You can safely try again.',
     }
   }
   if (l1TxUrl) {
@@ -184,11 +217,12 @@ export default function ProgressCard({
   errorMessage,
   isPrivate,
   currentPrivacyMode,
+  operationId,
 }: ProgressCardProps) {
   const router = useRouter()
   const notify = useToast()
 
-  const { waapAddress: l1Address, signWaapMessage } = useWalletStore()
+  const { waapAddress: l1Address, signWaapMessage, aztecAddress } = useWalletStore()
   const { setRecovery, setWithdrawalRecovery, setDirection, isPrivacyModeEnabled, setPrivacyModeEnabled } =
     useBridgeStore()
   const { data: operations } = useBridgeOperations()
@@ -217,6 +251,114 @@ export default function ProgressCard({
   // by a prior successful claim. Re-running just re-fails, so this renders as a calm "you're
   // likely done" state (no red alert, no Resume) that points at Activity / the L2 balance.
   const isAlreadyCompleted = hasError && failure.kind === 'consumed'
+
+  // #2146: a consumed L1→L2 message proves only that SOMETHING spent it, never that the
+  // tokens were delivered — that mainnet case had the message consumed, ~2.94 FJ burned and
+  // 0 cUSDC delivered, while this screen showed green and asserted it likely completed.
+  //
+  // The verdict comes from the claim tx receipt, which is the only evidence tied to THIS
+  // deposit. A balance is not: it moves with transfers, other apps, and later spends, so it
+  // can be non-zero without this deposit landing and zero after it landed and was spent.
+  // `executionResult === 'success'` means the claim executed; anything else means the setup
+  // phase consumed the message and the mint reverted, which is exactly #2146's shape.
+  //
+  // No recorded tx hash means undecidable here, and the screen says so rather than guessing.
+  //
+  // Must be THIS operation. The newest op of the direction is not good enough: a deposit
+  // completed earlier today would lend its successful receipt to an older stuck one being
+  // resumed and paint it green. Without an id, fall back to the newest unfinished op, since
+  // a completed one cannot be the one that just failed to claim.
+  const consumedOp = useMemo<BridgeOperation | null>(() => {
+    if (!isAlreadyCompleted || !direction || !operations) return null
+    if (operationId) return operations.find((op) => op.id === operationId) ?? null
+    return (
+      [...operations]
+        .filter((op) => op.direction === direction && op.status !== 'completed')
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null
+    )
+  }, [isAlreadyCompleted, operations, direction, operationId])
+
+  const [delivery, setDelivery] = useState<'checking' | 'delivered' | 'reverted' | 'unknown'>('checking')
+  const [backfilling, setBackfilling] = useState(false)
+
+  // classifyL2Execution is the SDK's tested reading of status + executionResult across
+  // every TxStatus, rather than a second copy of that logic here.
+  const verdictFromReceipt = (receipt: Awaited<ReturnType<typeof aztecNode.getTxReceipt>> | undefined) => {
+    const verdict = classifyL2Execution(receipt)
+    return verdict === 'executed' ? 'delivered' : verdict === 'reverted' ? 'reverted' : 'unknown'
+  }
+
+  // Operations that failed before the reverted-claim hash was persisted have no stored
+  // reference, but the verdict is still recoverable from chain state: the claim emitted a
+  // nullifier derived from (messageHash, claimSecret), and the nullifier tree records which
+  // block it landed in. Walk that block's tx effects to the tx that emitted it, then read
+  // its receipt. Costs a signature to decrypt the secret, so it is an explicit action.
+  const canBackfill =
+    delivery === 'unknown' && !!consumedOp?.messageHash && !!consumedOp?.bridgeAddressL2 && !!l1Address
+
+  const runBackfillCheck = async () => {
+    if (!consumedOp || !l1Address) return
+    setBackfilling(true)
+    try {
+      const decrypted = await decryptOperationPayload(consumedOp, l1Address, signWaapMessage)
+      const secret = decrypted?.claimSecret
+      const messageHash = consumedOp.messageHash
+      const bridge = consumedOp.bridgeAddressL2
+      if (!secret || !messageHash || !bridge) return
+
+      const inner = await computeFeeJuiceMessageNullifier(Fr.fromString(messageHash), Fr.fromString(secret))
+      const siloed = await siloNullifier(AztecAddress.fromStringUnsafe(bridge), inner)
+      const [found] = await aztecNode.findLeavesIndexes('latest', MerkleTreeId.NULLIFIER_TREE, [siloed])
+      if (!found) return
+
+      const block = await aztecNode.getBlock(found.l2BlockNumber, { includeTransactions: true })
+      const effect = block?.body?.txEffects.find((e) => e.nullifiers.some((n) => n.equals(siloed)))
+      if (!effect) return
+
+      const receipt = await aztecNode.getTxReceipt(effect.txHash)
+      setDelivery(verdictFromReceipt(receipt))
+    } catch (err) {
+      logError(
+        'bridge.consumed_backfill_check_failed',
+        { operationId: consumedOp.id },
+        err instanceof Error ? err : undefined,
+      )
+      notify('error', 'Could not check this deposit. Please contact support.')
+    } finally {
+      setBackfilling(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isAlreadyCompleted) return
+    // l2TxHash is only set once a claim landed, so it wins over a reverted earlier attempt
+    // (failedL2TxHash) that a later resume superseded.
+    const claimTxHash = consumedOp?.l2TxHash ?? consumedOp?.failedL2TxHash
+    if (!consumedOp || !claimTxHash) {
+      setDelivery('unknown')
+      return
+    }
+    let cancelled = false
+    setDelivery('checking')
+    void (async () => {
+      try {
+        const receipt = await aztecNode.getTxReceipt(TxHash.fromString(claimTxHash))
+        if (cancelled) return
+        setDelivery(verdictFromReceipt(receipt))
+      } catch (err) {
+        if (cancelled) return
+        logError(
+          'bridge.consumed_receipt_check_failed',
+          { operationId: consumedOp.id, l2TxHash: claimTxHash },
+          err instanceof Error ? err : undefined,
+        )
+        setDelivery('unknown')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isAlreadyCompleted, consumedOp])
 
   // The PUBLIC/PRIVATE badge reflects the OPERATION's mode (isPrivate), not the live toggle — a
   // resumed public claim must still read PUBLIC even while Privacy Mode is toggled on. When the
@@ -538,7 +680,76 @@ export default function ProgressCard({
       .catch(() => notify('error', 'Could not copy'))
   }
 
-  const heading = hasError ? failure.heading : isAllComplete ? 'Transaction complete' : 'Transaction in progress'
+  // Hand over both hashes: the L1 deposit proves the funds left, and the L2 claim is what
+  // support needs to see the revert. Reconstructing either by hand is the state #2146's
+  // reporter was left in.
+  const copyReferences = () => {
+    const lines = [
+      consumedOp?.l1TxHash ? `L1 deposit: ${consumedOp.l1TxHash}` : l1TxUrl ? `L1 deposit: ${l1TxUrl}` : null,
+      consumedOp?.l2TxHash ? `L2 claim: ${consumedOp.l2TxHash}` : null,
+      consumedOp?.failedL2TxHash ? `L2 claim (reverted): ${consumedOp.failedL2TxHash}` : null,
+      consumedOp?.id ? `Operation: ${consumedOp.id}` : null,
+    ].filter(Boolean)
+    if (lines.length === 0) return
+    navigator.clipboard
+      ?.writeText(lines.join('\n'))
+      .then(() => notify('success', 'Transaction references copied'))
+      .catch(() => notify('error', 'Could not copy'))
+  }
+
+  // The consumed screen speaks from the balance check, not from an assumption. Only the
+  // zero-balance branch states an outcome, because it is the only one that is certain.
+  const consumedView = useMemo(() => {
+    switch (delivery) {
+      case 'checking':
+        return {
+          heading: 'Checking this deposit',
+          message: 'This deposit cannot be retried. Looking up whether the claim went through.',
+          tone: 'neutral' as const,
+          icon: 'ph:hourglass-medium-fill',
+        }
+      case 'delivered':
+        return {
+          heading: 'Deposit completed',
+          message: 'The claim went through, so this deposit is done and cannot be retried.',
+          tone: 'ok' as const,
+          icon: 'ph:check-circle-fill',
+        }
+      case 'reverted':
+        return {
+          heading: 'Tokens did not arrive',
+          message:
+            'The claim was mined but reverted, so the deposit did not complete and cannot be retried. ' +
+            'Copy the references below and contact support.',
+          tone: 'alert' as const,
+          icon: 'ph:warning-circle-fill',
+        }
+      default:
+        return {
+          heading: "We can't confirm this deposit",
+          message:
+            'This deposit cannot be retried, and we could not determine whether the tokens arrived. ' +
+            'Copy the references below and contact support.',
+          tone: 'neutral' as const,
+          icon: 'ph:info-fill',
+        }
+    }
+  }, [delivery])
+
+  const consumedTone =
+    consumedView.tone === 'ok'
+      ? 'text-[#047857]'
+      : consumedView.tone === 'alert'
+        ? 'text-[#B45309]'
+        : 'text-latest-grey-500'
+
+  const heading = isAlreadyCompleted
+    ? consumedView.heading
+    : hasError
+      ? failure.heading
+      : isAllComplete
+        ? 'Transaction complete'
+        : 'Transaction in progress'
 
   const showBackButton = isAllComplete || hasError
 
@@ -547,13 +758,13 @@ export default function ProgressCard({
   // keeps its dark-chip treatment. Direction unknown falls back to the deposit orientation.
   const isWithdrawal = direction === 'L2_TO_L1'
   const renderEthMark = (small = false) => (
-    <StyledImage src="/assets/svg/ethLogo.svg" alt="" className={small ? 'h-5 w-5' : 'h-6 w-6'} />
+    <StyledImage src={publicAsset('/assets/svg/ethLogo.svg')} alt="" className={small ? 'h-5 w-5' : 'h-6 w-6'} />
   )
   const renderAztecMark = (small = false) => (
     <span
       className={`inline-flex ${small ? 'h-5 w-5' : 'h-6 w-6'} shrink-0 items-center justify-center rounded-full bg-[#0A0A0A]`}
     >
-      <StyledImage src="/assets/svg/aztec.svg" alt="" className={small ? 'h-[15px] w-[15px]' : 'h-[18px] w-[18px]'} />
+      <StyledImage src={publicAsset('/assets/svg/aztec.svg')} alt="" className={small ? 'h-[15px] w-[15px]' : 'h-[18px] w-[18px]'} />
     </span>
   )
   const renderFromMark = (small = false) => (isWithdrawal ? renderAztecMark(small) : renderEthMark(small))
@@ -752,7 +963,7 @@ export default function ProgressCard({
         )}
         <div className="flex flex-col items-center justify-center">
           {isAlreadyCompleted ? (
-            <Icon icon="ph:check-circle-fill" width={48} height={48} className="text-[#047857]" />
+            <Icon icon={consumedView.icon} width={48} height={48} className={consumedTone} />
           ) : hasError ? (
             <svg width="48" height="48" viewBox="0 0 25 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path
@@ -765,7 +976,7 @@ export default function ProgressCard({
             </svg>
           ) : (
             <StyledImage
-              src={isAllComplete ? '/assets/svg/transactionComplete.svg' : '/assets/svg/progress.svg'}
+              src={isAllComplete ? publicAsset('/assets/svg/transactionComplete.svg') : publicAsset('/assets/svg/progress.svg')}
               alt=""
               className={isAllComplete ? 'h-12 w-12' : 'h-[56px] w-[56px]'}
             />
@@ -774,13 +985,17 @@ export default function ProgressCard({
 
         <p
           className={`text-center font-semibold text-md ${hasError ? 'mt-3' : isAllComplete ? 'mt-2' : 'mt-4'} ${
-            isAlreadyCompleted ? 'text-[#047857]' : hasError ? 'text-[#B91C1C]' : isAllComplete ? 'text-green-600' : ''
+            isAlreadyCompleted ? consumedTone : hasError ? 'text-[#B91C1C]' : isAllComplete ? 'text-green-600' : ''
           }`}
         >
           {heading}
         </p>
 
-        {hasError && <p className="text-center text-12 text-latest-grey-500 mt-1 px-2">{failure.message}</p>}
+        {hasError && (
+          <p className="text-center text-12 text-latest-grey-500 mt-1 px-2">
+            {isAlreadyCompleted ? consumedView.message : failure.message}
+          </p>
+        )}
 
         {/* Privacy-mode mismatch warning — a public operation is on screen while Privacy Mode is on
             (e.g. resuming a public claim). The private case auto-enables Privacy Mode instead of
@@ -886,11 +1101,34 @@ export default function ProgressCard({
             </button>
             <button
               onClick={() => router.push('/activity')}
-              className="flex-[8_1_0%] rounded-lg bg-[#047857] py-[10px] font-semibold text-white transition-opacity hover:opacity-80"
+              className={`flex-[8_1_0%] rounded-lg py-[10px] font-semibold text-white transition-opacity hover:opacity-80 ${
+                consumedView.tone === 'ok' ? 'bg-[#047857]' : 'bg-latest-black-100'
+              }`}
             >
               View in Activity
             </button>
           </div>
+          {/* The deposit is unaccounted for, so hand over the one reference manual recovery
+              needs rather than leaving the user to reconstruct it (#2146). */}
+          {consumedView.tone !== 'ok' && (
+            <div className="mt-1 flex w-full flex-col items-center gap-1">
+              {(consumedOp?.l1TxHash || l1TxUrl || consumedOp?.l2TxHash || consumedOp?.failedL2TxHash) && (
+                <button
+                  onClick={() => copyReferences()}
+                  className="flex items-center gap-1.5 text-[11px] font-medium text-latest-grey-500 transition-colors hover:text-latest-black-100"
+                >
+                  <Icon icon="ph:copy" width={12} height={12} />
+                  Copy transaction references
+                </button>
+              )}
+              {canBackfill && (
+                <TextButton onClick={() => void runBackfillCheck()} disabled={backfilling}>
+                  {backfilling ? 'Checking…' : 'Check what happened to this deposit'}
+                </TextButton>
+              )}
+              <TextButton onClick={() => openSupport()}>Contact support</TextButton>
+            </div>
+          )}
         </div>
       )}
 
@@ -996,7 +1234,7 @@ export default function ProgressCard({
             className="flex items-center gap-2.5 rounded-xl border border-latest-grey-300 px-3 py-2.5 text-left transition-colors hover:border-latest-black-100"
           >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F5F5F5]">
-              <img src="/assets/svg/ecosystem/nyx.svg" alt="" className="h-5 w-5" />
+              <img src={publicAsset('/assets/svg/ecosystem/nyx.svg')} alt="" className="h-5 w-5" />
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-13 font-semibold text-latest-black-100">Spend privately with Nyx</span>

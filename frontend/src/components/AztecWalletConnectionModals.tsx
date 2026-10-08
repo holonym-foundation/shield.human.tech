@@ -14,6 +14,7 @@ import {
   useSessionLinkedL2,
   shortAddr,
 } from '@/hooks/useBindingStatus'
+import { publicAsset } from '@/config'
 
 /** Accounts per page in the selector before pagination kicks in. */
 const ACCOUNTS_PER_PAGE = 4
@@ -93,7 +94,7 @@ function PaginatedAccountModal({
             <div className='flex justify-between items-center mx-2.5 py-1'>
               <p className='text-latest-black-300 font-semibold text-16'>{title}</p>
               <motion.button onClick={onCancel} whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
-                <StyledImage src='/assets/svg/cross.svg' alt='' className='h-[14px] w-[14px] m-[2px]' />
+                <StyledImage src={publicAsset('/assets/svg/cross.svg')} alt='' className='h-[14px] w-[14px] m-[2px]' />
               </motion.button>
             </div>
 
@@ -190,7 +191,7 @@ function PaginatedAccountModal({
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.2 }}
                 className='flex justify-center gap-2 mt-2 mb-2'>
-                <StyledImage src='/assets/svg/silk0.4.svg' alt='' className='h-4 w-[14px]' />
+                <StyledImage src={publicAsset('/assets/svg/silk0.4.svg')} alt='' className='h-4 w-[14px]' />
                 <p className='text-12 font-medium text-neutral-600'>Secured by human.tech</p>
               </motion.div>
             </div>

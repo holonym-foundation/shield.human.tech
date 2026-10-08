@@ -95,7 +95,7 @@ if (!session.valid) {
         <P>
           Bridging and withdrawing need a <Code>walletAdapter</Code> — the link between this SDK and an Aztec wallet.
           It&apos;s any object implementing <Code>WalletAdapterInterface</Code> (defined by this SDK), so you can wrap an{' '}
-          <Code>@aztec/wallet-sdk</Code> wallet or your own.
+          <Code>@aztec-labs/wallet-sdk</Code> wallet or your own.
         </P>
         <CodeBlock>{`import type { WalletAdapterInterface } from '@human.tech/clean.sdk'
 

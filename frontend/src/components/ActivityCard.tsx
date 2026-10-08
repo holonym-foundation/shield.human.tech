@@ -6,7 +6,7 @@ import { Tooltip as ReactTooltip } from 'react-tooltip'
 import type { BridgeOperation } from '@human.tech/clean.sdk'
 import { STORAGE_KEYS } from '@human.tech/clean.sdk'
 import { formatUnits } from 'viem'
-import { L1_TOKEN_METADATA, L1_NETWORKS, AZTEC_VERSION } from '@/config'
+import { L1_TOKEN_METADATA, L1_NETWORKS, AZTEC_VERSION, publicAsset } from '@/config'
 import StyledImage from '@/components/StyledImage'
 import { canResumeOp, hasPossibleLockedFunds, isLikelyCompleted } from '@/utils/resumability'
 import { useIsOperationLive } from '@/hooks/useResumableCount'
@@ -60,10 +60,10 @@ function DirectionLogos({ direction }: { direction: BridgeOperation['direction']
   // The Ethereum glyph is a self-contained dark circle, but the Aztec mark is a
   // bare light-green diamond that washes out on a light surface. It gets a dark
   // circular chip so it stays legible; both glyphs stay h-4 w-4 so the row aligns.
-  const ethGlyph = <StyledImage src="/assets/svg/ethLogo.svg" alt="" className="h-4 w-4 shrink-0" />
+  const ethGlyph = <StyledImage src={publicAsset('/assets/svg/ethLogo.svg')} alt="" className="h-4 w-4 shrink-0" />
   const aztecGlyph = (
     <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#0A0A0A]">
-      <StyledImage src="/assets/svg/aztec.svg" alt="" className="h-3 w-3" />
+      <StyledImage src={publicAsset('/assets/svg/aztec.svg')} alt="" className="h-3 w-3" />
     </span>
   )
   const first = isDeposit ? ethGlyph : aztecGlyph

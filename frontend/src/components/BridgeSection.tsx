@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import SwapIcon from './SwapIcon'
 import { Icon } from '@iconify/react'
 import { Tooltip as ReactTooltip } from 'react-tooltip'
-import { POCH_MINT_URL } from '@/config'
+import { POCH_MINT_URL, publicAsset } from '@/config'
 import { BRIDGE_MAX_DEPOSIT_USD, TRAVEL_RULE_THRESHOLD_USD, PASSPORT_SCORE_THRESHOLD } from '@/config/env.config'
 import { useWalletStore } from '@/stores/walletStore'
 import { useSessionLinkedL2 } from '@/hooks/useBindingStatus'
@@ -381,9 +381,9 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
   const sessionLinkedL2 = useSessionLinkedL2(waapAddress)
   const l1WalletIcon =
     waapLoginMethod === LOGIN_METHODS.WAAP
-      ? '/assets/svg/silk-logo.svg'
-      : waapWalletIcon || '/assets/wallets/wally-dark.svg'
-  const aztecWalletIcon = '/assets/svg/aztec-wallet-logo.svg'
+      ? publicAsset('/assets/svg/silk-logo.svg')
+      : waapWalletIcon || publicAsset('/assets/wallets/wally-dark.svg')
+  const aztecWalletIcon = publicAsset('/assets/svg/aztec-wallet-logo.svg')
   const fromIsL1 = isDeposit
   const toIsL1 = !isDeposit
   const fromIcon = fromIsL1 ? l1WalletIcon : aztecWalletIcon
@@ -461,7 +461,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
   // Verified-tier badge: the tier's brand mark alongside the per-human limit. Passport
   // tier uses the Human Passport mark, Clean Hands tier uses the Clean Hands mark. The
   // mark is rendered in black via CSS mask so it reads as the real brand logo, not a tint.
-  const badgeIconSrc = isPoch ? '/assets/svg/clean-hands.svg' : '/assets/svg/passport.svg'
+  const badgeIconSrc = isPoch ? publicAsset('/assets/svg/clean-hands.svg') : publicAsset('/assets/svg/passport.svg')
   // Compact cap shown under the balance. Passport is a per-human tier limit; the Clean Hands cap
   // ($25k) is a DAILY cap, so it carries a "/day" suffix. The "per human" framing lives in the tooltip.
   const limitLabel = tierLimitUsd > 0 ? `Limit: ${formatUsd(tierLimitUsd)}${isPoch ? '/day' : ''}` : null
@@ -515,7 +515,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
           <span className="text-12 font-semibold text-latest-grey-100 shrink-0">From</span>
           <span className="flex items-center gap-1.5 min-w-0">
             <NetworkMark
-              src={bridge.from.network?.img || '/assets/svg/ethLogo.svg'}
+              src={bridge.from.network?.img || publicAsset('/assets/svg/ethLogo.svg')}
               network={bridge.from.network?.network}
               chip="h-4 w-4"
               inner="h-3 w-3"
@@ -570,13 +570,13 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
               }}
             >
               <NetworkMark
-                src={bridge.from.network?.img || '/assets/svg/ethLogo.svg'}
+                src={bridge.from.network?.img || publicAsset('/assets/svg/ethLogo.svg')}
                 network={bridge.from.network?.network}
                 chip="h-5 w-5"
                 inner="h-3.5 w-3.5"
               />
               <p className="text-16 font-medium text-latest-black-100 w-[106px]">{bridge.from.network?.title}</p>
-              <StyledImage src="/assets/svg/dropDown.svg" alt="" className="h-2.5 w-1.5 p-1.5 mr-1.5" />
+              <StyledImage src={publicAsset('/assets/svg/dropDown.svg')} alt="" className="h-2.5 w-1.5 p-1.5 mr-1.5" />
             </div>
           </div>
           {/* Token selector */}
@@ -593,7 +593,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
               <p className="text-16 font-medium text-latest-black-100">
                 {bridge.from.token?.symbol}
               </p>
-              <StyledImage src="/assets/svg/dropDown.svg" alt="" className="h-2.5 w-1.5 p-1.5 mr-1.5" />
+              <StyledImage src={publicAsset('/assets/svg/dropDown.svg')} alt="" className="h-2.5 w-1.5 p-1.5 mr-1.5" />
             </div>
           </div>
         </div>
@@ -760,7 +760,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
                 inner="h-3.5 w-3.5"
               />
               <p className="text-16 font-medium text-latest-black-100 w-[106px]">{bridge.to.network?.title}</p>
-              <StyledImage src="/assets/svg/dropDown.svg" alt="" className="h-2.5 w-1.5 p-1.5 mr-1.5" />
+              <StyledImage src={publicAsset('/assets/svg/dropDown.svg')} alt="" className="h-2.5 w-1.5 p-1.5 mr-1.5" />
             </div>
           </div>
 
@@ -778,7 +778,7 @@ const BridgeSection: React.FC<BridgeSectionProps> = ({
               <p className="text-16 font-medium text-latest-black-100">
                 {bridge.to.token?.symbol}
               </p>
-              <StyledImage src="/assets/svg/dropDown.svg" alt="" className="h-2.5 w-1.5 p-1.5 mr-1.5" />
+              <StyledImage src={publicAsset('/assets/svg/dropDown.svg')} alt="" className="h-2.5 w-1.5 p-1.5 mr-1.5" />
             </div>
           </div>
         </div>

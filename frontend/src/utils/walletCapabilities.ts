@@ -1,13 +1,13 @@
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
 import { BRIDGED_FPC_ADDRESS, L1_TOKENS } from '@/config'
-import type { ContractFunctionPattern } from '@aztec/aztec.js/wallet'
+import type { ContractFunctionPattern } from '@aztec-labs/aztec.js/wallet'
 
 /** v5 canonical FeeJuice protocol-contract address on L2 (was 0x5 in v4) */
 const FEE_JUICE_ADDRESS = AztecAddress.fromStringUnsafe('0x0000000000000000000000000000000000000000000000000000000000000003')
 
 /**
  * v5 canonical AuthRegistry address (StandardContractAddress.AuthRegistry from
- * @aztec/standard-contracts). In v4 this was 0x1, but v5 renumbered protocol
+ * @aztec-labs/standard-contracts). In v4 this was 0x1, but v5 renumbered protocol
  * contracts (0x1 is now ContractClassRegistry) and moved AuthRegistry to a
  * derived standard-contract address. Must match what SetPublicAuthwitContractInteraction
  * targets, or the wallet won't authorize set_authorized during withdrawals.

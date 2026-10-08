@@ -7,6 +7,7 @@ import { SIGNATURE_NEEDED_KEY, useWalletStore } from '@/stores/walletStore'
 import { useNotificationsStore } from '@/stores/useNotificationsStore'
 import { useL1TokenBalance } from '@/hooks/useL1Operations'
 import { useL2TokenBalance } from '@/hooks/useL2Operations'
+import { publicAsset } from '@/config'
 
 interface BridgeHeaderProps {
   /** Title shown in the header pill. State-dependent so the shared chrome is
@@ -37,15 +38,6 @@ const SAFETY_BANNER_KEYS = new Set(['l1-to-l2-do-not-reload', 'l2-to-l1-do-not-r
 // are out of context and must not surface in the ticker. Allowlist, not denylist —
 // a new idle screen is safe by default.
 const PROGRESS_PATHS = new Set(['/progress', '/progress/resume'])
-
-// Marquee travels one full copy (translateX(-50%) across two stacked copies), so
-// the loop is seamless. Slower is calmer; px/sec keeps long and short alerts at a
-// constant reading speed. Only mounted while a scrolling ticker is on screen.
-const TICKER_KEYFRAMES =
-  '@keyframes bridge-ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}'
-const TICKER_SPEED_PX_PER_S = 42
-const TICKER_MIN_DURATION_S = 8
-const TICKER_GAP_PX = 44
 
 // Surface "Refreshing…" for at most this long, then force it off even if the
 // balance query is still in flight. The balance hooks poll on a 30s/60s
@@ -193,18 +185,6 @@ const BridgeHeader: React.FC<BridgeHeaderProps> = ({ title = 'BRIDGE' }) => {
       : currentAlert.title
     : ''
 
-  // Respect reduced-motion for the marquee: when reduced, the ticker never
-  // scrolls, it just truncates. matchMedia is read in an effect so SSR stays
-  // deterministic (defaults to motion-on, corrected on mount).
-  const [reduceMotion, setReduceMotion] = React.useState(false)
-  React.useEffect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const update = () => setReduceMotion(mq.matches)
-    update()
-    mq.addEventListener('change', update)
-    return () => mq.removeEventListener('change', update)
-  }, [])
-
   // Live remaining-time for an in-progress transfer, streamed from ProgressCard via a window
   // event. ProgressCard is a sibling (not a parent) and the shared store is off-limits, so the
   // countdown crosses over here. When a countdown is live it takes the left slot in place of the
@@ -229,38 +209,6 @@ const BridgeHeader: React.FC<BridgeHeaderProps> = ({ title = 'BRIDGE' }) => {
   // numeric value, so they stay correct through the zero/overrun handoff.
   const timerActive = remainingTime !== null || timerLabel !== null
 
-  // Only scroll the ticker when the text actually overflows the viewport. A
-  // stable, always-mounted invisible measurer avoids the measure->switch->remeasure
-  // flicker that comes from measuring the moving marquee itself.
-  const tickerViewportRef = React.useRef<HTMLDivElement>(null)
-  const tickerMeasureRef = React.useRef<HTMLSpanElement>(null)
-  const [tickerScroll, setTickerScroll] = React.useState(false)
-  const [tickerContentWidth, setTickerContentWidth] = React.useState(0)
-
-  React.useEffect(() => {
-    if (!isAlertActive) {
-      setTickerScroll(false)
-      return
-    }
-    const viewport = tickerViewportRef.current
-    const measure = tickerMeasureRef.current
-    if (!viewport || !measure) return
-    const check = () => {
-      const contentWidth = measure.scrollWidth
-      setTickerContentWidth(contentWidth)
-      setTickerScroll(!reduceMotion && contentWidth > viewport.clientWidth + 1)
-    }
-    check()
-    const ro = new ResizeObserver(check)
-    ro.observe(viewport)
-    return () => ro.disconnect()
-  }, [isAlertActive, tickerText, reduceMotion])
-
-  const tickerDurationS = Math.max(
-    TICKER_MIN_DURATION_S,
-    (tickerContentWidth + TICKER_GAP_PX) / TICKER_SPEED_PX_PER_S,
-  )
-
   // Update step statuses based on wallet connections
   React.useEffect(() => {
     if (isWaapConnected) {
@@ -278,8 +226,12 @@ const BridgeHeader: React.FC<BridgeHeaderProps> = ({ title = 'BRIDGE' }) => {
 
   const steps = getHeaderSteps()
 
+  // No `whitespace-nowrap`: the alert wraps to as many lines as it needs (#2148).
+  // The marquee this replaced masked 12px at both ends and looped across a seam, so
+  // users read fragments like "rivate fee juice to keep your clai" and never the
+  // whole sentence — on the two screens where the message is the only guidance.
   const tickerTextClass =
-    "whitespace-nowrap text-[12px] font-[600] leading-[16px] tracking-[0.2px] font-['Suisse_Intl']"
+    "break-words text-[12px] font-[600] leading-[17px] tracking-[0.2px] font-['Suisse_Intl']"
 
   // The live countdown owns its own shrink-0 slot at the head of the bar, rendered
   // independently of the alert ticker. During a transfer an active warning/error would
@@ -311,7 +263,16 @@ const BridgeHeader: React.FC<BridgeHeaderProps> = ({ title = 'BRIDGE' }) => {
   ) : null
 
   return (
-    <div className='flex w-full min-w-0 items-center gap-[12px] rounded-[136px] border border-[#D4D4D4] bg-white px-[16px] py-[4px] pl-[8px]'>
+    // While an alert is active the bar holds a wrapped, multi-line message, so the
+    // 136px pill radius would render it as a lozenge. It softens to a rounded rect
+    // and top-aligns its controls for the duration; the idle bar is unchanged.
+    <div
+      className={`flex w-full min-w-0 gap-[12px] border border-[#D4D4D4] bg-white px-[16px] pl-[8px] ${
+        isAlertActive
+          ? 'items-start rounded-[16px] py-[6px]'
+          : 'items-center rounded-[136px] py-[4px]'
+      }`}
+    >
       {timerSlot}
       {isAlertActive && alertMeta ? (
         // ACTIVE: a live warning/error message takes over the bar as a compact
@@ -320,57 +281,31 @@ const BridgeHeader: React.FC<BridgeHeaderProps> = ({ title = 'BRIDGE' }) => {
         // trailing close control lets the user dismiss the alert (kept as a sibling
         // button, not nested, so it stays a valid, separately-focusable target).
         <div
-          className={`group flex min-w-0 flex-1 items-center gap-[4px] rounded-full py-[4px] pl-[10px] pr-[4px] ${alertMeta.className}`}
+          className={`group flex min-w-0 flex-1 items-start gap-[6px] rounded-[12px] py-[8px] pl-[12px] pr-[8px] ${alertMeta.className}`}
         >
           <button
             type='button'
             onClick={openMessages}
             aria-label={`${currentAlert!.type === 'error' ? 'Error' : 'Warning'}: ${tickerText}. Open messages`}
-            className='flex min-w-0 flex-1 items-center gap-[8px] rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A0A0A]/[0.2]'
+            className='flex min-w-0 flex-1 items-start gap-[8px] rounded-[8px] text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A0A0A]/[0.2]'
           >
             <Icon
               icon={alertMeta.icon}
               width={14}
               height={14}
-              className='shrink-0 animate-pulse motion-reduce:animate-none'
+              // Aligned to the first line's optical centre rather than the block, so a
+              // three-line message doesn't centre the glyph against line two.
+              className='mt-[2px] shrink-0 animate-pulse motion-reduce:animate-none'
             />
-            <div
-              ref={tickerViewportRef}
-              aria-hidden='true'
-              className='relative min-w-0 flex-1 overflow-hidden text-left'
-            >
-              {/* Always-mounted, out-of-flow width probe used to decide overflow. */}
-              <span
-                ref={tickerMeasureRef}
-                className={`invisible absolute left-0 top-0 ${tickerTextClass}`}
-              >
-                {tickerText}
-              </span>
-              {tickerScroll ? (
-                <>
-                  <style dangerouslySetInnerHTML={{ __html: TICKER_KEYFRAMES }} />
-                  <div
-                    className='flex w-max [mask-image:linear-gradient(to_right,transparent,#000_12px,#000_calc(100%-12px),transparent)]'
-                    style={{ animation: `bridge-ticker ${tickerDurationS}s linear infinite` }}
-                  >
-                    <span className={`${tickerTextClass}`} style={{ paddingRight: TICKER_GAP_PX }}>
-                      {tickerText}
-                    </span>
-                    <span className={`${tickerTextClass}`} style={{ paddingRight: TICKER_GAP_PX }}>
-                      {tickerText}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <span className={`block truncate ${tickerTextClass}`}>{tickerText}</span>
-              )}
-            </div>
+            <span aria-hidden='true' className={`min-w-0 flex-1 ${tickerTextClass}`}>
+              {tickerText}
+            </span>
           </button>
           <button
             type='button'
             onClick={dismissCurrentAlert}
             aria-label='Dismiss message'
-            className='flex shrink-0 items-center justify-center rounded-full p-[3px] transition-colors hover:bg-[#0A0A0A]/[0.08] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A0A0A]/[0.2]'
+            className='mt-[1px] flex shrink-0 items-center justify-center rounded-full p-[3px] transition-colors hover:bg-[#0A0A0A]/[0.08] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A0A0A]/[0.2]'
           >
             <Icon icon='ph:x-bold' width={12} height={12} className='shrink-0' />
           </button>
@@ -380,7 +315,7 @@ const BridgeHeader: React.FC<BridgeHeaderProps> = ({ title = 'BRIDGE' }) => {
         <>
           {!timerActive && (
             <img
-              src='/assets/svg/human.aztec.svg'
+              src={publicAsset('/assets/svg/human.aztec.svg')}
               alt=''
               className='h-[24px] w-[24px] shrink-0'
             />

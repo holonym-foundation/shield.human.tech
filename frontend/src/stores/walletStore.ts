@@ -1,4 +1,4 @@
-import { L1_CHAIN_ID, L1_RPC_URL, ROLLUP_VERSION, L2_NETWORKS } from '@/config'
+import { L1_CHAIN_ID, L1_RPC_URL, ROLLUP_VERSION, L2_NETWORKS, versionScopedKey, publicAsset } from '@/config'
 import { networkConfig, waapConfig } from '@/config/l1.config'
 import { showToast } from '@/hooks/useToast'
 import { dismissNotificationByKey, pushNotification } from '@/stores/useNotificationsStore'
@@ -12,7 +12,7 @@ import {
   handleWaapError,
 } from '@/stores/waapWalletHelpers'
 import { AztecLoginMethod, LOGIN_METHODS, WaapLoginMethod, WalletType } from '@/types/wallet'
-import { extractErrorMessage, humanizeError } from '@/utils'
+import { extractErrorMessage, humanizeError, isWalletSchemaMismatch, walletVersionMismatchMessage } from '@/utils'
 import { logError, logInfo, DatadogUserAction } from '@/utils/datadog'
 import {
   discoverWallets,
@@ -22,7 +22,7 @@ import {
   type PendingConnection,
 } from '@/utils/walletSdkConnection'
 import { buildCapabilityManifest } from '@/utils/walletCapabilities'
-import type { Wallet } from '@aztec/aztec.js/wallet'
+import type { Wallet } from '@aztec-labs/aztec.js/wallet'
 import type { DiscoverySession } from '@/utils/walletSdkConnection'
 import { initWaaP } from '@human.tech/waap-sdk'
 import { create } from 'zustand'
@@ -61,6 +61,20 @@ function clearWaapSignatureCache(): void {
 // number, so comparing their raw toString() outputs would give false mismatches.
 // Returns null when the value cannot be read, which the caller treats as
 // "unknown" and skips (fail open) rather than a mismatch.
+// The wrong-network check fails open, and until now a skip was only a console.warn —
+// which Datadog does not forward (it forwards console.error only). So there was no way to
+// know how often wallets connect unverified, which is exactly the blind spot behind #2065
+// and #2295: the check has existed since 2026-07-22 yet both were reported after it. Logged
+// at info level deliberately, so it is measurable without inflating error rates (#1817).
+function logSkippedNetworkCheck(reason: string): void {
+  logInfo('Aztec wrong-network check skipped', {
+    walletType: WalletType.AZTEC,
+    loginMethod: 'wallet-sdk',
+    userAction: DatadogUserAction.AZTEC_WALLET_NETWORK_CHECK_SKIPPED,
+    reason,
+  })
+}
+
 function normalizeChainValue(value: unknown): string | null {
   if (value == null) return null
   const asBigInt = (value as { toBigInt?: () => bigint }).toBigInt
@@ -93,8 +107,8 @@ declare global {
   }
 }
 
-const AZTEC_WALLET_KEY = 'aztecLoginMethod'
-const WEB_WALLET_URL_KEY = 'aztecWebWalletUrl'
+const AZTEC_WALLET_KEY = versionScopedKey('aztecLoginMethod')
+const WEB_WALLET_URL_KEY = versionScopedKey('aztecWebWalletUrl')
 
 // Stable feed key for the "signature needed" alert (#417). The mini-bar ticker
 // selects this key so the alert wins priority while a signature is pending, and
@@ -102,7 +116,13 @@ const WEB_WALLET_URL_KEY = 'aztecWebWalletUrl'
 // lingers on an idle bridge.
 export const SIGNATURE_NEEDED_KEY = 'waap-signature-needed'
 
-const DISCOVERY_TIMEOUT_MS = 60000
+// Long enough to cover a wallet that only answers after the user unlocks it (Azguard asks for its
+// password first); the modal shows its "not found" fast path after a few seconds regardless.
+const DISCOVERY_TIMEOUT_MS = 3 * 60_000
+// requestCapabilities waits on the wallet's own approval screen (often behind a PIN or password
+// unlock), so it must outlast a human reviewing the request; a short timeout falls through to the
+// getAccounts fallback, which wallets refuse without the accounts grant.
+const CAPABILITIES_TIMEOUT_MS = 5 * 60_000
 const DISCONNECT_GRACE_MS = 1000
 
 export type WalletConnectionPhase =
@@ -124,6 +144,9 @@ interface WalletState {
   // Connection state
   aztecLoginMethod: AztecLoginMethod | null
   aztecAddress: string | null
+  /** True only when the wallet positively reported the pinned Aztec network at connect.
+   *  The check fails open, so false/absent means "unverified", not "wrong network". */
+  aztecNetworkVerified: boolean
   aztecAccount: any | null
   isAztecConnected: boolean
   isAztecConnecting: boolean
@@ -263,6 +286,7 @@ const initialState = {
   // Aztec Wallet State
   aztecLoginMethod: getInitialWalletType(),
   aztecAddress: null,
+  aztecNetworkVerified: false,
   aztecAccount: null,
   isAztecConnected: false,
   isAztecConnecting: false,
@@ -541,7 +565,13 @@ const walletStore = create<WalletState>((set, get) => ({
         const readChainInfo = (wallet as { getChainInfo?: () => Promise<{ chainId: unknown; version: unknown }> })
           .getChainInfo
         if (typeof readChainInfo === 'function') {
-          const walletChainInfo = await readChainInfo.call(wallet)
+          // One retry: a single failed read leaves the wallet unverified for the whole
+          // session, and creating a permanent AddressBinding then refuses until the user
+          // reconnects. A brief blip right after the secure channel opens is the common case.
+          const walletChainInfo = await readChainInfo.call(wallet).catch(async () => {
+            await new Promise((r) => setTimeout(r, 500))
+            return readChainInfo.call(wallet)
+          })
           const walletVersion = normalizeChainValue(walletChainInfo?.version)
           const walletChainId = normalizeChainValue(walletChainInfo?.chainId)
           const expectedVersion = normalizeChainValue(ROLLUP_VERSION)
@@ -590,11 +620,21 @@ const walletStore = create<WalletState>((set, get) => ({
             )
             return
           }
+          // Positively confirmed. Recorded because creating a permanent AddressBinding
+          // requires it server-side: an address from a wallet that could not prove its
+          // network must not be written into an irreversible link (#2065/#2295).
+          // Only the rollup version tells Aztec networks apart; every testnet rollup shares
+          // Sepolia's L1 chain id, so a readable chainId alone proves nothing.
+          set({ aztecNetworkVerified: walletVersion != null })
         } else {
           console.warn('[walletStore] wallet.getChainInfo unavailable, skipping wrong-network check')
+          logSkippedNetworkCheck('getChainInfo unavailable')
         }
       } catch (chainCheckErr) {
         console.warn('[walletStore] wrong-network check skipped (chain info read failed):', chainCheckErr)
+        logSkippedNetworkCheck(
+          `chain info read failed: ${chainCheckErr instanceof Error ? chainCheckErr.message : String(chainCheckErr)}`,
+        )
       }
 
       // Transition to 'requesting' phase while we request capabilities
@@ -619,7 +659,7 @@ const walletStore = create<WalletState>((set, get) => ({
         const capabilities = await Promise.race([
           wallet.requestCapabilities(manifest),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('requestCapabilities timed out')), 15_000),
+            setTimeout(() => reject(new Error('requestCapabilities timed out')), CAPABILITIES_TIMEOUT_MS),
           ),
         ])
         console.info('[walletStore] requestCapabilities granted:', JSON.stringify(capabilities?.granted?.map((c: { type: string }) => c.type)), capabilities)
@@ -722,9 +762,16 @@ const walletStore = create<WalletState>((set, get) => ({
           verificationEmojis: null,
         })
         // Provide a more helpful message for known wallet extension errors
+        const networkName = L2_NETWORKS[0]?.title ?? 'this Aztec network'
         const userMessage = errorMessage.includes('missing account data')
           ? 'Wallet did not provide account data. This wallet may not be compatible. Try a different one.'
-          : `Couldn't confirm your wallet connection. ${humanizeError(error)}`
+          : errorMessage.includes('No accounts returned from wallet')
+            ? // A wallet keys its accounts by the network the app requests, so one built for
+              // another Aztec version (or never used here) has none to return.
+              `Your Aztec wallet has no account on ${networkName}. Create one in the wallet, or connect a wallet for ${networkName}.`
+            : isWalletSchemaMismatch(error)
+              ? walletVersionMismatchMessage(networkName)
+              : `Couldn't confirm your wallet connection. ${humanizeError(error)}`
         showToast('error', userMessage)
       }
     } finally {
@@ -785,9 +832,22 @@ const walletStore = create<WalletState>((set, get) => ({
 
       // Update all state — increment connectionGeneration so the adapter
       // cache (useWalletAdapter) is busted and a fresh adapter is created.
+      // A discovery session can outlive the connection (e.g. a wallet that answers late after an
+      // unlock); without this its picker or "not found" state stays mounted over the app.
+      if (activeDiscoverySession) {
+        try {
+          activeDiscoverySession.cancel()
+        } catch {
+          /* already settled */
+        }
+        activeDiscoverySession = null
+      }
+      isDiscoveryInProgress = false
       set((prev) => ({
         walletConnectionPhase: 'connected' as const,
         isAztecConnecting: false,
+        showWalletInstallPrompt: false,
+        discoveredWallets: [],
         aztecAlias: account.alias,
         connectionGeneration: prev.connectionGeneration + 1,
       }))
@@ -926,6 +986,7 @@ const walletStore = create<WalletState>((set, get) => ({
         sdkWallet: null,
         sdkProvider: null,
         aztecAddress: null,
+        aztecNetworkVerified: false,
         aztecAccount: null,
         isAztecConnected: false,
         isAztecConnecting: false,
@@ -1376,7 +1437,7 @@ const walletStore = create<WalletState>((set, get) => ({
       return walletIcon
     } catch (err) {
       console.error('Error getting wallet icon:', err)
-      const fallbackIcon = '/assets/wallets/wally-dark.svg'
+      const fallbackIcon = publicAsset('/assets/wallets/wally-dark.svg')
       set({ waapWalletIcon: fallbackIcon })
       return fallbackIcon
     }

@@ -1,6 +1,7 @@
 import StyledImage from '../StyledImage'
 import TextButton from '../TextButton'
 import { Oval } from 'react-loader-spinner'
+import { publicAsset } from '@/config'
 
 const formatAddress = (address: string) => {
   if (!address) return ''
@@ -34,7 +35,7 @@ export default function SBT({
             </p>
             <button onClick={onClose} disabled={isPending}>
               <StyledImage
-                src='/assets/svg/cross.svg'
+                src={publicAsset('/assets/svg/cross.svg')}
                 alt=''
                 className='h-[14px] w-[14px] m-[2px]'
               />
@@ -46,7 +47,7 @@ export default function SBT({
             </p>
             <div className='flex gap-2.5 bg-latest-grey-200 p-1 mt-1 rounded-[8px]'>
               <StyledImage
-                src='/assets/svg/network.svg'
+                src={publicAsset('/assets/svg/network.svg')}
                 alt=''
                 className='h-5 w-5 m-1.5'
               />
@@ -91,7 +92,7 @@ export default function SBT({
               </p>
               <div className='flex justify-center gap-2 mt-4'>
                 <StyledImage
-                  src='/assets/svg/silk0.4.svg'
+                  src={publicAsset('/assets/svg/silk0.4.svg')}
                   alt=''
                   className='h-4 w-[14px]'
                 />

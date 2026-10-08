@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Icon } from '@iconify/react'
 import { Tooltip as ReactTooltip } from 'react-tooltip'
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
 import { formatFjAmount, getFeeJuicePriceUsd, getTokenPriceUsd, usdToTokenAmount } from '@/utils/fuelPricing'
 import { buildSwapCandidates, getBestRoute } from '@/utils/fuelPricing'
 import { BRIDGED_FPC_ADDRESS, L1_RPC_URL } from '@/config'
@@ -563,9 +563,10 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [badRate, recommendedFuel, fuelAmount, tokenSymbol])
 
-  // Transient heads-up (#5): public fuel while privacy mode is on would deanonymize the claim.
-  // Fire once per entry into that state as an auto-dismissing reminder (privacy mode force-flips
-  // fuel back to private, so this is a brief window, not a persistent error).
+  // Heads-up (#5): public fuel while privacy mode is on would deanonymize the claim.
+  // Fire once per entry into that state. It holds until the user dismisses it (#2148) —
+  // the previous 6s timer pulled the sentence off screen mid-read, and a warning nobody
+  // finishes reading is worse than one that lingers.
   const publicRevealFiredRef = useRef(false)
   useEffect(() => {
     const shouldWarn = fuelEnabled && isPrivacyModeEnabled && fuelType === 'public'
@@ -580,7 +581,6 @@ const FuelToggle: React.FC<FuelToggleProps> = ({
       title: 'Public fee juice reveals your claim',
       message: 'Use Private fee juice to keep your claim anonymous.',
       key: 'fuel-public-reveal',
-      autoDismissMs: 6000,
     })
   }, [fuelEnabled, isPrivacyModeEnabled, fuelType])
 

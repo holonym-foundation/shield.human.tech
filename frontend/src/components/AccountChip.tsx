@@ -10,7 +10,7 @@ import { useWalletStore } from '@/stores/walletStore'
 import { useAttestationCheck } from '@/hooks/useAttestationCheck'
 import { useL1Humanity } from '@/hooks/useL1Humanity'
 import { shortAddr, accountLabel } from '@/hooks/useBindingStatus'
-import { POCH_MINT_URL, PASSPORT_BUILD_URL, IS_MAINNET } from '@/config'
+import { POCH_MINT_URL, PASSPORT_BUILD_URL, IS_MAINNET, publicAsset } from '@/config'
 import { BRIDGE_MAX_DEPOSIT_USD, TRAVEL_RULE_THRESHOLD_USD } from '@/config/env.config'
 import { silkUrl } from '@/config/l1.config'
 import { LOGIN_METHODS } from '@/types/wallet'
@@ -42,14 +42,14 @@ if (typeof window !== 'undefined') {
 }
 
 // ─── Brand assets reused from the app (never re-drawn) ──────────────────────
-const EVM_NETWORK_ICON = '/assets/svg/network-logo.svg'
-const AZTEC_ICON = '/assets/svg/aztec.svg'
-const EVM_WALLET_FALLBACK = '/assets/wallets/wally-dark.svg'
+const EVM_NETWORK_ICON = publicAsset('/assets/svg/network-logo.svg')
+const AZTEC_ICON = publicAsset('/assets/svg/aztec.svg')
+const EVM_WALLET_FALLBACK = publicAsset('/assets/wallets/wally-dark.svg')
 // WaaP embedded wallet brand mark. The WaaP wallet IS human.tech's Silk wallet
 // (the "Open Wallet" action opens the Silk UI at silkUrl), so its own product
 // logo is the correct identity for the row — never the generic/injected icon
 // (Rabby/MetaMask) that waapWalletIcon may carry for a browser-extension login.
-const WAAP_WALLET_ICON = '/assets/svg/silk-logo.svg'
+const WAAP_WALLET_ICON = publicAsset('/assets/svg/silk-logo.svg')
 
 // HUMN Points display is OFF until it reads from a working source (#427/#429).
 // The current /api/points proxy hits Passport's public Stamps API, whose

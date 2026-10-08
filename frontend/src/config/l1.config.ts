@@ -1,7 +1,7 @@
 import { parseUnits } from 'viem'
 import { InitWaaPOptions } from '@human.tech/waap-sdk'
 import { shieldLogo } from './logo'
-import { L1_CHAIN_ID } from '@/config'
+import { L1_CHAIN_ID, publicAsset } from '@/config'
 import { WALLETCONNECT_PROJECT_ID } from '@/config/env.config'
 
 export const useStagingWaap = false
@@ -158,7 +158,7 @@ export const networkConfig: NetworkConfigInfo = {
     cmc_id: 1027,
     currencyName: 'Ether',
     currencySymbol: 'ETH',
-    logo: '/assets/svg/AuroraLogo.svg', // TODO: Add Aurora logo
+    logo: publicAsset('/assets/svg/AuroraLogo.svg'), // TODO: Add Aurora logo
     blockExplorer: 'https://aurorascan.dev/',
     rpcUrl: '',
     chainId: 1313161554,
@@ -169,7 +169,7 @@ export const networkConfig: NetworkConfigInfo = {
     cmc_id: 5805,
     currencyName: 'AVAX',
     currencySymbol: 'AVAX',
-    logo: '/assets/svg/Avalanche_AVAX_Black.svg',
+    logo: publicAsset('/assets/svg/Avalanche_AVAX_Black.svg'),
     blockExplorer: 'https://subnets.avax.network/c-chain',
     rpcUrl: '',
     chainId: 43114,
@@ -181,7 +181,7 @@ export const networkConfig: NetworkConfigInfo = {
     cmc_id: 1027,
     currencyName: 'Ether',
     currencySymbol: 'ETH',
-    logo: '/assets/svg/Arbitrum.svg',
+    logo: publicAsset('/assets/svg/Arbitrum.svg'),
     blockExplorer: 'https://arbiscan.io/',
     rpcUrl: '',
     chainId: 42161,
@@ -193,7 +193,7 @@ export const networkConfig: NetworkConfigInfo = {
   //   cmc_id: 1027,
   //   currencyName: 'Ether',
   //   currencySymbol: 'ETH',
-  //   logo: '/assets/svg/Arbitrum.svg',
+  //   logo: publicAsset('/assets/svg/Arbitrum.svg'),
   //   blockExplorer: 'https://sepolia-explorer.arbitrum.io',
   //   rpcUrl: '',
   //   chainId: 421614,
@@ -203,7 +203,7 @@ export const networkConfig: NetworkConfigInfo = {
     cmc_id: 3513,
     currencyName: 'Fantom',
     currencySymbol: 'FTM',
-    logo: '/assets/svg/Fantom_round.svg',
+    logo: publicAsset('/assets/svg/Fantom_round.svg'),
     blockExplorer: 'https://ftmscan.com/',
     rpcUrl: '',
     chainId: 250,
@@ -214,7 +214,7 @@ export const networkConfig: NetworkConfigInfo = {
     cmc_id: 1027,
     currencyName: 'Sepolia Ether',
     currencySymbol: 'ETH',
-    logo: '/assets/svg/base.svg',
+    logo: publicAsset('/assets/svg/base.svg'),
     blockExplorer: 'https://base-sepolia.blockscout.com/',
     rpcUrl: '',
     chainId: 84532,
@@ -225,7 +225,7 @@ export const networkConfig: NetworkConfigInfo = {
     cmc_id: 1027,
     currencyName: 'Ether',
     currencySymbol: 'ETH',
-    logo: '/assets/svg/base.svg',
+    logo: publicAsset('/assets/svg/base.svg'),
     blockExplorer: 'https://basescan.org/',
     rpcUrl: '',
     chainId: 8453,
@@ -236,7 +236,7 @@ export const networkConfig: NetworkConfigInfo = {
     cmc_id: 5567,
     currencyName: 'Celo',
     currencySymbol: 'CELO',
-    logo: '/assets/images/celo.png',
+    logo: publicAsset('/assets/images/celo.png'),
     blockExplorer: 'https://explorer.celo.org/',
     rpcUrl: '',
     chainId: 42220,
@@ -256,7 +256,7 @@ export const networkConfig: NetworkConfigInfo = {
   //   currencyName: 'Ether',
   //   currencySymbol: 'pgnETH',
   //   // logo: 'https://docs.publicgoods.network/favicon.ico',
-  //   logo: '/assets/svg/pgn-favicon.svg',
+  //   logo: publicAsset('/assets/svg/pgn-favicon.svg'),
   //   blockExplorer: 'https://explorer.publicgoods.network/',
   //   rpcUrl: '',
   //   chainId: 424,

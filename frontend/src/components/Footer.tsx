@@ -107,7 +107,7 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
 
           {/* Center Text */}
           <div className={`absolute left-1/2 transform -translate-x-1/2 ${mutedText(isDark)} whitespace-nowrap`}>
-            © 2025 human.tech. All rights reserved.
+            © {new Date().getFullYear()} human.tech. All rights reserved.
           </div>
 
           {/* Right Side Links */}
@@ -125,7 +125,7 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
         <div className='[@media(min-height:821px)]:hidden flex flex-wrap items-center justify-center gap-x-4 gap-y-1 w-full px-4 pt-3 pb-4'>
           <ResourceLinks className='justify-center' isDark={isDark} />
           <span className={`${mutedText(isDark)} text-center`}>
-            © 2025 human.tech. All rights reserved.
+            © {new Date().getFullYear()} human.tech. All rights reserved.
           </span>
         </div>
 
@@ -139,7 +139,7 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
 
           {/* Bottom Copyright */}
           <div className={`${mutedText(isDark)} text-center`}>
-            © 2025 human.tech. All rights reserved.
+            © {new Date().getFullYear()} human.tech. All rights reserved.
           </div>
         </div>
       </div>

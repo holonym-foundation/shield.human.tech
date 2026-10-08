@@ -92,7 +92,11 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       // (bottom). On comfortable heights everything fits with no scroll at all — the
       // "looking through a window, see everything" experience. The clip guarantees the
       // footer is always visible and never pushed off-screen.
-      className="relative flex flex-col w-full min-w-0 overflow-hidden h-[100dvh]"
+      // Docs is the one exception (#2147): it is long-form prose with no card to scroll
+      // inside, so the clip cut every page at the fold. There the shell grows past the
+      // viewport and the document scrolls normally — which is also what the sidebar's
+      // `sticky` nav, the `#id` anchors and the section IntersectionObserver expect.
+      className={`relative flex flex-col w-full min-w-0 ${isDocs ? 'min-h-[100dvh]' : 'overflow-hidden h-[100dvh]'}`}
       style={{ minWidth: 0 }}
     >
       {/* Onboarding is skipped on docs so the guides render without connecting a wallet. */}
@@ -101,7 +105,9 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           treatment as the app for continuity, just near-white), pink field elsewhere.
           The white wash fades in so navigating INTO docs animates rather than cuts. */}
       {isDocs ? (
-        <div className="absolute inset-0 z-0" aria-hidden="true">
+        // Viewport-locked on docs: the shell is taller than the screen there, and an
+        // absolute layer would stretch the shader over the whole document height.
+        <div className="fixed inset-0 z-0" aria-hidden="true">
           <MeshGradient
             colors={['#ffffff', '#fdfbfc', '#f8f2f7', '#f1e8f0']}
             speed={0.12}
@@ -172,7 +178,10 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           pink background (#432). With overflow-visible the shadow fades softly behind the
           transparent footer; the page still never scrolls because the root shell
           (h-[100dvh], overflow-hidden) clips any spill below the footer. */}
-      <div className="relative z-20 flex flex-grow flex-col min-h-0 overflow-visible">
+      {/* z-30 (above the footer's z-20): where the fixed-height card spills into the footer's band
+          on a short viewport, the card must paint over it and receive taps, or the footer swallows
+          taps on the primary CTA (#150). */}
+      <div className="relative z-30 flex flex-grow flex-col min-h-0 overflow-visible">
         <div className="flex-grow">{children}</div>
       </div>
       {/* Footer pinned to the bottom of the fixed shell (shrink-0 so it keeps its

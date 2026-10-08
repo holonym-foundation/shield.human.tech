@@ -22,7 +22,8 @@ const AUTH_PENDING_TOAST_ID = 'auth-pending'
  * via SIWE (EIP-4361) using the SDK. Auto-retries on nonce expiry.
  */
 export default function AuthSync() {
-  const { waapAddress, aztecAddress, waapLoginMethod, waapWalletProvider, aztecLoginMethod } = useWalletStore()
+  const { waapAddress, aztecAddress, waapLoginMethod, waapWalletProvider, aztecLoginMethod, aztecNetworkVerified } =
+    useWalletStore()
   const { setAuth, setAuthFailed, clearAuth, user, retryAuth } = useAuthStore()
   const prevKeyRef = useRef<string | null>(null)
   const bridge = useBridge()
@@ -134,6 +135,7 @@ export default function AuthSync() {
           l1WalletProvider: waapWalletProvider ?? undefined,
           l2LoginMethod: aztecLoginMethod ?? undefined,
           l2WalletProvider: l2WalletProvider ?? undefined,
+          l2NetworkVerified: aztecNetworkVerified,
         })
 
         if (cancelled || !result.token || !result.user) return

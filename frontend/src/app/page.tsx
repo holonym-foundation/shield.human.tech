@@ -49,6 +49,7 @@ import {
   L2_TOKENS,
   getL2PairedToken,
   getL1PairedToken,
+  LEGACY_MODE,
 } from '@/config'
 import MetaMaskPrompt from '@/components/model/MetaMaskPrompt'
 import BalanceCard from '@/components/BalanceCard'
@@ -617,6 +618,7 @@ export default function Home() {
   if (!mounted) return null
 
   const handleBridgeTokensToL2 = (amount: string) => {
+    if (LEGACY_MODE) return
     setCurrentOperationId(null)
     setDirection(BridgeDirection.L1_TO_L2)
     setBridgeConfig({
@@ -731,7 +733,7 @@ export default function Home() {
               l2Balance={l2Balance}
               direction={bridgeConfig.direction}
               inputRef={inputRef as React.RefObject<HTMLInputElement>}
-              onSwap={swapDirection}
+              onSwap={LEGACY_MODE ? undefined : swapDirection}
               isPrivacyModeEnabled={isPrivacyModeEnabled}
               feeJuiceBalance={feeJuiceBalance}
               feeJuiceLoading={feeJuiceBalanceLoading}

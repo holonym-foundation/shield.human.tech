@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { MeshGradient } from '@paper-design/shaders-react'
 import { useWalletStore } from '@/stores/walletStore'
-import { POCH_MINT_URL } from '@/config'
+import { AZTEC_VERSION_ID, IS_MAINNET, POCH_MINT_URL, publicAsset } from '@/config'
 import { useOnboardingStore } from '@/stores/useOnboardingStore'
 import { PASSPORT_BUILD_URL } from '@/config'
 
@@ -144,10 +144,11 @@ function usePrefersDark() {
   return dark
 }
 
-/* Alphanet caution badge — sits above the hero eyebrow. Amber (not brand pink) so it
-   reads as a warning, with a hover/focus tooltip so users know this is an early network
-   before they bridge real value. */
-function AlphanetBadge() {
+/* Network-stage caution badge — sits above the hero eyebrow. Amber (not brand pink) so it
+   reads as a warning, with a hover/focus tooltip so users know which network they are on
+   before they bridge: Alphanet (real value, early network) on mainnet, Testnet otherwise. */
+function NetworkStageBadge() {
+  const stage = IS_MAINNET ? 'Alphanet' : 'Testnet'
   const [open, setOpen] = useState(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cancelClose = () => {
@@ -173,14 +174,14 @@ function AlphanetBadge() {
         className="ob-alpha-pill"
         tabIndex={0}
         role="note"
-        aria-label="Alphanet release warning"
+        aria-label={`${stage} release warning`}
         onFocus={() => setOpen(true)}
         onBlur={scheduleClose}
       >
         <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z" />
         </svg>
-        Alphanet
+        {stage}
       </span>
       <AnimatePresence>
         {open && (
@@ -194,8 +195,16 @@ function AlphanetBadge() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
           >
-            Shield runs on Aztec Alphanet, an early-stage network. Treat every transaction as final and bridge only what you can afford to lose.{' '}
-            <a href="https://aztec.network/blog/introducing-alpha-v5" target="_blank" rel="noopener noreferrer">Learn about Alpha v5</a>.
+            {IS_MAINNET ? (
+              <>
+                Shield runs on Aztec Alphanet, an early-stage network. Treat every transaction as final and bridge only what you can afford to lose.{' '}
+                <a href="https://aztec.network/blog/introducing-alpha-v5" target="_blank" rel="noopener noreferrer">Learn about Alpha v5</a>.
+              </>
+            ) : (
+              <>
+                Shield is running on Aztec Testnet ({AZTEC_VERSION_ID}). Testnet tokens have no value, and balances can be reset when Aztec ships a new version.
+              </>
+            )}
           </motion.span>
         )}
       </AnimatePresence>
@@ -771,7 +780,7 @@ export default function ShieldOnboarding() {
       </div>
 
       <div className="ob-top">
-        <img src="/assets/svg/shield-symbol-maroon.svg" alt="Shield" width={22} height={27} />
+        <img src={publicAsset('/assets/svg/shield-symbol-maroon.svg')} alt="Shield" width={22} height={27} />
         <button className="ob-skip" onClick={skip}>Skip</button>
       </div>
 
@@ -799,7 +808,7 @@ export default function ShieldOnboarding() {
                   <div className="ob-cryptex-hero">
                     <CryptexMark reduce={reduce} shared />
                     <div className="ob-headline">
-                      <AlphanetBadge />
+                      <NetworkStageBadge />
                       <p className="ob-eyebrow">{screen.eyebrow}</p>
                       <h1 className="ob-title">{screen.title}</h1>
                     </div>
@@ -850,7 +859,7 @@ export default function ShieldOnboarding() {
               <div className="ob-cryptex-hero">
                 <CryptexMark reduce={reduce} />
                 <div className="ob-headline">
-                  <AlphanetBadge />
+                  <NetworkStageBadge />
                   <p className="ob-eyebrow">{SCREENS[0].eyebrow}</p>
                   <h1 className="ob-title">{SCREENS[0].title}</h1>
                 </div>
@@ -927,7 +936,7 @@ export default function ShieldOnboarding() {
             animate={{ scale: [0.8, 1, 1.06], opacity: [0, 1, 1] }}
             transition={{ duration: 1.5, ease: 'easeOut' }}
           >
-            <img src="/assets/svg/human.tech.logo.svg" alt="human.tech" width={140} onError={(e) => ((e.currentTarget.src = '/assets/svg/shield-symbol-maroon.svg'))} />
+            <img src={publicAsset('/assets/svg/human.tech.logo.svg')} alt="human.tech" width={140} onError={(e) => ((e.currentTarget.src = publicAsset('/assets/svg/shield-symbol-maroon.svg')))} />
           </motion.div>
         </motion.div>
       )}
@@ -1017,8 +1026,8 @@ export default function ShieldOnboarding() {
           -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
           -webkit-mask-position: center; mask-position: center;
           -webkit-mask-size: contain; mask-size: contain; }
-        .ob-logo-passport { -webkit-mask-image: url(/assets/svg/passport.svg); mask-image: url(/assets/svg/passport.svg); }
-        .ob-logo-clean { -webkit-mask-image: url(/assets/svg/clean-hands.svg); mask-image: url(/assets/svg/clean-hands.svg); }
+        .ob-logo-passport { -webkit-mask-image: url(${publicAsset('/assets/svg/passport.svg')}); mask-image: url(${publicAsset('/assets/svg/passport.svg')}); }
+        .ob-logo-clean { -webkit-mask-image: url(${publicAsset('/assets/svg/clean-hands.svg')}); mask-image: url(${publicAsset('/assets/svg/clean-hands.svg')}); }
         .ob-tier-icon .ob-brandlogo { width: 22px; height: 22px; color: ${BRAND}; }
         .ob-pill-ico { width: 16px; height: 16px; }
         .ob-tier-copy { display: flex; flex-direction: column; gap: 2px; }
@@ -1098,8 +1107,8 @@ export default function ShieldOnboarding() {
            .ob-secured strong colour rules (light / dark / splash) instead of a fixed black.
            align-self centres the mark on the line under the container's baseline alignment. */
         .ob-htmark { display: inline-block; width: 61px; height: 15px; align-self: center; background-color: currentColor;
-          -webkit-mask: url(/assets/svg/human.tech.logo.svg) no-repeat center / contain;
-          mask: url(/assets/svg/human.tech.logo.svg) no-repeat center / contain; }
+          -webkit-mask: url(${publicAsset('/assets/svg/human.tech.logo.svg')}) no-repeat center / contain;
+          mask: url(${publicAsset('/assets/svg/human.tech.logo.svg')}) no-repeat center / contain; }
         .ob-dot { opacity: 0.5; }
         /* #157: splash trust-line footer, pinned to the bottom of the splash. */
         .ob-splash-footer { position: relative; z-index: 3; padding: 0 24px 20px; display: flex; justify-content: center; }

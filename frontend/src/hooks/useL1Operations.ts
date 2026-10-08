@@ -8,14 +8,15 @@ import {
   verifyEncryptionDomain,
   extractErrorMessage,
   humanizeError,
+  L1_GAS_RETRY_NOTICE,
 } from '@/utils'
 import { logError, logInfo, DatadogUserAction } from '@/utils/datadog'
 import { captureBridgeInitiated, captureBridgeCompleted } from '@/utils/posthog'
 import { WalletType } from '@/types/wallet'
 import { useWalletAdapter } from './useWalletAdapter'
-import { ADDRESS, getAztecscanUrl, getEtherscanUrl, IS_MAINNET, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID } from '@/config'
-import { TestERC20Abi } from '@aztec/l1-artifacts'
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
+import { ADDRESS, getAztecscanUrl, getEtherscanUrl, IS_MAINNET, L1_CHAIN_ID, L1_TOKENS, L2_CHAIN_ID, LEGACY_MODE } from '@/config'
+import { TestERC20Abi } from '@aztec-foundation/l1-artifacts'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, encodeFunctionData } from 'viem'
 import PortalSBTJson from '../constants/PortalSBT.json'
@@ -515,6 +516,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
       userAction: DatadogUserAction.BRIDGE_L1_TO_L2_INITIATED,
     })
 
+    if (LEGACY_MODE) {
+      throw new Error('Deposits are closed on this Aztec version. Switch to the current version to deposit.')
+    }
     const result = await bridge.bridgeL1ToL2({
       token: selectedToken?.symbol ?? 'USDC',
       amount: amountDisplayL1,
@@ -572,6 +576,9 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             setCurrentOperationId(event.operationId)
             drivenOperationIds.current.push(String(event.operationId))
             markOperationLive(event.operationId)
+            break
+          case BridgeEventType.L1_GAS_RETRY:
+            notify('warn', L1_GAS_RETRY_NOTICE, { autoClose: false, toastId: 'l1-gas-retry' })
             break
           case BridgeEventType.DEPOSIT_SENT:
             logInfo('L1 deposit tx sent', {
@@ -1080,6 +1087,8 @@ export function useL1TopUpFeeJuice(onTopUpSuccess?: (l2TxHash?: string) => void)
     // session leaves behind). Cleared in `finally`, success or failure.
     const drivenOperationIds: string[] = []
 
+    // Gas top-ups stay open on a legacy version until its portals are paused, so a user holding
+    // tokens but no Fee Juice can still pay for the withdrawal.
     try {
       const result = await bridge.bridgeL1ToL2({
         token: tokenSymbol,
@@ -1111,6 +1120,9 @@ export function useL1TopUpFeeJuice(onTopUpSuccess?: (l2TxHash?: string) => void)
             case BridgeEventType.OPERATION_CREATED:
               drivenOperationIds.push(String(event.operationId))
               markOperationLive(event.operationId)
+              break
+            case BridgeEventType.L1_GAS_RETRY:
+              notify('warn', L1_GAS_RETRY_NOTICE, { autoClose: false, toastId: 'l1-gas-retry' })
               break
             case BridgeEventType.DEPOSIT_SENT:
               notify(
