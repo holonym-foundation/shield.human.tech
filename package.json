@@ -9,6 +9,7 @@
     "dev:frontend": "pnpm --filter shield.human.tech dev"
   },
   "devDependencies": {
+    "prettier": "^3.9.9",
     "turbo": "^2"
   }
 }

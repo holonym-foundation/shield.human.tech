@@ -7,12 +7,12 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   external: [
-    '@aztec/aztec.js',
-    '@aztec/stdlib',
-    '@aztec/l1-artifacts',
-    '@aztec/wallet-sdk',
-    '@aztec/ethereum',
-    '@aztec/foundation',
+    '@aztec-labs/aztec.js',
+    '@aztec-labs/stdlib',
+    '@aztec-foundation/l1-artifacts',
+    '@aztec-labs/wallet-sdk',
+    '@aztec-labs/ethereum',
+    '@aztec-labs/foundation',
     'viem',
   ],
 })

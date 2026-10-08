@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "forge build",
+    "gen:constants": "node ./script/gen-aztec-constants.mjs",
+    "build": "pnpm run gen:constants && forge build",
     "test": "forge test -vvv",
     "test:e2e": "forge test --match-contract E2EPoolSeedAndSwapTest -vvv",
     "test:fuel-swap": "forge test --match-path src/test/UniswapFuelSwap.t.sol -vvv",
