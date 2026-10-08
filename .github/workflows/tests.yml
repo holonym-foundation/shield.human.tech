@@ -1,14 +1,13 @@
 name: Tests
 
+# No `push` trigger: on a push the deploy workflow calls this one and waits on it,
+# so a second push-triggered run would race the gate it is supposed to be.
 on:
   pull_request:
     branches:
       - main
       - testnet
-  push:
-    branches:
-      - main
-      - testnet
+  workflow_call:
 
 concurrency:
   group: tests-${{ github.ref }}

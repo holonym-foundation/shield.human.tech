@@ -25,9 +25,17 @@ on:
       - testnet
 
 jobs:
+  # Every deploy job below waits on this one. `needs:` cannot cross workflow files,
+  # so the suite is called in-run rather than left to race the deploy on its own
+  # push trigger — which is what it did before, letting production go live while
+  # its tests were still running, and stay live when they failed.
+  tests:
+    uses: ./.github/workflows/tests.yml
+
   Deploy-Preview:
     permissions: write-all
     runs-on: ubuntu-latest
+    needs: tests
     if: github.ref_name == 'main'
     env:
       ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
@@ -120,6 +128,7 @@ jobs:
   Deploy-Testnet:
     permissions: write-all
     runs-on: ubuntu-latest
+    needs: tests
     if: github.ref_name == 'testnet'
     env:
       ETHEREUM_RPC_URL: ${{ secrets.TESTNET_ETHEREUM_RPC_URL }}
