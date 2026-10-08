@@ -481,14 +481,20 @@ contract UniswapFuelSwapTest is Test {
 
         (PoolKey[] memory path, bool[] memory dirs) = _singlePath(poolKey, zeroForOne);
 
+        // On a Sepolia fork the swapper lands at Foundry's default deploy address, which holds
+        // real ETH sent by strangers. Assert the swap leaves nothing behind, not that it is empty.
+        uint256 wethBefore = IERC20(WETH).balanceOf(address(swapper));
+        uint256 aztecBefore = IERC20(AZTEC).balanceOf(address(swapper));
+        uint256 ethBefore = address(swapper).balance;
+
         vm.startPrank(user);
         IERC20(WETH).approve(address(swapper), inputAmount);
         swapper.swap(WETH, inputAmount, 0, path, dirs);
         vm.stopPrank();
 
-        assertEq(IERC20(WETH).balanceOf(address(swapper)), 0, "No leftover WETH");
-        assertEq(IERC20(AZTEC).balanceOf(address(swapper)), 0, "No leftover AZTEC");
-        assertEq(address(swapper).balance, 0, "No leftover ETH");
+        assertEq(IERC20(WETH).balanceOf(address(swapper)), wethBefore, "No leftover WETH");
+        assertEq(IERC20(AZTEC).balanceOf(address(swapper)), aztecBefore, "No leftover AZTEC");
+        assertEq(address(swapper).balance, ethBefore, "No leftover ETH");
     }
 
     function test_noLeftoverTokensAfterNativeEthSwap() public {
@@ -497,14 +503,20 @@ contract UniswapFuelSwapTest is Test {
 
         (PoolKey[] memory path, bool[] memory dirs) = _singlePath(ethFeeKey, ethFeeZeroForOne);
 
+        // On a Sepolia fork the swapper lands at Foundry's default deploy address, which holds
+        // real ETH sent by strangers. Assert the swap leaves nothing behind, not that it is empty.
+        uint256 wethBefore = IERC20(WETH).balanceOf(address(swapper));
+        uint256 aztecBefore = IERC20(AZTEC).balanceOf(address(swapper));
+        uint256 ethBefore = address(swapper).balance;
+
         vm.startPrank(user);
         IERC20(WETH).approve(address(swapper), inputAmount);
         swapper.swap(WETH, inputAmount, 0, path, dirs);
         vm.stopPrank();
 
-        assertEq(IERC20(WETH).balanceOf(address(swapper)), 0, "No leftover WETH");
-        assertEq(IERC20(AZTEC).balanceOf(address(swapper)), 0, "No leftover AZTEC");
-        assertEq(address(swapper).balance, 0, "No leftover ETH");
+        assertEq(IERC20(WETH).balanceOf(address(swapper)), wethBefore, "No leftover WETH");
+        assertEq(IERC20(AZTEC).balanceOf(address(swapper)), aztecBefore, "No leftover AZTEC");
+        assertEq(address(swapper).balance, ethBefore, "No leftover ETH");
     }
 
     // ═════════════════════════════════════════════════════════════════

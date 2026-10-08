@@ -381,7 +381,7 @@ describe('address binding', () => {
 
     await attest(session)
 
-    const binding = await db.addressBinding.findUnique({ where: { l1Address: session.l1Address } })
+    const binding = await db.addressBinding.findFirst({ where: { l1Address: session.l1Address } })
     expect(binding?.l2Address).toBe(session.l2Address)
   })
 
@@ -395,7 +395,7 @@ describe('address binding', () => {
     const result = await attest(rebound)
 
     expect(result.status).toBe(403)
-    expect(result.body.error).toMatch(/already bound/i)
+    expect(result.body.error).toMatch(/already linked/i)
   })
 
   it('refuses a second L1 wallet for an already-bound Aztec address', async () => {
@@ -406,7 +406,7 @@ describe('address binding', () => {
     const result = await attest(rebound)
 
     expect(result.status).toBe(403)
-    expect(result.body.error).toMatch(/already bound/i)
+    expect(result.body.error).toMatch(/already linked/i)
   })
 })
 

@@ -231,8 +231,8 @@ pub unconstrained fn setup() -> (TestEnvironment, AztecAddress, AztecAddress, Az
     let bridge_address =
         env.deploy("@token_bridge_contract/TokenBridge").with_public_initializer(owner, initializer);
 
-    // Advance time past the DelayedPublicMutable delay (delay=600 seconds) so initial values become active.
-    let advance_timestamp = env.last_block_timestamp() + 601;
+    // Advance time past the DelayedPublicMutable delay (delay=3600 seconds) so initial values become active.
+    let advance_timestamp = env.last_block_timestamp() + 3601;
     env.mine_block_at(advance_timestamp);
 
     (env, bridge_address, owner, other, dummy_proxy)

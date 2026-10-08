@@ -160,7 +160,7 @@ describe('issuing a POCH attestation', () => {
     const result = await attest(second)
 
     expect(result.status).toBe(403)
-    expect(result.body.error).toContain('already bound')
+    expect(result.body.error).toContain('already linked')
   })
 })
 

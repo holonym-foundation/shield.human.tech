@@ -40,6 +40,8 @@ export interface SiweOptions {
   chainId?: number
   issuedAt?: string
   expirationTime?: string
+  /** What the client reports about the Aztec wallet's network. Binding requires `true`. */
+  l2NetworkVerified?: boolean
 }
 
 /** Build and sign a SIWE message the way the app's wallet connector does. */
@@ -85,7 +87,13 @@ export async function loginWithL2(
 
   const result = await call(authenticateRoute, '/api/auth/authenticate', {
     method: 'POST',
-    body: { message, signature, l1LoginMethod: 'injected', l2LoginMethod: 'azguard' },
+    body: {
+      message,
+      signature,
+      l1LoginMethod: 'injected',
+      l2LoginMethod: 'azguard',
+      l2NetworkVerified: options.l2NetworkVerified ?? true,
+    },
   })
 
   if (result.status !== 200) {

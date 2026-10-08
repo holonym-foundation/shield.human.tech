@@ -87,6 +87,9 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
         vm.createSelectFork(rpcUrl);
         forkConfigured = true;
         user = vm.addr(userPk);
+        // Well-known test keys get EIP-7702-delegated on public testnets, so on a fork this
+        // address can carry code and Permit2 then checks ERC-1271 instead of the ECDSA signature.
+        vm.etch(user, "");
 
         usdc = new ForkMintableToken("USDC", "USDC");
         feeJuice = new ForkMintableToken("FeeJuice", "FJ");

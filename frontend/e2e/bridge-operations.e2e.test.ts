@@ -234,6 +234,28 @@ describe('updating an operation', () => {
     expect(stored?.completedAt).toBeInstanceOf(Date)
   })
 
+  it('clears the error from an earlier attempt once the operation completes', async () => {
+    const session = await login(actor)
+    const { body } = await create(session)
+    await patch(session, body.operationId, { status: 'deposited', lastErrorMessage: 'L1 withdraw transaction reverted' })
+
+    await patch(session, body.operationId, { status: 'completed' })
+
+    const stored = await db.bridgeActivity.findUnique({ where: { id: body.operationId } })
+    expect(stored?.lastErrorMessage).toBeNull()
+  })
+
+  it('keeps rollup versions and L2 chain ids above 2^31', async () => {
+    const session = await login(actor)
+    const { body } = await create(session, { rollupVersion: 2914217885, chainIdL2: 2904119610 })
+
+    const result = await read(session, body.operationId)
+
+    expect(result.status).toBe(200)
+    expect(result.body.rollupVersion).toBe(2914217885)
+    expect(result.body.chainIdL2).toBe(2904119610)
+  })
+
   it('refuses a backwards status transition', async () => {
     const session = await login(actor)
     const { body } = await create(session)
