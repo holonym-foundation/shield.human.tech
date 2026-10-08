@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 import { getAttesterAddress, getPassportSignerAddress } from '@/lib/attestation'
+import { currentRollupBindingWhere } from '@/lib/address-binding'
 
 /**
  * GET /api/attestation/status
@@ -21,9 +22,7 @@ export async function GET(request: NextRequest) {
 
     // Check address binding
     const binding = await prisma.addressBinding.findFirst({
-      where: {
-        OR: [{ l1Address }, { l2Address }],
-      },
+      where: currentRollupBindingWhere(l1Address, l2Address),
     })
 
     let bindingStatus: 'unbound' | 'bound' | 'conflict' = 'unbound'

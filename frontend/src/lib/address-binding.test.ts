@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { prismaMock, caps } = vi.hoisted(() => ({
   prismaMock: {
     addressBinding: { findFirst: vi.fn(), create: vi.fn() },
+    user: { findUnique: vi.fn(), findMany: vi.fn() },
     bridgeActivity: { findMany: vi.fn() },
     attestationReservation: { findMany: vi.fn(), create: vi.fn() },
     $executeRaw: vi.fn(),
@@ -42,6 +43,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   caps.limitUsd = 25_000
   caps.thresholdUsd = 1_000
+  prismaMock.user.findUnique.mockResolvedValue({ l1Address: '0xl1' })
+  prismaMock.user.findMany.mockResolvedValue([{ id: 'user-1' }])
   prismaMock.bridgeActivity.findMany.mockResolvedValue([])
   prismaMock.attestationReservation.findMany.mockResolvedValue([])
   prismaMock.attestationReservation.create.mockResolvedValue({})
@@ -50,6 +53,15 @@ beforeEach(() => {
 })
 
 describe('getConfirmedDepositUsd', () => {
+  it('sums deposits across every account the L1 address has bound on any rollup', async () => {
+    // The same human on a later rollup is a new User row; their volume must carry over.
+    prismaMock.user.findMany.mockResolvedValue([{ id: 'user-1' }, { id: 'user-on-next-rollup' }])
+
+    await getConfirmedDepositUsd('user-1')
+    const { where } = prismaMock.bridgeActivity.findMany.mock.calls[0][0]
+    expect(where.fkUserId).toEqual({ in: ['user-1', 'user-on-next-rollup'] })
+  })
+
   it('converts base units to USD using the row decimals and symbol', async () => {
     prismaMock.bridgeActivity.findMany.mockResolvedValue([
       usdcDeposit(400),
@@ -83,7 +95,7 @@ describe('getConfirmedDepositUsd', () => {
     const after = Date.now()
 
     const { where } = prismaMock.bridgeActivity.findMany.mock.calls[0][0]
-    expect(where.fkUserId).toBe('user-1')
+    expect(where.fkUserId).toEqual({ in: ['user-1'] })
     expect(where.direction).toBe('L1_TO_L2')
     const gte = where.createdAt.gte.getTime()
     expect(gte).toBeGreaterThanOrEqual(before - DEPOSIT_CAP_WINDOW_MS)
@@ -128,7 +140,7 @@ describe('getReservedDepositUsd', () => {
     await getReservedDepositUsd('user-1')
 
     const { where } = prismaMock.attestationReservation.findMany.mock.calls[0][0]
-    expect(where.fkUserId).toBe('user-1')
+    expect(where.fkUserId).toEqual({ in: ['user-1'] })
     expect(where.expiresAt.gt).toBeInstanceOf(Date)
   })
 
@@ -379,8 +391,31 @@ describe('enforceAddressBinding', () => {
 
     expect(await enforceAddressBinding('0xl1', '0xl2')).toBeNull()
     expect(prismaMock.addressBinding.create).toHaveBeenCalledWith({
-      data: { l1Address: '0xl1', l2Address: '0xl2' },
+      data: { l1Address: '0xl1', l2Address: '0xl2', rollupVersion: expect.any(BigInt) },
     })
+  })
+
+  it('only looks for bindings on the current rollup', async () => {
+    // A binding made on a previous Aztec rollup names an account that does not exist on this one,
+    // so it must not block the wallet from binding its new account here.
+    prismaMock.addressBinding.findFirst.mockResolvedValue(null)
+    prismaMock.addressBinding.create.mockResolvedValue({})
+
+    await enforceAddressBinding('0xl1', '0xl2')
+    const { where } = prismaMock.addressBinding.findFirst.mock.calls[0][0]
+    const [rollup] = where.AND
+    expect(typeof rollup.OR[0].rollupVersion).toBe('bigint')
+  })
+
+  it('still honours bindings written before they were scoped per rollup', async () => {
+    // Unbackfilled rows have a NULL rollupVersion; ignoring them would let the wallet
+    // bind a second account.
+    prismaMock.addressBinding.findFirst.mockResolvedValue(null)
+    prismaMock.addressBinding.create.mockResolvedValue({})
+
+    await enforceAddressBinding('0xl1', '0xl2')
+    const { where } = prismaMock.addressBinding.findFirst.mock.calls[0][0]
+    expect(where.AND[0].OR).toContainEqual({ rollupVersion: null })
   })
 
   it('accepts the same pair again', async () => {
@@ -390,16 +425,45 @@ describe('enforceAddressBinding', () => {
     expect(prismaMock.addressBinding.create).not.toHaveBeenCalled()
   })
 
+  it('refuses to CREATE a binding when the wallet network was not verified', async () => {
+    prismaMock.addressBinding.findFirst.mockResolvedValue(null)
+
+    const msg = await enforceAddressBinding('0xl1', '0xl2', { l2NetworkVerified: null })
+    expect(msg).toMatch(/Could not confirm which Aztec network/)
+    // The whole point: nothing irreversible is written.
+    expect(prismaMock.addressBinding.create).not.toHaveBeenCalled()
+  })
+
+  it('creates the binding once the network is verified', async () => {
+    prismaMock.addressBinding.findFirst.mockResolvedValue(null)
+
+    expect(await enforceAddressBinding('0xl1', '0xl2', { l2NetworkVerified: true })).toBeNull()
+    expect(prismaMock.addressBinding.create).toHaveBeenCalled()
+  })
+
+  it('still READS an existing matching binding when the network is unverified', async () => {
+    // An unverified wallet must keep working for everything that is not a permanent write.
+    prismaMock.addressBinding.findFirst.mockResolvedValue({ l1Address: '0xl1', l2Address: '0xl2' })
+
+    expect(await enforceAddressBinding('0xl1', '0xl2', { l2NetworkVerified: null })).toBeNull()
+  })
+
   it('rejects a second L2 address for an already-bound L1 address', async () => {
     prismaMock.addressBinding.findFirst.mockResolvedValue({ l1Address: '0xl1', l2Address: '0xother' })
 
-    expect(await enforceAddressBinding('0xl1', '0xl2')).toMatch(/L1 address .* already bound/)
+    const msg = await enforceAddressBinding('0xl1', '0xl2')
+    // Names the bound Aztec account, because that is what tells the user which one to reconnect.
+    expect(msg).toMatch(/already linked to Aztec account/)
+    expect(msg).toMatch(/permanent/)
   })
 
   it('rejects a second L1 address for an already-bound L2 address', async () => {
     prismaMock.addressBinding.findFirst.mockResolvedValue({ l1Address: '0xother', l2Address: '0xl2' })
 
-    expect(await enforceAddressBinding('0xl1', '0xl2')).toMatch(/L2 address .* already bound/)
+    const msg = await enforceAddressBinding('0xl1', '0xl2')
+    expect(msg).toMatch(/already linked to a different wallet/)
+    // Must never leak the third party's L1 address to this caller.
+    expect(msg).not.toContain('0xother')
   })
 
   it('re-reads instead of failing when a concurrent request wins the insert', async () => {

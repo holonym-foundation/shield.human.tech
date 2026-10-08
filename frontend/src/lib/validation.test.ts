@@ -17,6 +17,8 @@ import {
   sanitizeString,
   sanitizeTxHash,
   sanitizeUrl,
+  operationToJson,
+  UINT32_MAX,
 } from './validation'
 
 const ETH_ADDRESS = '0x' + 'aB'.repeat(20)
@@ -274,5 +276,20 @@ describe('PochAttestationSchema', () => {
   it('still rejects wrong-typed fields', () => {
     expect(PochAttestationSchema.safeParse({ isPrivate: 'yes' }).success).toBe(false)
     expect(PochAttestationSchema.safeParse({ tokenDecimals: 37 }).success).toBe(false)
+  })
+})
+
+describe('uint32 rollup versions and L2 chain ids', () => {
+  // v6 testnet and Alpha mainnet both exceed the old Int range, which silently stored NULL.
+  it('accepts values above 2^31', () => {
+    expect(sanitizeInt(2914217885, 0, UINT32_MAX)).toBe(2914217885)
+    expect(sanitizeInt(4248422647, 0, UINT32_MAX)).toBe(4248422647)
+    expect(sanitizeInt(UINT32_MAX + 1, 0, UINT32_MAX)).toBeUndefined()
+  })
+
+  it('serializes BigInt columns as JSON numbers', () => {
+    const op = operationToJson({ id: 'a', rollupVersion: 2914217885n, chainIdL2: 2904119610n })
+    expect(JSON.parse(JSON.stringify(op))).toEqual({ id: 'a', rollupVersion: 2914217885, chainIdL2: 2904119610 })
+    expect(operationToJson({ rollupVersion: null, chainIdL2: null })).toEqual({ rollupVersion: null, chainIdL2: null })
   })
 })

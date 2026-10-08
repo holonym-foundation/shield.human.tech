@@ -12,6 +12,7 @@ import {
   sanitizeEthAddress,
   sanitizeSiblingPath,
   MAX_ERROR_LENGTH,
+  operationToJson,
 } from '@/lib/validation'
 
 /**
@@ -55,6 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         l1TxHash: true,
         l1TxUrl: true,
         l2TxHash: true,
+        failedL2TxHash: true,
         l2TxUrl: true,
         // L1→L2 recovery fields
         messageHash: true,
@@ -112,6 +114,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         encryptedCiphertext: true,
         encryptedIv: true,
         encryptedTag: true,
+        encryptedVersion: true,
         keyDerivationMessage: true,
         keyDerivationDomain: true,
       },
@@ -121,7 +124,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Operation not found or access denied' }, { status: 404 })
     }
 
-    return NextResponse.json(operation)
+    return NextResponse.json(operationToJson(operation))
   } catch (error) {
     console.error('[bridge/operations/[id] GET]', error)
     return NextResponse.json({ error: 'Failed to fetch operation' }, { status: 500 })
@@ -198,6 +201,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const messageHash = sanitizeHexString(body.messageHash, 130)
     const messageLeafIndex = sanitizeNumericString(body.messageLeafIndex)
     const l2TxHash = sanitizeHexString(body.l2TxHash, 130)
+    const failedL2TxHash = sanitizeHexString(body.failedL2TxHash, 130)
     const l2TxUrl = sanitizeUrl(body.l2TxUrl)
     const lastErrorMessage =
       body.lastErrorMessage !== undefined ? (sanitizeString(body.lastErrorMessage, MAX_ERROR_LENGTH) ?? '') : undefined
@@ -228,6 +232,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       'encryptedCiphertext',
       'encryptedIv',
       'encryptedTag',
+      'encryptedVersion',
       'amountL1',
       'amountL2',
       'direction',
@@ -314,8 +319,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (messageHash) updateData.messageHash = messageHash
     if (messageLeafIndex) updateData.messageLeafIndex = messageLeafIndex
     if (l2TxHash) updateData.l2TxHash = l2TxHash
+    if (failedL2TxHash) updateData.failedL2TxHash = failedL2TxHash
     if (l2TxUrl) updateData.l2TxUrl = l2TxUrl
     if (lastErrorMessage !== undefined) updateData.lastErrorMessage = lastErrorMessage
+    // An error from an earlier attempt is stale once the operation completes; every client and
+    // resume path reaches completion through here, so clear it in one place.
+    else if (status === 'completed') updateData.lastErrorMessage = null
     // Set completedAt server-side for terminal states — ignore client-supplied value
     if (status === 'completed' || status === 'failed') {
       updateData.completedAt = new Date()

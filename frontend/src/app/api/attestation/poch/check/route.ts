@@ -25,7 +25,9 @@ export async function GET(request: NextRequest) {
     const { l1Address, l2Address } = authResult.user
 
     // Check address binding (l1 ↔ l2 must be 1:1)
-    const bindingError = await enforceAddressBinding(l1Address, l2Address)
+    const bindingError = await enforceAddressBinding(l1Address, l2Address, {
+      l2NetworkVerified: authResult.user.l2NetworkVerified,
+    })
     if (bindingError) {
       return NextResponse.json({ eligible: false, reason: bindingError })
     }

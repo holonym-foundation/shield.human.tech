@@ -14,6 +14,8 @@ import {
   sanitizeNodeInfo,
   sanitizeCiphertext,
   MAX_STRING_LENGTH,
+  UINT32_MAX,
+  operationToJson,
 } from '@/lib/validation'
 
 /** Valid direction values. */
@@ -67,6 +69,7 @@ export async function GET(request: NextRequest) {
         l1TxHash: true,
         l1TxUrl: true,
         l2TxHash: true,
+        failedL2TxHash: true,
         l2TxUrl: true,
         // L1→L2 recovery fields
         messageHash: true,
@@ -121,12 +124,13 @@ export async function GET(request: NextRequest) {
         encryptedCiphertext: true,
         encryptedIv: true,
         encryptedTag: true,
+        encryptedVersion: true,
         // keyDerivationMessage omitted — client can reconstruct from createSigningMessage(l1Address)
         keyDerivationDomain: true,
       },
     })
 
-    return NextResponse.json({ operations })
+    return NextResponse.json({ operations: operations.map(operationToJson) })
   } catch (error) {
     console.error('[bridge/operations GET]', error)
     return NextResponse.json({ error: 'Failed to fetch operations' }, { status: 500 })
@@ -189,6 +193,9 @@ export async function POST(request: NextRequest) {
     const encryptedCiphertext = sanitizeCiphertext(body.encryptedCiphertext)
     const encryptedIv = sanitizeString(body.encryptedIv, 128)
     const encryptedTag = sanitizeString(body.encryptedTag, 128)
+    // Envelope format version. Bounded like any other int input; an out-of-range or
+    // absent value stores null, which decrypt reads as "unknown, trial every derivation".
+    const encryptedVersion = sanitizeInt(body.encryptedVersion, 1, 1_000_000)
     const keyDerivationMessage = sanitizeString(body.keyDerivationMessage, MAX_STRING_LENGTH)
     const keyDerivationDomain = sanitizeString(body.keyDerivationDomain, MAX_STRING_LENGTH)
     const direction = sanitizeString(body.direction, 10)
@@ -205,9 +212,9 @@ export async function POST(request: NextRequest) {
     const recipientL1Address = sanitizeEthAddress(body.recipientL1Address)
     const nodeInfo = sanitizeNodeInfo(body.nodeInfo)
     // Recovery-critical contract & version snapshot
-    const rollupVersion = sanitizeInt(body.rollupVersion, 0, 2_000_000_000)
+    const rollupVersion = sanitizeInt(body.rollupVersion, 0, UINT32_MAX)
     const chainIdL1 = sanitizeInt(body.chainIdL1, 1, 1_000_000_000)
-    const chainIdL2 = sanitizeInt(body.chainIdL2, 1, 1_000_000_000)
+    const chainIdL2 = sanitizeInt(body.chainIdL2, 1, UINT32_MAX)
     const portalAddressL1 = sanitizeEthAddress(body.portalAddressL1)
     const bridgeAddressL2 = sanitizeHexString(body.bridgeAddressL2, 130)
     const l1RollupAddress = sanitizeEthAddress(body.l1RollupAddress)
@@ -284,6 +291,7 @@ export async function POST(request: NextRequest) {
         encryptedCiphertext,
         encryptedIv,
         encryptedTag,
+        encryptedVersion: encryptedVersion ?? undefined,
         keyDerivationMessage,
         keyDerivationDomain,
         amountL1,

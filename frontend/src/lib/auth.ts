@@ -10,6 +10,8 @@ export interface AuthUser {
   l1WalletProvider: string | null
   l2LoginMethod: string | null
   l2WalletProvider: string | null
+  /** Null when the wallet could not report its Aztec network at connect time. */
+  l2NetworkVerified: boolean | null
 }
 
 export async function authenticateRequest(request: NextRequest): Promise<{
@@ -46,6 +48,7 @@ export async function authenticateRequest(request: NextRequest): Promise<{
         l1WalletProvider: true,
         l2LoginMethod: true,
         l2WalletProvider: true,
+        l2NetworkVerified: true,
       },
     })
 
@@ -66,6 +69,7 @@ export async function authenticateRequest(request: NextRequest): Promise<{
         l1WalletProvider: user.l1WalletProvider,
         l2LoginMethod: user.l2LoginMethod,
         l2WalletProvider: user.l2WalletProvider,
+        l2NetworkVerified: user.l2NetworkVerified,
       },
     }
   } catch (error) {

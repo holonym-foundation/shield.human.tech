@@ -3,6 +3,9 @@ import { BridgeDirection, BridgeOperationStatus, Prisma } from '@prisma/client'
 import { prisma } from './prisma'
 import { getTokenPriceUsd } from '@/utils/fuelPricing'
 import { getBridgeMaxDepositUsd, getTravelRuleThresholdUsd } from './attestation'
+import { ROLLUP_VERSION } from '@/config'
+
+const CURRENT_ROLLUP_VERSION = BigInt(ROLLUP_VERSION)
 
 // L1→L2 statuses where funds are locked on L1 (the deposit tx confirmed).
 // Excludes 'pending' (operation row exists but no L1 deposit yet — this is the
@@ -19,24 +22,49 @@ const LOCKED_DEPOSIT_STATUSES: BridgeOperationStatus[] = [
 ]
 
 /**
+ * Bindings that apply on the current rollup. Rows written before bindings were scoped per
+ * rollup have a NULL rollupVersion; until they are backfilled they still count here, or a
+ * wallet whose existing link is NULL could bind a second account.
+ */
+export function currentRollupBindingWhere(l1Address: string, l2Address: string) {
+  return {
+    AND: [
+      { OR: [{ rollupVersion: CURRENT_ROLLUP_VERSION }, { rollupVersion: null }] },
+      { OR: [{ l1Address }, { l2Address }] },
+    ],
+  }
+}
+
+/**
  * Enforce 1:1 binding between L1 and L2 addresses.
  * Creates the binding on first use; rejects if either address is already bound elsewhere.
  * Returns an error string if binding is violated, null if OK.
  */
-export async function enforceAddressBinding(l1Address: string, l2Address: string): Promise<string | null> {
+export async function enforceAddressBinding(
+  l1Address: string,
+  l2Address: string,
+  opts?: { l2NetworkVerified?: boolean | null },
+): Promise<string | null> {
   const existing = await prisma.addressBinding.findFirst({
-    where: {
-      OR: [
-        { l1Address },
-        { l2Address },
-      ],
-    },
+    where: currentRollupBindingWhere(l1Address, l2Address),
   })
 
   if (!existing) {
+    // Creating the binding is irreversible, so it must not be done from an address whose
+    // network we could not confirm. The connect-time check fails open (a wallet that cannot
+    // report its network still connects), and #2295 showed Azguard handing over an
+    // address derived on a different network than the one its UI displayed. Binding that
+    // would lock the wallet out of this deployment permanently. Reading an existing binding
+    // is unaffected, so an unverified wallet can still browse, resume and see balances.
+    if (opts && opts.l2NetworkVerified !== true) {
+      return (
+        'Could not confirm which Aztec network your wallet is on, and linking it is permanent. ' +
+        'Disconnect and reconnect your Aztec wallet, then try again.'
+      )
+    }
     try {
       await prisma.addressBinding.create({
-        data: { l1Address, l2Address },
+        data: { l1Address, l2Address, rollupVersion: CURRENT_ROLLUP_VERSION },
       })
     } catch (err: any) {
       // P2002 = unique constraint violation (concurrent request created it first).
@@ -53,11 +81,31 @@ export async function enforceAddressBinding(l1Address: string, l2Address: string
     return null
   }
 
+  // The binding is permanent by design: `User` is unique on (l1Address, l2Address) and the
+  // deposit cap is summed per user, so allowing a rebind would hand out a fresh daily cap on
+  // every Aztec account rotation. The message therefore has to explain a dead end rather than
+  // hint at a fix that does not exist (#2065).
   if (existing.l1Address === l1Address) {
-    return `L1 address ${l1Address} is already bound to a different L2 address`
+    // Safe to name the bound L2: the caller authenticated as this L1, so it is their own
+    // binding, and it is the one fact that tells them which account to reconnect.
+    return (
+      `This wallet is already linked to Aztec account ${shortenAddress(existing.l2Address)}. ` +
+      `Reconnect that account to continue. For security, links are permanent and cannot be changed.`
+    )
   }
 
-  return `L2 address ${l2Address} is already bound to a different L1 address`
+  // Deliberately does NOT name existing.l1Address: that is a THIRD PARTY's wallet, and the
+  // caller has proven nothing about it. Naming it would leak one user's address to another.
+  return (
+    `This Aztec account is already linked to a different wallet. ` +
+    `Connect the wallet you first used with it. For security, links are permanent and cannot be changed.`
+  )
+}
+
+/** `0x1aff…c198` — enough to recognise an account without an unreadable wall of hex. */
+function shortenAddress(address: string): string {
+  if (address.length <= 14) return address
+  return `${address.slice(0, 6)}…${address.slice(-4)}`
 }
 
 /** Rolling window (ms) over which per-user deposits are summed for the cap. */
@@ -83,14 +131,24 @@ export const ATTESTATION_TTL_MINUTES = Math.round(ATTESTATION_TTL_SECONDS / 60)
  * age out. USDC (the only Alpha-mainnet token) is USD-pegged, so the hardcoded
  * fallback price (USDC=$1) is exact and no live price feed is needed.
  */
+// Volume caps follow the human's L1 address across Aztec rollups: each rollup binds the same L1 to a
+// new L2 account (a new User row), so summing per row would reset the caps at every migration.
+async function userIdsSharingL1(userId: string, client: Prisma.TransactionClient): Promise<string[]> {
+  const owner = await client.user.findUnique({ where: { id: userId }, select: { l1Address: true } })
+  if (!owner) return [userId]
+  const users = await client.user.findMany({ where: { l1Address: owner.l1Address }, select: { id: true } })
+  return users.length > 0 ? users.map((u) => u.id) : [userId]
+}
+
 export async function getConfirmedDepositUsd(
   userId: string,
   windowMs: number | null = DEPOSIT_CAP_WINDOW_MS,
   client: Prisma.TransactionClient = prisma,
 ): Promise<number> {
+  const userIds = await userIdsSharingL1(userId, client)
   const rows = await client.bridgeActivity.findMany({
     where: {
-      fkUserId: userId,
+      fkUserId: { in: userIds },
       direction: BridgeDirection.L1_TO_L2,
       status: { in: LOCKED_DEPOSIT_STATUSES },
       // windowMs === null → all-time (Travel Rule cumulative sum); otherwise rolling window.
@@ -142,15 +200,16 @@ export async function getReservedDepositUsd(
   userId: string,
   client: Prisma.TransactionClient = prisma,
 ): Promise<number> {
+  const userIds = await userIdsSharingL1(userId, client)
   const rows = await client.attestationReservation.findMany({
-    where: { fkUserId: userId, expiresAt: { gt: new Date() } },
+    where: { fkUserId: { in: userIds }, expiresAt: { gt: new Date() } },
     select: { amountUsd: true, nonce: true },
   })
   if (rows.length === 0) return 0
 
   const settled = await client.bridgeActivity.findMany({
     where: {
-      fkUserId: userId,
+      fkUserId: { in: userIds },
       direction: BridgeDirection.L1_TO_L2,
       status: { in: LOCKED_DEPOSIT_STATUSES },
       attestationNonce: { in: rows.map((r) => r.nonce) },
@@ -211,7 +270,10 @@ export async function reservePassportBudget(params: {
     // blocks here and then reads the reservation this transaction wrote.
     // $executeRaw, not $queryRaw: pg_advisory_xact_lock returns void, which the
     // query deserializer rejects ("cannot deserialize column of type 'void'").
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${params.userId}))`
+    // Keyed on the L1 address, the scope the budget is summed over, so requests from the same human
+    // on two rollups (two User rows) still serialize.
+    const lockOwner = await tx.user.findUnique({ where: { id: params.userId }, select: { l1Address: true } })
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockOwner?.l1Address ?? params.userId}))`
 
     const reservedUsd = await getReservedDepositUsd(params.userId, tx)
     let maxAmount = params.perTxMaxAmount

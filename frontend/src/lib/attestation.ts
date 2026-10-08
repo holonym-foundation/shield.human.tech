@@ -7,7 +7,7 @@
 
 import { keccak256, encodePacked, type Hex } from 'viem'
 import { privateKeyToAccount, signMessage } from 'viem/accounts'
-import { Schnorr } from '@aztec/foundation/crypto/schnorr'
+import { Schnorr } from '@aztec-labs/foundation/crypto/schnorr'
 import {
   POCH_ATTESTER_PRIVATE_KEY,
   PASSPORT_SIGNER_PRIVATE_KEY,
@@ -26,10 +26,10 @@ import {
 import { HOLONYM_POCH_PATH } from '@/config'
 // 5.0.0 dropped the deriveSigningKey export; it was an alias for the IVSK_M derivation,
 // so keep using that exact function to preserve previously-derived L2 account addresses.
-import { deriveMasterIncomingViewingSecretKey as deriveSigningKey } from '@aztec/stdlib/keys'
-import { computeInnerAuthWitHash } from '@aztec/stdlib/auth-witness'
-import { Fr } from '@aztec/aztec.js/fields'
-import type { GrumpkinScalar } from '@aztec/foundation/curves/grumpkin'
+import { deriveMasterIncomingViewingSecretKey as deriveSigningKey } from '@aztec-labs/stdlib/keys'
+import { computeInnerAuthWitHash } from '@aztec-labs/stdlib/auth-witness'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import type { GrumpkinScalar } from '@aztec-labs/foundation/curves/grumpkin'
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 

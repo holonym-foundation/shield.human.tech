@@ -49,6 +49,12 @@ model User {
   l2Address      String   // L2 Aztec address (normalized lowercase)
   l2LoginMethod  String?  // azguard | obsidion (AztecLoginMethod)
   l2WalletProvider String? // e.g. "Azguard", "Obsidion"
+  // Did the wallet positively confirm it is on the Aztec network this deployment pins?
+  // Null means it could not report (the connect-time check fails open). Consulted before
+  // CREATING an AddressBinding, which is permanent: a wallet that cannot prove its network
+  // may hand over an address derived on a different one, and binding that would lock the
+  // user out irreversibly. Client-asserted, so it guards accidents, not attackers.
+  l2NetworkVerified Boolean?
   defaultPrivacyMode Boolean? // Sync from frontend localStorage "privacyModeEnabled"
   lastLoginAt    DateTime? // Updated on each successful authenticate call
   lastLoginIp    String?   // IP address from the most recent authenticate request
@@ -71,10 +77,16 @@ model User {
 
 model AddressBinding {
   id         String   @id @default(cuid(2))
-  l1Address  String   @unique // one L1 address can only bind to one L2 address
-  l2Address  String   @unique // one L2 address can only bind to one L1 address
+  l1Address  String   // one L1 address binds to one L2 address per rollup
+  l2Address  String   // one L2 address binds to one L1 address per rollup
+  // An Aztec rollup upgrade starts a fresh rollup where every account has a new address, so a
+  // binding only holds on the rollup it was made on. Rows written before this column are NULL and
+  // must be backfilled with the rollup version they were created under before deploying.
+  rollupVersion BigInt?
   createdAt  DateTime @default(now())
 
+  @@unique([l1Address, rollupVersion])
+  @@unique([l2Address, rollupVersion])
   @@map("address_bindings")
 }
 
@@ -133,6 +145,11 @@ model BridgeActivity {
   encryptedCiphertext String
   encryptedIv        String
   encryptedTag       String
+  // Envelope format version (SDK ENCRYPTION_VERSION) so a future KDF/cipher change
+  // has a migration path instead of orphaning every existing row. Nullable: rows
+  // written before this column existed carry no version, and decrypt falls back to
+  // trialling every known derivation for those.
+  encryptedVersion   Int?
 
   // --- Key derivation: same deterministic message/signature needed to decrypt ---
   keyDerivationMessage   String  // Deterministic message user signed (same for all ops per wallet+domain)
@@ -143,6 +160,12 @@ model BridgeActivity {
   recipientL1Address String? // L2→L1: withdraw-to address (if different from signer)
   l1TxHash   String?
   l2TxHash   String?
+  // Hash of an L2 tx that was MINED AND REVERTED: the claim on an L1→L2 deposit, or the
+  // burn on an L2→L1 withdrawal. Kept apart from l2TxHash, which means "the successful
+  // tx" and is rendered as such, so a revert stored there would read as a completed one.
+  // This is the reference that makes a failed operation diagnosable after the fact
+  // instead of operator-dashboard-only.
+  failedL2TxHash String?
 
   // --- L1→L2 claim recovery (plaintext so we can list "pending claim" without decrypting) ---
   messageHash     String? // L1→L2 message key (from portal event); used for sync check and claim
@@ -206,7 +229,7 @@ model BridgeActivity {
   // Convenience: "from" token symbol for list view (e.g. L1→L2 use tokenSymbolL1, L2→L1 use tokenSymbolL2)
   tokenSymbol     String?
   chainIdL1       Int?    // e.g. 11155111 (Sepolia)
-  chainIdL2       Int?    // Aztec chain id from config
+  chainIdL2       BigInt? // Aztec chain id from config; a uint32 that exceeds Int
 
   // --- Contract & privacy (support & recovery; see PRISMA_SCHEMA_DESIGN §8) ---
   isPrivacyModeEnabled Boolean? // L1→L2: private vs public deposit
@@ -221,7 +244,7 @@ model BridgeActivity {
   // From app config at tx time:
   // tokenAddressL1, tokenAddressL2, portalAddressL1, bridgeAddressL2 already above
   // From node.getNodeInfo() at tx time (inbox/outbox/rollup/registry are Aztec protocol L1 contracts):
-  rollupVersion     Int?    // node.getNodeInfo().rollupVersion (used in L2→L1 message hash)
+  rollupVersion     BigInt? // node.getNodeInfo().rollupVersion (used in L2→L1 message hash); a uint32 that exceeds Int
   l1InboxAddress    String? // node.l1ContractAddresses.inboxAddress
   l1OutboxAddress   String? // node.l1ContractAddresses.outboxAddress
   l1RollupAddress   String? // node.l1ContractAddresses.rollupAddress

@@ -48,6 +48,10 @@ export const AuthenticateSchema = z.object({
   l1WalletProvider: z.string().max(64).optional(),
   l2LoginMethod: z.string().max(64).optional(),
   l2WalletProvider: z.string().max(64).optional(),
+  // Client's assertion that the wallet confirmed the pinned Aztec network. Guards a
+  // permanent AddressBinding write against an accidental wrong-network address; a client
+  // that lies only locks itself out, so this is a safety check, not an authorization one.
+  l2NetworkVerified: z.boolean().optional(),
 })
 
 /** Schema for POST /api/attestation/passport.
@@ -177,6 +181,9 @@ export function sanitizeUrl(value: unknown): string | undefined {
   }
 }
 
+/** Largest uint32. Rollup versions and the Aztec L2 chain ids derived from them span the full range. */
+export const UINT32_MAX = 4_294_967_295
+
 /** Validate an integer is within range. Returns the value or undefined if out of range. */
 export function sanitizeInt(value: unknown, min: number = 0, max: number = 1000): number | undefined {
   if (value == null) return undefined
@@ -234,4 +241,16 @@ export function sanitizeSiblingPath(value: unknown): string[] | undefined {
     sanitized.push(s)
   }
   return sanitized
+}
+
+/**
+ * Prisma returns BigInt columns as bigint, which JSON.stringify rejects. The operation's
+ * rollupVersion and chainIdL2 are uint32, so converting to number is lossless.
+ */
+export function operationToJson<T extends { rollupVersion?: bigint | null; chainIdL2?: bigint | null }>(op: T) {
+  return {
+    ...op,
+    rollupVersion: op.rollupVersion == null ? op.rollupVersion : Number(op.rollupVersion),
+    chainIdL2: op.chainIdL2 == null ? op.chainIdL2 : Number(op.chainIdL2),
+  }
 }

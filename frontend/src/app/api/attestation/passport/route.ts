@@ -56,7 +56,9 @@ export async function POST(request: NextRequest) {
     const bridgeAddress = data.bridgeAddress
 
     // 2. Enforce 1:1 address binding
-    const bindingError = await enforceAddressBinding(l1Address, l2Address)
+    const bindingError = await enforceAddressBinding(l1Address, l2Address, {
+      l2NetworkVerified: authResult.user.l2NetworkVerified,
+    })
     if (bindingError) {
       return NextResponse.json({ error: bindingError }, { status: 403 })
     }

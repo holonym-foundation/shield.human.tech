@@ -4,7 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { sepolia } from 'viem/chains'
 import { L1_TOKENS } from '@/config'
 import { L1_RPC_SEPOLIA, FAUCET_PRIVATE_KEY as ENV_FAUCET_KEY } from '@/config/env.config'
-import { TestERC20Abi } from '@aztec/l1-artifacts'
+import { TestERC20Abi } from '@aztec-foundation/l1-artifacts'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 
 // Configure Vercel function timeout (300 seconds for Pro plan)
