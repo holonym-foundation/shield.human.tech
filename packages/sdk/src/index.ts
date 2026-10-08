@@ -1,5 +1,5 @@
 // Main client
-export { HumanTechBridge } from './client'
+export { HumanTechBridge, createRpcLimitedAztecNodeClient } from './client'
 
 // Status info
 export { BRIDGE_STATUS_INFO } from './types'
@@ -62,12 +62,15 @@ export type { DeploymentData } from './config'
 export {
   createSigningMessage,
   deriveEncryptionKey,
+  deriveEncryptionKeyCandidates,
   decryptData,
+  decryptDataWithCandidates,
   decryptOperationPayload,
   ENCRYPTION_VERSION,
 } from './encryption'
 
 // Auth
+export { classifyL2Execution } from './bridge/utils'
 export { getL2ResourcePrefix } from './auth'
 
 // API
@@ -87,6 +90,7 @@ export { retryFailedPatches } from './operations'
 // Storage
 export {
   STORAGE_KEYS,
+  setStorageNamespace,
   getDeposits,
   getWithdrawals,
   getPendingDeposits,

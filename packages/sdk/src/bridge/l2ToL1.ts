@@ -1,3 +1,4 @@
+import type { AztecNode } from '@aztec-labs/aztec.js/node'
 /**
  * L2→L1 withdrawal orchestrator.
  *
@@ -12,8 +13,8 @@
  *   Step 5: Done
  */
 
-import { Fr } from '@aztec/aztec.js/fields'
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
 import { encodeFunctionData, parseUnits } from 'viem'
 import { CustomTokenPortalAbi } from '../contracts/abis/CustomTokenPortalAbi'
 
@@ -45,6 +46,7 @@ import {
   isFatalContractReadError,
   assertPassportDeadlineBuffer,
   assertValidEpoch,
+  l1CallStillSucceeds,
 } from './utils'
 import { getEtherscanUrl as getEtherscanBaseUrl, getAztecscanUrl as getAztecscanBaseUrl } from '../config'
 import { waitForBlockProven } from './polling'
@@ -58,6 +60,55 @@ import type { L2CleanHandsStruct, L2PassportStruct } from '../types'
 /**
  * Encode and send the withdraw transaction on L1 TokenPortal, wait for confirmation.
  */
+const OUTBOX_ROOT_POLL_MS = 12_000
+const OUTBOX_ROOT_MAX_WAIT_MS = 5 * 60_000
+
+async function waitForOutboxRoot(
+  publicClient: { readContract: (args: any) => Promise<unknown> },
+  outboxAddress: `0x${string}`,
+  epoch: bigint,
+  numCheckpointsInEpoch: bigint,
+): Promise<void> {
+  const deadline = Date.now() + OUTBOX_ROOT_MAX_WAIT_MS
+  for (;;) {
+    let root: string
+    try {
+      root = (await publicClient.readContract({
+      address: outboxAddress,
+      abi: [{
+        type: 'function',
+        name: 'getRootData',
+        inputs: [
+          { name: 'epoch', type: 'uint256' },
+          { name: 'numCheckpointsInEpoch', type: 'uint256' },
+        ],
+        outputs: [{ name: '', type: 'bytes32' }],
+        stateMutability: 'view',
+      }],
+      functionName: 'getRootData',
+      args: [epoch, numCheckpointsInEpoch],
+      })) as string
+    } catch (e) {
+      // Same stance as the consumption pre-check: a transient read failure must not block the
+      // withdrawal; the L1 tx itself still reverts safely if the root really is missing.
+      console.warn('[SDK L2→L1] Outbox root check failed, proceeding:', e instanceof Error ? e.message : e)
+      return
+    }
+    if (BigInt(root) !== 0n) return
+    if (Date.now() >= deadline) {
+      // Matches the BlockNotProven family below, so callers surface the "wait, then resume" copy.
+      throw new Error(
+        `Outbox__NothingToConsumeAtEpoch: the proof for epoch ${epoch} is not visible on L1 yet. ` +
+          'Resume this withdrawal from the Activity page in a few minutes.',
+      )
+    }
+    await new Promise((r) => setTimeout(r, OUTBOX_ROOT_POLL_MS))
+  }
+}
+
+/** Proving plus inclusion time an approved burn needs before the attestation deadline. */
+const ATTESTATION_EXPIRY_MARGIN_SECONDS = 300
+
 export async function executeL1Withdraw(params: {
   publicClient: any
   sendTransaction: (tx: { from?: string; to: string; data: string }) => Promise<string>
@@ -73,8 +124,10 @@ export async function executeL1Withdraw(params: {
   l2BlockNumber: number
   /** Outbox address for idempotency check */
   outboxAddress?: string
+  emit?: BridgeEventCallback
 }): Promise<L1WithdrawResult> {
   const { publicClient, sendTransaction, l1Address, amount, epoch, numCheckpointsInEpoch, leafIndex, siblingPath, portalAddress, chainId, l2BlockNumber, outboxAddress } = params
+  const emit: BridgeEventCallback = params.emit ?? (() => {})
 
   // Check if the L2→L1 message has already been consumed on L1.
   // Prevents wasting gas on a tx that would revert, and unblocks stuck operations.
@@ -118,6 +171,13 @@ export async function executeL1Withdraw(params: {
     }
   }
 
+  // The Aztec node hands out a witness once the epoch root is on L1 in ITS synced view; the L1 RPC
+  // we read (and the wallet's, which sends the tx) can lag behind it, so withdraw() would revert with
+  // Outbox__NothingToConsumeAtEpoch. Wait until the root is visible here before asking for a signature.
+  if (outboxAddress) {
+    await waitForOutboxRoot(publicClient, outboxAddress as `0x${string}`, epoch, numCheckpointsInEpoch)
+  }
+
   const siblingPathHex = siblingPath.map((s) => s as `0x${string}`)
 
   const withdrawCallData = encodeFunctionData({
@@ -134,19 +194,20 @@ export async function executeL1Withdraw(params: {
     ],
   })
 
-  const l1WithdrawTxHash = await sendTransaction({
-    from: l1Address,
-    to: portalAddress,
-    data: withdrawCallData,
-  })
-
+  const withdrawTx = { from: l1Address, to: portalAddress, data: withdrawCallData }
   // no timeout. Mainnet/testnet mempool spikes routinely push inclusion
   // past 5 minutes; surfacing a viem timeout here as a "failure" to the user
   // is misleading because the L2 burn already happened and the L1 tx WILL
   // eventually mine. Wait indefinitely (matches main).
-  const receipt = await publicClient.waitForTransactionReceipt({
-    hash: l1WithdrawTxHash as `0x${string}`,
+  let receipt = await publicClient.waitForTransactionReceipt({
+    hash: (await sendTransaction(withdrawTx)) as `0x${string}`,
   })
+  if (receipt.status !== 'success' && (await l1CallStillSucceeds(publicClient, withdrawTx))) {
+    emit({ type: BridgeEventType.L1_GAS_RETRY, phase: 'withdraw', revertedTxHash: receipt.transactionHash })
+    receipt = await publicClient.waitForTransactionReceipt({
+      hash: (await sendTransaction(withdrawTx)) as `0x${string}`,
+    })
+  }
 
   if (receipt.status !== 'success') {
     throw new Error(
@@ -161,6 +222,24 @@ export async function executeL1Withdraw(params: {
   const l1BlockNumber = receipt.blockNumber != null ? String(receipt.blockNumber) : undefined
 
   return { l1TxHash, l1TxUrl, l1BlockNumber }
+}
+
+/**
+ * Did a failed burn call leave a transaction that might still execute?
+ *
+ * A txHash alone does NOT mean the burn happened: `assertReceiptSuccess` attaches one for
+ * dropped, pending AND reverted. Only a pending tx may still mine, so only that case must
+ * keep the operation out of 'failed' (marking it retryable while it mines could double-burn).
+ * A reverted or dropped burn did not execute, and recording it as confirmed writes a
+ * successful burn that never happened, then strands the withdrawal computing an L2→L1
+ * witness for a tx that emitted no message.
+ */
+export function burnMayStillLand(err: unknown): boolean {
+  const txHash = (err as { txHash?: unknown; transactionHash?: unknown })?.txHash ??
+    (err as { transactionHash?: unknown })?.transactionHash
+  if (typeof txHash !== 'string' || !txHash) return false
+  const outcome = (err as { txOutcome?: unknown })?.txOutcome
+  return outcome !== 'reverted' && outcome !== 'dropped'
 }
 
 // ─── Main L2→L1 Withdrawal Orchestrator ─────────────────────────────
@@ -178,7 +257,7 @@ export async function executeL1Withdraw(params: {
 export async function withdrawL2ToL1(
   config: ResolvedConfig,
   apiClient: BridgeApiClient,
-  aztecNode: any,
+  aztecNode: AztecNode,
   domain: string,
   params: WithdrawL2ToL1Params,
 ): Promise<BridgeResult> {
@@ -306,6 +385,7 @@ export async function withdrawL2ToL1(
       encryptedCiphertext: encrypted.ciphertext,
       encryptedIv: encrypted.iv,
       encryptedTag: encrypted.tag,
+      encryptedVersion: encrypted.version,
       keyDerivationMessage: signingMsg,
       keyDerivationDomain,
       direction: 'L2_TO_L1',
@@ -370,6 +450,7 @@ export async function withdrawL2ToL1(
       encryptedCiphertext: encrypted.ciphertext,
       encryptedIv: encrypted.iv,
       encryptedTag: encrypted.tag,
+      encryptedVersion: encrypted.version,
       keyDerivationDomain,
       keyDerivationMessage: signingMsg,
       isPrivacyModeEnabled: isPrivate,
@@ -413,22 +494,35 @@ export async function withdrawL2ToL1(
     emit({ type: BridgeEventType.DO_NOT_RELOAD, phase: BridgePhase.L2_BURN })
     const userAddress = AztecAddress.fromStringUnsafe(l2Address)
     let burnResult: { txHash: string; blockNumber?: number }
+    // The wallet keeps its approval prompt open indefinitely, but the bridge rejects the
+    // attestation once its deadline passes. Warn while the user can still reject the prompt;
+    // keep waiting rather than abandoning it, since an approval inside the window can still burn.
+    const expiryWarning =
+      l2Passport && l2Passport.deadline > 0n
+        ? setTimeout(
+            () => emit({ type: BridgeEventType.ATTESTATION_EXPIRING, phase: 'withdraw' }),
+            Math.max(0, (Number(l2Passport.deadline) - ATTESTATION_EXPIRY_MARGIN_SECONDS) * 1000 - Date.now()),
+          )
+        : undefined
     try {
-      burnResult = isPrivate
-        ? await walletAdapter.executeWithdrawToL1Private(l1Address, amount, nonce, l2CleanHands, l2Passport, userAddress.toString())
-        : await walletAdapter.executeWithdrawToL1Public(l1Address, amount, nonce, l2CleanHands, l2Passport, userAddress.toString())
+      burnResult = await (isPrivate
+        ? walletAdapter.executeWithdrawToL1Private(l1Address, amount, nonce, l2CleanHands, l2Passport, userAddress.toString())
+        : walletAdapter.executeWithdrawToL1Public(l1Address, amount, nonce, l2CleanHands, l2Passport, userAddress.toString())
+      ).finally(() => clearTimeout(expiryWarning))
       // 🔒 Only set burnConfirmed after the wallet call returns successfully
       burnConfirmed = true
     } catch (burnErr) {
       // Check if the error object contains a txHash — this means the tx was
       // submitted on-chain but the adapter threw while reading the receipt.
       const errTxHash = (burnErr as any)?.txHash ?? (burnErr as any)?.transactionHash
-      if (errTxHash) {
+      if (burnMayStillLand(burnErr)) {
         // Tx was submitted — treat as confirmed to prevent marking 'failed'
         burnConfirmed = true
         burnResult = { txHash: errTxHash }
       } else {
-        // No txHash — check if this is a user rejection (safe to retry)
+        // Either no txHash at all, or a dropped/reverted tx: in every one of those the
+        // burn did not execute, so the operation stays retryable.
+        // Check if this is a user rejection (safe to retry)
         const msg = burnErr instanceof Error ? burnErr.message : String(burnErr)
         const code = (burnErr as any)?.code
         const isUserRejection =
@@ -606,7 +700,7 @@ export async function withdrawL2ToL1(
     } catch (err) {
       // User-friendly error for BlockNotProven
       const errMsg = err instanceof Error ? err.message : String(err)
-      if (/BlockNotProven|NothingToConsumeAtBlock/i.test(errMsg)) {
+      if (/BlockNotProven|NothingToConsumeAtBlock|NothingToConsumeAtEpoch|0x5e3d32ce/i.test(errMsg)) {
         throw new Error(
           `The L2 block (${l2BlockNumber}) has not been proven on L1 yet. ` +
           'This is expected — it can take 30–50 minutes. ' +
@@ -617,7 +711,7 @@ export async function withdrawL2ToL1(
     }
 
     // If epoch is null, derive it from the rollup contract so the DB always has it.
-    // Deployed Rollup exposes `getEpochForCheckpoint(uint256)` (per @aztec/l1-artifacts
+    // Deployed Rollup exposes `getEpochForCheckpoint(uint256)` (per @aztec-foundation/l1-artifacts
     // RollupAbi on 4.2.0-aztecnr-rc.2), NOT `getEpochForBlock` — the latter exists in
     // the in-repo Rollup.sol but not on the deployed contract, so calling it fails.
     let resolvedEpoch = witnessResult.epoch
@@ -713,6 +807,7 @@ export async function withdrawL2ToL1(
         chainId: config.l1ChainId,
         l2BlockNumber,
         outboxAddress: outboxAddress ?? config.l1ContractAddresses.outboxAddress,
+        emit,
       })
     } catch (withdrawErr) {
       const errMsg = withdrawErr instanceof Error ? withdrawErr.message : String(withdrawErr)
@@ -785,7 +880,7 @@ export async function withdrawL2ToL1(
     // rewrite class-of-error messages so the consumer can show actionable copy.
     // BlockNotProven family means "wait longer" — main puts a friendly message here.
     const isBlockNotProven =
-      /BlockNotProven|NothingToConsumeAtBlock|block.*required|required.*block/i.test(errorMessage)
+      /BlockNotProven|NothingToConsumeAtBlock|NothingToConsumeAtEpoch|0x5e3d32ce|block.*required|required.*block/i.test(errorMessage)
     const isArtifactNotFound =
       /Contract artifact not found|artifact.*not found/i.test(errorMessage)
 
@@ -807,6 +902,13 @@ export async function withdrawL2ToL1(
     if (operationId) {
       const patchData: Record<string, unknown> = {
         lastErrorMessage: errorMessage.slice(0, 500),
+      }
+      // Same reasoning as the L1→L2 failure path: keep the hash of an L2 tx that was
+      // mined and reverted, in its own field rather than l2TxHash, so the failure stays
+      // diagnosable without a reverted tx reading as a successful burn.
+      const failedL2TxHash = (err as { txHash?: unknown; txOutcome?: unknown })?.txHash
+      if (typeof failedL2TxHash === 'string' && failedL2TxHash && (err as any)?.txOutcome === 'reverted') {
+        patchData.failedL2TxHash = failedL2TxHash
       }
       if (!burnConfirmed) {
         patchData.status = 'failed'

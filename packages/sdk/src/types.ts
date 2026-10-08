@@ -103,6 +103,11 @@ export type BridgeEvent =
   | { type: 'burn_confirmed'; l2TxHash: string; l2TxUrl: string; l2BlockNumber?: number }
   | { type: 'witness_computed'; leafIndex: string; siblingPath: string[]; epoch: number }
   | { type: 'l1_withdraw_sent'; l1TxHash: string; l1TxUrl: string }
+  // An L1 tx reverted while the call itself still simulates (wallet gas, see l1CallStillSucceeds);
+  // it is being resent once and the wallet will prompt again.
+  | { type: 'l1_gas_retry'; phase: 'approve' | 'deposit' | 'withdraw'; revertedTxHash: string }
+  // The wallet has not answered and the attestation is about to expire; approving now will revert.
+  | { type: 'attestation_expiring'; phase: 'withdraw' }
   // Polling progress
   | { type: 'sync_poll'; elapsedMinutes: number; synced: boolean }
   | { type: 'proven_poll'; provenBlock: number; neededBlock: number; elapsedMs: number }
@@ -122,8 +127,8 @@ export type BridgeEvent =
   | { type: 'attestation_fetch'; method: 'poch' | 'passport' }
   | { type: 'attestation_fallback'; from: 'poch'; to: 'passport'; reason: string }
   // Secrets (only hashes + encrypted payload — never plaintext secrets)
-  | { type: 'secrets_generated'; claimSecretHash: string; fuelSecretHash?: string; encryptedPayload: { ciphertext: string; iv: string; tag: string }; l1BlockNumberBeforeTx: string; l2BlockNumberBeforeTx: string; nodeInfo: Record<string, unknown> }
-  | { type: 'nonce_generated'; l2BridgeAddress: string; encryptedPayload: { ciphertext: string; iv: string; tag: string }; l1BlockNumberBeforeTx: string; l2BlockNumberBeforeTx: string; nodeInfo: Record<string, unknown> }
+  | { type: 'secrets_generated'; claimSecretHash: string; fuelSecretHash?: string; encryptedPayload: { ciphertext: string; iv: string; tag: string; version?: number }; l1BlockNumberBeforeTx: string; l2BlockNumberBeforeTx: string; nodeInfo: Record<string, unknown> }
+  | { type: 'nonce_generated'; l2BridgeAddress: string; encryptedPayload: { ciphertext: string; iv: string; tag: string; version?: number }; l1BlockNumberBeforeTx: string; l2BlockNumberBeforeTx: string; nodeInfo: Record<string, unknown> }
 
 export type BridgeEventCallback = (event: BridgeEvent) => void
 
@@ -149,6 +154,8 @@ export const BridgeEventType = {
   BURN_CONFIRMED: 'burn_confirmed',
   WITNESS_COMPUTED: 'witness_computed',
   L1_WITHDRAW_SENT: 'l1_withdraw_sent',
+  L1_GAS_RETRY: 'l1_gas_retry',
+  ATTESTATION_EXPIRING: 'attestation_expiring',
   // Polling progress
   SYNC_POLL: 'sync_poll',
   PROVEN_POLL: 'proven_poll',
@@ -286,9 +293,15 @@ export interface BridgeOperation {
   createdAt: string
   completedAt: string | null
   // Encrypted fields
+  /** Hash of a claim tx that was mined and REVERTED. Never `l2TxHash`, which means a
+   *  successful claim — see the failure PATCH in bridge/l1ToL2.ts. */
+  failedL2TxHash?: string | null
   encryptedCiphertext: string | null
   encryptedIv: string | null
   encryptedTag: string | null
+  /** Envelope format version (ENCRYPTION_VERSION at write time). Null on rows
+   *  written before the column existed — decrypt trials derivations for those. */
+  encryptedVersion?: number | null
   keyDerivationMessage: string | null
   keyDerivationDomain: string | null
 }
@@ -337,7 +350,7 @@ export interface BridgeL1ToL2Params {
   fuelQuote?: FuelQuote
   /** Callback to send an L1 transaction (e.g. via wallet provider) */
   sendTransaction: (tx: TransactionRequest) => Promise<string>
-  /** Aztec wallet adapter (from @aztec/wallet-sdk) */
+  /** Aztec wallet adapter (from @aztec-labs/wallet-sdk) */
   walletAdapter: WalletAdapterInterface
   /** Callback to sign a message with the L1 wallet */
   signMessage: (msg: string) => Promise<string>
@@ -528,7 +541,7 @@ export interface NetworkHealth {
 
 // ─── Internal Step Result Types ─────────────────────────────────────
 
-/** Minimal interface for Aztec wallet adapters (e.g. from @aztec/wallet-sdk). */
+/** Minimal interface for Aztec wallet adapters (e.g. from @aztec-labs/wallet-sdk). */
 export interface WalletAdapterInterface {
   bridgeAddress: string
   executeCall(

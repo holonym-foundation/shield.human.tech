@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { Fr } from '@aztec/aztec.js/fields'
-import { executeL2Claim } from './l1ToL2'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { executeL2Claim, FUEL_CLAIM_MESSAGE_GONE_ERROR } from './l1ToL2'
 import { isAlreadyConsumedError } from './utils'
 
 /**
@@ -107,6 +107,32 @@ describe('executeL2Claim pending-tx resolution', () => {
   })
 })
 
+describe('executeL2Claim slow wallet approval', () => {
+  it('keeps waiting on the open wallet request instead of queueing a duplicate claim', async () => {
+    // Approved after two timeout windows. A second executeCall would open a second
+    // approval whose tx fails once the first one has consumed the message.
+    const executeCall = vi.fn(
+      () => new Promise<{ txHash: string }>((resolve) => setTimeout(() => resolve({ txHash: TX_HASH }), 50)),
+    )
+    const { deps } = makeDeps([], executeCall)
+
+    const result = await executeL2Claim(deps, params, { ...fastOptions, walletTimeoutMs: 20 })
+
+    expect(result.l2TxHash).toBe(TX_HASH)
+    expect(executeCall).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives up with the timeout error once every attempt has waited', async () => {
+    const executeCall = vi.fn(() => new Promise<{ txHash: string }>(() => {}))
+    const { deps } = makeDeps([], executeCall)
+
+    await expect(
+      executeL2Claim(deps, params, { ...fastOptions, walletTimeoutMs: 5, maxAttempts: 3 }),
+    ).rejects.toThrow('Wallet did not respond in time')
+    expect(executeCall).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('executeL2Claim nullified-message classification', () => {
   it('maps a persistent nullified-message error to already-claimed for no-fuel claims', async () => {
     const executeCall = vi.fn().mockRejectedValue(messageGoneError())
@@ -118,7 +144,7 @@ describe('executeL2Claim nullified-message classification', () => {
     expect(executeCall).toHaveBeenCalledTimes(2)
   })
 
-  it('does not report success for fuel claims — directs to balance check and resume', async () => {
+  it('does not report success for fuel claims — states only that the message was consumed', async () => {
     const executeCall = vi.fn().mockRejectedValue(messageGoneError())
     const { deps } = makeDeps([], executeCall)
 
@@ -127,8 +153,40 @@ describe('executeL2Claim nullified-message classification', () => {
         ...fastOptions,
         feeOption: { fee: { paymentMethod: {} } },
       }),
-    ).rejects.toThrow(/Check your L2 balance/)
+    ).rejects.toThrow(/does not confirm the tokens arrived/)
     expect(executeCall).toHaveBeenCalledTimes(2)
+  })
+
+  // The #2146 shape end to end: attempt 1 is mined and reverted (setup phase consumes the
+  // message), attempts 2+ see the message gone and the loop throws a fresh error. That
+  // fresh error must still carry the reverted tx, or the caller persists no reference.
+  it('carries the reverted claim hash onto the message-gone error', async () => {
+    const reverted = Object.assign(new Error(`L2 transaction reverted (reverted): ${TX_HASH}`), {
+      txHash: TX_HASH,
+      txOutcome: 'reverted',
+    })
+    const executeCall = vi
+      .fn()
+      .mockRejectedValueOnce(reverted)
+      .mockRejectedValue(messageGoneError())
+    const { deps } = makeDeps([], executeCall)
+
+    const err = await executeL2Claim(deps, params, {
+      ...fastOptions,
+      feeOption: { fee: { paymentMethod: {} } },
+    }).catch((e) => e)
+    expect(err.message).toBe(FUEL_CLAIM_MESSAGE_GONE_ERROR)
+    expect(err.txHash).toBe(TX_HASH)
+    expect(err.txOutcome).toBe('reverted')
+  })
+
+  it('never claims the earlier attempt succeeded (#2146)', async () => {
+    const executeCall = vi.fn().mockRejectedValue(messageGoneError())
+    const { deps } = makeDeps([], executeCall)
+
+    await expect(
+      executeL2Claim(deps, params, { ...fastOptions, feeOption: { fee: { paymentMethod: {} } } }),
+    ).rejects.not.toThrow(/likely|probably|succeeded|completed/i)
   })
 
   it('still maps consumed-message errors to already-claimed immediately', async () => {
@@ -139,6 +197,16 @@ describe('executeL2Claim nullified-message classification', () => {
       'This deposit has already been claimed.',
     )
     expect(executeCall).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not report a consumed fuel claim as delivered', async () => {
+    // The setup phase can nullify the message while the mint reverts (#2146).
+    const executeCall = vi.fn().mockRejectedValue(new Error('message has already been nullified'))
+    const { deps } = makeDeps([], executeCall)
+
+    await expect(
+      executeL2Claim(deps, params, { ...fastOptions, feeOption: { fee: { paymentMethod: {} } } }),
+    ).rejects.toThrow(FUEL_CLAIM_MESSAGE_GONE_ERROR)
   })
 
   it('does not retry user rejections', async () => {
@@ -161,10 +229,14 @@ describe('isAlreadyConsumedError — consumed vs not-ready split (Aztec 5.0 sema
   })
 
   it('does not match the fuel-ambiguous message — resume must treat it as resumable', () => {
-    expect(
-      isAlreadyConsumedError(
-        'The L1→L2 message for this claim was consumed by an earlier attempt that most likely succeeded.',
-      ),
-    ).toBe(false)
+    expect(isAlreadyConsumedError(FUEL_CLAIM_MESSAGE_GONE_ERROR)).toBe(false)
+  })
+
+  // Guard rail. Resume turns a match here into status 'completed'. #2146 was a mainnet
+  // deposit whose message was consumed with zero tokens delivered, so a fuel claim that
+  // matched would write a false completion — strictly worse than reporting the failure.
+  it('the fuel message must never drift into matching', () => {
+    expect(FUEL_CLAIM_MESSAGE_GONE_ERROR).not.toMatch(/already\s*(nullified|consumed)/i)
+    expect(FUEL_CLAIM_MESSAGE_GONE_ERROR).not.toMatch(/deposit has already been claimed/i)
   })
 })

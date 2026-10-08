@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  classifyL2Execution,
   isAlreadyConsumedError,
   extractErrorString,
   assertPassportDeadlineBuffer,
@@ -203,5 +204,40 @@ describe('assertBlockScanRange', () => {
   it('mentions correct tx-hash hint for L1 vs L2', () => {
     expect(() => assertBlockScanRange(0, 2_000_000, 1_000_000, 'L1')).toThrow(/l1TxHash/)
     expect(() => assertBlockScanRange(0, 5000, 1000, 'L2')).toThrow(/l2TxHash/)
+  })
+})
+
+describe('classifyL2Execution — every TxStatus, not just the happy one', () => {
+  // TxStatus is block finalization, NOT success. All four mined statuses are decidable;
+  // the two un-mined ones are not, regardless of what executionResult says.
+  const MINED = ['proposed', 'checkpointed', 'proven', 'finalized']
+  const NOT_MINED = ['dropped', 'pending']
+
+  for (const status of MINED) {
+    it(`${status} + success -> executed`, () => {
+      expect(classifyL2Execution({ status, executionResult: 'success' })).toBe('executed')
+    })
+    it(`${status} + reverted -> reverted`, () => {
+      expect(classifyL2Execution({ status, executionResult: 'reverted' })).toBe('reverted')
+    })
+    it(`${status} with no executionResult -> unknown, never a guess`, () => {
+      expect(classifyL2Execution({ status })).toBe('unknown')
+    })
+  }
+
+  for (const status of NOT_MINED) {
+    it(`${status} -> unknown even if an executionResult is somehow present`, () => {
+      expect(classifyL2Execution({ status })).toBe('unknown')
+      expect(classifyL2Execution({ status, executionResult: 'success' })).toBe('unknown')
+    })
+  }
+
+  it('a missing receipt is unknown, not a failure', () => {
+    expect(classifyL2Execution(undefined)).toBe('unknown')
+    expect(classifyL2Execution(null)).toBe('unknown')
+  })
+
+  it('never reports executed for an unrecognised executionResult', () => {
+    expect(classifyL2Execution({ status: 'proven', executionResult: 'weird' })).toBe('reverted')
   })
 })

@@ -1,9 +1,11 @@
+import type { AztecNode } from '@aztec-labs/aztec.js/node'
+import type { NodeInfo } from '@aztec-labs/stdlib/contract'
+import { BlockNumber } from '@aztec-labs/foundation/branded-types'
 /**
  * HumanTechBridge — Main SDK entry point.
  */
 
-import { createAztecNodeClient } from '@aztec/aztec.js/node'
-import { makeFetch } from '@aztec/foundation/json-rpc/client'
+import { createAztecNodeClient } from '@aztec-labs/aztec.js/node'
 
 import { BridgeApiClient, BridgeApiError } from './api'
 import { createConfig, ACTIVE_DEPLOYMENT_ID } from './config'
@@ -32,25 +34,12 @@ import type {
 
 const DEFAULT_API_URL = 'https://shield.human.tech'
 
-// Some L2 RPC providers cap JSON-RPC batch size (drpc free tier rejects batches > 3 with
-// code 31). The L2→L1 witness computation fires 4+ concurrent node calls, which the client
-// bundles into one oversized batch → the whole request fails. Split oversized batches into
-// chunks and merge; the client matches responses by id, so chunk order is irrelevant.
+// drpc's free tier rejects JSON-RPC batches larger than 3 (code 31), and the L2→L1 witness
+// computation fires 4+ concurrent node calls that the client would bundle into one batch.
 const MAX_RPC_BATCH = 3
 
-function createBatchLimitedFetch(): ReturnType<typeof makeFetch> {
-  const base = makeFetch([1, 2, 3], false)
-  return (async (host, body, extraHeaders, noRetry) => {
-    if (!Array.isArray(body) || body.length <= MAX_RPC_BATCH) {
-      return base(host, body, extraHeaders, noRetry)
-    }
-    const chunks: Awaited<ReturnType<typeof base>>[] = []
-    for (let i = 0; i < body.length; i += MAX_RPC_BATCH) {
-      chunks.push(await base(host, body.slice(i, i + MAX_RPC_BATCH), extraHeaders, noRetry))
-    }
-    const response = chunks.flatMap((c) => (Array.isArray(c.response) ? c.response : [c.response]))
-    return { ...chunks[0], response }
-  }) as ReturnType<typeof makeFetch>
+export function createRpcLimitedAztecNodeClient(url: string) {
+  return createAztecNodeClient(url, { maxBatchSize: MAX_RPC_BATCH })
 }
 
 function resolveDomain(domain?: string): string {
@@ -68,7 +57,7 @@ function resolveDomain(domain?: string): string {
 export class HumanTechBridge {
   private config: ResolvedConfig
   private apiClient: BridgeApiClient
-  private aztecNode: any
+  private aztecNode: AztecNode
   readonly domain: string
 
   constructor(options: HumanTechBridgeConfig) {
@@ -83,7 +72,7 @@ export class HumanTechBridge {
     })
     this.domain = resolveDomain(options.domain)
     this.apiClient = new BridgeApiClient(options.apiUrl ?? DEFAULT_API_URL)
-    this.aztecNode = createAztecNodeClient(this.config.l2NodeUrl, {}, createBatchLimitedFetch())
+    this.aztecNode = createRpcLimitedAztecNodeClient(this.config.l2NodeUrl)
   }
 
   /**
@@ -103,6 +92,8 @@ export class HumanTechBridge {
     l1WalletProvider?: string
     l2LoginMethod?: string
     l2WalletProvider?: string
+    /** True only when the wallet positively confirmed the expected Aztec network. */
+    l2NetworkVerified?: boolean
   }): ReturnType<typeof authenticate> {
     const result = await authenticate(this.apiClient, params)
     // Drain queued failed PATCHes now that we have a fresh JWT.
@@ -256,7 +247,7 @@ export class HumanTechBridge {
   /**
    * Get Aztec L2 node info (version, L1 contract addresses, etc.).
    */
-  async getAztecNodeInfo(): Promise<Record<string, unknown>> {
+  async getAztecNodeInfo(): Promise<NodeInfo> {
     return this.aztecNode.getNodeInfo()
   }
 
@@ -278,7 +269,8 @@ export class HumanTechBridge {
    * Get an Aztec L2 block header by number or tag ('latest').
    */
   async getAztecBlockHeader(numberOrTag: number | 'latest'): Promise<any> {
-    return this.aztecNode.getBlockHeader(numberOrTag)
+    const block = await this.aztecNode.getBlock(numberOrTag === 'latest' ? 'latest' : BlockNumber(numberOrTag))
+    return block?.header
   }
 
   /**

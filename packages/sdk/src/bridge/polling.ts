@@ -1,9 +1,10 @@
+import type { AztecNode } from '@aztec-labs/aztec.js/node'
 /**
  * Polling utilities shared by L1→L2 and L2→L1 bridge modules.
  */
 
-import { Fr } from '@aztec/aztec.js/fields'
-import { isL1ToL2MessageReady } from '@aztec/aztec.js/messaging'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { isL1ToL2MessageReady } from '@aztec-labs/aztec.js/messaging'
 import { wait } from './utils'
 
 /**
@@ -18,7 +19,7 @@ import { wait } from './utils'
  * covers the whole wait — no separate block-count heuristic is needed afterward.
  */
 export async function pollL1ToL2MessageSync(
-  aztecNode: any,
+  aztecNode: AztecNode,
   messageHash: string,
   options?: {
     pollIntervalMs?: number
@@ -66,7 +67,7 @@ export async function pollL1ToL2MessageSync(
  * Falls back to a fixed wait if the node call fails.
  */
 export async function waitForBlockProven(params: {
-  aztecNode: any
+  aztecNode: AztecNode
   blockNumberForProof: number
   pollIntervalMs?: number
   maxWaitMs?: number

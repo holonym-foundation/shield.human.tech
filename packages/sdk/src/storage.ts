@@ -13,6 +13,15 @@
 const DEPOSITS_KEY = 'bridge:deposits:l1ToL2'
 const WITHDRAWALS_KEY = 'bridge:withdrawals:l2ToL1'
 
+// Builds for different Aztec rollups can share one origin (the current version at `/`, older
+// ones at `/vN`). Their recovery entries must not mix, so each build sets its own suffix.
+let keySuffix = ''
+
+/** Scope this app's recovery keys, e.g. to the Aztec version id. An empty namespace uses the bare keys. */
+export function setStorageNamespace(namespace: string): void {
+  keySuffix = namespace ? `:${namespace}` : ''
+}
+
 function isLocalStorageAvailable(): boolean {
   try {
     return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
@@ -82,7 +91,7 @@ function updateItem(
 
 /** Push a new deposit backup entry. */
 export function pushDeposit(data: Record<string, unknown>): void {
-  pushItem(DEPOSITS_KEY, data)
+  pushItem(STORAGE_KEYS.deposits, data)
 }
 
 /** Update an existing deposit entry by predicate. Creates fallback if entry missing. */
@@ -91,12 +100,12 @@ export function updateDeposit(
   updater: (item: any) => any,
   fallbackEntry?: Record<string, unknown>,
 ): void {
-  updateItem(DEPOSITS_KEY, predicate, updater, fallbackEntry)
+  updateItem(STORAGE_KEYS.deposits, predicate, updater, fallbackEntry)
 }
 
 /** Push a new withdrawal backup entry. */
 export function pushWithdrawal(data: Record<string, unknown>): void {
-  pushItem(WITHDRAWALS_KEY, data)
+  pushItem(STORAGE_KEYS.withdrawals, data)
 }
 
 /** Update an existing withdrawal entry by predicate. Creates fallback if entry missing. */
@@ -105,32 +114,32 @@ export function updateWithdrawal(
   updater: (item: any) => any,
   fallbackEntry?: Record<string, unknown>,
 ): void {
-  updateItem(WITHDRAWALS_KEY, predicate, updater, fallbackEntry)
+  updateItem(STORAGE_KEYS.withdrawals, predicate, updater, fallbackEntry)
 }
 
 /** Get all deposit entries (for recovery UI). */
 export function getDeposits(): any[] {
-  return getArray(DEPOSITS_KEY)
+  return getArray(STORAGE_KEYS.deposits)
 }
 
 /** Get all withdrawal entries (for recovery UI). */
 export function getWithdrawals(): any[] {
-  return getArray(WITHDRAWALS_KEY)
+  return getArray(STORAGE_KEYS.withdrawals)
 }
 
 /** Get a single deposit by operationId. Accepts string or number (cuid IDs). */
 export function getDepositById(operationId: string | number): any | undefined {
-  return getArray(DEPOSITS_KEY).find((d: any) => d.id === operationId)
+  return getArray(STORAGE_KEYS.deposits).find((d: any) => d.id === operationId)
 }
 
 /** Get a single withdrawal by operationId. Accepts string or number (cuid IDs). */
 export function getWithdrawalById(operationId: string | number): any | undefined {
-  return getArray(WITHDRAWALS_KEY).find((w: any) => w.id === operationId)
+  return getArray(STORAGE_KEYS.withdrawals).find((w: any) => w.id === operationId)
 }
 
 /** Get all pending (incomplete) deposits. Includes 'failed' ops that have an l1TxHash (funds may be locked). */
 export function getPendingDeposits(): any[] {
-  return getArray(DEPOSITS_KEY).filter((d: any) => {
+  return getArray(STORAGE_KEYS.deposits).filter((d: any) => {
     if (d.status === 'completed') return false
     if (d.status === 'failed' && !d.l1TxHash) return false
     return true
@@ -139,7 +148,7 @@ export function getPendingDeposits(): any[] {
 
 /** Get all pending (incomplete) withdrawals. Includes 'failed' ops that have an l2TxHash (funds may be burned). */
 export function getPendingWithdrawals(): any[] {
-  return getArray(WITHDRAWALS_KEY).filter((w: any) => {
+  return getArray(STORAGE_KEYS.withdrawals).filter((w: any) => {
     if (w.status === 'completed') return false
     if (w.status === 'failed' && !w.l2TxHash) return false
     return true
@@ -170,7 +179,7 @@ const MAX_FAILED_PATCHES = 100
 export function pushFailedPatch(patch: FailedPatch): void {
   if (!isLocalStorageAvailable()) return
   try {
-    const arr = getArray(FAILED_PATCHES_KEY) as FailedPatch[]
+    const arr = getArray(STORAGE_KEYS.failedPatches) as FailedPatch[]
     const cutoff = Date.now() - FAILED_PATCH_TTL_MS
     // Drop TTL-expired entries. An entry with no timestamp (legacy) gets the
     // benefit of the doubt and stays — `timestamp ?? Date.now()`.
@@ -185,7 +194,7 @@ export function pushFailedPatch(patch: FailedPatch): void {
         'This usually indicates prolonged backend unavailability.',
       )
     }
-    setArray(FAILED_PATCHES_KEY, fresh as unknown as Record<string, unknown>[])
+    setArray(STORAGE_KEYS.failedPatches, fresh as unknown as Record<string, unknown>[])
   } catch (err) {
     console.error('[Bridge SDK] pushFailedPatch failed:', err)
   }
@@ -193,18 +202,18 @@ export function pushFailedPatch(patch: FailedPatch): void {
 
 /** Get all queued failed PATCHes. */
 export function getFailedPatches(): FailedPatch[] {
-  return getArray(FAILED_PATCHES_KEY) as FailedPatch[]
+  return getArray(STORAGE_KEYS.failedPatches) as FailedPatch[]
 }
 
 /** Remove a failed PATCH after successful retry (by operationId + label). */
 export function removeFailedPatch(operationId: number | string, label: string): void {
   if (!isLocalStorageAvailable()) return
   try {
-    const arr = getArray(FAILED_PATCHES_KEY)
+    const arr = getArray(STORAGE_KEYS.failedPatches)
     const filtered = arr.filter(
       (p: any) => !(p.operationId === operationId && p.label === label),
     )
-    setArray(FAILED_PATCHES_KEY, filtered)
+    setArray(STORAGE_KEYS.failedPatches, filtered)
   } catch {
     // Non-critical
   }
@@ -214,7 +223,7 @@ export function removeFailedPatch(operationId: number | string, label: string): 
 export function clearFailedPatches(): void {
   if (!isLocalStorageAvailable()) return
   try {
-    localStorage.removeItem(FAILED_PATCHES_KEY)
+    localStorage.removeItem(STORAGE_KEYS.failedPatches)
   } catch {
     // Non-critical
   }
@@ -222,9 +231,15 @@ export function clearFailedPatches(): void {
 
 /** Storage keys (exported for consumers that need to read directly). */
 export const STORAGE_KEYS = {
-  deposits: DEPOSITS_KEY,
-  withdrawals: WITHDRAWALS_KEY,
-  failedPatches: FAILED_PATCHES_KEY,
+  get deposits() {
+    return DEPOSITS_KEY + keySuffix
+  },
+  get withdrawals() {
+    return WITHDRAWALS_KEY + keySuffix
+  },
+  get failedPatches() {
+    return FAILED_PATCHES_KEY + keySuffix
+  },
 } as const
 
 // ─── Export Builders ────────────────────────────────────────────────
@@ -255,6 +270,7 @@ export function buildDepositExport(deposit: any): {
       encryptedCiphertext: deposit.encryptedCiphertext,
       encryptedIv: deposit.encryptedIv,
       encryptedTag: deposit.encryptedTag,
+      encryptedVersion: deposit.encryptedVersion ?? undefined,
       keyDerivationDomain: deposit.keyDerivationDomain,
       messageHash: deposit.messageHash,
       messageLeafIndex: deposit.messageLeafIndex,
@@ -298,6 +314,7 @@ export function buildWithdrawalExport(withdrawal: any): {
       encryptedCiphertext: withdrawal.encryptedCiphertext,
       encryptedIv: withdrawal.encryptedIv,
       encryptedTag: withdrawal.encryptedTag,
+      encryptedVersion: withdrawal.encryptedVersion ?? undefined,
       keyDerivationDomain: withdrawal.keyDerivationDomain,
       l2TxHash: withdrawal.l2TxHash,
       l2BlockNumber: withdrawal.l2BlockNumber ?? withdrawal.l2TxReceipt?.blockNumber,

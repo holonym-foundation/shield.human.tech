@@ -16,7 +16,7 @@ import { BridgeApiClient } from './api'
 
 // `createAztecNodeClient` hits a real URL during construction; mock it.
 // The mock accepts any method and returns something sensible.
-vi.mock('@aztec/aztec.js/node', () => ({
+vi.mock('@aztec-labs/aztec.js/node', () => ({
   createAztecNodeClient: (_url: string) => ({
     getNodeInfo: vi.fn(),
     isReady: vi.fn().mockResolvedValue(true),

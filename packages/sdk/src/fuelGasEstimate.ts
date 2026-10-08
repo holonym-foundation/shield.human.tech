@@ -1,3 +1,4 @@
+import type { AztecNode } from '@aztec-labs/aztec.js/node'
 /**
  * Fuel gas estimation utilities.
  *
@@ -34,8 +35,8 @@ const CLAIM_DA_GAS_CEILING = 50_000
  * Queries current base fees from the Aztec node and applies a 2× safety
  * multiplier for the max fee rate. Matches main's behavior.
  */
-export async function buildClaimGasSettings(aztecNode: any) {
-  const { GasFees } = await import('@aztec/stdlib/gas')
+export async function buildClaimGasSettings(aztecNode: AztecNode) {
+  const { GasFees } = await import('@aztec-labs/stdlib/gas')
   const baseFees = await aztecNode.getCurrentMinFees()
 
   // 2× multiplier — provides headroom above current base fees while keeping
@@ -66,7 +67,7 @@ export async function buildClaimGasSettings(aztecNode: any) {
  * is a practical middle ground between 3× and 1.5×).
  */
 export async function estimateClaimFeeLimit(
-  aztecNode: any,
+  aztecNode: AztecNode,
   fuelType: 'public' | 'private' = 'public',
 ): Promise<bigint> {
   const baseFees = await aztecNode.getCurrentMinFees()
@@ -84,11 +85,15 @@ export async function estimateClaimFeeLimit(
  *
  * @param expectedFjOutput - Expected FJ from the swap (wei, 18 decimals)
  * @param fuelType - 'private' (BridgedFPC, 3× multiplier) or 'public' (2×)
+ * @param existingFj - The fuel recipient's current public FJ. Public claims pay the fee from
+ *   that balance after crediting the swap, so it counts. Private claims ignore it: the
+ *   BridgedFPC asserts the freshly bridged amount alone covers the fee.
  */
 export async function checkFuelSufficiency(
-  aztecNode: any,
+  aztecNode: AztecNode,
   expectedFjOutput: bigint,
   fuelType: 'public' | 'private' = 'public',
+  existingFj: bigint = 0n,
 ): Promise<{
   sufficient: boolean
   feeLimit: bigint
@@ -99,13 +104,14 @@ export async function checkFuelSufficiency(
   const feeLimit = await estimateClaimFeeLimit(aztecNode, fuelType)
   const feeLimitFj = (Number(feeLimit) / 1e18).toFixed(4)
   const expectedFj = (Number(expectedFjOutput) / 1e18).toFixed(4)
-  const sufficient = expectedFjOutput >= feeLimit
+  const available = expectedFjOutput + (fuelType === 'public' ? existingFj : 0n)
+  const sufficient = available >= feeLimit
 
   return {
     sufficient,
     feeLimit,
     feeLimitFj,
     expectedFj,
-    shortfallFj: sufficient ? null : (Number(feeLimit - expectedFjOutput) / 1e18).toFixed(4),
+    shortfallFj: sufficient ? null : (Number(feeLimit - available) / 1e18).toFixed(4),
   }
 }

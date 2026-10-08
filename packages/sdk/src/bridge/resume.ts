@@ -1,3 +1,4 @@
+import type { AztecNode } from '@aztec-labs/aztec.js/node'
 /**
  * Bridge resume/recovery module.
  *
@@ -19,9 +20,9 @@
  *   - Has l2BlockNumberBeforeTx only → block scan → compute witness → ...
  */
 
-import { Fr } from '@aztec/aztec.js/fields'
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { extractEvent } from '@aztec/ethereum/utils'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { extractEvent } from '@aztec-labs/ethereum/utils'
 import { CustomTokenPortalAbi } from '../contracts/abis/CustomTokenPortalAbi'
 import { decodeEventLog } from 'viem'
 
@@ -56,7 +57,7 @@ import { updateDeposit, updateWithdrawal } from '../storage'
 export async function resume(
   config: ResolvedConfig,
   apiClient: BridgeApiClient,
-  aztecNode: any,
+  aztecNode: AztecNode,
   domain: string,
   operationId: number | string,
   params: ResumeParams,
@@ -364,7 +365,7 @@ async function recoverFromBlockScan(
 async function resumeL1ToL2(
   config: ResolvedConfig,
   apiClient: BridgeApiClient,
-  aztecNode: any,
+  aztecNode: AztecNode,
   op: BridgeOperation,
   data: BridgeActivityData,
   params: ResumeParams,
@@ -495,7 +496,7 @@ async function resumeL1ToL2(
     }
     const { PrivateMintAndPayFeePaymentMethod, maxFeesPerGasFromBaseFees } =
       await import('@alejoamiras/private-fee-juice')
-    const { Gas, GasFees } = await import('@aztec/stdlib/gas')
+    const { Gas, GasFees } = await import('@aztec-labs/stdlib/gas')
     const baseFees = await aztecNode.getCurrentMinFees()
     const gasLimits = Gas.from({ l2Gas: 2_000_000, daGas: 50_000 })
     const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
@@ -546,7 +547,7 @@ async function resumeL1ToL2(
       // All three inputs are required — a zero `fuelAmount` here would produce a
       // FeeJuice note of zero value, which the claim uses as the payment method and
       // then fails downstream with an opaque "insufficient fee" error.
-      const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+      const { FeeJuicePaymentMethodWithClaim } = await import('@aztec-labs/aztec.js/fee')
       const { buildClaimGasSettings } = await import('../fuelGasEstimate')
       const paymentMethod = new FeeJuicePaymentMethodWithClaim(
         AztecAddress.fromStringUnsafe(l2Address),
@@ -785,11 +786,19 @@ async function resumeL1ToL2(
   }
   const syncResults = await Promise.all(syncPromises)
   const syncResult = syncResults[0]
+  const fuelSyncResult = syncResults[1]
   emit({ type: BridgeEventType.SYNC_POLL, elapsedMinutes: syncResult.elapsedMinutes, synced: syncResult.synced })
 
   if (!syncResult.synced) {
     throw new Error(
       `L1-to-L2 message sync timeout after ${syncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming again later.`,
+    )
+  }
+
+  // The claim consumes the fuel message too, so claiming before it syncs reverts on the fee step.
+  if (fuelSyncResult && !fuelSyncResult.synced) {
+    throw new Error(
+      `Fuel message sync timeout after ${fuelSyncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming again later.`,
     )
   }
 
@@ -870,6 +879,13 @@ async function resumeL1ToL2(
       alreadyClaimed = true
       l2TxHash = op.l2TxHash ?? 'already-claimed'
     } else {
+      // Keep the on-chain reference of a mined-but-reverted claim, as the first attempt does;
+      // without it the screen cannot tell whether the tokens arrived. A pending tx is skipped,
+      // since it may still succeed.
+      const { txHash, txOutcome } = claimErr as { txHash?: unknown; txOutcome?: unknown }
+      if (typeof txHash === 'string' && txHash && txOutcome === 'reverted') {
+        await patchOperationWithRetry(apiClient, op.id, { failedL2TxHash: txHash }, { label: 'failed claim tx' })
+      }
       throw claimErr
     }
   }
@@ -957,7 +973,7 @@ async function resumeL1ToL2(
 /**
  * Recover l2BlockNumber from l2TxHash by polling the Aztec node.
  */
-async function recoverL2BlockNumber(aztecNode: any, l2TxHash: string): Promise<number> {
+async function recoverL2BlockNumber(aztecNode: AztecNode, l2TxHash: string): Promise<number> {
   console.log('[SDK Resume L2→L1] Recovering l2BlockNumber from l2TxHash...')
   for (let i = 0; i < 30; i++) {
     try {
@@ -991,7 +1007,7 @@ async function recoverL2BlockNumber(aztecNode: any, l2TxHash: string): Promise<n
 async function resumeL2ToL1(
   config: ResolvedConfig,
   apiClient: BridgeApiClient,
-  aztecNode: any,
+  aztecNode: AztecNode,
   op: BridgeOperation,
   data: BridgeActivityData,
   params: ResumeParams,
@@ -1299,7 +1315,7 @@ async function resumeL2ToL1(
   // The checkpoint may not be available immediately after the block is proven,
   // so retry up to 5 times with a 30s delay (matches old frontend behavior).
   if (withdrawEpoch == null && l1RollupAddress) {
-    const { RollupAbi } = await import('@aztec/l1-artifacts')
+    const { RollupAbi } = await import('@aztec-foundation/l1-artifacts')
     const maxRetries = 5
     const retryDelayMs = 30_000
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -1390,6 +1406,7 @@ async function resumeL2ToL1(
       chainId: op.chainIdL1 ?? config.l1ChainId,
       l2BlockNumber: Number(l2BlockNumber),
       outboxAddress: op.l1OutboxAddress ?? config.l1ContractAddresses.outboxAddress,
+      emit,
     })
 
     withdrawL1TxHash = withdrawResult.l1TxHash

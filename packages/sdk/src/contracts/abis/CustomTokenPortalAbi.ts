@@ -3,7 +3,7 @@
  *
  * The deployed TokenPortal has a custom `fee` field in its deposit events
  * and a custom `depositToAztecPrivate` function with attestation params.
- * The standard @aztec/l1-artifacts TokenPortalAbi does NOT match these
+ * The standard @aztec-foundation/l1-artifacts TokenPortalAbi does NOT match these
  * event signatures (different keccak256 hash due to extra `fee` param),
  * so we must use this custom ABI for all encoding and event extraction.
  *

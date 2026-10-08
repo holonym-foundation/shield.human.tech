@@ -5,6 +5,9 @@ import {
   removeFailedPatch,
   clearFailedPatches,
   STORAGE_KEYS,
+  setStorageNamespace,
+  pushDeposit,
+  getDeposits,
   type FailedPatch,
 } from './storage'
 
@@ -158,5 +161,29 @@ describe('pushFailedPatch — localStorage unavailable', () => {
   it('does not throw when localStorage is unavailable', () => {
     expect(() => pushFailedPatch(makePatch())).not.toThrow()
     expect(getFailedPatches()).toEqual([])
+  })
+})
+
+describe('setStorageNamespace', () => {
+  afterEach(() => {
+    setStorageNamespace('')
+    localStorage.clear()
+  })
+
+  it('keeps the bare keys without a namespace', () => {
+    expect(STORAGE_KEYS.deposits).toBe('bridge:deposits:l1ToL2')
+    expect(STORAGE_KEYS.failedPatches).toBe('bridge:failedPatches')
+  })
+
+  it('keeps recovery entries of builds for different rollups apart', () => {
+    // The legacy build at /v5 and the current one at / share an origin and so localStorage.
+    pushDeposit({ id: 'v5-op' })
+    setStorageNamespace('v6')
+    pushDeposit({ id: 'v6-op' })
+
+    expect(STORAGE_KEYS.deposits).toBe('bridge:deposits:l1ToL2:v6')
+    expect(getDeposits().map((d: any) => d.id)).toEqual(['v6-op'])
+    setStorageNamespace('')
+    expect(getDeposits().map((d: any) => d.id)).toEqual(['v5-op'])
   })
 })

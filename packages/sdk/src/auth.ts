@@ -42,6 +42,8 @@ export async function authenticate(
     l1WalletProvider?: string
     l2LoginMethod?: string
     l2WalletProvider?: string
+    /** True only when the wallet positively confirmed the expected Aztec network. */
+    l2NetworkVerified?: boolean
   },
 ): Promise<{
   token: string
@@ -103,6 +105,7 @@ export async function authenticate(
     l1WalletProvider: params.l1WalletProvider,
     l2LoginMethod: params.l2LoginMethod,
     l2WalletProvider: params.l2WalletProvider,
+    l2NetworkVerified: params.l2NetworkVerified,
   })
 
   apiClient.setAuthToken(res.token)

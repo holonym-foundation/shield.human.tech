@@ -1,3 +1,4 @@
+import type { AztecNode } from '@aztec-labs/aztec.js/node'
 /**
  * L1→L2 bridge orchestrator.
  *
@@ -13,11 +14,12 @@
  *   Step 5: Done
  */
 
-import { Fr } from '@aztec/aztec.js/fields'
-import { computeSecretHash } from '@aztec/stdlib/hash'
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { TestERC20Abi } from '@aztec/l1-artifacts'
-import { extractEvent } from '@aztec/ethereum/utils'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { getFeeJuiceBalance } from '@aztec-labs/aztec.js/utils'
+import { computeSecretHash } from '@aztec-labs/stdlib/hash'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { TestERC20Abi } from '@aztec-foundation/l1-artifacts'
+import { extractEvent } from '@aztec-labs/ethereum/utils'
 import { encodeFunctionData, decodeEventLog, parseUnits, keccak256, encodeAbiParameters } from 'viem'
 import { CustomTokenPortalAbi } from '../contracts/abis/CustomTokenPortalAbi'
 
@@ -47,6 +49,24 @@ import { BridgeEventType, BridgePhase } from '../types'
 // ─── Permit2 Constants ──────────────────────────────────────────────
 
 const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
+
+/**
+ * The fuel-claim case: the L1→L2 message is gone, so retrying can never succeed, but we
+ * cannot tell a landed claim from one that reverted after the non-revertible setup phase
+ * consumed the message. #2146 was exactly that on mainnet: message consumed, ~2.94 FJ
+ * burned, 0 tokens delivered, while the UI called it likely complete.
+ *
+ * Two wording constraints, both load-bearing:
+ *  - It must NOT match `isAlreadyConsumedError` (bridge/utils.ts), which resume uses to
+ *    write status 'completed'. Any phrasing like "already consumed" or "already claimed"
+ *    starts matching and records a false completion for an undelivered deposit.
+ *  - It MUST match ProgressCard's CONSUMED_ERROR_NEEDLES ("was consumed"), so the UI
+ *    suppresses Resume and runs its balance check instead of looping.
+ */
+export const FUEL_CLAIM_MESSAGE_GONE_ERROR =
+  'The L1→L2 message for this deposit was consumed, so this claim cannot be retried. ' +
+  'That does not confirm the tokens arrived: check your L2 balance, and if they are missing, ' +
+  'keep the L1 transaction reference and contact support.'
 
 const BRIDGE_WITNESS_TYPE = {
   BridgeWitness: [
@@ -204,7 +224,7 @@ async function signPermit2Transfer(params: {
   const signature = await signTypedData(params.l1Address, JSON.stringify(typedData)) as `0x${string}`
   return { nonce, deadline, signature }
 }
-import { createL1PublicClient, serializeNodeInfo, wait, extractErrorString, assertPassportDeadlineBuffer } from './utils'
+import { createL1PublicClient, serializeNodeInfo, wait, extractErrorString, assertPassportDeadlineBuffer, l1CallStillSucceeds } from './utils'
 import { getEtherscanUrl as getEtherscanBaseUrl, getAztecscanUrl as getAztecscanBaseUrl } from '../config'
 import { pollL1ToL2MessageSync } from './polling'
 import { pushDeposit, updateDeposit } from '../storage'
@@ -292,8 +312,11 @@ export async function executeL2Claim(
         setTimeout(
           () =>
             reject(
-              new Error(
-                'Wallet did not respond in time. Check for a hidden wallet popup behind your browser window.',
+              Object.assign(
+                new Error(
+                  'Wallet did not respond in time. Check for a hidden wallet popup behind your browser window.',
+                ),
+                { walletTimeout: true },
               ),
             ),
           walletTimeoutMs,
@@ -304,7 +327,22 @@ export async function executeL2Claim(
   if (messageLeafIndex != null) {
     let result: { txHash: string } | undefined
     let pendingTxHash: string | undefined
+    // Our timeout does not cancel the wallet request: its approval prompt stays open and
+    // can still be approved later. Re-awaiting it instead of calling executeCall again keeps
+    // a slow approval from queueing a duplicate claim that then fails on the consumed message.
+    let inFlight: Promise<{ txHash: string }> | undefined
     let messageGoneStreak = 0
+    // A claim that is mined and reverted is retried as transient, and the attempts after it
+    // fail with "no non-nullified message" (the revert's setup phase consumed it) and throw a
+    // fresh error. That fresh error must still carry the reverted tx, or the only on-chain
+    // reference to what happened is lost right before it is persisted as failedL2TxHash.
+    let revertedTxHash: string | undefined
+    const withRevertedHash = <T extends Error>(e: T): T => {
+      if (revertedTxHash && !(e as { txHash?: unknown }).txHash) {
+        Object.assign(e, { txHash: revertedTxHash, txOutcome: 'reverted' })
+      }
+      return e
+    }
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // A previous attempt submitted a tx whose inclusion wait expired.
       // Resolve its fate before ever re-submitting: the tx may well have
@@ -338,8 +376,8 @@ export async function executeL2Claim(
       }
       try {
         options?.onAttempt?.(attempt, maxAttempts)
-        result = await callWithTimeout(
-          walletAdapter.executeCall(
+        if (!inFlight) {
+          inFlight = walletAdapter.executeCall(
             walletAdapter.bridgeAddress,
             method,
             [
@@ -349,15 +387,30 @@ export async function executeL2Claim(
               messageLeafIndex,
             ],
             { contractType: 'bridge', ...options?.feeOption },
-          ),
-        )
+          )
+          // A request abandoned after the last attempt may still reject later.
+          inFlight.catch(() => {})
+        }
+        result = await callWithTimeout(inFlight)
         break
       } catch (err) {
+        if ((err as { walletTimeout?: unknown })?.walletTimeout) {
+          console.warn(`[SDK Claim] attempt ${attempt}/${maxAttempts}: wallet has not answered yet, still waiting`)
+          if (attempt < maxAttempts) continue
+          throw err
+        }
+        inFlight = undefined
         // Don't retry user rejections — they are intentional
         const errMsg = err instanceof Error ? err.message : String(err)
         const errLower = errMsg.toLowerCase()
         const errCode = (err as any)?.code
-        console.error(`[SDK Claim] attempt ${attempt}/${maxAttempts} failed:`, errMsg, err)
+        // warn, not error, for an attempt that is about to be retried. The frontend runs
+        // Datadog with `forwardConsoleLogs: ['error']`, so an error here published one event
+        // PER ATTEMPT and inflated every claim-failure bucket by the retry count — #1817's
+        // 95 events are roughly 47 incidents, because that path always burns two attempts.
+        // The attempt is still visible locally; the failure that actually ends the claim is
+        // logged as an error below, so one incident produces one Datadog error.
+        console.warn(`[SDK Claim] attempt ${attempt}/${maxAttempts} failed:`, errMsg, err)
         const isUserRejection =
           errCode === 4001 ||
           errLower.includes('user rejected') ||
@@ -365,6 +418,9 @@ export async function executeL2Claim(
           errLower.includes('action_rejected') ||
           errLower.includes('user cancelled')
         if (isUserRejection) throw err
+        if ((err as any)?.txOutcome === 'reverted' && typeof (err as any)?.txHash === 'string') {
+          revertedTxHash = (err as any).txHash
+        }
 
         // The wallet submitted the tx but gave up waiting for inclusion.
         // Switch to watching that tx (next loop iteration) instead of
@@ -385,28 +441,27 @@ export async function executeL2Claim(
           errLower.includes('already been consumed') ||
           errLower.includes('message has already been nullified')
         ) {
-          throw new Error('This deposit has already been claimed.')
+          // With fuel the setup phase can consume the message and the mint still revert, so
+          // this is not proof of delivery (same split as the no-non-nullified branch below).
+          throw withRevertedHash(
+            new Error(options?.feeOption ? FUEL_CLAIM_MESSAGE_GONE_ERROR : 'This deposit has already been claimed.'),
+          )
         }
 
         // "No non-nullified L1 to L2 message found": the message is either
         // nullified or gone. Callers verify message readiness right before
         // claiming, so when this persists it means consumed — retrying can
-        // never succeed. Without fuel the only consumer is this claim, so it
-        // already happened. With fuel we cannot tell a fully-landed claim
-        // from a reverted one that only consumed the fuel message (setup
-        // phase is non-revertible), so surface that honestly instead of
-        // reporting success.
+        // never succeed.
         if (errLower.includes('no non-nullified l1 to l2 message')) {
           messageGoneStreak++
           if (messageGoneStreak >= 2) {
+            // Without fuel the claim is the only consumer, and consumption and mint are
+            // atomic, so the deposit really did land — resume finalizes it. With fuel the
+            // setup phase can consume the message and still revert, so say only what is known.
             if (!options?.feeOption) {
-              throw new Error('This deposit has already been claimed.')
+              throw withRevertedHash(new Error('This deposit has already been claimed.'))
             }
-            throw new Error(
-              'The L1→L2 message for this claim was consumed by an earlier attempt that most likely ' +
-                'succeeded. Check your L2 balance before retrying; if the tokens have not arrived, ' +
-                'resume this deposit from the Activity page.',
-            )
+            throw withRevertedHash(new Error(FUEL_CLAIM_MESSAGE_GONE_ERROR))
           }
           if (attempt < maxAttempts) {
             const shortDelayMs = Math.min(retryDelayMs, 30_000)
@@ -414,7 +469,7 @@ export async function executeL2Claim(
             await wait(shortDelayMs)
             continue
           }
-          throw err
+          throw withRevertedHash(err as Error)
         }
         messageGoneStreak = 0
 
@@ -423,7 +478,7 @@ export async function executeL2Claim(
           errLower.includes('not in capability') ||
           errLower.includes('permission denied')
         ) {
-          throw new Error(`Wallet permission error: ${errMsg}`)
+          throw withRevertedHash(new Error(`Wallet permission error: ${errMsg}`))
         }
 
         // Retry on transient errors — the claim is idempotent
@@ -433,7 +488,7 @@ export async function executeL2Claim(
           await wait(retryDelayMs)
           continue
         }
-        throw err
+        throw withRevertedHash(err as Error)
       }
     }
     return { l2TxHash: result!.txHash, usedBruteForce: false }
@@ -480,30 +535,6 @@ export async function executeL2Claim(
   }
 }
 
-// A flat gas ceiling forces MetaMask to reserve `gasLimit × gasPrice` of ETH up
-// front for its pre-flight balance check, regardless of what the tx actually
-// burns — a 16M ceiling demanded ~0.03 ETH free balance and blocked users who
-// held enough for the real cost. Estimate against the node and buffer instead;
-// only fall back to a fixed (but far lower) ceiling if estimation reverts.
-async function estimateL1BridgeGas(
-  publicClient: ReturnType<typeof createL1PublicClient>,
-  tx: { from: string; to: string; data: string },
-  fallbackGas: bigint,
-): Promise<string> {
-  try {
-    const est = await publicClient.estimateGas({
-      account: tx.from as `0x${string}`,
-      to: tx.to as `0x${string}`,
-      data: tx.data as `0x${string}`,
-    })
-    // 1.5× buffer: multi-hop V4 swaps vary run-to-run and estimateGas can undershoot.
-    const buffered = (est * 3n) / 2n
-    return `0x${buffered.toString(16)}`
-  } catch {
-    return `0x${fallbackGas.toString(16)}`
-  }
-}
-
 // ─── Main L1→L2 Bridge Orchestrator ─────────────────────────────────
 
 /**
@@ -519,7 +550,7 @@ async function estimateL1BridgeGas(
 export async function bridgeL1ToL2(
   config: ResolvedConfig,
   apiClient: BridgeApiClient,
-  aztecNode: any,
+  aztecNode: AztecNode,
   domain: string,
   params: BridgeL1ToL2Params,
 ): Promise<BridgeResult> {
@@ -645,7 +676,7 @@ export async function bridgeL1ToL2(
     let privateFuelSecretHash: Fr | undefined
     if (fuel?.enabled) {
       if (isPrivateFuel) {
-        const { poseidon2HashWithSeparator } = await import('@aztec/foundation/crypto/poseidon')
+        const { poseidon2HashWithSeparator } = await import('@aztec-labs/foundation/crypto/poseidon')
         privateFuelSalt = Fr.random()
         const claimerFr = Fr.fromString(l2Address)
         privateFuelSecret = await poseidon2HashWithSeparator(
@@ -730,6 +761,7 @@ export async function bridgeL1ToL2(
       encryptedCiphertext: encrypted.ciphertext,
       encryptedIv: encrypted.iv,
       encryptedTag: encrypted.tag,
+      encryptedVersion: encrypted.version,
       keyDerivationMessage: signingMessage,
       keyDerivationDomain,
       direction: 'L1_TO_L2',
@@ -790,6 +822,7 @@ export async function bridgeL1ToL2(
       encryptedCiphertext: encrypted.ciphertext,
       encryptedIv: encrypted.iv,
       encryptedTag: encrypted.tag,
+      encryptedVersion: encrypted.version,
       keyDerivationMessage: signingMessage,
       keyDerivationDomain,
       l1Address,
@@ -865,10 +898,25 @@ export async function bridgeL1ToL2(
     if (isFuelEnabled && resolvedFuelQuote!.expectedOutput != null) {
       const { checkFuelSufficiency } = await import('../fuelGasEstimate')
       const fuelTypeForCheck = fuel!.fuelType === 'private' ? 'private' : 'public'
-      const sufficiency = await checkFuelSufficiency(aztecNode, resolvedFuelQuote!.expectedOutput, fuelTypeForCheck)
+      let existingFj = 0n
+      if (fuelTypeForCheck === 'public' && resolvedFuelRecipient) {
+        try {
+          existingFj = await getFeeJuiceBalance(AztecAddress.fromStringUnsafe(resolvedFuelRecipient), aztecNode)
+        } catch (err) {
+          console.warn('[SDK] could not read existing FeeJuice balance; checking the swap output alone', err)
+        }
+      }
+      const sufficiency = await checkFuelSufficiency(
+        aztecNode,
+        resolvedFuelQuote!.expectedOutput,
+        fuelTypeForCheck,
+        existingFj,
+      )
       if (!sufficiency.sufficient) {
         throw new Error(
-          `Insufficient fuel: swap produces ~${sufficiency.expectedFj} FJ but the L2 claim requires ~${sufficiency.feeLimitFj} FJ. ` +
+          `Insufficient fuel: swap produces ~${sufficiency.expectedFj} FJ` +
+            (existingFj > 0n ? ` (plus ~${(Number(existingFj) / 1e18).toFixed(4)} FJ already held)` : '') +
+            ` but the L2 claim requires ~${sufficiency.feeLimitFj} FJ. ` +
             `Increase the fuel amount or bridge without fuel and top up gas separately.`,
         )
       }
@@ -896,17 +944,30 @@ export async function bridgeL1ToL2(
         args: [spender as `0x${string}`, totalApprovalNeeded],
       })
 
-      const approveTxHash = await sendTransaction({
-        from: l1Address,
-        to: tokenConfig.l1TokenContract,
-        data: approveData,
+      const approveTx = { from: l1Address, to: tokenConfig.l1TokenContract, data: approveData }
+      let approveTxHash = await sendTransaction(approveTx)
+      let approveReceipt = await publicClient.waitForTransactionReceipt({
+        hash: approveTxHash as `0x${string}`,
       })
-
-      await publicClient.waitForTransactionReceipt({ hash: approveTxHash as `0x${string}` })
+      if (approveReceipt.status === 'reverted' && (await l1CallStillSucceeds(publicClient, approveTx))) {
+        emit({ type: BridgeEventType.L1_GAS_RETRY, phase: 'approve', revertedTxHash: approveTxHash })
+        approveTxHash = await sendTransaction(approveTx)
+        approveReceipt = await publicClient.waitForTransactionReceipt({
+          hash: approveTxHash as `0x${string}`,
+        })
+      }
+      // A reverted approve was being accepted as success, which surfaced later as an
+      // opaque allowance revert from the deposit itself rather than the real cause.
+      if (approveReceipt.status === 'reverted') {
+        throw new Error(
+          `Token approval transaction reverted on-chain (hash: ${approveTxHash}). ` +
+            `No funds were moved. You can retry the deposit.`,
+        )
+      }
     }
 
     // Send L1 deposit transaction — all paths go through SwapBridgeRouter with Permit2
-    let txHash: string
+    let depositTx: { from: string; to: string; data: string }
     const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
 
     // Fetch attestation for ALL deposits (public AND private). The L1
@@ -1017,17 +1078,7 @@ export async function bridgeL1ToL2(
         ],
       })
 
-      const fuelTx = {
-        from: l1Address,
-        to: config.swapBridgeRouterAddress,
-        data: bridgeData,
-      }
-      txHash = await sendTransaction({
-        ...fuelTx,
-        // bridgeWithFuel is heavy (Permit2 + V4 swap + 2 portal deposits); 5M is
-        // the fallback ceiling only if node estimation reverts.
-        gas: await estimateL1BridgeGas(publicClient, fuelTx, 5_000_000n),
-      })
+      depositTx = { from: l1Address, to: config.swapBridgeRouterAddress, data: bridgeData }
     } else {
       // ── Standard path: call SwapBridgeRouter.bridge via Permit2 ──
 
@@ -1073,69 +1124,80 @@ export async function bridgeL1ToL2(
         ],
       })
 
-      const bridgeTx = {
-        from: l1Address,
-        to: config.swapBridgeRouterAddress,
-        data: bridgeData,
-      }
-      txHash = await sendTransaction({
-        ...bridgeTx,
-        // Plain Permit2 bridge + single portal deposit; 1M is the fallback
-        // ceiling only if node estimation reverts.
-        gas: await estimateL1BridgeGas(publicClient, bridgeTx, 1_000_000n),
-      })
+      depositTx = { from: l1Address, to: config.swapBridgeRouterAddress, data: bridgeData }
     }
 
-    const l1TxHash = typeof txHash === 'string' ? txHash : String(txHash)
+    // No `gas`: smart-account wallets replace it with their own estimate for the call they
+    // actually send (see l1CallStillSucceeds).
+    let l1TxHash = String(await sendTransaction(depositTx))
+    let l1TxUrl = `${getEtherscanBaseUrl(config.l1ChainId)}/tx/${l1TxHash}`
     l1TxSent = true
-    const l1TxUrl = `${getEtherscanBaseUrl(config.l1ChainId)}/tx/${l1TxHash}`
+    const recordDepositSent = async () => {
+      emit({ type: BridgeEventType.DEPOSIT_SENT, l1TxHash, l1TxUrl })
 
-    emit({ type: BridgeEventType.DEPOSIT_SENT, l1TxHash, l1TxUrl })
+      // Persist l1TxHash to localStorage immediately (before backend patch).
+      // Pass a fallback entry so that if the original pushDeposit entry was lost
+      // (e.g., localStorage cleared between steps), a new entry is created for recovery.
+      updateDeposit(
+        (c: any) => c.id === operationId,
+        (c: any) => ({ ...c, l1TxHash, l1TxUrl }),
+        {
+          id: operationId,
+          operationId,
+          l1TxHash,
+          l1TxUrl,
+          l1Address,
+          l2Address,
+          claimSecretHash: claimSecretHash.toString(),
+          isPrivacyModeEnabled: isPrivate,
+          tokenSymbol: tokenConfig.symbol,
+          hasFuel: fuel?.enabled ?? false,
+          timestamp: Date.now(),
+          status: 'deposited',
+        },
+      )
 
-    // Persist l1TxHash to localStorage immediately (before backend patch).
-    // Pass a fallback entry so that if the original pushDeposit entry was lost
-    // (e.g., localStorage cleared between steps), a new entry is created for recovery.
-    updateDeposit(
-      (c: any) => c.id === operationId,
-      (c: any) => ({ ...c, l1TxHash, l1TxUrl }),
-      {
-        id: operationId,
-        operationId,
-        l1TxHash,
-        l1TxUrl,
-        l1Address,
-        l2Address,
-        claimSecretHash: claimSecretHash.toString(),
-        isPrivacyModeEnabled: isPrivate,
-        tokenSymbol: tokenConfig.symbol,
-        hasFuel: fuel?.enabled ?? false,
-        timestamp: Date.now(),
-        status: 'deposited',
-      },
-    )
-
-    const l1TxPatchData: Record<string, unknown> = { l1TxHash, l1TxUrl }
-    // Report the passport nonce this deposit consumed so the server stops
-    // double-counting its budget reservation once the deposit confirms. Only the
-    // passport path carries one (cleanHands/POCH deposits reserve no budget).
-    if (passportData.signature.length > 2) {
-      l1TxPatchData.attestationNonce = passportData.nonce.toString()
+      const l1TxPatchData: Record<string, unknown> = { l1TxHash, l1TxUrl }
+      // Report the passport nonce this deposit consumed so the server stops
+      // double-counting its budget reservation once the deposit confirms. Only the
+      // passport path carries one (cleanHands/POCH deposits reserve no budget).
+      if (passportData.signature.length > 2) {
+        l1TxPatchData.attestationNonce = passportData.nonce.toString()
+      }
+      const l1TxPatchOk = await patchOperationWithRetry(apiClient, operationId!, l1TxPatchData, {
+        label: 'l1TxHash',
+      })
+      if (!l1TxPatchOk) {
+        emit({ type: BridgeEventType.PATCH_FAILED, operationId: operationId!, label: 'l1TxHash', data: l1TxPatchData })
+      }
     }
-    const l1TxPatchOk = await patchOperationWithRetry(apiClient, operationId, l1TxPatchData, { label: 'l1TxHash' })
-    if (!l1TxPatchOk) {
-      emit({ type: BridgeEventType.PATCH_FAILED, operationId: operationId!, label: 'l1TxHash', data: l1TxPatchData })
-    }
+    await recordDepositSent()
 
     // Wait for receipt — only AFTER receipt confirms do we know funds are locked.
     // Add 5-minute timeout matching the resume path.
-    const txReceipt = await publicClient.waitForTransactionReceipt({
+    let txReceipt = await publicClient.waitForTransactionReceipt({
       hash: l1TxHash as `0x${string}`,
       timeout: 300_000, // 5 minutes
     })
+    if (txReceipt.status === 'reverted' && (await l1CallStillSucceeds(publicClient, depositTx))) {
+      emit({ type: BridgeEventType.L1_GAS_RETRY, phase: 'deposit', revertedTxHash: l1TxHash })
+      // The revert locked nothing, so a rejected or failed resend must leave the op 'failed'.
+      l1TxSent = false
+      l1TxHash = String(await sendTransaction(depositTx))
+      l1TxSent = true
+      l1TxUrl = `${getEtherscanBaseUrl(config.l1ChainId)}/tx/${l1TxHash}`
+      await recordDepositSent()
+      txReceipt = await publicClient.waitForTransactionReceipt({
+        hash: l1TxHash as `0x${string}`,
+        timeout: 300_000,
+      })
+    }
 
     // 🔒 Check receipt status BEFORE setting depositConfirmed.
     // A reverted tx means funds were NOT locked — the catch block should mark as 'failed'.
     if (txReceipt.status === 'reverted') {
+      // l1TxSent guards a tx that may still mine; this one is mined and locked nothing.
+      l1TxSent = false
       throw new Error(
         `L1 deposit transaction reverted on-chain (hash: ${txReceipt.transactionHash}). ` +
         `No funds were locked. You can retry the deposit.`
@@ -1218,7 +1280,7 @@ export async function bridgeL1ToL2(
       }
     } else {
       // ── Standard path: extract DepositToAztec event from TokenPortal ──
-      // IMPORTANT: Use CustomTokenPortalAbi, NOT the upstream @aztec/l1-artifacts TokenPortalAbi.
+      // IMPORTANT: Use CustomTokenPortalAbi, NOT the upstream @aztec-foundation/l1-artifacts TokenPortalAbi.
       // Our deployed TokenPortal has a `fee` field in its events that changes the event signature
       // (different keccak256 hash). The standard ABI would never match these events.
       const eventName = isPrivate ? 'DepositToAztecPrivate' : 'DepositToAztecPublic'
@@ -1395,7 +1457,7 @@ export async function bridgeL1ToL2(
       // to match what checkFuelSufficiency('private') validated earlier.
       const { PrivateMintAndPayFeePaymentMethod, maxFeesPerGasFromBaseFees } =
         await import('@alejoamiras/private-fee-juice')
-      const { Gas, GasFees } = await import('@aztec/stdlib/gas')
+      const { Gas, GasFees } = await import('@aztec-labs/stdlib/gas')
       const baseFees = await aztecNode.getCurrentMinFees()
       const gasLimits = Gas.from({ l2Gas: 2_000_000, daGas: 50_000 })
       const teardownGasLimits = Gas.from({ l2Gas: 0, daGas: 0 })
@@ -1432,7 +1494,7 @@ export async function bridgeL1ToL2(
       ).toLowerCase()
       const fuelGoesToBridger = fuelRecipientForClaim === l2Address.toLowerCase()
       if (fuelGoesToBridger) {
-        const { FeeJuicePaymentMethodWithClaim } = await import('@aztec/aztec.js/fee')
+        const { FeeJuicePaymentMethodWithClaim } = await import('@aztec-labs/aztec.js/fee')
         const { buildClaimGasSettings } = await import('../fuelGasEstimate')
         const paymentMethod = new FeeJuicePaymentMethodWithClaim(
           AztecAddress.fromStringUnsafe(l2Address),
@@ -1568,6 +1630,26 @@ export async function bridgeL1ToL2(
     if (operationId) {
       const patchData: Record<string, unknown> = {
         lastErrorMessage: errorMessage.slice(0, 500),
+      }
+      // Keep the hash of a claim tx that was mined but reverted. `assertReceiptSuccess`
+      // attaches it to the error, and without it a reverted claim leaves no on-chain
+      // reference at all: the L1→L2 message reads as consumed with nothing to look up,
+      // which is why #2146 was only diagnosable from the operator dashboard.
+      //
+      // Deliberately NOT written to `l2TxHash`. That field means "the claim tx", and the
+      // Activity page renders it as the operation's L2 transaction — a reverted claim
+      // stored there would read as a successful one, and any `if (op.l2TxHash)` check
+      // would treat the deposit as claimed. A separate field keeps the two unambiguous.
+      //
+      // Only a reverted outcome qualifies. A pending tx also carries a txHash and may still
+      // mine successfully; recording it here would label a live claim as failed.
+      const failedL2TxHash = (error as { txHash?: unknown; txOutcome?: unknown })?.txHash
+      if (
+        typeof failedL2TxHash === 'string' &&
+        failedL2TxHash &&
+        (error as { txOutcome?: unknown })?.txOutcome === 'reverted'
+      ) {
+        patchData.failedL2TxHash = failedL2TxHash
       }
       // Only mark 'failed' if no tx was sent — otherwise the tx may still mine
       if (!depositConfirmed && !l1TxSent) {

@@ -241,6 +241,30 @@ export function assertValidEpoch(epoch: bigint | null | undefined, l2BlockNumber
 }
 
 /**
+ * Did an L2 transaction actually execute?
+ *
+ * Two independent fields, easy to conflate. `status` is BLOCK FINALIZATION progress
+ * (dropped / pending / proposed / checkpointed / proven / finalized) and never says
+ * success. `executionResult` (success / reverted) is the one that does, and the protocol
+ * only sets it once the tx is in a block. So a `status` of 'proposed' is already decidable,
+ * while 'pending' and 'dropped' are not mined and carry no result at all.
+ *
+ * Returns 'unknown' rather than guessing, because the callers use this to tell a user
+ * whether their funds moved.
+ */
+export function classifyL2Execution(receipt: {
+  status?: string | null
+  executionResult?: string | null
+} | null | undefined): 'executed' | 'reverted' | 'unknown' {
+  if (!receipt) return 'unknown'
+  // Not mined: no execution has happened yet, and nothing can be concluded.
+  if (receipt.status === 'dropped' || receipt.status === 'pending') return 'unknown'
+  if (receipt.executionResult == null) return 'unknown'
+  if (receipt.executionResult === 'success') return 'executed'
+  return 'reverted'
+}
+
+/**
  * Detect errors that indicate a bridge message has already been consumed on
  * the target chain — i.e. the operation is actually complete, we just didn't
  * finalize the DB state. Used by both happy-path and resume flows so that a
@@ -295,3 +319,29 @@ export function extractErrorString(error: unknown): string {
   return String(error)
 }
 
+
+/**
+ * Whether an L1 call that just reverted would still succeed if sent again.
+ *
+ * MetaMask's "Added protection" wraps calls to contracts Blockaid has not rated Trusted in a
+ * 7702 delegation and replaces the gas limit with a zero-margin estimate that under-counts the
+ * account's one-time 7702 upgrade (MetaMask/metamask-extension#46334), so the first protected
+ * tx from an account can run out of gas. A revert leaves funds untouched; if the same call still
+ * simulates cleanly the revert was the wallet's gas, and a resend succeeds because the account
+ * is upgraded by then.
+ */
+export async function l1CallStillSucceeds(
+  publicClient: { call: (args: { account: `0x${string}`; to: `0x${string}`; data: `0x${string}` }) => Promise<unknown> },
+  tx: { from: string; to: string; data: string },
+): Promise<boolean> {
+  try {
+    await publicClient.call({
+      account: tx.from as `0x${string}`,
+      to: tx.to as `0x${string}`,
+      data: tx.data as `0x${string}`,
+    })
+    return true
+  } catch {
+    return false
+  }
+}

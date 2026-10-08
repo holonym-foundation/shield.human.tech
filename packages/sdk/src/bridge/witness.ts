@@ -1,3 +1,4 @@
+import type { AztecNode } from '@aztec-labs/aztec.js/node'
 /**
  * L2→L1 message witness computation.
  *
@@ -5,13 +6,13 @@
  * needed for the L1 withdrawal transaction.
  */
 
-import { Fr } from '@aztec/aztec.js/fields'
-import { AztecAddress } from '@aztec/stdlib/aztec-address'
-import { EthAddress } from '@aztec/foundation/eth-address'
-import { sha256ToField } from '@aztec/foundation/crypto/sha256'
-import { computeL2ToL1MessageHash } from '@aztec/stdlib/hash'
-import { computeL2ToL1MembershipWitness } from '@aztec/stdlib/messaging'
-import { TxHash } from '@aztec/stdlib/tx'
+import { Fr } from '@aztec-labs/aztec.js/fields'
+import { AztecAddress } from '@aztec-labs/stdlib/aztec-address'
+import { EthAddress } from '@aztec-labs/foundation/eth-address'
+import { sha256ToField } from '@aztec-labs/foundation/crypto/sha256'
+import { computeL2ToL1MessageHash } from '@aztec-labs/stdlib/hash'
+import { computeL2ToL1MembershipWitness } from '@aztec-labs/stdlib/messaging'
+import { TxHash } from '@aztec-labs/stdlib/tx'
 import { toFunctionSelector } from 'viem'
 
 import type { WitnessResult } from '../types'
@@ -64,7 +65,7 @@ export function computeL2ToL1MessageLeaf(params: {
  * @param l2TxHash - The L2 transaction hash (required for 4.2+ witness computation)
  */
 export async function computeWitness(
-  aztecNode: any,
+  aztecNode: AztecNode,
   blockNumber: number,
   msgLeaf: Fr,
   l2TxHash: string,

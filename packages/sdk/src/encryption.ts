@@ -11,6 +11,7 @@
 import { hkdf } from '@noble/hashes/hkdf.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { gcm } from '@noble/ciphers/aes.js'
+import { getAddress } from 'viem'
 
 import type { EncryptedData, BridgeOperation, BridgeActivityData } from './types'
 
@@ -40,11 +41,24 @@ export function createSigningMessage(
 
 // ─── Key Derivation ─────────────────────────────────────────────────
 
+// Every KDF string set this codebase has shipped, current first. The second set is
+// what envelope version 1 used, before 87d76c5 renamed the runtime identifiers; it is
+// kept because decrypt has to be able to reproduce either one, and nothing stored
+// alongside a ciphertext says which applies. See `deriveEncryptionKeyCandidates`.
+const KDF_STRINGS = [
+  { prefix: 'Shield Human Tech Encryption Key', info: 'shield-human-tech-key' },
+  { prefix: 'Aztec Bridge Encryption Key', info: 'aztec-bridge-key' },
+] as const
+
 /**
  * Derives a 256-bit encryption key from a wallet signature using HKDF-SHA256.
  *
  * Because the signing message is deterministic (same for a given wallet + domain),
  * the same wallet will always produce the same signature, and thus the same key.
+ *
+ * The address is lowercased first. Callers pass it straight through from the wallet
+ * provider, which is inconsistent about checksum casing, and an address that reaches
+ * the KDF raw makes the key depend on that casing — the #2185 defect.
  *
  * @param l1Address - User's L1 (Ethereum) address
  * @param signature - Signature from wallet.signMessage()
@@ -56,19 +70,92 @@ export async function deriveEncryptionKey(
   signature: string,
   domain: string,
 ): Promise<Uint8Array> {
-  const keyDerivationInput = `Shield Human Tech Encryption Key\nDomain: ${domain}\nL1 Address: ${l1Address}\nSignature: ${signature}`
+  return deriveKey(l1Address.toLowerCase(), signature, domain, KDF_STRINGS[0])
+}
+
+async function deriveKey(
+  l1Address: string,
+  signature: string,
+  domain: string,
+  strings: (typeof KDF_STRINGS)[number],
+): Promise<Uint8Array> {
+  const keyDerivationInput = `${strings.prefix}\nDomain: ${domain}\nL1 Address: ${l1Address}\nSignature: ${signature}`
   const te = new TextEncoder()
   const ikm = te.encode(keyDerivationInput)
   const salt = te.encode(domain)
-  const info = te.encode('shield-human-tech-key')
+  const info = te.encode(strings.info)
 
   return hkdf(sha256, ikm, salt, info, 32)
 }
 
+/**
+ * Every key that could have encrypted a payload for this wallet, best guess first.
+ *
+ * Two independent things have varied over time, and neither is recorded alongside
+ * the ciphertext:
+ *
+ *  - **Address casing.** `createSigningMessage` lowercases the address, but this KDF
+ *    used to interpolate it raw. Callers pass the address straight through from the
+ *    wallet provider, which returns checksummed or lowercase depending on the provider
+ *    and the code path, so the same wallet could derive two different keys across two
+ *    sessions. Decrypt therefore tries every casing.
+ *  - **KDF strings.** 87d76c5 changed them and bumped ENCRYPTION_VERSION 1 -> 2, but
+ *    that version is never persisted (both storage writes and the event payload pick
+ *    ciphertext/iv/tag only), so there is nothing to branch on. Decrypt tries both sets.
+ *
+ * Trialling is safe: GCM authenticates, so a wrong key throws rather than returning
+ * plausible garbage.
+ *
+ * One wallet signature covers all of them: the signing message already lowercases the
+ * address, so every candidate here shares the same signature and the user is prompted once.
+ *
+ * `version` (when the record carries one) only ORDERS the candidates, it never drops any.
+ * A stored version narrows the likely derivation, but a row could still have been written
+ * by a path that recorded the wrong one, and silently refusing to try the others would
+ * turn a recoverable operation into a lost one.
+ */
+export async function deriveEncryptionKeyCandidates(
+  l1Address: string,
+  signature: string,
+  domain: string,
+  version?: number | null,
+): Promise<Uint8Array[]> {
+  const forms: string[] = [l1Address.toLowerCase()]
+  if (l1Address && !forms.includes(l1Address)) forms.push(l1Address)
+  try {
+    const checksummed = getAddress(l1Address)
+    if (!forms.includes(checksummed)) forms.push(checksummed)
+  } catch {
+    // Not a well-formed address; the raw and lowercased forms above still apply.
+  }
+
+  // Version 1 is the only one written with the old KDF strings; 2 and 3 (and anything
+  // newer) use the current set, so it leads unless the record says otherwise.
+  const setOrder = version === 1 ? [KDF_STRINGS[1], KDF_STRINGS[0]] : [KDF_STRINGS[0], KDF_STRINGS[1]]
+
+  const keys: Uint8Array[] = []
+  for (const strings of setOrder) {
+    for (const form of forms) {
+      keys.push(await deriveKey(form, signature, domain, strings))
+    }
+  }
+  return keys
+}
+
 // ─── Encryption ─────────────────────────────────────────────────────
 
-/** Current encryption envelope format version. Increment on KDF, cipher, or payload changes. */
-export const ENCRYPTION_VERSION = 2
+/**
+ * Current encryption envelope format version. Increment on KDF, cipher, or payload changes.
+ *
+ * 1 -> 2: KDF strings renamed (87d76c5).
+ * 2 -> 3: the L1 address is lowercased before it enters the KDF, so a key no longer
+ *         depends on whether the wallet provider handed back a checksummed address.
+ *
+ * Persisted as `encryptedVersion` on API and localStorage records. Rows written before
+ * that column existed carry none, so decrypt uses the version only to order the
+ * candidate keys and still trials all of them (`deriveEncryptionKeyCandidates`).
+ */
+export const ENCRYPTION_VERSION = 3
 
 /**
  * Encrypts data using AES-256-GCM.
@@ -130,13 +217,36 @@ export async function decryptData(
     const decrypted = cipher.decrypt(encrypted)
     return new TextDecoder().decode(decrypted)
   } catch {
-    throw new Error(
-      'Decryption failed. This could mean:\n' +
-        '1. The encryption key is incorrect\n' +
-        '2. The data was tampered with\n' +
-        '3. The signature used for key derivation was different',
-    )
+    throw new Error(DECRYPTION_FAILED_MESSAGE)
   }
+}
+
+const DECRYPTION_FAILED_MESSAGE =
+  'Decryption failed. This could mean:\n' +
+  '1. The encryption key is incorrect\n' +
+  '2. The data was tampered with\n' +
+  '3. The signature used for key derivation was different'
+
+/**
+ * Decrypt with the first key that works, from `deriveEncryptionKeyCandidates`.
+ *
+ * GCM authenticates, so a wrong key fails cleanly rather than returning garbage —
+ * trialling keys cannot produce a false positive.
+ */
+export async function decryptDataWithCandidates(
+  ciphertext: string,
+  iv: string,
+  tag: string,
+  keys: Uint8Array[],
+): Promise<string> {
+  for (const key of keys) {
+    try {
+      return await decryptData(ciphertext, iv, tag, key)
+    } catch {
+      continue
+    }
+  }
+  throw new Error(DECRYPTION_FAILED_MESSAGE)
 }
 
 // ─── Decrypt Operation Payload ───────────────────────────────────────
@@ -186,12 +296,17 @@ export async function decryptOperationPayload(
     throw new Error('Wallet signature required to decrypt operation data')
   }
 
-  const key = await deriveEncryptionKey(l1Address, signature, effectiveDomain)
-  const plaintext = await decryptData(
+  const keys = await deriveEncryptionKeyCandidates(
+    l1Address,
+    signature,
+    effectiveDomain,
+    operation.encryptedVersion,
+  )
+  const plaintext = await decryptDataWithCandidates(
     operation.encryptedCiphertext,
     operation.encryptedIv,
     operation.encryptedTag,
-    key,
+    keys,
   )
 
   return JSON.parse(plaintext) as BridgeActivityData
