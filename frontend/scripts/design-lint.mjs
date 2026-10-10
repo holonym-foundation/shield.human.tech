@@ -225,12 +225,40 @@ function reportNoScrollStub() {
 }
 
 // ── report ──────────────────────────────────────────────────────────────────
+// ── orphaned-component check ─────────────────────────────────────────────────
+// A component under src/components that NOTHING imports is a red flag it was
+// reverted or duplicated — the AccountChip regression: a nav refactor
+// reimplemented the chip inline and left the real component dead. SOP §1:
+// reuse, don't reimplement; never orphan a component.
+function reportOrphanedComponents() {
+  const all = walk(SRC, ['.tsx', '.ts'])
+  const texts = all.map((f) => [f, readFileSync(f, 'utf8')])
+  const comps = all.filter((f) => f.includes('/components/') && f.endsWith('.tsx'))
+  for (const file of comps) {
+    const base = file.split('/').pop().replace(/\.tsx$/, '')
+    if (base === 'index') continue
+    const re = new RegExp(`from\\s+['"][^'"]*/${base}['"]|import\\s*\\(\\s*['"][^'"]*/${base}['"]`)
+    const imported = texts.some(([f, t]) => f !== file && re.test(t))
+    if (!imported) {
+      add(
+        'orphaned',
+        relative(ROOT, file),
+        1,
+        'component is never imported — orphaned/dead code (reverted or duplicated?). Reuse it or delete it (SOP §1: reuse, do not reimplement).',
+        base,
+      )
+    }
+  }
+}
+reportOrphanedComponents()
+
 const byRule = findings.reduce((acc, f) => ((acc[f.rule] = (acc[f.rule] || 0) + 1), acc), {})
 const RULE_TITLES = {
   contrast: 'Contrast / readability (SOP §2)',
   opacity: 'Off-scale opacity (SOP §2/§6)',
   copy: 'Copy — em/long dash (SOP §10)',
   states: 'Graceful states — disabled buttons (SOP §6)',
+  orphaned: 'Orphaned component — never imported (SOP §1: reuse, do not reimplement)',
 }
 
 console.log('Shield design-lint — SOP: internal-docs products/shield/design-sop.md')
@@ -240,7 +268,7 @@ console.log('')
 if (findings.length === 0) {
   console.log('No static findings.')
 } else {
-  const order = ['contrast', 'opacity', 'states', 'copy']
+  const order = ['orphaned', 'contrast', 'opacity', 'states', 'copy']
   for (const rule of order) {
     const items = findings.filter((f) => f.rule === rule)
     if (!items.length) continue
