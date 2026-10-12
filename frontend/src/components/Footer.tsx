@@ -7,6 +7,8 @@ import { useBridgeStore } from '@/stores/bridgeStore'
 
 interface FooterProps {
   className?: string
+  /** The support chat bubble is showing in the bottom-right corner: keep the links clear of it. */
+  chatBubble?: boolean
 }
 
 // The footer has no surface of its own: no fill, no top border, no shadow. It
@@ -91,7 +93,7 @@ const ResourceLinks: React.FC<{ className?: string; isDark: boolean }> = ({ clas
   </div>
 )
 
-const Footer: React.FC<FooterProps> = ({ className }) => {
+const Footer: React.FC<FooterProps> = ({ className, chatBubble = false }) => {
   const { isPrivacyModeEnabled } = useBridgeStore()
   const isDark = isPrivacyModeEnabled
 
@@ -100,7 +102,8 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
     // page background instead of reading as its own band with an edge line.
     <footer className={`relative w-full text-xs ${className || ''}`}>
       {/* Desktop Footer — single row, already compact vertically. */}
-      <div className='hidden md:flex flex-col w-full px-10 pb-8 gap-4'>
+      {/* With the chat bubble showing, the right padding keeps Terms of Use out from under it. */}
+      <div className={`hidden md:flex flex-col w-full pl-10 ${chatBubble ? 'pr-24' : 'pr-10'} pb-8 gap-4`}>
         <div className='flex justify-between items-center w-full relative'>
           {/* Left Side Social Icons */}
           <SocialIcons isDark={isDark} />
@@ -115,32 +118,21 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
         </div>
       </div>
 
-      {/* Mobile Footer (below md). Height-adaptive: the card is the priority
-          surface, so on short viewports the footer collapses to a single minimal
-          row and can never squeeze the card's primary CTA out of view. The full
-          stacked footer only returns where there's vertical room to spare. */}
+      {/* Mobile Footer (below md): one compact row, at every height. The card is the
+          priority surface. A stacked footer with the social row (once shown from 821px
+          tall) needed ~150px, more than the card's height formula leaves, so it covered
+          the card's CTA and took its taps (#150). The bottom padding keeps the links above
+          the fixed bottom strip: the binder dock on the left (bottom-4 + 44px tabs) and,
+          when it shows, the support chat bubble on the right (56px, 20px up). */}
       <div className='md:hidden w-full'>
-        {/* Compact row — short viewports (<=820px tall): copyright + the two
-            essential links only, minimal padding. */}
-        <div className='[@media(min-height:821px)]:hidden flex flex-wrap items-center justify-center gap-x-4 gap-y-1 w-full px-4 pt-3 pb-4'>
+        <div
+          className={`flex flex-wrap items-center justify-center gap-x-4 gap-y-1 w-full px-4 pt-3 ${
+            chatBubble ? 'pb-[5.25rem]' : 'pb-[4.25rem]'
+          }`}>
           <ResourceLinks className='justify-center' isDark={isDark} />
           <span className={`${mutedText(isDark)} text-center`}>
             © 2025 human.tech. All rights reserved.
           </span>
-        </div>
-
-        {/* Full stack — taller viewports (>820px) with room for the richer layout. */}
-        <div className='hidden [@media(min-height:821px)]:flex flex-col items-center w-full px-4 py-6 gap-6'>
-          {/* Top Social Icons */}
-          <SocialIcons className='justify-center flex-wrap' isDark={isDark} />
-
-          {/* Middle Resource Links */}
-          <ResourceLinks className='justify-center' isDark={isDark} />
-
-          {/* Bottom Copyright */}
-          <div className={`${mutedText(isDark)} text-center`}>
-            © 2025 human.tech. All rights reserved.
-          </div>
         </div>
       </div>
     </footer>
