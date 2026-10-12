@@ -690,110 +690,115 @@ export function LocalRecoveryPanel({ variant = 'page', onClose }: LocalRecoveryP
         </div>
       )}
 
-      <h2 className="text-lg font-semibold mt-3">Local Recovery</h2>
-      <p className="text-xs text-gray-500 mt-1">
-        Resume incomplete bridge operations from browser storage or a backup file.
-      </p>
+      {/* Everything between the header and the actions scrolls inside the card, so the
+          Back actions stay reachable when the card is short (a phone, a network banner).
+          Signed in, it grows to fill the card for the entry list, as before; signed out,
+          it keeps its content height and the actions follow it. */}
+      <div className={`flex min-h-0 flex-col overflow-y-auto ${isAuthed ? 'flex-1' : ''}`}>
+        <h2 className="text-lg font-semibold mt-3">Local Recovery</h2>
+        <p className="text-xs text-gray-500 mt-1">
+          Resume incomplete bridge operations from browser storage or a backup file.
+        </p>
 
-      {/* Auth warning */}
-      {!isAuthed && (
-        <div className="mt-3 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-          <p className="text-xs text-yellow-800 font-medium">
-            Connect your wallet and sign in to load recovery data.
-          </p>
-        </div>
-      )}
+        {/* Auth warning */}
+        {!isAuthed && (
+          <div className="mt-3 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+            <p className="text-xs text-yellow-800 font-medium">
+              Connect your wallet and sign in to load recovery data.
+            </p>
+          </div>
+        )}
 
-      {/* Entry list (paginated, internally bounded) */}
-      {isAuthed && (
-        <div className="flex-1 min-h-0 mt-3 flex flex-col">
-          {entries.length === 0 && (
-            <p className="text-sm text-gray-400 mt-1 text-center">
-              No local recovery data found. Upload a backup file below.
+        {/* Entry list (paginated, internally bounded) */}
+        {isAuthed && (
+          <div className="flex-1 min-h-0 mt-3 flex flex-col">
+            {entries.length === 0 && (
+              <p className="text-sm text-gray-400 mt-1 text-center">
+                No local recovery data found. Upload a backup file below.
+              </p>
+            )}
+
+            {entries.length > 0 && (
+              <>
+                <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3">
+                  {pageItems.map((entry) => (
+                    <RecoveryEntryCard
+                      key={`${entry.source}-${entry.operationId}`}
+                      entry={entry}
+                      onResume={handleResume}
+                      resuming={resumingId === entry.operationId}
+                    />
+                  ))}
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="mt-2 flex shrink-0 items-center justify-center gap-4 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      disabled={page === 0}
+                      aria-label="Previous page"
+                      className="text-gray-500 hover:text-[#81133B] disabled:opacity-40 disabled:hover:text-gray-500 p-1 rounded"
+                    >
+                      <Icon icon="ph:caret-left-bold" width={16} height={16} />
+                    </button>
+                    <span className="text-xs font-medium text-gray-500 tabular-nums">
+                      {page + 1} of {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                      disabled={page >= totalPages - 1}
+                      aria-label="Next page"
+                      className="text-gray-500 hover:text-[#81133B] disabled:opacity-40 disabled:hover:text-gray-500 p-1 rounded"
+                    >
+                      <Icon icon="ph:caret-right-bold" width={16} height={16} />
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Import backup zone */}
+        <div className="mt-3 shrink-0">
+          <p className="text-xs text-gray-500 mb-1.5 font-medium">Import backup file (.json)</p>
+          <label
+            onDragOver={(e) => {
+              e.preventDefault()
+              setIsDragging(true)
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault()
+              setIsDragging(false)
+            }}
+            onDrop={handleDrop}
+            className={`flex flex-col items-center justify-center gap-1.5 w-full h-20 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+              isDragging
+                ? 'border-shield bg-shield/5'
+                : 'border-shield/30 hover:border-shield hover:bg-shield/5'
+            }`}
+          >
+            <span className="text-xs text-gray-500">Drag &amp; drop your Shield backup, or</span>
+            <span className="text-xs font-semibold text-white bg-shield hover:bg-[#6a0f31] px-4 py-1.5 rounded-full">
+              Choose file
+            </span>
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="sr-only"
+              onChange={handleFileUpload}
+              aria-label="Import backup file"
+            />
+          </label>
+          {uploadError && (
+            <p role="alert" className="text-xs text-red-500 mt-1">
+              {uploadError}
             </p>
           )}
-
-          {entries.length > 0 && (
-            <>
-              <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3">
-                {pageItems.map((entry) => (
-                  <RecoveryEntryCard
-                    key={`${entry.source}-${entry.operationId}`}
-                    entry={entry}
-                    onResume={handleResume}
-                    resuming={resumingId === entry.operationId}
-                  />
-                ))}
-              </div>
-
-              {totalPages > 1 && (
-                <div className="mt-2 flex shrink-0 items-center justify-center gap-4 pt-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    disabled={page === 0}
-                    aria-label="Previous page"
-                    className="text-gray-500 hover:text-[#81133B] disabled:opacity-40 disabled:hover:text-gray-500 p-1 rounded"
-                  >
-                    <Icon icon="ph:caret-left-bold" width={16} height={16} />
-                  </button>
-                  <span className="text-xs font-medium text-gray-500 tabular-nums">
-                    {page + 1} of {totalPages}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                    disabled={page >= totalPages - 1}
-                    aria-label="Next page"
-                    className="text-gray-500 hover:text-[#81133B] disabled:opacity-40 disabled:hover:text-gray-500 p-1 rounded"
-                  >
-                    <Icon icon="ph:caret-right-bold" width={16} height={16} />
-                  </button>
-                </div>
-              )}
-            </>
-          )}
         </div>
-      )}
-
-      {/* Import backup zone (pinned) */}
-      <div className="mt-3 shrink-0">
-        <p className="text-xs text-gray-500 mb-1.5 font-medium">Import backup file (.json)</p>
-        <label
-          onDragOver={(e) => {
-            e.preventDefault()
-            setIsDragging(true)
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault()
-            setIsDragging(false)
-          }}
-          onDrop={handleDrop}
-          className={`flex flex-col items-center justify-center gap-1.5 w-full h-20 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
-            isDragging
-              ? 'border-shield bg-shield/5'
-              : 'border-shield/30 hover:border-shield hover:bg-shield/5'
-          }`}
-        >
-          <span className="text-xs text-gray-500">Drag &amp; drop your Shield backup, or</span>
-          <span className="text-xs font-semibold text-white bg-shield hover:bg-[#6a0f31] px-4 py-1.5 rounded-full">
-            Choose file
-          </span>
-          <input
-            type="file"
-            accept="application/json,.json"
-            className="sr-only"
-            onChange={handleFileUpload}
-            aria-label="Import backup file"
-          />
-        </label>
-        {uploadError && (
-          <p role="alert" className="text-xs text-red-500 mt-1">
-            {uploadError}
-          </p>
-        )}
       </div>
-
       <div className="mt-3 flex shrink-0 flex-col gap-2">
         {variant === 'modal' ? (
           <>
