@@ -571,9 +571,14 @@ const AccountChip: React.FC<AccountChipProps> = ({
             {bothConnected && <span className="-ml-2">{AztecAvatar}</span>}
             {!isWaapConnected && isAztecConnected && AztecAvatar}
           </span>
-          <span className={`text-xs font-medium truncate ${navText(isDark)}`} title={waapAddress || ''}>
+          {/* Below sm the chip collapses to its avatar(s) and the status glyph, as
+              the Connect wallet chip collapses to its icon, so the nav pill keeps
+              the Privacy Mode switch and the hamburger on phones. The label stays
+              the button's accessible name there. */}
+          <span className={`hidden sm:block text-xs font-medium truncate ${navText(isDark)}`} title={waapAddress || ''}>
             {label}
           </span>
+          <span className="sr-only sm:hidden">{label}</span>
           {/* #441: the pill ALWAYS communicates verification status. A pink seal
               when personhood is verified, a muted outline seal when connected but
               not yet verified — each with a hover explainer. Same 15px glyph slot
@@ -614,7 +619,7 @@ const AccountChip: React.FC<AccountChipProps> = ({
             icon="ph:caret-down"
             width={12}
             height={12}
-            className={`flex-shrink-0 ${mutedIconText(isDark)} transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+            className={`hidden sm:block flex-shrink-0 ${mutedIconText(isDark)} transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
           />
         </button>
 
@@ -622,7 +627,9 @@ const AccountChip: React.FC<AccountChipProps> = ({
             a TRANSPARENT secondary segment adjoined to the solid primary via the
             same hairline divider, NOT a filled floating pill. Accent-coloured
             label + hover tint keep it reading as active; only faded +
-            cursor-not-allowed while actually connecting. */}
+            cursor-not-allowed while actually connecting. Hidden below sm with the
+            label: the account menu's Aztec row and the bridge card still connect
+            Aztec there. */}
         {isWaapConnected && !isAztecConnected && (
           <button
             type="button"
@@ -632,7 +639,7 @@ const AccountChip: React.FC<AccountChipProps> = ({
             }}
             disabled={isL2Connecting}
             title="Connect Aztec wallet"
-            className={`flex items-center gap-1 flex-shrink-0 h-9 pl-2.5 pr-2 border-l text-[11px] font-medium ${
+            className={`hidden sm:flex items-center gap-1 flex-shrink-0 h-9 pl-2.5 pr-2 border-l text-[11px] font-medium ${
               isDark ? 'border-white/[0.14]' : 'border-black/[0.10]'
             } ${
               isL2Connecting ? 'opacity-40 cursor-not-allowed' : `cursor-pointer ${hoverTint(isDark)}`
