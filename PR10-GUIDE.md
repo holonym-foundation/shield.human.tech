@@ -993,7 +993,8 @@ L1_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY   # Sepolia RPC
 
 # ---- Optional ----
 AZTEC_ENV=devnet              # "devnet" or "sandbox" (default: sandbox)
-FEE_BASIS_POINTS=500          # Fee on deposits, 500 = 5% (default: 500)
+FEE_BASIS_POINTS=500          # Fee on deposits in bp. 500 = 5% is the Sepolia/testnet
+                              # default used by this guide. Mainnet is 50 (0.5%).
 
 # ---- Compliant bridge only ----
 POCH_ATTESTER_PRIVATE_KEY=0x...     # Clean-hands attestation signer

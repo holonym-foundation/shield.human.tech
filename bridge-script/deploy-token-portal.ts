@@ -9,7 +9,9 @@
  *   - L1_PRIVATE_KEY (required): Deployer private key
  *   - L1_URL (optional): L1 RPC URL
  *   - FEE_RECIPIENT (required): Address that collects portal fees
- *   - FEE_BASIS_POINTS (optional): Fee in basis points (default: 500 = 5%)
+ *   - FEE_BASIS_POINTS (optional): Fee in basis points (default: 500 = 5%). This script is
+ *     pinned to Sepolia (chain 11155111), so 500 is the testnet rate and is correct here.
+ *     Mainnet is 50 (0.5%) — deploy there with deploy-mainnet.ts, not this script.
  *   - HUMAN_ID_ATTESTER (required): Clean-hands attester address
  *   - CLEAN_HANDS_CIRCUIT_ID (optional): Circuit ID (default: 1)
  *   - PASSPORT_SIGNER (required): Passport signer address

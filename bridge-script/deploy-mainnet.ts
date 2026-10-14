@@ -35,7 +35,9 @@
  *
  * Optional env:
  *   OWNER=0x…                   Multisig to transfer L1 ownership to (two-step).
- *   FEE_BASIS_POINTS=500        Portal fee (default 5%, max 10%).
+ *   FEE_BASIS_POINTS=50         Portal fee in bp (default 50 = 0.5%, the adopted mainnet
+ *                               rate; max 1000 = 10%). Override only deliberately — the
+ *                               deploy warns when it is not 50.
  *   CLEAN_HANDS_CIRCUIT_ID=…    Override default circuit ID.
  *   CLEAN_HANDS_ACTION_ID=…     Override default action ID.
  *   L1_URL=…                    Override L1 RPC.
@@ -141,7 +143,10 @@ const ERC20_BALANCE_ABI = [
 const L1_PRIVATE_KEY = process.env.L1_PRIVATE_KEY as Hex | undefined
 const OWNER = process.env.OWNER as Hex | undefined
 const FEE_RECIPIENT = process.env.FEE_RECIPIENT as Hex | undefined
-const FEE_BASIS_POINTS = BigInt(process.env.FEE_BASIS_POINTS || '500')
+// 50 bp = 0.5%, the adopted mainnet rate. The live portal reads 50; a redeploy that
+// silently fell back to the old 500 would charge users ten times the published fee.
+const MAINNET_FEE_BASIS_POINTS = '50'
+const FEE_BASIS_POINTS = BigInt(process.env.FEE_BASIS_POINTS || MAINNET_FEE_BASIS_POINTS)
 const CLEAN_HANDS_CIRCUIT_ID = BigInt(
   process.env.CLEAN_HANDS_CIRCUIT_ID ||
     '0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19',
@@ -687,6 +692,12 @@ async function main() {
   logger.info(`WETH:                ${WETH}`)
   logger.info(`Permit2:             ${PERMIT2}`)
   logger.info(`Fee basis points:    ${FEE_BASIS_POINTS} (max 1000 = 10%)`)
+  if (FEE_BASIS_POINTS !== BigInt(MAINNET_FEE_BASIS_POINTS)) {
+    logger.warn(
+      `Fee is ${FEE_BASIS_POINTS} bp, not the adopted mainnet ${MAINNET_FEE_BASIS_POINTS} bp (0.5%). ` +
+        `Unset FEE_BASIS_POINTS unless this override is intentional.`,
+    )
+  }
   logger.info(`POCH attester (L1):  ${pochAttester.address}`)
   logger.info(`Passport signer (L1):${passportSigner.address}`)
   logger.info(`Tokens:              ${tokensToProcess.map((t) => t.symbol).join(', ')}`)

@@ -62,7 +62,7 @@ See [`.env.example`](./.env.example) for all available variables. Key ones:
 | `AZTEC_ENV` | No | `devnet` or `sandbox` (default: `sandbox`) |
 | `POCH_ATTESTER_PRIVATE_KEY` | Yes (prod) | Private key for POCH attester (compliant bridge) |
 | `PASSPORT_SIGNER_PRIVATE_KEY` | Yes (prod) | Private key for passport signer (compliant bridge) |
-| `FEE_BASIS_POINTS` | No | Fee on deposits in basis points (default: `500` = 5%) |
+| `FEE_BASIS_POINTS` | No | Fee on deposits in basis points. Defaults are per network: **`50` (0.5%) on mainnet**, `500` (5%) on the devnet/testnet scripts. Max `1000` (10%), enforced in the contract. Shield's published fee is the mainnet one — see the [root README](../README.md). |
 | `CLEAN_HANDS_CIRCUIT_ID` | No | Circuit ID for clean-hands attestation (default: `1`) |
 
 ## Scripts

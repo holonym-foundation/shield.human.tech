@@ -428,7 +428,9 @@ const L1_CREDENTIAL = L1_PRIVATE_KEY || MNEMONIC
 const L1_URL = process.env.L1_URL || getL1RpcUrl()
 
 const MINT_AMOUNT = BigInt(process.env.MINT_AMOUNT || '1000000000000000') // 1e15
-const FEE_BASIS_POINTS = BigInt(process.env.FEE_BASIS_POINTS || '500') // 5% fee
+// 500 bp = 5%. This is the TESTNET rate and matches the Sepolia portal. Mainnet is
+// 50 bp (0.5%) — see deploy-mainnet.ts. Do not quote this number as Shield's fee.
+const FEE_BASIS_POINTS = BigInt(process.env.FEE_BASIS_POINTS || '500')
 const CLEAN_HANDS_CIRCUIT_ID = BigInt(process.env.CLEAN_HANDS_CIRCUIT_ID || '0x1c98fc4f7f1ad3805aefa81ad25fa466f8342292accf69566b43691d12742a19')
 const CLEAN_HANDS_ACTION_ID = BigInt(process.env.CLEAN_HANDS_ACTION_ID || '123456789')
 
