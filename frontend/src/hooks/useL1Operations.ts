@@ -582,7 +582,7 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
               userAction: DatadogUserAction.BRIDGE_L1_TO_L2_DEPOSIT_SENT,
             })
             captureBridgeInitiated({
-              token: selectedToken?.symbol ?? 'unknown',
+              token_symbol: selectedToken?.symbol ?? 'unknown',
               amount: amountDisplayL1,
               fuel_enabled: !!fuel,
             })
@@ -726,9 +726,8 @@ export function useL1BridgeToL2(onBridgeSuccess?: (data: any) => void) {
             const l2Url = event.l2TxHash ? `${getAztecscanUrl(L2_CHAIN_ID)}/tx-effects/${event.l2TxHash}` : null
             setTransactionUrls(l1Url, l2Url)
             captureBridgeCompleted({
-              token: selectedToken?.symbol ?? 'unknown',
+              token_symbol: selectedToken?.symbol ?? 'unknown',
               l1_tx_hash: event.l1TxHash ?? null,
-              l2_tx_hash: event.l2TxHash ?? null,
             })
             pushNotification({
               type: 'claim',
