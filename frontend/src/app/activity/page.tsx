@@ -234,7 +234,7 @@ export default function ActivityPage() {
 
           {isError && (
             <p className="text-sm text-red-500 mt-1 text-center">
-              {error instanceof Error ? error.message : 'Failed to load'}
+              {humanizeError(error)}
             </p>
           )}
 

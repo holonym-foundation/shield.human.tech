@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   AuthenticateSchema,
+  getClientIp,
   MAX_CIPHERTEXT_LENGTH,
+  MAX_CLIENT_IP_LENGTH,
   MAX_SIBLING_PATH_ENTRIES,
   PassportAttestationSchema,
   PochAttestationSchema,
@@ -274,5 +276,51 @@ describe('PochAttestationSchema', () => {
   it('still rejects wrong-typed fields', () => {
     expect(PochAttestationSchema.safeParse({ isPrivate: 'yes' }).success).toBe(false)
     expect(PochAttestationSchema.safeParse({ tokenDecimals: 37 }).success).toBe(false)
+  })
+})
+
+describe('getClientIp', () => {
+  // The caller controls what it puts in `x-forwarded-for`, so which end of the
+  // list is read decides whether the rate limit and the audit trail mean anything.
+  const h = (init: Record<string, string>) => new Headers(init)
+
+  it('does not let a forged leading entry become the caller identity', () => {
+    // The proxy appends the real peer, so the caller's own value stays on the left.
+    expect(getClientIp(h({ 'x-forwarded-for': '10.0.0.1, 203.0.113.7' }))).toBe('203.0.113.7')
+  })
+
+  it('treats a single-entry list as the peer itself', () => {
+    expect(getClientIp(h({ 'x-forwarded-for': '203.0.113.7' }))).toBe('203.0.113.7')
+  })
+
+  it('does not make spacing part of the identity', () => {
+    expect(getClientIp(h({ 'x-forwarded-for': '10.0.0.1,203.0.113.7  ' }))).toBe('203.0.113.7')
+  })
+
+  it('uses x-real-ip only when no list was set', () => {
+    expect(getClientIp(h({ 'x-real-ip': '198.51.100.4' }))).toBe('198.51.100.4')
+    expect(getClientIp(h({ 'x-forwarded-for': '203.0.113.7', 'x-real-ip': '198.51.100.4' }))).toBe(
+      '203.0.113.7',
+    )
+  })
+
+  it('drops an oversized value rather than storing it', () => {
+    expect(getClientIp(h({ 'x-forwarded-for': 'a'.repeat(MAX_CLIENT_IP_LENGTH + 1) }))).toBeUndefined()
+  })
+
+  it('accepts an IPv6 address at the length limit', () => {
+    const v6 = '2001:0db8:85a3:0000:0000:8a2e:0370:7334:255.255.255.255'.slice(0, MAX_CLIENT_IP_LENGTH)
+    expect(getClientIp(h({ 'x-forwarded-for': v6 }))).toBe(v6)
+  })
+
+  it('yields no identity when no usable header is present', () => {
+    expect(getClientIp(h({}))).toBeUndefined()
+    expect(getClientIp(h({ 'x-forwarded-for': '   ' }))).toBeUndefined()
+  })
+
+  it('differs from the left-most read the old call sites used', () => {
+    const forged = '10.0.0.1, 203.0.113.7'.split(',')[0]?.trim()
+    expect(forged).toBe('10.0.0.1')
+    expect(getClientIp(h({ 'x-forwarded-for': '10.0.0.1, 203.0.113.7' }))).not.toBe(forged)
   })
 })

@@ -1,10 +1,18 @@
 import jwt from 'jsonwebtoken'
 import { JWT_SECRET, JWT_EXPIRES_IN } from '@/config/env.config'
 
+// HS256 is a keyed hash, so the secret is the whole of the security: a short one
+// is recoverable offline from any single issued token, after which anyone can
+// mint a session for any userId.
+const MIN_SECRET_LENGTH = 32
+
 function getSecret(): string {
   const secret = JWT_SECRET
   if (!secret) {
     throw new Error('JWT_SECRET environment variable is required. Please set it in your .env file.')
+  }
+  if (secret.length < MIN_SECRET_LENGTH) {
+    throw new Error(`JWT_SECRET must be at least ${MIN_SECRET_LENGTH} characters (got ${secret.length}).`)
   }
   return secret
 }

@@ -38,6 +38,8 @@ export const FAUCET_PRIVATE_KEY = process.env.FAUCET_PRIVATE_KEY ?? ''
 // ─── Auth (server) ──────────────────────────────────────────────────
 
 export const JWT_SECRET = process.env.JWT_SECRET ?? ''
+// There is no revocation path, so this is the only bound on a stolen token.
+// Shorten it with JWT_EXPIRES_IN; the cost is a SIWE re-signature that often.
 export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '7d'
 
 // ─── Attestation (server) ───────────────────────────────────────────
@@ -82,13 +84,12 @@ export const SANCTIONS_SCREENING_ENABLED = (process.env.SANCTIONS_SCREENING_ENAB
 // ─── Auth (server) ──────────────────────────────────────────────────
 
 /**
- * Expected SIWE domain for /api/auth/authenticate. The signed message has its
- * own .domain field; this is what the server verifies against. Pinning to env
- * prevents a Host-header injection where a misconfigured proxy lets an
- * attacker present a SIWE message signed for evil.com and have the server
- * accept it. localhost connections still pass (dev exception).
+ * Extra SIWE/app host(s) this deployment answers on, single or comma-separated.
+ * Additive only, and never another environment's host: the deployment's own
+ * host already comes from the network it serves, and the signed domain is all
+ * a user sees before approving, so it has to denote one environment.
  */
-export const AUTH_EXPECTED_DOMAIN = process.env.AUTH_EXPECTED_DOMAIN ?? 'shield.human.tech'
+export const AUTH_EXPECTED_DOMAIN = process.env.AUTH_EXPECTED_DOMAIN ?? ''
 
 // ─── PostHog (client) ───────────────────────────────────────────────
 

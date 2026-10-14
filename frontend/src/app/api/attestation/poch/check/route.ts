@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 import { checkCleanHands, getDefaultActionId } from '@/lib/attestation'
-import { enforceAddressBinding, evaluateDepositLimit } from '@/lib/address-binding'
+import { checkAddressBindingConflict, evaluateDepositLimit } from '@/lib/address-binding'
 import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctions'
 
 /**
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     const { l1Address, l2Address } = authResult.user
 
     // Check address binding (l1 ↔ l2 must be 1:1)
-    const bindingError = await enforceAddressBinding(l1Address, l2Address)
+    const bindingError = await checkAddressBindingConflict(l1Address, l2Address)
     if (bindingError) {
       return NextResponse.json({ eligible: false, reason: bindingError })
     }

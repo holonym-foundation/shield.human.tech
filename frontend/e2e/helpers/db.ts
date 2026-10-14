@@ -14,6 +14,46 @@ export async function resetDb() {
   )
 }
 
+let holdSeq = 0
+
+/**
+ * Record a charge the way the compliance caps actually see one: a hold the
+ * server signed, past its deposit window. Deposit rows are client-authored and
+ * are not counted — the hold ledger is the whole of the accounting.
+ */
+export async function settleHold(
+  user: { userId: string },
+  usd: number,
+  extra: { method?: string; createdAt?: Date } = {},
+) {
+  const createdAt = extra.createdAt ?? new Date(Date.now() - 60_000)
+  return db.attestationReservation.create({
+    data: {
+      fkUserId: user.userId,
+      nonce: String(++holdSeq),
+      amountUsd: usd,
+      method: extra.method ?? 'passport',
+      // Past its window, so the charge is committed until the on-chain resolver
+      // proves the nonce was never used.
+      expiresAt: new Date(createdAt.getTime() + 1_000),
+      createdAt,
+    },
+  })
+}
+
+/** A hold still inside its signed window: the deposit may yet land or be abandoned. */
+export async function liveHold(user: { userId: string }, usd: number, extra: { method?: string } = {}) {
+  return db.attestationReservation.create({
+    data: {
+      fkUserId: user.userId,
+      nonce: String(++holdSeq),
+      amountUsd: usd,
+      method: extra.method ?? 'passport',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  })
+}
+
 /** Record a settled L1→L2 deposit, the way the bridge flow does once it confirms. */
 export async function settleDeposit(
   user: { userId: string },

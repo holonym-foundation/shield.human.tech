@@ -1,7 +1,7 @@
 import {
   createSigningMessage,
-  deriveEncryptionKey,
-  decryptData,
+  deriveEncryptionKeyCandidates,
+  decryptDataWithCandidates,
   buildDepositExport,
   buildWithdrawalExport,
   getDepositById,
@@ -85,6 +85,21 @@ export function humanizeError(error: unknown): string {
     (raw.includes('rollup__') && raw.includes('checkpoint'))
   ) {
     return 'The Aztec network is briefly catching up. Try again in a moment.'
+  }
+
+  // Node / RPC throttling or missing a method (free tiers answer 429, -32601, or a batch-size error
+  // under load); the payload is JSON-RPC internals that mean nothing to a user.
+  if (
+    /\b429\b/.test(raw) ||
+    raw.includes('rate limit') ||
+    raw.includes('too many requests') ||
+    raw.includes('-32601') ||
+    raw.includes('method is not available') ||
+    (raw.includes('is not available') && raw.includes('does not exist')) ||
+    raw.includes('batch size') ||
+    raw.includes('temporary internal error')
+  ) {
+    return 'The Aztec network is busy. Please try again in a moment.'
   }
 
   // Node / RPC unreachable or 5xx.
@@ -249,9 +264,14 @@ export async function decryptStorageEntry(
 
   const signingMessage = createSigningMessage(entry.l1Address, entry.keyDerivationDomain)
   const signature = await signMessage(signingMessage, entry.l1Address)
-  const encryptionKey = await deriveEncryptionKey(entry.l1Address, signature, entry.keyDerivationDomain)
+  const keys = await deriveEncryptionKeyCandidates(
+    entry.l1Address,
+    signature,
+    entry.keyDerivationDomain,
+    entry.encryptedVersion,
+  )
   const decrypted = JSON.parse(
-    await decryptData(entry.encryptedCiphertext, entry.encryptedIv, entry.encryptedTag, encryptionKey),
+    await decryptDataWithCandidates(entry.encryptedCiphertext, entry.encryptedIv, entry.encryptedTag, keys),
   )
 
   const value = decrypted[fieldName]

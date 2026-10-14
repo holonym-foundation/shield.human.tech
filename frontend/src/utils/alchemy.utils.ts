@@ -60,6 +60,23 @@ export const getSupportedNetworks = (chains: (string | number)[]): string[] => {
     .filter(Boolean) as string[]
 }
 
+// The API key is a path segment of every Alchemy URL, so an AxiosError — which
+// carries `config.url` — leaks it to whatever consumes the logs. Never log or
+// return one directly; summarise it through here instead.
+export const describeAlchemyError = (error: unknown, apiKey: string): string => {
+  const status = (error as { response?: { status?: number } })?.response?.status
+  const code = (error as { code?: string })?.code
+  const message = error instanceof Error ? error.message : String(error)
+
+  return [
+    status ? `status=${status}` : null,
+    code ? `code=${code}` : null,
+    apiKey ? message.split(apiKey).join('***') : message,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
 // Helper function to get chain ID from network name
 export const getChainIdFromNetwork = (network: string): number | undefined => {
   const chainId = Object.entries(CHAIN_TO_NETWORK).find(

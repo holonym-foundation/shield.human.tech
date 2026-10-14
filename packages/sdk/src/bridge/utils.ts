@@ -241,6 +241,30 @@ export function assertValidEpoch(epoch: bigint | null | undefined, l2BlockNumber
 }
 
 /**
+ * Did an L2 transaction actually execute?
+ *
+ * Two independent fields, easy to conflate. `status` is BLOCK FINALIZATION progress
+ * (dropped / pending / proposed / checkpointed / proven / finalized) and never says
+ * success. `executionResult` (success / reverted) is the one that does, and the protocol
+ * only sets it once the tx is in a block. So a `status` of 'proposed' is already decidable,
+ * while 'pending' and 'dropped' are not mined and carry no result at all.
+ *
+ * Returns 'unknown' rather than guessing, because the callers use this to tell a user
+ * whether their funds moved.
+ */
+export function classifyL2Execution(receipt: {
+  status?: string | null
+  executionResult?: string | null
+} | null | undefined): 'executed' | 'reverted' | 'unknown' {
+  if (!receipt) return 'unknown'
+  // Not mined: no execution has happened yet, and nothing can be concluded.
+  if (receipt.status === 'dropped' || receipt.status === 'pending') return 'unknown'
+  if (receipt.executionResult == null) return 'unknown'
+  if (receipt.executionResult === 'success') return 'executed'
+  return 'reverted'
+}
+
+/**
  * Detect errors that indicate a bridge message has already been consumed on
  * the target chain — i.e. the operation is actually complete, we just didn't
  * finalize the DB state. Used by both happy-path and resume flows so that a
