@@ -50,7 +50,7 @@ const activeDeployment = getSelectedDeployment()
 // by the deployment's l1ChainId — switch networks by changing the active
 // deployment (or NEXT_PUBLIC_AZTEC_ENV override), not by editing env var names.
 
-type AztecEnv = 'devnet' | 'testnet' | 'mainnet'
+export type AztecEnv = 'devnet' | 'testnet' | 'mainnet'
 
 import {
   AZTEC_ENV as AZTEC_ENV_OVERRIDE,
@@ -71,7 +71,7 @@ function resolveAztecEnv(): AztecEnv {
   return 'testnet'
 }
 
-const AZTEC_ENV = resolveAztecEnv()
+export const AZTEC_ENV = resolveAztecEnv()
 
 const ENV_CONFIG = {
   devnet: {

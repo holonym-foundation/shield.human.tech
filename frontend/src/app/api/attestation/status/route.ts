@@ -19,18 +19,16 @@ export async function GET(request: NextRequest) {
 
     const { l1Address, l2Address } = authResult.user
 
-    // Check address binding
-    const binding = await prisma.addressBinding.findFirst({
-      where: {
-        OR: [{ l1Address }, { l2Address }],
-      },
+    // Keyed on L1 only — SIWE proves that half, so both addresses disclosed
+    // below are the caller's own. Matching on L2 would report a binding some
+    // other L1 made against this Aztec account, and disclose that L1.
+    const binding = await prisma.addressBinding.findUnique({
+      where: { l1Address },
     })
 
     let bindingStatus: 'unbound' | 'bound' | 'conflict' = 'unbound'
     if (binding) {
-      bindingStatus = (binding.l1Address === l1Address && binding.l2Address === l2Address)
-        ? 'bound'
-        : 'conflict'
+      bindingStatus = binding.l2Address === l2Address ? 'bound' : 'conflict'
     }
 
     return NextResponse.json({

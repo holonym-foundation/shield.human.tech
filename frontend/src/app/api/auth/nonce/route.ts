@@ -1,13 +1,11 @@
 // frontend/src/app/api/auth/nonce/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createNonce, checkRateLimit, cleanupExpiredNonces } from '@/lib/siweNonceStore'
+import { getClientIp } from '@/lib/validation'
 
 export async function GET(request: NextRequest) {
   // Rate limit by IP
-  const ip =
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    request.headers.get('x-real-ip') ??
-    'unknown'
+  const ip = getClientIp(request.headers) ?? 'unknown'
 
   if (!checkRateLimit(ip)) {
     return new NextResponse('Too many requests', { status: 429 })

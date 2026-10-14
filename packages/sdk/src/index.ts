@@ -62,12 +62,15 @@ export type { DeploymentData } from './config'
 export {
   createSigningMessage,
   deriveEncryptionKey,
+  deriveEncryptionKeyCandidates,
   decryptData,
+  decryptDataWithCandidates,
   decryptOperationPayload,
   ENCRYPTION_VERSION,
 } from './encryption'
 
 // Auth
+export { classifyL2Execution } from './bridge/utils'
 export { getL2ResourcePrefix } from './auth'
 
 // API

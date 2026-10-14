@@ -3,19 +3,21 @@
  */
 
 import { Fr } from '@aztec/aztec.js/fields'
-import { isL1ToL2MessageReady } from '@aztec/aztec.js/messaging'
 import { wait } from './utils'
 
 /**
  * Poll until the L1→L2 message is consumable on L2.
  *
- * Uses isL1ToL2MessageReady, which returns true only once the 'latest' chain tip
- * has advanced to the message's checkpoint — i.e. the sequencer has included the
- * message and a claim can actually consume it. A bare getL1ToL2MessageCheckpoint
- * lookup returns a value as soon as the archiver indexes the message from L1
- * (message "seen"), which is earlier; consuming at that point reverts the claim's
- * public phase with an empty "Assertion failed:". This single poll therefore
- * covers the whole wait — no separate block-count heuristic is needed afterward.
+ * Readiness is a membership witness for the message at the 'latest' block: the node
+ * returns one only once the sequencer has included the message in the L1→L2 tree, which
+ * is when a claim can actually consume it. A bare checkpoint lookup returns a value as
+ * soon as the archiver indexes the message from L1, which is earlier; consuming at that
+ * point reverts the claim's public phase with an empty "Assertion failed:". This single
+ * poll therefore covers the whole wait — no separate block-count heuristic is needed.
+ *
+ * The witness call is used instead of aztec.js's isL1ToL2MessageReady because the latter
+ * needs aztec_getL1ToL2MessageCheckpoint, which dRPC does not serve (-32601), so every
+ * poll threw. Node errors are reported through `lastError` instead of being dropped.
  */
 export async function pollL1ToL2MessageSync(
   aztecNode: any,
@@ -25,25 +27,32 @@ export async function pollL1ToL2MessageSync(
     maxWaitMs?: number
     onPoll?: (elapsedSec: number, pollCount: number) => void
   },
-): Promise<{ synced: boolean; elapsedMinutes: number }> {
+): Promise<{ synced: boolean; elapsedMinutes: number; lastError?: string }> {
   const pollIntervalMs = options?.pollIntervalMs ?? 15_000
   const maxWaitMs = options?.maxWaitMs ?? 40 * 60 * 1000
   const messageHashFr = Fr.fromString(messageHash)
   const startWait = Date.now()
   let pollCount = 0
+  let lastError: string | undefined
 
   while (Date.now() - startWait < maxWaitMs) {
     pollCount++
     const elapsedSec = Math.round((Date.now() - startWait) / 1000)
     try {
-      if (await isL1ToL2MessageReady(aztecNode, messageHashFr, 'latest')) {
+      const witness = await aztecNode.getL1ToL2MessageMembershipWitness('latest', messageHashFr)
+      if (witness !== undefined) {
         return {
           synced: true,
           elapsedMinutes: (Date.now() - startWait) / 60_000,
         }
       }
-    } catch {
-      // retry
+      lastError = undefined
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (message !== lastError) {
+        console.warn('[SDK] L1→L2 message readiness check failed, retrying:', message)
+      }
+      lastError = message
     }
     options?.onPoll?.(elapsedSec, pollCount)
     await wait(pollIntervalMs)
@@ -52,6 +61,7 @@ export async function pollL1ToL2MessageSync(
   return {
     synced: false,
     elapsedMinutes: (Date.now() - startWait) / 60_000,
+    lastError,
   }
 }
 

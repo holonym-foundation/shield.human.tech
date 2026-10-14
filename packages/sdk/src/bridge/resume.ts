@@ -785,11 +785,21 @@ async function resumeL1ToL2(
   }
   const syncResults = await Promise.all(syncPromises)
   const syncResult = syncResults[0]
+  const fuelSyncResult = syncResults[1]
   emit({ type: BridgeEventType.SYNC_POLL, elapsedMinutes: syncResult.elapsedMinutes, synced: syncResult.synced })
 
   if (!syncResult.synced) {
     throw new Error(
-      `L1-to-L2 message sync timeout after ${syncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming again later.`,
+      `L1-to-L2 message sync timeout after ${syncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming again later.` +
+        (syncResult.lastError ? ` Last node error: ${syncResult.lastError}` : ''),
+    )
+  }
+
+  // The claim consumes the fuel message too, so claiming before it syncs reverts on the fee step.
+  if (fuelSyncResult && !fuelSyncResult.synced) {
+    throw new Error(
+      `Fuel message sync timeout after ${fuelSyncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming again later.` +
+        (fuelSyncResult.lastError ? ` Last node error: ${fuelSyncResult.lastError}` : ''),
     )
   }
 
@@ -870,6 +880,13 @@ async function resumeL1ToL2(
       alreadyClaimed = true
       l2TxHash = op.l2TxHash ?? 'already-claimed'
     } else {
+      // Keep the on-chain reference of a mined-but-reverted claim, as the first attempt does;
+      // without it the screen cannot tell whether the tokens arrived. A pending tx is skipped,
+      // since it may still succeed.
+      const { txHash, txOutcome } = claimErr as { txHash?: unknown; txOutcome?: unknown }
+      if (typeof txHash === 'string' && txHash && txOutcome === 'reverted') {
+        await patchOperationWithRetry(apiClient, op.id, { failedL2TxHash: txHash }, { label: 'failed claim tx' })
+      }
       throw claimErr
     }
   }

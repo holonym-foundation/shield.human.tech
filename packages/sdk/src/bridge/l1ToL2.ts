@@ -48,6 +48,24 @@ import { BridgeEventType, BridgePhase } from '../types'
 
 const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as const
 
+/**
+ * The fuel-claim case: the L1→L2 message is gone, so retrying can never succeed, but we
+ * cannot tell a landed claim from one that reverted after the non-revertible setup phase
+ * consumed the message. #2146 was exactly that on mainnet: message consumed, ~2.94 FJ
+ * burned, 0 tokens delivered, while the UI called it likely complete.
+ *
+ * Two wording constraints, both load-bearing:
+ *  - It must NOT match `isAlreadyConsumedError` (bridge/utils.ts), which resume uses to
+ *    write status 'completed'. Any phrasing like "already consumed" or "already claimed"
+ *    starts matching and records a false completion for an undelivered deposit.
+ *  - It MUST match ProgressCard's CONSUMED_ERROR_NEEDLES ("was consumed"), so the UI
+ *    suppresses Resume and runs its receipt check instead of looping.
+ */
+export const FUEL_CLAIM_MESSAGE_GONE_ERROR =
+  'The L1→L2 message for this deposit was consumed, so this claim cannot be retried. ' +
+  'That does not confirm the tokens arrived: check your L2 balance, and if they are missing, ' +
+  'keep the L1 transaction reference and contact support.'
+
 const BRIDGE_WITNESS_TYPE = {
   BridgeWitness: [
     { name: 'tokenPortal', type: 'address' },
@@ -305,6 +323,17 @@ export async function executeL2Claim(
     let result: { txHash: string } | undefined
     let pendingTxHash: string | undefined
     let messageGoneStreak = 0
+    // A claim that is mined and reverted is retried as transient, and the attempts after it
+    // fail with "no non-nullified message" (the revert's setup phase consumed it) and throw a
+    // fresh error. That fresh error must still carry the reverted tx, or the only on-chain
+    // reference to what happened is lost right before it is persisted as failedL2TxHash.
+    let revertedTxHash: string | undefined
+    const withRevertedHash = <T extends Error>(e: T): T => {
+      if (revertedTxHash && !(e as { txHash?: unknown }).txHash) {
+        Object.assign(e, { txHash: revertedTxHash, txOutcome: 'reverted' })
+      }
+      return e
+    }
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // A previous attempt submitted a tx whose inclusion wait expired.
       // Resolve its fate before ever re-submitting: the tx may well have
@@ -321,10 +350,13 @@ export async function executeL2Claim(
           return { l2TxHash: pendingTxHash, usedBruteForce: false }
         }
         if (fate.outcome === 'reverted') {
-          throw new Error(
-            `The L2 claim transaction was included but reverted (${fate.receipt?.executionResult}). ` +
-              'Do not retry as-is: with bridged fuel, the fee-payment setup phase is non-revertible, so the ' +
-              `fuel message may already be consumed. Resume this deposit from the Activity page. (${pendingTxHash})`,
+          throw Object.assign(
+            new Error(
+              `The L2 claim transaction was included but reverted (${fate.receipt?.executionResult}). ` +
+                'Do not retry as-is: with bridged fuel, the fee-payment setup phase is non-revertible, so the ' +
+                `fuel message may already be consumed. Resume this deposit from the Activity page. (${pendingTxHash})`,
+            ),
+            { txHash: pendingTxHash, txOutcome: 'reverted' },
           )
         }
         if (fate.outcome === 'timeout') {
@@ -365,6 +397,9 @@ export async function executeL2Claim(
           errLower.includes('action_rejected') ||
           errLower.includes('user cancelled')
         if (isUserRejection) throw err
+        if ((err as any)?.txOutcome === 'reverted' && typeof (err as any)?.txHash === 'string') {
+          revertedTxHash = (err as any).txHash
+        }
 
         // The wallet submitted the tx but gave up waiting for inclusion.
         // Switch to watching that tx (next loop iteration) instead of
@@ -385,28 +420,27 @@ export async function executeL2Claim(
           errLower.includes('already been consumed') ||
           errLower.includes('message has already been nullified')
         ) {
-          throw new Error('This deposit has already been claimed.')
+          // With fuel the setup phase can consume the message and the mint still revert, so
+          // this is not proof of delivery (same split as the no-non-nullified branch below).
+          throw withRevertedHash(
+            new Error(options?.feeOption ? FUEL_CLAIM_MESSAGE_GONE_ERROR : 'This deposit has already been claimed.'),
+          )
         }
 
         // "No non-nullified L1 to L2 message found": the message is either
         // nullified or gone. Callers verify message readiness right before
         // claiming, so when this persists it means consumed — retrying can
-        // never succeed. Without fuel the only consumer is this claim, so it
-        // already happened. With fuel we cannot tell a fully-landed claim
-        // from a reverted one that only consumed the fuel message (setup
-        // phase is non-revertible), so surface that honestly instead of
-        // reporting success.
+        // never succeed.
         if (errLower.includes('no non-nullified l1 to l2 message')) {
           messageGoneStreak++
           if (messageGoneStreak >= 2) {
+            // Without fuel the claim is the only consumer, and consumption and mint are
+            // atomic, so the deposit really did land — resume finalizes it. With fuel the
+            // setup phase can consume the message and still revert, so say only what is known.
             if (!options?.feeOption) {
-              throw new Error('This deposit has already been claimed.')
+              throw withRevertedHash(new Error('This deposit has already been claimed.'))
             }
-            throw new Error(
-              'The L1→L2 message for this claim was consumed by an earlier attempt that most likely ' +
-                'succeeded. Check your L2 balance before retrying; if the tokens have not arrived, ' +
-                'resume this deposit from the Activity page.',
-            )
+            throw withRevertedHash(new Error(FUEL_CLAIM_MESSAGE_GONE_ERROR))
           }
           if (attempt < maxAttempts) {
             const shortDelayMs = Math.min(retryDelayMs, 30_000)
@@ -414,7 +448,7 @@ export async function executeL2Claim(
             await wait(shortDelayMs)
             continue
           }
-          throw err
+          throw withRevertedHash(err as Error)
         }
         messageGoneStreak = 0
 
@@ -423,7 +457,7 @@ export async function executeL2Claim(
           errLower.includes('not in capability') ||
           errLower.includes('permission denied')
         ) {
-          throw new Error(`Wallet permission error: ${errMsg}`)
+          throw withRevertedHash(new Error(`Wallet permission error: ${errMsg}`))
         }
 
         // Retry on transient errors — the claim is idempotent
@@ -433,7 +467,7 @@ export async function executeL2Claim(
           await wait(retryDelayMs)
           continue
         }
-        throw err
+        throw withRevertedHash(err as Error)
       }
     }
     return { l2TxHash: result!.txHash, usedBruteForce: false }
@@ -730,6 +764,7 @@ export async function bridgeL1ToL2(
       encryptedCiphertext: encrypted.ciphertext,
       encryptedIv: encrypted.iv,
       encryptedTag: encrypted.tag,
+      encryptedVersion: encrypted.version,
       keyDerivationMessage: signingMessage,
       keyDerivationDomain,
       direction: 'L1_TO_L2',
@@ -790,6 +825,7 @@ export async function bridgeL1ToL2(
       encryptedCiphertext: encrypted.ciphertext,
       encryptedIv: encrypted.iv,
       encryptedTag: encrypted.tag,
+      encryptedVersion: encrypted.version,
       keyDerivationMessage: signingMessage,
       keyDerivationDomain,
       l1Address,
@@ -1365,14 +1401,16 @@ export async function bridgeL1ToL2(
 
     if (!syncResult.synced) {
       throw new Error(
-        `L1-to-L2 message sync timeout after ${syncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming later.`,
+        `L1-to-L2 message sync timeout after ${syncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming later.` +
+          (syncResult.lastError ? ` Last node error: ${syncResult.lastError}` : ''),
       )
     }
 
     // Check fuel message sync too — if fuel didn't sync, the claim will fail
     if (fuelSyncResult && !fuelSyncResult.synced) {
       throw new Error(
-        `Fuel message sync timeout after ${fuelSyncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming later.`,
+        `Fuel message sync timeout after ${fuelSyncResult.elapsedMinutes.toFixed(1)} minutes. You can try resuming later.` +
+          (fuelSyncResult.lastError ? ` Last node error: ${fuelSyncResult.lastError}` : ''),
       )
     }
 
@@ -1568,6 +1606,18 @@ export async function bridgeL1ToL2(
     if (operationId) {
       const patchData: Record<string, unknown> = {
         lastErrorMessage: errorMessage.slice(0, 500),
+      }
+      // Keep the hash of a claim tx that was mined but reverted. Deliberately NOT written to
+      // `l2TxHash`: that field means "the claim tx" and Activity renders it as the operation's
+      // L2 transaction, so a reverted claim stored there would read as a successful one.
+      // Only a reverted outcome qualifies; a pending tx also carries a txHash and may still mine.
+      const failedL2TxHash = (error as { txHash?: unknown; txOutcome?: unknown })?.txHash
+      if (
+        typeof failedL2TxHash === 'string' &&
+        failedL2TxHash &&
+        (error as { txOutcome?: unknown })?.txOutcome === 'reverted'
+      ) {
+        patchData.failedL2TxHash = failedL2TxHash
       }
       // Only mark 'failed' if no tx was sent — otherwise the tx may still mine
       if (!depositConfirmed && !l1TxSent) {

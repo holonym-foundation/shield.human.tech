@@ -5,7 +5,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { POST as passportRoute } from '@/app/api/attestation/passport/route'
 import { GET as passportCheckRoute } from '@/app/api/attestation/passport/check/route'
 
-import { db, resetDb, settleDeposit } from './helpers/db'
+import { db, resetDb, settleDeposit, settleHold } from './helpers/db'
 import { call } from './helpers/request'
 import { aztecAddress, login, loginWithL2, type Session } from './helpers/session'
 import { installUpstreams, type UpstreamState } from './helpers/upstreams'
@@ -24,6 +24,13 @@ const attest = (session: Session, body: Record<string, unknown> = {}) =>
     method: 'POST',
     token: session.token,
     body: { portalAddress: PORTAL, ...body },
+  })
+
+/** Push a hold past its signed deposit window, the way waiting would. */
+const expireHold = (nonce: string) =>
+  db.attestationReservation.update({
+    where: { nonce },
+    data: { expiresAt: new Date(Date.now() - 1000) },
   })
 
 const check = (session: Session) =>
@@ -181,7 +188,7 @@ describe('issuing a passport attestation', () => {
 describe('the cumulative Travel Rule threshold', () => {
   it('shrinks the signed ceiling to the volume left under the threshold', async () => {
     const session = await login(actor)
-    await settleDeposit(session, 900)
+    await settleHold(session, 900)
 
     const { body } = await attest(session)
 
@@ -190,18 +197,19 @@ describe('the cumulative Travel Rule threshold', () => {
 
   it('refuses once lifetime volume reaches the threshold', async () => {
     const session = await login(actor)
-    await settleDeposit(session, 1000)
+    await settleHold(session, 1000)
 
     const result = await attest(session)
 
     expect(result.status).toBe(403)
     expect(result.body.reason).toBe('travel_rule')
-    expect(await db.attestationReservation.count()).toBe(0)
+    // Only the seeded charge: a refusal must not bank a hold of its own.
+    expect(await db.attestationReservation.count()).toBe(1)
   })
 
   it('counts volume from outside the 24h window, unlike the daily cap', async () => {
     const session = await login(actor)
-    await settleDeposit(session, 1000, { createdAt: new Date(Date.now() - 10 * 24 * 3600 * 1000) })
+    await settleHold(session, 1000, { createdAt: new Date(Date.now() - 10 * 24 * 3600 * 1000) })
 
     const result = await attest(session)
 
@@ -213,7 +221,7 @@ describe('the cumulative Travel Rule threshold', () => {
     // Omitting `direction` once bypassed the cap entirely: the gate only ran for
     // an explicit L1_TO_L2, so a body with no direction was signed uncapped.
     const session = await login(actor)
-    await settleDeposit(session, 1000)
+    await settleHold(session, 1000)
 
     const omitted = await attest(session, {})
     const explicit = await attest(session, { direction: 'L1_TO_L2' })
@@ -226,18 +234,19 @@ describe('the cumulative Travel Rule threshold', () => {
     // A withdrawal is not capped, so it must not come back with the L1
     // signature a deposit consumes.
     const session = await login(actor)
-    await settleDeposit(session, 1000)
+    await settleHold(session, 1000)
 
     const result = await attest(session, { direction: 'L2_TO_L1', bridgeAddress: BRIDGE })
 
     expect(result.status).toBe(200)
     expect(result.body.l1Signature).toBeNull()
-    expect(await db.attestationReservation.count()).toBe(0)
+    // Only the seeded charge: a withdrawal spends no deposit budget.
+    expect(await db.attestationReservation.count()).toBe(1)
   })
 
   it('ignores deposits belonging to another user', async () => {
     const other = await login(otherActor())
-    await settleDeposit(other, 1000)
+    await settleHold(other, 1000)
     const session = await login(actor)
 
     const result = await attest(session)
@@ -245,14 +254,27 @@ describe('the cumulative Travel Rule threshold', () => {
     expect(result.status).toBe(200)
   })
 
-  it('does not count a failed or still-pending deposit', async () => {
+  it('does not count a hold the resolver has released', async () => {
     const session = await login(actor)
-    await settleDeposit(session, 900, { status: 'failed' })
-    await settleDeposit(session, 900, { status: 'pending' })
+    await settleHold(session, 900)
+    // amountUsd 0 is the tombstone the on-chain resolver writes once it has
+    // proven the nonce was never used.
+    await db.attestationReservation.updateMany({ data: { amountUsd: 0 } })
 
     const { body } = await attest(session, { amount: (500n * USDC).toString() })
 
     expect(BigInt(body.maxAmount)).toBe(500n * USDC)
+  })
+
+  it('ignores client-reported deposit rows entirely', async () => {
+    // The old accounting summed BridgeActivity, whose amount, decimals and status
+    // are all attacker-supplied. Nothing but the signed hold ledger counts now.
+    const session = await login(actor)
+    await settleDeposit(session, 5_000)
+
+    const { body } = await attest(session, { amount: (1000n * USDC).toString() })
+
+    expect(BigInt(body.maxAmount)).toBe(1000n * USDC)
   })
 })
 
@@ -281,29 +303,53 @@ describe('outstanding holds', () => {
     expect(result.body.error).toMatch(/frees up/i)
   })
 
-  it('releases the hold as the deposit it authorized settles', async () => {
+  it('charges a settling deposit once, at the ceiling its hold signed', async () => {
     const session = await login(actor)
     const first = await attest(session, { amount: (600n * USDC).toString() })
 
     await settleDeposit(session, 600, { attestationNonce: first.body.nonce })
     const second = await attest(session, { amount: (600n * USDC).toString() })
 
-    // 600 settled, its hold retired: 400 of the 1000 threshold is left.
+    // The hold already counts 600 against the threshold; the deposit row landing
+    // beside it must neither double-count nor discharge it. 400 left either way.
     expect(BigInt(second.body.maxAmount)).toBe(400n * USDC)
   })
 
-  it('stops counting a hold once it has expired', async () => {
+  it('keeps counting an expired hold while the chain cannot be read', async () => {
     const session = await login(actor)
     const first = await attest(session, { amount: (1000n * USDC).toString() })
-    await db.attestationReservation.update({
-      where: { nonce: first.body.nonce },
-      data: { expiresAt: new Date(Date.now() - 1000) },
-    })
+    await expireHold(first.body.nonce)
+
+    const second = await attest(session, { amount: (1000n * USDC).toString() })
+
+    // Expiry on its own proves nothing — the deposit may well have landed.
+    // Freeing budget on the clock let a user sign, deposit, wait out the window
+    // and be handed the whole cap again.
+    expect(second.status).toBe(403)
+  })
+
+  it('frees an expired hold once the chain proves its nonce was never used', async () => {
+    const session = await login(actor)
+    const first = await attest(session, { amount: (1000n * USDC).toString() })
+    await expireHold(first.body.nonce)
+    upstreams.l1NonceConsumed = false
 
     const second = await attest(session, { amount: (1000n * USDC).toString() })
 
     expect(second.status).toBe(200)
     expect(BigInt(second.body.maxAmount)).toBe(1000n * USDC)
+  })
+
+  it('keeps an expired hold whose nonce the chain shows consumed', async () => {
+    const session = await login(actor)
+    const first = await attest(session, { amount: (1000n * USDC).toString() })
+    await expireHold(first.body.nonce)
+    upstreams.l1NonceConsumed = true
+
+    const second = await attest(session, { amount: (1000n * USDC).toString() })
+
+    // The deposit landed, so the charge is committed for good.
+    expect(second.status).toBe(403)
   })
 
   it('does not hand a full budget to each of several concurrent requests', async () => {
@@ -398,15 +444,33 @@ describe('address binding', () => {
     expect(result.body.error).toMatch(/already bound/i)
   })
 
-  it('refuses a second L1 wallet for an already-bound Aztec address', async () => {
-    const first = await login(actor)
-    await attest(first)
+  it('does not let a claim on the Aztec address lock its owner out', async () => {
+    // The L2 half comes from caller-chosen SIWE resources and is never proven,
+    // so refusing on it let anyone name a stranger's Aztec account and bar them
+    // from the bridge for good — the row is permanent and there is no unbind
+    // path. Only the L1 half, which SIWE actually proves, can refuse.
+    const claimant = await login(otherActor())
+    await attest(claimant)
+    const owner = await loginWithL2(actor, claimant.l2Address)
 
-    const rebound = await loginWithL2(otherActor(), first.l2Address)
-    const result = await attest(rebound)
+    const result = await attest(owner)
 
-    expect(result.status).toBe(403)
-    expect(result.body.error).toMatch(/already bound/i)
+    expect(result.status).toBe(200)
+  })
+
+  it('leaves the first claimant’s binding standing, and records none for the second', async () => {
+    const claimant = await login(otherActor())
+    await attest(claimant)
+    const owner = await loginWithL2(actor, claimant.l2Address)
+
+    await attest(owner)
+
+    expect(
+      (await db.addressBinding.findUnique({ where: { l1Address: claimant.l1Address } }))?.l2Address,
+    ).toBe(claimant.l2Address)
+    // The unique constraint on the L2 half still holds; it is swallowed rather
+    // than surfaced as a refusal, so the second wallet simply stays unbound.
+    expect(await db.addressBinding.findUnique({ where: { l1Address: owner.l1Address } })).toBeNull()
   })
 })
 
@@ -423,7 +487,7 @@ describe('the eligibility pre-check', () => {
 
   it('reports the remaining budget shrinking as deposits settle', async () => {
     const session = await login(actor)
-    await settleDeposit(session, 900)
+    await settleHold(session, 900)
 
     const result = await check(session)
 
@@ -442,7 +506,7 @@ describe('the eligibility pre-check', () => {
 
   it('marks a user over the threshold as needing Clean Hands', async () => {
     const session = await login(actor)
-    await settleDeposit(session, 1000)
+    await settleHold(session, 1000)
 
     const result = await check(session)
 

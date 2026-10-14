@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server'
 const httpsAgent = new HttpsAgent({ family: 4 })
 
 import { AlchemyTokenResponse, T_AlchemyTokenBalanceResponse } from '@/types/token.balances.types'
-import { getChainIdFromNetwork, getSupportedNetworks } from '@/utils/alchemy.utils'
+import { describeAlchemyError, getChainIdFromNetwork, getSupportedNetworks } from '@/utils/alchemy.utils'
 
 import { ALCHEMY_API_KEY } from '@/config/env.config'
 const apiKey = ALCHEMY_API_KEY
@@ -65,15 +65,9 @@ export async function POST(request: NextRequest) {
     })) as T_AlchemyTokenBalanceResponse[]
 
     return NextResponse.json(balances)
-  } catch (error: any) {
-    console.error('Error processing token balances:', error.response?.data || error)
+  } catch (error) {
+    console.error('[tokens-balances]', describeAlchemyError(error, apiKey))
 
-    return NextResponse.json(
-      {
-        error: 'Failed to process token balances',
-        details: error.response?.data || error.message,
-      },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: 'Failed to process token balances' }, { status: 500 })
   }
 }
