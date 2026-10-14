@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { prismaMock, caps } = vi.hoisted(() => ({
   prismaMock: {
-    addressBinding: { findFirst: vi.fn(), create: vi.fn() },
-    bridgeActivity: { findMany: vi.fn() },
-    attestationReservation: { findMany: vi.fn(), create: vi.fn() },
+    addressBinding: { findFirst: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
+    attestationReservation: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+    user: { findMany: vi.fn(), findUnique: vi.fn() },
     $executeRaw: vi.fn(),
     $transaction: vi.fn(),
   },
@@ -20,90 +20,75 @@ vi.mock('./attestation', () => ({
 import {
   ATTESTATION_TTL_SECONDS,
   DEPOSIT_CAP_WINDOW_MS,
+  checkAddressBindingConflict,
   enforceAddressBinding,
   evaluateDepositLimit,
   evaluateTravelRuleThreshold,
-  getConfirmedDepositUsd,
   getNextNonce,
   getReservedDepositUsd,
   reservePassportBudget,
   usdToTokenBaseUnits,
 } from './address-binding'
 
-/** A confirmed USDC deposit row as `getConfirmedDepositUsd` selects it. */
-const usdcDeposit = (usd: number, extra: Record<string, unknown> = {}) => ({
-  amountL1: String(BigInt(Math.round(usd * 1e6))),
-  tokenDecimalsL1: 6,
-  tokenSymbolL1: 'USDC',
+const HOUR_MS = 3_600_000
+
+interface HoldFixture {
+  amountUsd: number
+  createdAt: Date
+  expiresAt: Date
+  method: string
+}
+
+/** A hold past its signed deposit window: a committed charge against the caps. */
+const settledHold = (usd: number, extra: Partial<HoldFixture> = {}): HoldFixture => ({
+  amountUsd: usd,
+  createdAt: new Date(Date.now() - 2 * HOUR_MS),
+  expiresAt: new Date(Date.now() - HOUR_MS),
+  method: 'passport',
   ...extra,
 })
+
+/** A live hold: signed, still inside its deposit window, deposit not yet landed. */
+const outstandingHold = (usd: number, extra: Partial<HoldFixture> = {}): HoldFixture => ({
+  amountUsd: usd,
+  createdAt: new Date(),
+  expiresAt: new Date(Date.now() + HOUR_MS),
+  method: 'passport',
+  ...extra,
+})
+
+/**
+ * Every cap read first sweeps expired holds off the same table, so a fixture fed
+ * to a single `mockResolvedValue` would come back as a stale row and be sent to
+ * the on-chain resolver. Discriminate on the sweep's `expiresAt` filter, and
+ * apply the method filter the way the database would.
+ */
+const seedHolds = (rows: HoldFixture[]) => {
+  prismaMock.attestationReservation.findMany.mockImplementation(async ({ where }: any) => {
+    if (where.expiresAt) return []
+    const methods: string[] | undefined = where.method?.in
+    return methods ? rows.filter((r) => methods.includes(r.method)) : rows
+  })
+}
+
+/** The hold read itself, skipping the expiry sweep that shares this mock. */
+const heldRowsQuery = () =>
+  prismaMock.attestationReservation.findMany.mock.calls
+    .map(([args]: any) => args)
+    .find((args: any) => !args.where.expiresAt)
 
 beforeEach(() => {
   vi.clearAllMocks()
   caps.limitUsd = 25_000
   caps.thresholdUsd = 1_000
-  prismaMock.bridgeActivity.findMany.mockResolvedValue([])
-  prismaMock.attestationReservation.findMany.mockResolvedValue([])
+  seedHolds([])
   prismaMock.attestationReservation.create.mockResolvedValue({})
+  prismaMock.attestationReservation.updateMany.mockResolvedValue({ count: 0 })
+  prismaMock.addressBinding.findUnique.mockResolvedValue(null)
+  prismaMock.user.findUnique.mockResolvedValue(null)
+  prismaMock.user.findMany.mockResolvedValue([])
   prismaMock.$executeRaw.mockResolvedValue(1)
   prismaMock.$transaction.mockImplementation((fn: any) => fn(prismaMock))
-})
-
-describe('getConfirmedDepositUsd', () => {
-  it('converts base units to USD using the row decimals and symbol', async () => {
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([
-      usdcDeposit(400),
-      { amountL1: String(10n ** 18n), tokenDecimalsL1: 18, tokenSymbolL1: 'WETH' },
-    ])
-
-    // WETH has no live feed here, so the Sepolia fallback ($2100) applies.
-    expect(await getConfirmedDepositUsd('user-1')).toBeCloseTo(2500, 6)
-  })
-
-  it('defaults a row with no decimals/symbol to 6-decimal USDC', async () => {
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([
-      { amountL1: '1500000', tokenDecimalsL1: null, tokenSymbolL1: null },
-    ])
-
-    expect(await getConfirmedDepositUsd('user-1')).toBeCloseTo(1.5, 6)
-  })
-
-  it('ignores rows with no L1 amount instead of counting them as zero-decimals', async () => {
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([
-      { amountL1: null, tokenDecimalsL1: 6, tokenSymbolL1: 'USDC' },
-      usdcDeposit(10),
-    ])
-
-    expect(await getConfirmedDepositUsd('user-1')).toBeCloseTo(10, 6)
-  })
-
-  it('scopes the query to the rolling window by default', async () => {
-    const before = Date.now()
-    await getConfirmedDepositUsd('user-1')
-    const after = Date.now()
-
-    const { where } = prismaMock.bridgeActivity.findMany.mock.calls[0][0]
-    expect(where.fkUserId).toBe('user-1')
-    expect(where.direction).toBe('L1_TO_L2')
-    const gte = where.createdAt.gte.getTime()
-    expect(gte).toBeGreaterThanOrEqual(before - DEPOSIT_CAP_WINDOW_MS)
-    expect(gte).toBeLessThanOrEqual(after - DEPOSIT_CAP_WINDOW_MS)
-  })
-
-  it('drops the date filter entirely when the window is null (Travel Rule lifetime sum)', async () => {
-    await getConfirmedDepositUsd('user-1', null)
-
-    const { where } = prismaMock.bridgeActivity.findMany.mock.calls[0][0]
-    expect(where).not.toHaveProperty('createdAt')
-  })
-
-  it('never counts pending or failed deposits toward the cap', async () => {
-    await getConfirmedDepositUsd('user-1')
-
-    const { where } = prismaMock.bridgeActivity.findMany.mock.calls[0][0]
-    expect(where.status.in).not.toContain('pending')
-    expect(where.status.in).not.toContain('failed')
-  })
 })
 
 describe('usdToTokenBaseUnits', () => {
@@ -121,49 +106,33 @@ describe('usdToTokenBaseUnits', () => {
 describe('getReservedDepositUsd', () => {
   it('is zero when the user holds no live reservation', async () => {
     expect(await getReservedDepositUsd('user-1')).toBe(0)
-    expect(prismaMock.bridgeActivity.findMany).not.toHaveBeenCalled()
   })
 
-  it('only looks at reservations that have not expired', async () => {
-    await getReservedDepositUsd('user-1')
+  it('counts every account sharing the proven L1 address, not just the calling one', async () => {
+    // A User is an (l1Address, l2Address) pair, so counting per user row would
+    // hand the same L1 address a fresh allowance for every L2 address it pairs with.
+    prismaMock.user.findUnique.mockResolvedValue({ l1Address: '0xl1' })
+    prismaMock.user.findMany.mockResolvedValue([{ id: 'user-1' }, { id: 'user-2' }])
+    seedHolds([outstandingHold(400)])
 
-    const { where } = prismaMock.attestationReservation.findMany.mock.calls[0][0]
-    expect(where.fkUserId).toBe('user-1')
-    expect(where.expiresAt.gt).toBeInstanceOf(Date)
+    expect(await getReservedDepositUsd('user-1')).toBe(400)
+    expect(heldRowsQuery().where).toMatchObject({
+      fkUserId: { in: ['user-1', 'user-2'] },
+      amountUsd: { gt: 0 },
+    })
   })
 
   it('sums the full ceiling of a hold whose deposit has not settled', async () => {
-    prismaMock.attestationReservation.findMany.mockResolvedValue([
-      { amountUsd: 400, nonce: '1' },
-      { amountUsd: 250, nonce: '2' },
-    ])
+    seedHolds([outstandingHold(400), outstandingHold(250)])
 
     expect(await getReservedDepositUsd('user-1')).toBe(650)
   })
 
-  it('nets a settled deposit against its own hold so the user is not charged twice', async () => {
-    prismaMock.attestationReservation.findMany.mockResolvedValue([{ amountUsd: 400, nonce: '1' }])
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(300, { attestationNonce: '1' })])
+  it('stops reporting a hold as reserved once its deposit window has closed', async () => {
+    seedHolds([outstandingHold(400), settledHold(250)])
 
-    expect(await getReservedDepositUsd('user-1')).toBeCloseTo(100, 6)
-  })
-
-  it('keeps the signed ceiling as a floor when the settled deposit exceeds it', async () => {
-    prismaMock.attestationReservation.findMany.mockResolvedValue([{ amountUsd: 400, nonce: '1' }])
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(900, { attestationNonce: '1' })])
-
-    // Clamped at 0: a hold can only ever add budget usage, never refund it.
-    expect(await getReservedDepositUsd('user-1')).toBe(0)
-  })
-
-  it('does not let a deposit settled under one nonce discharge another hold', async () => {
-    prismaMock.attestationReservation.findMany.mockResolvedValue([
-      { amountUsd: 400, nonce: '1' },
-      { amountUsd: 400, nonce: '2' },
-    ])
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(400, { attestationNonce: '1' })])
-
-    expect(await getReservedDepositUsd('user-1')).toBeCloseTo(400, 6)
+    // The closed one is a spent charge, not budget still held for a pending deposit.
+    expect(await getReservedDepositUsd('user-1')).toBe(400)
   })
 })
 
@@ -174,12 +143,12 @@ describe('evaluateDepositLimit', () => {
     const result = await evaluateDepositLimit({ userId: 'user-1', amount: '999999000000' })
 
     expect(result).toMatchObject({ enabled: false, overLimit: false, remainingUsd: Infinity })
-    expect(prismaMock.bridgeActivity.findMany).not.toHaveBeenCalled()
+    expect(prismaMock.attestationReservation.findMany).not.toHaveBeenCalled()
   })
 
   it('allows a deposit that lands exactly on the cap', async () => {
     caps.limitUsd = 1_000
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(600)])
+    seedHolds([settledHold(600)])
 
     const result = await evaluateDepositLimit({
       userId: 'user-1',
@@ -194,7 +163,7 @@ describe('evaluateDepositLimit', () => {
 
   it('blocks the first deposit that crosses the cap', async () => {
     caps.limitUsd = 1_000
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(600)])
+    seedHolds([settledHold(600)])
 
     const result = await evaluateDepositLimit({
       userId: 'user-1',
@@ -208,7 +177,7 @@ describe('evaluateDepositLimit', () => {
 
   it('does not trip the cap on float rounding noise below one micro-dollar', async () => {
     caps.limitUsd = 1_000
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(600)])
+    seedHolds([settledHold(600)])
 
     const result = await evaluateDepositLimit({
       userId: 'user-1',
@@ -222,11 +191,51 @@ describe('evaluateDepositLimit', () => {
 
   it('floors the remaining budget at zero once the cap is already spent', async () => {
     caps.limitUsd = 1_000
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(1_500)])
+    seedHolds([settledHold(1_500)])
 
     const result = await evaluateDepositLimit({ userId: 'user-1' })
 
     expect(result.remainingUsd).toBe(0)
+  })
+
+  it('charges a settled hold once, at the ceiling the server signed', async () => {
+    caps.limitUsd = 1_000
+    seedHolds([settledHold(400)])
+
+    const result = await evaluateDepositLimit({ userId: 'user-1' })
+
+    // One row per nonce, valued at its signed ceiling: a deposit that lands under
+    // the ceiling refunds nothing, and no client-authored deposit row can either
+    // discharge the hold or be counted a second time beside it.
+    expect(result.confirmedUsd).toBeCloseTo(400, 6)
+    expect(result.remainingUsd).toBeCloseTo(600, 6)
+  })
+
+  it('pre-blocks against an outstanding hold, not only settled usage', async () => {
+    caps.limitUsd = 1_000
+    seedHolds([outstandingHold(900)])
+
+    const result = await evaluateDepositLimit({
+      userId: 'user-1',
+      amount: '200000000',
+      tokenSymbol: 'USDC',
+      tokenDecimals: 6,
+    })
+
+    // Nothing has settled, so the reported budget is still whole...
+    expect(result.remainingUsd).toBeCloseTo(1_000, 6)
+    // ...but the signing path would refuse this, so the UI has to refuse it first.
+    expect(result.overLimit).toBe(true)
+  })
+
+  it('ages a charge out of the window on the server-set issuance time', async () => {
+    caps.limitUsd = 1_000
+    seedHolds([settledHold(600, { createdAt: new Date(Date.now() - DEPOSIT_CAP_WINDOW_MS - HOUR_MS) })])
+
+    const result = await evaluateDepositLimit({ userId: 'user-1' })
+
+    expect(result.confirmedUsd).toBe(0)
+    expect(result.remainingUsd).toBeCloseTo(1_000, 6)
   })
 })
 
@@ -241,7 +250,7 @@ describe('evaluateTravelRuleThreshold', () => {
 
   it('triggers at the threshold, not above it', async () => {
     caps.thresholdUsd = 1_000
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(900)])
+    seedHolds([settledHold(900)])
 
     const result = await evaluateTravelRuleThreshold({
       userId: 'user-1',
@@ -256,7 +265,7 @@ describe('evaluateTravelRuleThreshold', () => {
 
   it('leaves a deposit just under the threshold on the passport tier', async () => {
     caps.thresholdUsd = 1_000
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(900)])
+    seedHolds([settledHold(900)])
 
     const result = await evaluateTravelRuleThreshold({
       userId: 'user-1',
@@ -271,10 +280,35 @@ describe('evaluateTravelRuleThreshold', () => {
 
   it('sums lifetime volume, not the rolling window', async () => {
     caps.thresholdUsd = 1_000
-    await evaluateTravelRuleThreshold({ userId: 'user-1' })
+    seedHolds([settledHold(600, { createdAt: new Date(Date.now() - 30 * 24 * HOUR_MS) })])
 
-    const { where } = prismaMock.bridgeActivity.findMany.mock.calls[0][0]
-    expect(where).not.toHaveProperty('createdAt')
+    const result = await evaluateTravelRuleThreshold({ userId: 'user-1' })
+
+    // A charge from a month ago still counts: the threshold is cumulative, so
+    // aging it out would let a user reset it by waiting a day.
+    expect(result.lifetimeUsd).toBeCloseTo(600, 6)
+  })
+
+  it('does not count a POCH hold against the passport threshold', async () => {
+    caps.thresholdUsd = 1_000
+    seedHolds([settledHold(600, { method: 'poch' }), settledHold(100)])
+
+    const result = await evaluateTravelRuleThreshold({ userId: 'user-1' })
+
+    // POCH-verified humans are exempt, so their volume must not push the passport
+    // tier toward a Clean Hands upgrade it does not owe.
+    expect(result.lifetimeUsd).toBeCloseTo(100, 6)
+    expect(heldRowsQuery().where.method).toEqual({ in: ['passport'] })
+  })
+
+  it('does not route a user to Clean Hands on an outstanding hold alone', async () => {
+    caps.thresholdUsd = 1_000
+    seedHolds([outstandingHold(1_000)])
+
+    const result = await evaluateTravelRuleThreshold({ userId: 'user-1' })
+
+    // The deposit may never land; only settled volume decides the tier.
+    expect(result.exceeded).toBe(false)
   })
 })
 
@@ -299,7 +333,7 @@ describe('reservePassportBudget', () => {
   it('caps the signed amount to the smallest remaining budget', async () => {
     caps.thresholdUsd = 1_000
     caps.limitUsd = 25_000
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(700)])
+    seedHolds([settledHold(700)])
 
     const result = await reservePassportBudget(params)
 
@@ -310,8 +344,7 @@ describe('reservePassportBudget', () => {
 
   it('charges outstanding holds against the remaining budget', async () => {
     caps.thresholdUsd = 1_000
-    prismaMock.attestationReservation.findMany.mockResolvedValue([{ amountUsd: 400, nonce: '7' }])
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([])
+    seedHolds([outstandingHold(400)])
 
     const result = await reservePassportBudget(params)
 
@@ -321,7 +354,7 @@ describe('reservePassportBudget', () => {
 
   it('refuses once lifetime volume reaches the Travel Rule threshold', async () => {
     caps.thresholdUsd = 1_000
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(1_000)])
+    seedHolds([settledHold(1_000)])
 
     const result = await reservePassportBudget(params)
 
@@ -332,7 +365,7 @@ describe('reservePassportBudget', () => {
   it('refuses once the rolling daily cap is spent', async () => {
     caps.thresholdUsd = 0
     caps.limitUsd = 1_000
-    prismaMock.bridgeActivity.findMany.mockResolvedValue([usdcDeposit(1_000)])
+    seedHolds([settledHold(1_000)])
 
     const result = await reservePassportBudget(params)
 
@@ -374,7 +407,6 @@ describe('reservePassportBudget', () => {
 
 describe('enforceAddressBinding', () => {
   it('creates the binding on first use', async () => {
-    prismaMock.addressBinding.findFirst.mockResolvedValue(null)
     prismaMock.addressBinding.create.mockResolvedValue({})
 
     expect(await enforceAddressBinding('0xl1', '0xl2')).toBeNull()
@@ -384,39 +416,67 @@ describe('enforceAddressBinding', () => {
   })
 
   it('accepts the same pair again', async () => {
-    prismaMock.addressBinding.findFirst.mockResolvedValue({ l1Address: '0xl1', l2Address: '0xl2' })
+    prismaMock.addressBinding.findUnique.mockResolvedValue({ l1Address: '0xl1', l2Address: '0xl2' })
 
     expect(await enforceAddressBinding('0xl1', '0xl2')).toBeNull()
     expect(prismaMock.addressBinding.create).not.toHaveBeenCalled()
   })
 
   it('rejects a second L2 address for an already-bound L1 address', async () => {
-    prismaMock.addressBinding.findFirst.mockResolvedValue({ l1Address: '0xl1', l2Address: '0xother' })
+    prismaMock.addressBinding.findUnique.mockResolvedValue({ l1Address: '0xl1', l2Address: '0xother' })
 
     expect(await enforceAddressBinding('0xl1', '0xl2')).toMatch(/L1 address .* already bound/)
   })
 
-  it('rejects a second L1 address for an already-bound L2 address', async () => {
-    prismaMock.addressBinding.findFirst.mockResolvedValue({ l1Address: '0xother', l2Address: '0xl2' })
+  it('looks the binding up by the L1 address alone', async () => {
+    await enforceAddressBinding('0xl1', '0xl2')
 
-    expect(await enforceAddressBinding('0xl1', '0xl2')).toMatch(/L2 address .* already bound/)
+    // SIWE proves the L1 half; the L2 half comes from caller-chosen `resources`
+    // and is never proven. Matching on it would let a throwaway L1 claim a
+    // stranger's Aztec account, and the row is permanent with no unbind path.
+    expect(prismaMock.addressBinding.findUnique).toHaveBeenCalledWith({ where: { l1Address: '0xl1' } })
+  })
+
+  it('does not let an unproven L2 collision lock the claiming L1 out', async () => {
+    // Someone else already recorded this L2 address under their own L1. The
+    // insert loses the unique constraint, but this L1 has no binding of its own,
+    // so it must be left free rather than refused for a pair it never proved.
+    prismaMock.addressBinding.findUnique.mockResolvedValue(null)
+    prismaMock.addressBinding.create.mockRejectedValueOnce(Object.assign(new Error('dup'), { code: 'P2002' }))
+
+    expect(await enforceAddressBinding('0xl1', '0xl2')).toBeNull()
   })
 
   it('re-reads instead of failing when a concurrent request wins the insert', async () => {
-    prismaMock.addressBinding.findFirst
+    prismaMock.addressBinding.findUnique
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ l1Address: '0xl1', l2Address: '0xl2' })
     prismaMock.addressBinding.create.mockRejectedValueOnce(Object.assign(new Error('dup'), { code: 'P2002' }))
 
     expect(await enforceAddressBinding('0xl1', '0xl2')).toBeNull()
-    expect(prismaMock.addressBinding.findFirst).toHaveBeenCalledTimes(2)
+    expect(prismaMock.addressBinding.findUnique).toHaveBeenCalledTimes(2)
   })
 
   it('propagates any error that is not a unique-constraint race', async () => {
-    prismaMock.addressBinding.findFirst.mockResolvedValue(null)
     prismaMock.addressBinding.create.mockRejectedValue(Object.assign(new Error('down'), { code: 'P1001' }))
 
     await expect(enforceAddressBinding('0xl1', '0xl2')).rejects.toThrow('down')
+  })
+})
+
+describe('checkAddressBindingConflict', () => {
+  it('reports a conflict without ever creating a binding', async () => {
+    prismaMock.addressBinding.findUnique.mockResolvedValue({ l1Address: '0xl1', l2Address: '0xother' })
+
+    expect(await checkAddressBindingConflict('0xl1', '0xl2')).toMatch(/L1 address .* already bound/)
+    // The pre-check routes call this. A binding is permanent, so a read-shaped
+    // request must never be able to consume an address on the user's behalf.
+    expect(prismaMock.addressBinding.create).not.toHaveBeenCalled()
+  })
+
+  it('reports nothing, and still writes nothing, when the address is free', async () => {
+    expect(await checkAddressBindingConflict('0xl1', '0xl2')).toBeNull()
+    expect(prismaMock.addressBinding.create).not.toHaveBeenCalled()
   })
 })
 

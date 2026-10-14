@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest, createAuthErrorResponse } from '@/lib/auth'
 import { PochAttestationSchema } from '@/lib/validation'
-import { enforceAddressBinding, getNextNonce, evaluateDepositLimit } from '@/lib/address-binding'
+import { enforceAddressBinding, getNextNonce, reservePochBudget, ATTESTATION_TTL_SECONDS } from '@/lib/address-binding'
 import {
   checkCleanHands,
   signCleanHandsAttestation,
@@ -81,35 +81,39 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 3b. Alpha per-day (rolling 24h) deposit cap. POCH has no on-chain amount
-    // binding, so this refuses to issue the deposit (L1) signature once the user is
-    // over budget. `direction` is client-controlled and must never relax the check:
-    // anything but an explicit withdrawal is treated as a deposit, and the L1
-    // signature — the only artifact a TokenPortal deposit consumes — is issued for
-    // deposits only, so a withdrawal request can't skip the cap and still deposit.
     const isDeposit = data.direction !== 'L2_TO_L1'
 
+    // 4. Get next nonce (needed to key the durable budget hold below) and circuitId.
+    const circuitId = getCircuitId()
+    const nonce = getNextNonce()
+
+    // 3b. Alpha per-day (rolling 24h) deposit cap — evaluated AND held atomically
+    // under a per-user advisory lock (mirroring the passport path). `direction` is
+    // client-controlled and must never relax the check: anything but an explicit
+    // withdrawal is treated as a deposit, and the L1 signature — the only artifact a
+    // TokenPortal deposit consumes — is issued for deposits only, so a withdrawal
+    // request can't skip the cap and still deposit. Note the clean-hands attestation
+    // binds no on-chain amount, so the held figure is the client's self-reported
+    // `amount`; a hard POCH volume cap requires a signed maxAmount on the attestation
+    // (a TokenPortal change).
     if (isDeposit) {
-      const limit = await evaluateDepositLimit({
+      const poch = await reservePochBudget({
         userId: authResult.user.id,
+        nonce,
+        expiresAt: new Date(Date.now() + ATTESTATION_TTL_SECONDS * 1000),
         amount: data.amount,
         tokenSymbol: data.tokenSymbol,
-        tokenDecimals: data.tokenDecimals,
       })
-      if (limit.enabled && limit.overLimit) {
+      if (!poch.ok) {
         return NextResponse.json(
           {
-            error: `Alpha deposit limit reached ($${limit.limitUsd.toFixed(0)} per user / day). You have $${limit.confirmedUsd.toFixed(2)} of $${limit.limitUsd.toFixed(2)} used in the last 24h.`,
+            error: `Alpha deposit limit reached ($${poch.limitUsd.toFixed(0)} per user / day). You have $${poch.confirmedUsd.toFixed(2)} of $${poch.limitUsd.toFixed(2)} used in the last 24h.`,
             reason: 'deposit_limit',
           },
           { status: 403 },
         )
       }
     }
-
-    // 4. Get next nonce and sign attestations (L1 ECDSA + L2 Schnorr)
-    const circuitId = getCircuitId()
-    const nonce = getNextNonce()
 
     // Only a deposit needs the L1 (portal) CleanHands signature; a withdrawal is
     // verified by the L2 Schnorr signature below. Issuing an L1 signature for a

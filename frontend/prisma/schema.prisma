@@ -133,6 +133,7 @@ model BridgeActivity {
   encryptedCiphertext String
   encryptedIv        String
   encryptedTag       String
+  encryptedVersion   Int? // SDK ENCRYPTION_VERSION at write time; null on older rows, which decrypt resolves by trialling every known derivation
 
   // --- Key derivation: same deterministic message/signature needed to decrypt ---
   keyDerivationMessage   String  // Deterministic message user signed (same for all ops per wallet+domain)
@@ -143,6 +144,10 @@ model BridgeActivity {
   recipientL1Address String? // L2→L1: withdraw-to address (if different from signer)
   l1TxHash   String?
   l2TxHash   String?
+  // Hash of an L2 tx that was MINED AND REVERTED: the claim on an L1→L2 deposit, or the burn on an
+  // L2→L1 withdrawal. Kept apart from l2TxHash, which means "the successful tx" and is rendered as
+  // such, so a revert stored there would read as a completed one.
+  failedL2TxHash String?
 
   // --- L1→L2 claim recovery (plaintext so we can list "pending claim" without decrypting) ---
   messageHash     String? // L1→L2 message key (from portal event); used for sync check and claim

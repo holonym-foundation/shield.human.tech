@@ -118,7 +118,7 @@ describe('executeL2Claim nullified-message classification', () => {
     expect(executeCall).toHaveBeenCalledTimes(2)
   })
 
-  it('does not report success for fuel claims — directs to balance check and resume', async () => {
+  it('does not report success for fuel claims — says delivery is unconfirmed', async () => {
     const executeCall = vi.fn().mockRejectedValue(messageGoneError())
     const { deps } = makeDeps([], executeCall)
 
@@ -127,7 +127,7 @@ describe('executeL2Claim nullified-message classification', () => {
         ...fastOptions,
         feeOption: { fee: { paymentMethod: {} } },
       }),
-    ).rejects.toThrow(/Check your L2 balance/)
+    ).rejects.toThrow(/was consumed.*does not confirm the tokens arrived/s)
     expect(executeCall).toHaveBeenCalledTimes(2)
   })
 

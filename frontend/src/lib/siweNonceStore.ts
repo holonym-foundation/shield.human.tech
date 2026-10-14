@@ -60,19 +60,20 @@ export async function cleanupExpiredNonces(): Promise<number> {
 }
 
 /**
- * Check IP rate limit for nonce requests.
+ * Check a fixed-window rate limit. `key` namespaces the bucket — nonce requests
+ * pass an IP, other callers should prefix their own (`mint:<userId>`).
  * Returns true if within limit, false if exceeded.
  * (In-memory — best-effort, resets on restart. Acceptable for rate limiting.)
  */
-export function checkRateLimit(ip: string): boolean {
+export function checkRateLimit(key: string, max: number = RATE_LIMIT_MAX): boolean {
   const now = Date.now()
-  const entry = rateLimitMap.get(ip)
+  const entry = rateLimitMap.get(key)
 
   if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    rateLimitMap.set(ip, { count: 1, windowStart: now })
+    rateLimitMap.set(key, { count: 1, windowStart: now })
     return true
   }
 
   entry.count++
-  return entry.count <= RATE_LIMIT_MAX
+  return entry.count <= max
 }

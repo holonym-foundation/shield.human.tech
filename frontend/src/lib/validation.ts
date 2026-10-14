@@ -97,7 +97,26 @@ export const MAX_SIBLING_PATH_ENTRY_LENGTH = 200
 /** Max number of sibling path entries. */
 export const MAX_SIBLING_PATH_ENTRIES = 128
 
+/** Longest plausible textual IP (IPv6 with an embedded IPv4 literal). */
+export const MAX_CLIENT_IP_LENGTH = 45
+
 // ─── Sanitization helpers ───────────────────────────────────────────────
+
+/**
+ * Caller IP for rate limiting and the audit trail.
+ *
+ * `x-forwarded-for` is a list the caller can seed: whatever it sends arrives as
+ * the leading entries and only the final hop is appended by the proxy in front
+ * of us, so the left-most entry is attacker-chosen. This reads the right-most,
+ * which assumes exactly one trusted proxy (the platform edge). `x-real-ip` is a
+ * fallback for local and self-hosted runs, where no proxy sets the list.
+ */
+export function getClientIp(headers: Headers): string | undefined {
+  const nearestHop = headers.get('x-forwarded-for')?.split(',').pop()?.trim()
+  const candidate = nearestHop || headers.get('x-real-ip')?.trim()
+  if (!candidate || candidate.length > MAX_CLIENT_IP_LENGTH) return undefined
+  return candidate
+}
 
 /** Trim and limit a string field. Returns undefined if input is falsy. */
 export function sanitizeString(value: unknown, maxLength: number = MAX_STRING_LENGTH): string | undefined {

@@ -122,8 +122,8 @@ export type BridgeEvent =
   | { type: 'attestation_fetch'; method: 'poch' | 'passport' }
   | { type: 'attestation_fallback'; from: 'poch'; to: 'passport'; reason: string }
   // Secrets (only hashes + encrypted payload — never plaintext secrets)
-  | { type: 'secrets_generated'; claimSecretHash: string; fuelSecretHash?: string; encryptedPayload: { ciphertext: string; iv: string; tag: string }; l1BlockNumberBeforeTx: string; l2BlockNumberBeforeTx: string; nodeInfo: Record<string, unknown> }
-  | { type: 'nonce_generated'; l2BridgeAddress: string; encryptedPayload: { ciphertext: string; iv: string; tag: string }; l1BlockNumberBeforeTx: string; l2BlockNumberBeforeTx: string; nodeInfo: Record<string, unknown> }
+  | { type: 'secrets_generated'; claimSecretHash: string; fuelSecretHash?: string; encryptedPayload: { ciphertext: string; iv: string; tag: string; version?: number }; l1BlockNumberBeforeTx: string; l2BlockNumberBeforeTx: string; nodeInfo: Record<string, unknown> }
+  | { type: 'nonce_generated'; l2BridgeAddress: string; encryptedPayload: { ciphertext: string; iv: string; tag: string; version?: number }; l1BlockNumberBeforeTx: string; l2BlockNumberBeforeTx: string; nodeInfo: Record<string, unknown> }
 
 export type BridgeEventCallback = (event: BridgeEvent) => void
 
@@ -286,9 +286,13 @@ export interface BridgeOperation {
   createdAt: string
   completedAt: string | null
   // Encrypted fields
+  /** Hash of a claim tx that was mined and REVERTED. Never `l2TxHash`, which means a
+   *  successful claim — see the failure PATCH in bridge/l1ToL2.ts. */
+  failedL2TxHash?: string | null
   encryptedCiphertext: string | null
   encryptedIv: string | null
   encryptedTag: string | null
+  encryptedVersion?: number | null
   keyDerivationMessage: string | null
   keyDerivationDomain: string | null
 }

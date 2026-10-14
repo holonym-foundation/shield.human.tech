@@ -216,6 +216,7 @@ export default function ResumePage() {
             errorMessage={errorMessage}
             isPrivate={operationIsPrivate}
             currentPrivacyMode={isPrivacyModeEnabled}
+            operationId={opId}
           />
         </div>
       </div>

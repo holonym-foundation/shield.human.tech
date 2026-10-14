@@ -2,7 +2,7 @@ import axios from 'axios'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { NFT } from '@/types/nft.types'
-import { getChainIdFromNetwork, getSupportedNetworks } from '@/utils/alchemy.utils'
+import { describeAlchemyError, getChainIdFromNetwork, getSupportedNetworks } from '@/utils/alchemy.utils'
 
 import { ALCHEMY_API_KEY } from '@/config/env.config'
 const apiKey = ALCHEMY_API_KEY
@@ -81,15 +81,9 @@ export async function POST(request: NextRequest) {
     })
 
     return NextResponse.json(nfts)
-  } catch (error: any) {
-    console.error('Error processing NFTs:', error.response?.data || error)
+  } catch (error) {
+    console.error('[nfts]', describeAlchemyError(error, apiKey))
 
-    return NextResponse.json(
-      {
-        error: 'Failed to process NFTs',
-        details: error.response?.data || error.message,
-      },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: 'Failed to process NFTs' }, { status: 500 })
   }
 }

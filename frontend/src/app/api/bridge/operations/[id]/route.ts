@@ -55,6 +55,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         l1TxHash: true,
         l1TxUrl: true,
         l2TxHash: true,
+        failedL2TxHash: true,
         l2TxUrl: true,
         // L1→L2 recovery fields
         messageHash: true,
@@ -112,6 +113,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         encryptedCiphertext: true,
         encryptedIv: true,
         encryptedTag: true,
+        encryptedVersion: true,
         keyDerivationMessage: true,
         keyDerivationDomain: true,
       },
@@ -198,6 +200,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const messageHash = sanitizeHexString(body.messageHash, 130)
     const messageLeafIndex = sanitizeNumericString(body.messageLeafIndex)
     const l2TxHash = sanitizeHexString(body.l2TxHash, 130)
+    const failedL2TxHash = sanitizeHexString(body.failedL2TxHash, 130)
     const l2TxUrl = sanitizeUrl(body.l2TxUrl)
     const lastErrorMessage =
       body.lastErrorMessage !== undefined ? (sanitizeString(body.lastErrorMessage, MAX_ERROR_LENGTH) ?? '') : undefined
@@ -228,6 +231,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       'encryptedCiphertext',
       'encryptedIv',
       'encryptedTag',
+      'encryptedVersion',
       'amountL1',
       'amountL2',
       'direction',
@@ -314,6 +318,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (messageHash) updateData.messageHash = messageHash
     if (messageLeafIndex) updateData.messageLeafIndex = messageLeafIndex
     if (l2TxHash) updateData.l2TxHash = l2TxHash
+    if (failedL2TxHash) updateData.failedL2TxHash = failedL2TxHash
     if (l2TxUrl) updateData.l2TxUrl = l2TxUrl
     if (lastErrorMessage !== undefined) updateData.lastErrorMessage = lastErrorMessage
     // Set completedAt server-side for terminal states — ignore client-supplied value
@@ -357,10 +362,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
     }
 
-    await prisma.bridgeActivity.update({
-      where: { id },
+    // Scoped by owner as well as id: the ownership read above is a separate
+    // statement, so a write keyed on the id alone trusts a fact that was true
+    // when it was read rather than when it is applied.
+    const { count } = await prisma.bridgeActivity.updateMany({
+      where: { id, fkUserId: authResult.user.id },
       data: updateData,
     })
+
+    if (count === 0) {
+      return NextResponse.json({ error: 'Operation not found or access denied' }, { status: 404 })
+    }
 
     return NextResponse.json({ ok: true })
   } catch (error) {

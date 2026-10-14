@@ -306,6 +306,7 @@ export async function withdrawL2ToL1(
       encryptedCiphertext: encrypted.ciphertext,
       encryptedIv: encrypted.iv,
       encryptedTag: encrypted.tag,
+      encryptedVersion: encrypted.version,
       keyDerivationMessage: signingMsg,
       keyDerivationDomain,
       direction: 'L2_TO_L1',
@@ -370,6 +371,7 @@ export async function withdrawL2ToL1(
       encryptedCiphertext: encrypted.ciphertext,
       encryptedIv: encrypted.iv,
       encryptedTag: encrypted.tag,
+      encryptedVersion: encrypted.version,
       keyDerivationDomain,
       keyDerivationMessage: signingMsg,
       isPrivacyModeEnabled: isPrivate,
@@ -807,6 +809,12 @@ export async function withdrawL2ToL1(
     if (operationId) {
       const patchData: Record<string, unknown> = {
         lastErrorMessage: errorMessage.slice(0, 500),
+      }
+      // Keep the hash of an L2 tx that was mined and reverted, in its own field rather than
+      // l2TxHash, so a reverted tx never reads as a successful burn.
+      const failedL2TxHash = (error as { txHash?: unknown; txOutcome?: unknown })?.txHash
+      if (typeof failedL2TxHash === 'string' && failedL2TxHash && (error as any)?.txOutcome === 'reverted') {
+        patchData.failedL2TxHash = failedL2TxHash
       }
       if (!burnConfirmed) {
         patchData.status = 'failed'

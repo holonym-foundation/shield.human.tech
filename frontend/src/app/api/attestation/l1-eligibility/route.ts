@@ -7,6 +7,8 @@ import {
   getPassportScoreThreshold,
   getPassportMaxAmount,
 } from '@/lib/attestation'
+import { checkRateLimit } from '@/lib/siweNonceStore'
+import { getClientIp } from '@/lib/validation'
 import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctions'
 
 /**
@@ -26,12 +28,16 @@ import { screenAddress, SanctionsScreeningUnavailableError } from '@/lib/sanctio
  * Deposit-cap / Travel-Rule fields are intentionally absent here: those are
  * per-user (DB-backed) and require an authenticated session.
  *
- * TODO(rate-limit): this route is unauthenticated and proxies two upstream APIs
- * (Holonym, Passport). Add IP-based rate limiting before exposing broadly to
- * avoid being used as a free lookup/enumeration proxy.
+ * Rate limited per IP (in-memory, best-effort per server instance) because it proxies two upstream
+ * APIs and would otherwise be a free lookup/enumeration proxy.
  */
 export async function GET(request: NextRequest) {
   try {
+    const ip = getClientIp(request.headers) ?? 'unknown'
+    if (!checkRateLimit(`l1-eligibility:${ip}`, 30)) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
+
     const address = request.nextUrl.searchParams.get('address')
 
     if (!address || !isAddress(address)) {
@@ -57,7 +63,7 @@ export async function GET(request: NextRequest) {
       if (err instanceof SanctionsScreeningUnavailableError) {
         console.error('[attestation/l1-eligibility] sanctions screening unavailable:', err.message)
         return NextResponse.json(
-          { error: 'Compliance screening temporarily unavailable. Please try again shortly.' },
+          { error: 'Sanctions screening temporarily unavailable. Please try again shortly.' },
           { status: 503 },
         )
       }

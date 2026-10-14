@@ -21,7 +21,13 @@ export interface UpstreamState {
   cleanHandsUnique: boolean
   /** Force the Holonym lookup to fail, the way an outage would. */
   cleanHandsDown: boolean
-  calls: { passport: number; sanctions: number; cleanHands: number }
+  /**
+   * What the L1 portals report for an attestation nonce, which is what decides
+   * whether an expired hold is freed. `null` makes the RPC unreadable — the
+   * default, because the resolver must never free a hold it could not verify.
+   */
+  l1NonceConsumed: boolean | null
+  calls: { passport: number; sanctions: number; cleanHands: number; l1: number }
 }
 
 export function installUpstreams(overrides: Partial<UpstreamState> = {}): UpstreamState {
@@ -35,7 +41,8 @@ export function installUpstreams(overrides: Partial<UpstreamState> = {}): Upstre
     sanctionsDown: false,
     cleanHandsUnique: true,
     cleanHandsDown: false,
-    calls: { passport: 0, sanctions: 0, cleanHands: 0 },
+    l1NonceConsumed: null,
+    calls: { passport: 0, sanctions: 0, cleanHands: 0, l1: 0 },
     ...overrides,
   }
 
@@ -72,6 +79,14 @@ export function installUpstreams(overrides: Partial<UpstreamState> = {}): Upstre
         state.calls.cleanHands++
         if (state.cleanHandsDown) return json({ error: 'upstream' }, 500)
         return json({ isUnique: state.cleanHandsUnique })
+      }
+
+      if (url.includes('l1-rpc.e2e.test')) {
+        state.calls.l1++
+        if (state.l1NonceConsumed === null) return json({ error: 'unreachable' }, 502)
+        const word = state.l1NonceConsumed ? '1'.padStart(64, '0') : '0'.repeat(64)
+        const { id } = JSON.parse(String(init?.body ?? '{}'))
+        return json({ jsonrpc: '2.0', id, result: `0x${word}` })
       }
 
       throw new Error(`e2e: unexpected outbound request to ${url}`)
