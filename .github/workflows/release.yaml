@@ -32,6 +32,27 @@ jobs:
       - name: Build SDK
         run: pnpm build --filter=@human.tech/clean.sdk
 
+      - name: Scan build output for embedded credentials
+        run: |
+          set -euo pipefail
+          # Matches a URL whose path contains a long hex segment, i.e. a keyed
+          # endpoint such as https://<host>/<32-hex-api-key>. Deliberately does
+          # not match 0x-prefixed contract addresses: requiring "/" immediately
+          # before the hex run excludes /0x... paths and bare address literals.
+          PATTERN='https?://[^"'"'"'`[:space:],)]*/[0-9a-f]{24,}'
+          if grep -rEIl "$PATTERN" packages/sdk/dist > /dev/null 2>&1; then
+            echo "::error::Build output contains what looks like a keyed URL. Refusing to publish."
+            echo "Offending files:"
+            grep -rEIl "$PATTERN" packages/sdk/dist
+            echo "Matches (key redacted):"
+            grep -rhoEI "$PATTERN" packages/sdk/dist | sed -E 's#/[0-9a-f]{24,}#/<REDACTED>#' | sort -u
+            echo
+            echo "npm versions are immutable, so a credential published here cannot be removed."
+            echo "See holonym-foundation/internal-docs#1983."
+            exit 1
+          fi
+          echo "No keyed URLs found in packages/sdk/dist."
+
       - name: Publish
         run: |
           cd packages/sdk
