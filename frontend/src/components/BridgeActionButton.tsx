@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
+import { Icon } from '@iconify/react'
 import TextButton from './TextButton'
-import StyledImage from './StyledImage'
 import { BridgeDirection } from '@/types/bridge'
 import { useToast } from '@/hooks/useToast'
 import { extractErrorMessage, humanizeError } from '@/utils'
@@ -616,7 +616,7 @@ function BridgeActionButton({
             <LoadingContent label={getLoadingText()} />
           ) : bridgeCompleted ? (
             <div className="flex items-center gap-2">
-              <StyledImage src="/assets/svg/check-circle.svg" alt="" className="h-5 w-5" />
+              <Icon icon="ph:check-circle-fill" width={20} height={20} className="flex-shrink-0" aria-hidden="true" />
               <span>Bridge Complete!</span>
             </div>
           ) : (
