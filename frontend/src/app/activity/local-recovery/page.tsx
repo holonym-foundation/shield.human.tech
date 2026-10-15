@@ -6,7 +6,7 @@ import { LocalRecoveryPanel } from '@/components/LocalRecoveryPanel'
 
 export default function LocalRecoveryPage() {
   return (
-    <RootStyle className="min-h-0 max-h-[calc(90vh-5rem)] overflow-hidden">
+    <RootStyle className="min-h-0 overflow-hidden">
       <LocalRecoveryPanel variant="page" />
     </RootStyle>
   )

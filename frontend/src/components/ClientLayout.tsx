@@ -170,23 +170,23 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         <Header />
       </div>
       {/* Main content — a flex-grow column between header and footer. It is
-          overflow-VISIBLE, not a clipped scroller: the fixed-height card is sized to
-          fit this space (RootStyle: h-[min(85vh,100dvh-11rem)]), and each page scrolls
-          INSIDE its own card (the card is overflow-hidden with an internal scroll
-          region). A clip here (overflow-y-auto) cut the card's drop shadow off exactly
-          at the footer's top edge, drawing a hard horizontal line where the card met the
-          pink background (#432). With overflow-visible the shadow fades softly behind the
-          transparent footer; the page still never scrolls because the root shell
-          (h-[100dvh], overflow-hidden) clips any spill below the footer. */}
+          overflow-VISIBLE, not a clipped scroller: each page scrolls INSIDE its own card
+          (the card is overflow-hidden with an internal scroll region). A clip here
+          (overflow-y-auto) cut the card's drop shadow off exactly at the footer's top
+          edge, drawing a hard horizontal line where the card met the pink background
+          (#432). With overflow-visible the shadow fades softly behind the transparent
+          footer. The inner column passes its height down, so RootStyle can cap the card
+          to the space between the header (banners included) and the footer: the card
+          never reaches under the footer, and the footer never covers its CTA (#150). */}
       <div className="relative z-20 flex flex-grow flex-col min-h-0 overflow-visible">
-        <div className="flex-grow">{children}</div>
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       </div>
       {/* Footer pinned to the bottom of the fixed shell (shrink-0 so it keeps its
           height). It rests at the bottom edge on every route and can never be clipped:
           when a short viewport can't fit the card, the column above scrolls under this
           footer rather than pushing it off-screen or forcing a document scroll. */}
       <div className="relative z-20 shrink-0">
-        <Footer />
+        <Footer chatBubble={IRIS_ENABLED && !(SUPPORT_TAB_ENABLED && hideNativeBubble)} />
       </div>
       {/* Persistent binder dock: app-shell chrome mounted once, so the Tutorial /
           Activity / Messages tabs are present on EVERY route and navigation never
